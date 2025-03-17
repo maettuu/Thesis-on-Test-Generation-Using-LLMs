@@ -2,6 +2,7 @@ import hmac
 import hashlib
 import json
 import requests
+import sys
 from django.http import JsonResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 import re
@@ -23,8 +24,9 @@ if is_in_server:
     WEBHOOK_RAW_LOG_DIR = "/home/ubuntu/logs/raw/" # for raw requests
     WEBHOOK_LOG_DIR     = "/home/ubuntu/logs/" # for parsed requests
 else:
-    WEBHOOK_RAW_LOG_DIR = "/Users/konstantinos/local-desktop/github_bot_logs/" # for raw requests
-    WEBHOOK_LOG_DIR     = "/Users/konstantinos/local-desktop/github_bot_logs/" # for parsed requests
+    WORKING_DIR = os.getcwd()
+    WEBHOOK_RAW_LOG_DIR = os.path.join(WORKING_DIR, "bot_logs") # for raw requests
+    WEBHOOK_LOG_DIR     = os.path.join(WORKING_DIR, "bot_logs") # for parsed requests
 
 # GitHub webhook secret. Must be the same when setting up the hook in GH.
 GITHUB_WEBHOOK_SECRET = "1234"
@@ -43,7 +45,7 @@ comment_template_generation = """Hi! 🤖 The test below is automatically genera
 - passes, and
 - fails in the codebase before the PR.
 
-```python
+```javascript
 %s
 ```
 
@@ -72,7 +74,7 @@ comment_template_amplification = """Hi! 🤖 The test below is automatically gen
 - passes, and
 - covers lines that were not covered by the tests introduced in this PR.
 
-```python
+```javascript
 %s
 ```
 
@@ -213,7 +215,7 @@ def run(payload, dockerfile=None,
     test_fname_arr          = []
     test_content_before_arr = []
     test_content_after_arr  = []
-    at_least_one_python_code_file = False
+    at_least_one_javascript_code_file = False
     for file_dict in files:
         # Get the version of the file AFTER the PR
         fname = file_dict["filename"]
@@ -240,11 +242,11 @@ def run(payload, dockerfile=None,
             code_fname_arr.append(fname)
             code_content_before_arr.append(content_before)
             code_content_after_arr.append(content_after)
-            if fname.endswith(".py") and not at_least_one_python_code_file:
-                at_least_one_python_code_file = True
+            if fname.endswith(".js") and not at_least_one_javascript_code_file:
+                at_least_one_javascript_code_file = True
 
-    if not at_least_one_python_code_file: # if the PR changed only non-python files return
-        logger.info("No .py code files (except maybe for test) were modified, skipping")
+    if not at_least_one_javascript_code_file: # if the PR changed only non-javascript files return
+        logger.info("No .js code files (except maybe for test) were modified, skipping")
         return JsonResponse({"status": "success"}), True
     
     # If test file already exists, we do amplification, otherwise generation
@@ -521,7 +523,10 @@ def run(payload, dockerfile=None,
 
     # Calculate temporal coupling to find where to inject the test
     tmp_repo_dir = "tmp_repo_dir"
-    res = subprocess.run(["git", "clone", f"https://github.com/{owner}/{repo}.git", tmp_repo_dir], capture_output=True, check=True)
+    if not os.path.exists(tmp_repo_dir):
+        logger.info(f"[*] Cloning repository https://github.com/{owner}/{repo}.git")
+        res = subprocess.run(["git", "clone", f"https://github.com/{owner}/{repo}.git", tmp_repo_dir], capture_output=True, check=True)
+        logger.info(f"[+] Cloning successful.")
     try:
         test_filename, test_file_content, test_file_content_sliced = get_contents_of_test_file_to_inject(instance, tmp_repo_dir)
         if test_filename == "":
@@ -530,7 +535,9 @@ def run(payload, dockerfile=None,
         test_filename = test_filename.replace(tmp_repo_dir+'/', '')
         instance['predicted_test_file_content_sliced'] = test_file_content_sliced
     finally:
-        res = subprocess.run(["rm", "-rf", tmp_repo_dir], capture_output=True, check=True)
+        is_windows = sys.platform.startswith("win")
+        args = ["cmd", "/c", "rmdir", "/s", "/q", tmp_repo_dir] if is_windows else ["rm", "-rf", tmp_repo_dir]
+        res = subprocess.run(args, capture_output=True, check=True)
 
 
     # Build prompt
@@ -563,7 +570,7 @@ def run(payload, dockerfile=None,
         T     = 0.0
         response = query_model(prompt, model=model, T=T)
 
-        new_test = response.replace('```python', '')
+        new_test = response.replace('```javascript', '')
         new_test = new_test.replace('```', '')
         new_test = adjust_function_indentation(new_test)
 
@@ -779,8 +786,6 @@ def extract_test_scope(test_file_content, new_test_file_content, test_filename):
 
 #### Helpers to run the tests in docker
 import docker
-import sys
-import re
 
 # def read_dockerfile(commit_hash, dockerfile_path="Dockerfile"):
 #     """Reads the Dockerfile, replaces the commit hash, and returns the modified content."""
@@ -829,7 +834,6 @@ def build_docker_image(client, dockerfile_path, commit_hash, image_tag="no_name_
 
 
 import tempfile
-import os
 import tarfile
 import io
 
@@ -942,8 +946,6 @@ def run_test_in_container(client, image_tag, model_test_patch, tests_to_run, gol
         logger.info("[*] Container stopped and removed.")
 
 ######### Helper to fetch file contents that changed in the PR
-
-import requests
 def fetch_pr_files(pr_number, repo_owner, repo_name):
     url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{pr_number}/files"
     response = requests.get(url, headers=HEADERS)

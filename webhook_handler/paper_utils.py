@@ -2,6 +2,7 @@
 import re
 import subprocess
 import os
+import sys
 import openai
 import tokenize
 from collections import defaultdict
@@ -9,6 +10,8 @@ from io import BytesIO
 import ast
 import difflib
 from huggingface_hub import InferenceClient
+import tree_sitter_javascript
+from tree_sitter import Language, Parser
 
 openai_key_path = '/Users/konstantinos/local-desktop/swt-bench/openai_key.txt' # my Mac
 if not os.path.isfile(openai_key_path):
@@ -21,6 +24,8 @@ with open (openai_key_path, 'r') as f:
 client = InferenceClient( # for huggingface client
 	api_key="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"
 )
+
+JS_LANGUAGE = Language(tree_sitter_javascript.language())
 
 def extract_edited_files(diff_content):
     """
@@ -310,7 +315,7 @@ def is_test_file(filepath, test_folder=''):
                 is_in_test_folder = True
                 break
 
-    if is_in_test_folder and parts[-1].startswith('test') and parts[-1].endswith(".py"):
+    if is_in_test_folder and 'spec' in parts[-1] and parts[-1].endswith("js"):
         return True
     else:
         return False
@@ -338,8 +343,9 @@ def find_file_to_inject(row, repo_dir):
         for edited_file in edited_files:
             matching_test_files = [] # could be more than 1 matching files in different dirs
 
-            # ".../x.py" => ".../test_x.py"
-            potential_test_file = 'test_' + edited_file.split('/')[-1]
+            # ".../x.js" => ".../x_spec.js"
+            name, ext = os.path.splitext(edited_file.split('/')[-1])
+            potential_test_file = f"{name}_spec{ext}"
             # Search in all test_ folders for that name
             for root, dirs, files in os.walk(repo_dir):
                 if any(part.startswith("test") for part in root.split(os.sep)):
@@ -404,14 +410,14 @@ def get_first_test_file(root_dir: str) -> str | None:
     for dirpath, _, filenames in os.walk(root_dir):
         if not any(part.startswith(".") for part in dirpath.split(os.sep)) and any(part.startswith("test") for part in dirpath.split(os.sep)):
             for filename in filenames:
-                if filename.startswith("test"):
+                if "spec" in filename:
                     return os.path.relpath(os.path.join(dirpath, filename), root_dir)
     
     # If nothing is found, search only for files starting with "test" (e.g., requests repo in old commits)
     for dirpath, _, filenames in os.walk(root_dir):
         if not any(part.startswith(".") for part in dirpath.split(os.sep)):
             for filename in filenames:
-                if filename.startswith("test"):
+                if "spec" in filename:
                     return os.path.relpath(os.path.join(dirpath, filename), root_dir)
     return None
 
@@ -919,7 +925,13 @@ def apply_patch(file_content_arr, patch):
         for file_path in file_path_arr:
             os.remove(temp_dir + file_path)
             #pass
-        subprocess.run(["rm", "-rf", ".git/"], cwd=temp_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        is_windows = sys.platform.startswith("win")
+        args = ["cmd", "/c", "rmdir", "/s", "/q", ".git"] if is_windows else ["rm", "-rf", ".git/"]
+        subprocess.run(args, cwd=temp_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ###
+        args = ["cmd", "/c", "rmdir", "/s", "/q", os.path.abspath(temp_dir)] if is_windows else ["rm", "-rf", temp_dir]
+        subprocess.run(args, check=True)
+        ###
 
         raise ValueError(f"Failed to apply patch: {e}")
 
@@ -927,14 +939,20 @@ def apply_patch(file_content_arr, patch):
     updated_content_all_files = []
     for file_path in file_path_arr:
         # Read the updated file content
-        with open(temp_dir + file_path, "r") as file:
+        with open(temp_dir + file_path, "r", encoding="utf-8") as file:
             updated_content = file.read()
 
         os.remove(temp_dir + file_path)
         updated_content_all_files.append(updated_content)
 
     os.remove(temp_dir + patch_path)
-    subprocess.run(["rm", "-rf", ".git/"], cwd=temp_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    is_windows = sys.platform.startswith("win")
+    args = ["cmd", "/c", "rmdir", "/s", "/q", ".git"] if is_windows else ["rm", "-rf", ".git/"]
+    subprocess.run(args, cwd=temp_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ###
+    args = ["cmd", "/c", "rmdir", "/s", "/q", os.path.abspath(temp_dir)] if is_windows else ["rm", "-rf", temp_dir]
+    subprocess.run(args, check=True)
+    ###
 
     return updated_content_all_files, res.stderr
 
@@ -1427,7 +1445,9 @@ def unified_diff_with_function_context(string1, string2, fname="tempfile.py", co
         diff = "\n".join(diff_lines)
         return diff
     finally:
-        subprocess.run(["rm", "-rf", temp_dir], check=True)
+        is_windows = sys.platform.startswith("win")
+        args = ["cmd", "/c", "rmdir", "/s", "/q", os.path.abspath(temp_dir)] if is_windows else ["rm", "-rf", temp_dir]
+        subprocess.run(args, check=True)
 
 
 
@@ -2158,7 +2178,7 @@ def extract_offsets_from_stderr(stderr: str):
     """
     file_pattern = re.compile(r'Checking patch (.*?)\.\.\.')
     hunk_pattern = re.compile(r'Hunk #(\d+) succeeded at \d+ \(offset ([+-]?\d+) line(?:s?)\)')
-    
+
     current_file = None
     file_offsets = {}
     first_hunk_seen = {}
