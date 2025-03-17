@@ -11,7 +11,7 @@ import ast
 import difflib
 from huggingface_hub import InferenceClient
 import tree_sitter_javascript
-from tree_sitter import Language, Parser
+from tree_sitter import Language, Parser, Tree, Node
 
 openai_key_path = '/Users/konstantinos/local-desktop/swt-bench/openai_key.txt' # my Mac
 if not os.path.isfile(openai_key_path):
@@ -1492,11 +1492,11 @@ def slice_golden_file(golden_contents_before_arr, patch, issue_description, retu
         #functions_called_in_issue_desc = extract_python_function_calls(issue_description)
 
         #if return_file == "pre":
-        mapping_before = map_functions_to_classes(golden_contents_before, edited_functions_before)
+        mapping_before = map_functions_to_classes(edited_functions_before)
         #else: # "post"
-        mapping_after = map_functions_to_classes(golden_contents_after, edited_functions_after)
+        mapping_after = map_functions_to_classes(edited_functions_after)
         # TODO: by concatenating the mappings, we will have problems in the (very unlikely) scenario
-        # where a method is moved from one class to another.
+        #  where a method is moved from one class to another.
         mapping = mapping_before + mapping_after
         class2methods = {}
         for method2class in mapping:
@@ -1506,18 +1506,18 @@ def slice_golden_file(golden_contents_before_arr, patch, issue_description, retu
         #global_funcs = []
 
         if return_file == "pre": # apply slicing to the file before the patch
-            sliced_code = slice_python_code(golden_contents_before, global_funcs, class2methods, append_line_numbers=append_line_numbers, edited_lines=removed_lines_list)
+            sliced_code = slice_javascript_code(golden_contents_before, global_funcs, class2methods, append_line_numbers=append_line_numbers, edited_lines=removed_lines_list)
         else:
-            sliced_code = slice_python_code(golden_contents_after, global_funcs, class2methods, append_line_numbers=append_line_numbers, edited_lines=added_lines_list)
+            sliced_code = slice_javascript_code(golden_contents_after, global_funcs, class2methods, append_line_numbers=append_line_numbers, edited_lines=added_lines_list)
 
         sliced_code_arr.append(sliced_code)
     return sliced_code_arr
     
 
-def get_edited_functions(code_before, code_after, diff):
+def get_edited_functions(code_before: str, code_after: str, diff: str) -> tuple:
     """
     Given:
-      1) code: the contents of a .py file (string)
+      1) code: the contents of a .js file (string)
       2) diff: a patch in unified diff format (string)
 
     TODO: It only looks functions containing lines added in the updated version of the code
@@ -1587,115 +1587,114 @@ def get_edited_functions(code_before, code_after, diff):
     added_lines_list = [x[0] for x in added_lines_info]
 
     # -------------------------------------------------------------------------
-    # 2) Parse the updated code into an AST, and figure out for *every line*
+    # 2) Parse the updated code with tree-sitter, and figure out for *every line*
     #    which top-level function it belongs to (or "global").
     # -------------------------------------------------------------------------
 
-    # Parse code into an AST
+    # Parse code with tree-sitter
     try:
-        tree_after = ast.parse(code_after)
+        tree_after = Parser(JS_LANGUAGE).parse(bytes(code_after, 'utf-8'))
     except SyntaxError as e:
-        # Maybe a non-python file was edited (e.g., .cfg), return empty array
+        # Maybe a non-javascript file was edited (e.g., .css), return empty array
         tree_after = None
     
     try:
-        tree_before = ast.parse(code_before)
+        tree_before = Parser(JS_LANGUAGE).parse(bytes(code_before, 'utf-8'))
     except SyntaxError as e:
-        # Maybe a non-python file was edited (e.g., .cfg), return empty array
+        # Maybe a non-javascript file was edited (e.g., .css), return empty array
         tree_before = None
 
-    class ASTScopeAnalyzer(ast.NodeVisitor):
-        """
-        Visits each node in the AST.
-        Maintains a stack of function names for nested FunctionDef nodes.
-        (ClassDef does NOT push onto this stack, because classes are not function scopes.)
-        For every node, we mark all lines in [lineno, end_lineno] as belonging to
-        the *outermost* function in stack (stack[0]) or "global" if empty.
-        """
-        def __init__(self, line_scope_map):
-            super().__init__()
-            self.line_scope_map = line_scope_map
-            self.func_stack = []  # stack of function names
+    def build_line_scope_map(tree: Tree) -> dict:
+        line_scope_map = {}
 
-        def _mark_lines(self, node):
-            """Assign all lines from node.lineno to node.end_lineno the scope of stack[0] or 'global'."""
-            start = getattr(node, 'lineno', None)
-            end = getattr(node, 'end_lineno', None)
-            if start is None or end is None:
-                return  # Node might not have line info (e.g. Python <3.8 or synthetic nodes)
-            scope_name = self.func_stack[0] if self.func_stack else "global"
-            for ln in range(start, end+1):
-                self.line_scope_map[ln] = scope_name
+        def mark_lines(node: Node, scope_name: str) -> None:
+            # Mark line number with scope
+            if any([
+                node.start_point is None,
+                node.end_point is None,
+                node.start_point[0] is None,
+                node.end_point[0] is None
+            ]):
+                return
 
-        def visit_FunctionDef(self, node):
-            # Mark this function's entire span with the scope of the *currently* outermost function
-            self._mark_lines(node)
+            start_line = node.start_point[0] + 1
+            end_line = node.end_point[0] + 1
+            for ln in range(start_line, end_line + 1):
+                line_scope_map[ln] = scope_name
 
-            # Push this function's name onto the stack
-            self.func_stack.append(node.name)
+        def mark_decorators(node: Node, scope_name: str) -> None:
+            # Mark decorator lines & JSDocs if present
+            prev = node.prev_sibling
+            if prev:
+                txt = prev.text.decode("utf-8")
+                if all([
+                    (txt.startswith("@") or txt.startswith("/**")),
+                    node.start_point[0] - 1 == prev.end_point[0]
+                ]):
+                    mark_lines(prev, scope_name)
+                    mark_decorators(prev, scope_name)  # Iterate further back in case of several
 
-            # Visit the children (parameters, body, etc.)
-            self.generic_visit(node)
+        def visit_body(node: Node, scope_name: str) -> None:
+            # Visit the function/class body if available
+            body = node.child_by_field_name("body")
+            if body:
+                for child in body.named_children:
+                    visit_node(child, scope_name)
 
-            # Pop the function
-            self.func_stack.pop()
+        def visit_node(node: Node, scope_name: str = "global") -> None:
+            if node.type in {"function_declaration", "method_definition"}:
+                identifier = node.child_by_field_name("name")
+                new_scope = identifier.text.decode("utf-8") if identifier else "<function>"
+                scope_name = f"{scope_name}.{new_scope}"  # Concatenate with dot for methods
 
-        def visit_ClassDef(self, node):
-            # Mark this function's entire span with the scope of the *currently* outermost function
-            self._mark_lines(node)
+                mark_decorators(node, scope_name)
+                mark_lines(node, scope_name)
+                visit_body(node, scope_name)
 
-            # Push this function's name onto the stack
-            self.func_stack.append(node.name)
+            elif node.type == "class_declaration":
+                identifier = node.child_by_field_name("name")
+                new_scope = identifier.text.decode("utf-8") if identifier else "<class>"
+                if scope_name != "global":
+                    new_scope = f"{scope_name}:{new_scope}"  # If class is nested, concatenate with colon to easily differentiate
 
-            # Visit the children (parameters, body, etc.)
-            self.generic_visit(node)
+                mark_decorators(node, scope_name)
+                mark_lines(node, scope_name)
+                visit_body(node, new_scope)
 
-            # Pop the function
-            self.func_stack.pop()
+            else:
+                # For other nodes, use the current scope
+                if any([  # Skip nodes with missing line info
+                    node.start_point is None,
+                    node.end_point is None,
+                    node.start_point[0] is None,
+                    node.end_point[0] is None,
+                    all([  # Skip global comments
+                        scope_name == "global",
+                        node.type == "comment",
+                        not node.text.decode("utf-8").startswith("/**")
+                    ])
+                ]):
+                    pass
+                else:
+                    mark_lines(node, scope_name)
 
-        def visit_AsyncFunctionDef(self, node):
-            # Same as FunctionDef, just for async defs
-            self._mark_lines(node)
+        for root_child in tree.root_node.children:
+            visit_node(root_child)
+        return line_scope_map
 
-            self.func_stack.append(node.name)
-            self.generic_visit(node)
-            self.func_stack.pop()
-
-        def visit_ClassDef(self, node):
-            # Mark the class lines with the current outer scope
-            self._mark_lines(node)
-
-            # IMPORTANT: we don't push or pop anything for classes,
-            # because classes are not function scopes. 
-            self.generic_visit(node)
-
-        def visit_Module(self, node):
-            # For the entire module, mark lines as "global" (if no function stack)
-            self._mark_lines(node)
-            self.generic_visit(node)
-
-        def generic_visit(self, node):
-            # For any node, we mark lines if available
-            self._mark_lines(node)
-            super().generic_visit(node)
-
-    # Walk the AST to fill line_scope_map with top-level function scopes or 'global'
-    # We'll store the scope of each line in a dictionary: line -> function_name or "global"
-    line_scope_map_after = {}
-    map_arr_after        = []
+    # Walk through tree-sitter to fill line_scope_map with function scopes or 'global'
+    # We'll store the scope of each line in a dictionary: line -> function_scope_name or "global"
+    map_arr_after = []
     if tree_after is not None:
-        analyzer_after = ASTScopeAnalyzer(line_scope_map_after)
-        analyzer_after.visit(tree_after)
+        line_scope_map_after = build_line_scope_map(tree_after)
 
         for (added_line_number, added_line_text) in added_lines_info:
             scope = line_scope_map_after.get(added_line_number, "global")
             map_arr_after.append({added_line_text: scope})
 
-    line_scope_map_before = {}
-    map_arr_before        = []
+    map_arr_before = []
     if tree_before is not None:
-        analyzer_before = ASTScopeAnalyzer(line_scope_map_before)
-        analyzer_before.visit(tree_before)
+        line_scope_map_before = build_line_scope_map(tree_before)
 
         for (added_line_number, added_line_text) in removed_lines_info:
             scope = line_scope_map_before.get(added_line_number, "global")
@@ -1704,75 +1703,39 @@ def get_edited_functions(code_before, code_after, diff):
 
     return map_arr_before, map_arr_after, removed_lines_list, added_lines_list
 
-import ast
-
-def map_functions_to_classes(code_str, function_list):
+def map_functions_to_classes(function_list: list[str]) -> list:
     """
     Given:
-      1) code_str: a string containing valid Python (.py) source code
-      2) function_list: a list of function names that we want to check
+      function_list: a list of function names (full scope) that we want to check
     
     Returns:
-      A list of dicts: [{"function_name": scope}, ...] where `scope` is either
+      A list of dicts: [{"function_scope_name": scope}, ...] where `scope` is either
       the class name in which the function is defined, or "global" if
       it is defined at the top level.
       
       Example return value:
       [
-          {"my_func": "MyClass"},
+          {"MyClass.my_func": "MyClass"},
           {"other_func": "global"}
       ]
     """
-    
-    class ScopeTrackingVisitor(ast.NodeVisitor):
-        """
-        AST visitor that keeps track of the current class scope, so we know if
-        we're inside a class when we encounter a function definition.
-        """
-        def __init__(self):
-            self.current_class = None
-            # function_map will map function_name -> class_name or "global"
-            self.function_map = {}
-        
-        def visit_ClassDef(self, node):
-            # Temporarily store the current class (if any), then set to this class
-            saved_class = self.current_class
-            self.current_class = node.name
-            
-            # Visit all nodes inside this class
-            self.generic_visit(node)
-            
-            # Restore the previous class after exiting this class
-            self.current_class = saved_class
-        
-        def visit_FunctionDef(self, node):
-            if self.current_class:
-                self.function_map[node.name] = self.current_class
-            else:
-                self.function_map[node.name] = "global"
-            
-            # Visit possible inner nodes (e.g., decorators)
-            self.generic_visit(node)
-    
-    # Parse the source code into an AST
-    tree = ast.parse(code_str)
-    
-    # Create and run our custom visitor
-    visitor = ScopeTrackingVisitor()
-    visitor.visit(tree)
-    
+
     # For each function in our list, report the scope we found (or "global" if missing)
     results = []
-    for func_name in function_list:
-        scope = visitor.function_map.get(func_name, "global")
-        results.append({func_name: scope})
-    
+    for item in function_list:
+        parts = item.split(":")
+        segments = [class_scope.split(".") for class_scope in parts]
+        if len(segments) == 1 and len(segments[0]) > 1:  # If only one segment, no nested classes
+            key = ".".join(segments[0][1:]) if segments[0][0] == "global" else item  # Skip "global" keyword
+            results.append({key: segments[0][0]})
+        elif len(segments) > 1:  # For more than one segment there are nested classes, first part of last segment is parent class
+            results.append({item: segments[-1][0]})
     return results
 
 #KK: recently changed this slice_python_code function completely, have to check how it works again
 from typing import List, Dict, Set
 
-def slice_python_code(
+def slice_javascript_code(
     source_code: str,
     global_funcs: List[str],
     class_methods: Dict[str, List[str]],
@@ -1780,7 +1743,7 @@ def slice_python_code(
     edited_lines: List[int] = [],
 ) -> str:
     """
-    Return a 'sliced' version of the given Python source code, preserving
+    Return a 'sliced' version of the given Javascript source code, preserving
     original whitespace (and optionally annotating lines with original line numbers).
 
     The resulting code includes:
@@ -1789,20 +1752,21 @@ def slice_python_code(
       3. Classes (defined in the global scope) whose names are keys in `class_methods`.
          For each kept class:
            - Keep all class-level assignments (properties).
-           - Keep the constructor (__init__) if defined.
+           - Keep the constructor (constructor()) if defined.
            - Keep only the methods listed in class_methods[class_name].
-           - Keep docstrings (which appear as Expr nodes with string constants).
+           - Keep JSDocs (which appear outside of class).
+           - Keep nested classes
     If `append_line_numbers` is True, each kept line starts with the line number of the original source.
     If it is False, then instead of line numbers, the edited lines start with a '+' (edited lines are in the edited_lines list)
-    NOTE: This approach *skips entire lines* belonging to unwanted AST nodes.
+    NOTE: This approach *skips entire lines* belonging to unwanted nodes.
           It does not attempt partial-line slicing.  
     """
 
-    # Parse the code into an AST
-    tree = ast.parse(source_code)
+    # Parse the code with tree-sitter
+    tree = Parser(JS_LANGUAGE).parse(bytes(source_code, 'utf-8'))
 
     # We'll create a "skip set" of line numbers to exclude from final output.
-    # Python's AST nodes have lineno (start) and end_lineno (end), 1-based.
+    # tree-sitter's nodes have start and end points, 0-based.
     # We'll later skip all lines in these ranges for nodes we *don't* want.
     lines_to_skip: Set[int] = set()
 
@@ -1811,15 +1775,13 @@ def slice_python_code(
 
     # --- Helper functions ---
 
-    def is_docstring_expr(node: ast.AST) -> bool:
+    def is_jsdoc(node: Node) -> bool:
         """
-        Returns True if 'node' is an Expr node containing a string constant
-        (i.e., a docstring).
+        Returns True if 'node' is a comment node containing a JSDoc
         """
         return (
-            isinstance(node, ast.Expr)
-            and isinstance(getattr(node, 'value', None), ast.Constant)
-            and isinstance(getattr(node.value, 'value', None), str)
+            node.type == "comment"
+            and node.text.decode("utf-8").startswith("/**")
         )
 
     def mark_lines_skip(start: int, end: int) -> None:
@@ -1827,47 +1789,64 @@ def slice_python_code(
         for ln in range(start, end + 1):
             lines_to_skip.add(ln)
 
-    def keep_top_level_node(node: ast.AST) -> bool:
+    def mark_lines_keep(start: int, end: int) -> None:
+        """Mark all lines [start, end] (inclusive) to be kept if skipped unintentionally (i.e., decorators)."""
+        lines_to_skip.difference_update(list(range(start, end + 1)))
+
+    def get_node_name(node: Node) -> str:
+        """Return the name of a node (i.e., function / class name)."""
+        identifier = node.child_by_field_name("name")
+        return identifier.text.decode("utf-8") if identifier else ""
+
+    def keep_top_level_node(node: Node) -> bool:
         """Decide if a top-level node is to be kept."""
         # 1. Keep import statements
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
+        if node.type == "import_statement":
             return True
         # 2. Keep top-level assignments
-        if isinstance(node, ast.Assign):
+        if node.type in {"variable_declaration", "lexical_declaration"}:
             return True
         # 3. Keep top-level functions if name is in global_funcs
-        if isinstance(node, ast.FunctionDef):
-            return (node.name in global_funcs)
+        if node.type == "function_declaration":
+            return get_node_name(node) in global_funcs
         # 4. Keep top-level classes if name is in class_methods
-        if isinstance(node, ast.ClassDef):
-            return (node.name in class_methods)
-        # # 
-        # if is_docstring_expr(node):
-        #     return False
-        # Otherwise, skip
+        if node.type == "class_declaration":
+            return get_node_name(node) in class_methods
+        # 5. Keep top-level comments (except global JSDocs not assigned to a class or function)
+        if node.type == "comment":
+            return not is_jsdoc(node)
         return False
 
-    def keep_class_child(node: ast.AST, class_name: str) -> bool:
+    def keep_class_child(node: Node, class_name: str) -> bool:
         """
         Decide if a node *inside* a class body is to be kept.
         """
         # Keep class-level assignments
-        if isinstance(node, ast.Assign):
-            return True
-        # Keep docstrings
-        if is_docstring_expr(node):
+        if node.type in {"variable_declaration", "lexical_declaration", "comment"}:
             return True
         # Keep methods if they match criteria
-        if isinstance(node, ast.FunctionDef):
-            if node.name == '__init__':
+        if node.type == "method_definition":
+            if get_node_name(node) == 'constructor':
                 return True
-            # Or if the method is in the allowed list
-            if node.name in class_methods[class_name]:
+            # Or if the method is in the allowed list (split last segment to get method name from scope)
+            if get_node_name(node) in [method_name.split(".")[-1] for method_name in class_methods[class_name]]:
                 return True
         # Otherwise, skip
         return False
 
-    def mark_node(node: ast.AST, keep: bool, parent_class: str = None) -> None:
+    def keep_decorators(node: Node) -> None:
+        # Mark decorator lines & JSDocs if present
+        prev = node.prev_sibling
+        if prev:
+            txt = prev.text.decode("utf-8")
+            if all([
+                (txt.startswith("@") or txt.startswith("/**")),
+                node.start_point[0] - 1 == prev.end_point[0]
+            ]):
+                mark_node(prev, True)
+                keep_decorators(prev)
+
+    def mark_node(node: Node, keep: bool) -> None:
         """
         Recursively mark lines to keep or skip based on the 'keep' flag.
         
@@ -1875,28 +1854,41 @@ def slice_python_code(
         If we keep, we *may still skip children* if we are inside a class and
         the child isn't wanted.
         """
-        if not hasattr(node, 'lineno') or not hasattr(node, 'end_lineno'):
+        if any([  # Skip nodes with missing line info
+            node.start_point is None,
+            node.end_point is None,
+            node.start_point[0] is None,
+            node.end_point[0] is None
+        ]):
             # Some nodes (e.g. interactive mode) may not have line info
             return
 
         # If we're skipping this node, skip all its lines
-        if not keep:
-            mark_lines_skip(node.lineno, node.end_lineno)
+        start_line = node.start_point[0] + 1
+        end_line = node.end_point[0] + 1
+        if keep:
+            mark_lines_keep(start_line, end_line)
+        else:
+            mark_lines_skip(start_line, end_line)
             return
 
-        # If we're keeping this node but it's a ClassDef, we need to process children
-        if isinstance(node, ast.ClassDef):
+        if node.type in {"class_declaration", "function_declaration"}:
+            keep_decorators(node)
+        # If it's a class declaration, we need to process children
+        if node.type == "class_declaration":
             # The node itself is kept, but we might skip unwanted child nodes
-            for child in node.body:
-                child_keep = keep_class_child(child, node.name)
-                mark_node(child, child_keep, parent_class=node.name)
+            body = node.child_by_field_name("body")
+            if body:
+                for child in body.named_children:
+                    child_keep = keep_class_child(child, get_node_name(node))
+                    mark_node(child, child_keep)
 
     # --- Main slicing logic ---
 
     # 1) Walk top-level nodes and mark them keep/skip
-    for node in tree.body:
-        keep_flag = keep_top_level_node(node)
-        mark_node(node, keep_flag, parent_class=None)
+    for root_child in tree.root_node.children:
+        keep_flag = keep_top_level_node(root_child)
+        mark_node(root_child, keep_flag)
 
     # 2) Rebuild final code, skipping lines we marked
     result_lines = []
@@ -1931,12 +1923,16 @@ def is_decorator_start(line: str) -> bool:
     """
     return bool(re.match(r'^\s*\d*\s*@', line))
 
-def is_def_or_class_start(line: str) -> bool:
+def is_function_or_class_start(line: str) -> bool:
     """
-    Check if a line starts with optional digits/spaces followed by 'def' or 'class'.
-    e.g. "300 def foo():", " class Bar:", "def something():"
+    Check if a line starts with optional digits/spaces followed by:
+      - an optional 'async' then 'function' (for global function declarations),
+      - 'class', or
+      - an optional 'async' then an identifier followed by '(' (for class method definitions).
+    e.g. "  10 function foo() {", "  async function bar() {",
+         "  class Baz {", or "  async myMethod() {"
     """
-    return bool(re.match(r'^\s*\d*\s*(?:def|class)\b', line))
+    return bool(re.match(r'^\s*\d*\s*(?:(?:async\s+)?function\b|class\b|(?:async\s+)?[A-Za-z_$][A-Za-z0-9:$]*\s*\()', line))
 
 def find_decorator_end(lines: list[str], start_index: int) -> int:
     """
@@ -2003,7 +1999,7 @@ def filter_stray_decorators(text: str) -> str:
 
             # Now i is at a line that does NOT start with '@' or it's beyond the end.
             # We check if that line starts with 'def' or 'class'
-            if i < n and is_def_or_class_start(lines[i]):
+            if i < n and is_function_or_class_start(lines[i]):
                 # Keep *all* consecutive decorator blocks
                 for block in decorator_blocks:
                     kept.extend(block)
@@ -2322,37 +2318,42 @@ def isFail2Pass(raw_pred, report):
 ### Using predicted test file in test generation
 def keep_first_N_defs(source_code: str, N: int = 3) -> str:
     """
-    Takes Python source code as input and returns a sliced version
-    where all import/global statements, global comments, and docstrings
+    Takes Javascript source code as input and returns a sliced version
+    where all import/global statements, global comments, and JSDocs
     are retained, but only the first three global class/function definitions are kept,
-    along with their comments, docstrings, and decorators.
+    along with their comments, JSDocs, and decorators.
     """
-    tree = ast.parse(source_code)
+    tree = Parser(JS_LANGUAGE).parse(bytes(source_code, 'utf-8'))
+    root_node = tree.root_node
     
     result_lines = []
     global_defs_count = 0
     source_lines = source_code.splitlines()
     kept_lines = set()
     
-    for node in tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            kept_lines.update(range(node.lineno - 1, node.end_lineno))
-        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+    for node in root_node.children:
+        node_type = node.type
+        if node_type in {"import_statement", "variable_declaration", "lexical_declaration", "comment"}:
+            """
+                variable_declaration: var x = 0
+                lexical_declaration: const / let x = 0
+                lexical_declaration: const foo = function() {}
+                lexical_declaration: const foo = () => {}
+            """
+            kept_lines.update(range(node.start_point[0], node.end_point[0] + 1))
+        elif node_type in {"function_declaration", "class_declaration"}:
+            """
+                function_declaration: function foo() {}
+            """
             if global_defs_count < N:
-                kept_lines.update(range(node.lineno - 1, node.end_lineno))
+                kept_lines.update(range(node.start_point[0], node.end_point[0] + 1))
                 global_defs_count += 1
-                # Include docstring if present
-                if hasattr(node, 'body') and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant):
-                    kept_lines.update(range(node.body[0].lineno - 1, node.body[0].end_lineno))
-                # Include decorators
-                for decorator in node.decorator_list:
-                    kept_lines.update(range(decorator.lineno - 1, node.lineno - 1))
-        elif isinstance(node, ast.Assign):
-            kept_lines.update(range(node.lineno - 1, node.end_lineno))
-        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):  # Global docstrings
-            kept_lines.update(range(node.lineno - 1, node.end_lineno))
-        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):  # Global comments
-            kept_lines.update(range(node.lineno - 1, node.end_lineno))
+
+                if node.prev_sibling:
+                    prev_node = node.prev_sibling
+                    text = prev_node.text.decode("utf-8")
+                    if text.startswith("@"): # Decorators
+                        kept_lines.update(range(prev_node.start_point[0], prev_node.end_point[0] + 1))
     
     result_lines = [source_lines[i] for i in sorted(kept_lines) if i < len(source_lines)]
     
