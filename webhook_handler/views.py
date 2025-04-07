@@ -572,7 +572,7 @@ def run(payload, dockerfile=None,
 
         new_test = response.replace('```javascript', '')
         new_test = new_test.replace('```', '')
-        new_test = adjust_function_indentation(new_test)
+        new_test = adjust_function_indentation(new_test)  # TODO: Required for Javascript?
 
         with open(os.path.join(this_instance_log_dir, "generation", "raw_model_response.txt"), "w") as f:
             f.write(response)
@@ -584,7 +584,7 @@ def run(payload, dockerfile=None,
         f.write(new_test)
 
     # Append generated test to existing test file
-    new_test_file_content = append_function(test_file_content, new_test, insert_in_class="NOCLASS")
+    new_test_file_content = append_function(test_file_content, new_test, insert_in_block="NOBLOCK")
 
     # Construct test patch
     model_test_patch = unified_diff(test_file_content, new_test_file_content, fromfile=test_filename, tofile=test_filename)+"\n"
@@ -708,81 +708,69 @@ def is_issue_or_pr(owner, repo, number):
 import ast
 import difflib
 from typing import List, Dict
-def get_function_definitions(source: str) -> dict:
-    """Extract function and method definitions from the source code - only for functions starting with test*"""
-    tree = ast.parse(source)
-    functions = {}
-    
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            function_name = node.name
-            if function_name.startswith('test'):
-                function_body = ast.get_source_segment(source, node)
-                functions[function_name] = function_body
-    
-    return functions
 
-def find_changed_functions(old_source: str, new_source: str) -> List[str]:
-    """Find functions that have changed between two versions of a Python file."""
-    old_funcs = get_function_definitions(old_source)
-    new_funcs = get_function_definitions(new_source)
-    
+def find_changed_its(old_its: dict, new_its: dict) -> List[str]:
+    """Find its that have changed between two versions of a Javascript file."""
     changed_functions = []
     
-    for func_name, new_body in new_funcs.items():
-        old_body = old_funcs.get(func_name)
+    for it_name, new_body in new_its.items():
+        old_body = old_its.get(it_name)
         if old_body is None:
             # Function is new
-            changed_functions.append(func_name)
+            changed_functions.append(it_name)
         elif old_body and old_body != new_body:
             # Function exists but has changed
             diff = list(difflib.unified_diff(old_body.splitlines(), new_body.splitlines()))
             if diff:
-                changed_functions.append(func_name)
+                changed_functions.append(it_name)
     
     return changed_functions
 
-def extract_functions_and_methods(source: str) -> Dict[str, str]:
-    """
-    Extracts global function names and class methods from Python source code.
-    
-    :param source: A string containing Python source code.
-    :return: A dictionary mapping function/method names to "global" or their class name.
-    """
-    tree = ast.parse(source)
-    result = {}
-    
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef):
-            # Global function
-            
-            result[node.name] = "global"
-        elif isinstance(node, ast.ClassDef):
-            # Class with methods
-            class_name = node.name
-            for sub_node in node.body:
-                if isinstance(sub_node, ast.FunctionDef):
-                    # Method inside the class
-                    result[sub_node.name] = class_name
-    
-    return result
+def build_expression_map(tree: Tree) -> tuple:
+    expression_map = {}
+    its = {}
 
-def extract_test_scope(test_file_content, new_test_file_content, test_filename):
-    # Extract string of the type fname::class::method
-    func2class             = extract_functions_and_methods(new_test_file_content)
-    contributing_functions = find_changed_functions(test_file_content, new_test_file_content)
-    func2test_arr          = []
-    if contributing_functions:
-        for func in contributing_functions:
-            scope = func2class.get(func, "")
+    def visit_body(node: Node, scope_name: str) -> None:
+        # Visit the describe body if available
+        for child in get_call_expression_content(node):
+            visit_node(child, scope_name)
+
+    def visit_node(node: Node, scope_name: str = "global") -> None:
+        expression_type = get_call_expression_type(node)
+        if expression_type == "it":
+            new_scope = get_call_expression_description(node, "<it>")
+            expression_map[new_scope] = scope_name
+            its[new_scope] = node.text.decode("utf-8")
+
+        elif expression_type == "describe":
+            new_scope = get_call_expression_description(node, "<describe>")
+            if scope_name != "global":
+                new_scope = f"{scope_name} {new_scope}"
+
+            visit_body(node, new_scope)
+
+    for root_child in tree.root_node.children:
+        visit_node(root_child)
+    return expression_map, its
+
+def extract_test_scope(test_file_content, new_test_file_content, test_filename) -> dict:
+    # Extract string of the type fname describe it
+    _, contributing_its_old = build_expression_map(test_file_content)
+    it2describe, contributing_its_new = build_expression_map(new_test_file_content)
+
+    contributing_its = find_changed_its(contributing_its_old, contributing_its_new)
+    it2test_arr      = {}
+    if contributing_its:
+        for it in contributing_its:
+            scope = it2describe.get(it, "")
             if scope == "":
                 pass
             elif scope == "global":
-                func2test_arr.append(f"{test_filename}::{func}")
-            else: # class scope
-                func2test_arr.append(f"{test_filename}::{scope}::{func}")
+                it2test_arr[it] = test_filename
+            else: # describe scope
+                it2test_arr[f"{scope} {it}"] = test_filename
 
-    return func2test_arr
+    return it2test_arr
 
 #### Helpers to run the tests in docker
 import docker
@@ -913,10 +901,14 @@ def run_test_in_container(client, image_tag, model_test_patch, tests_to_run, gol
 
         # Run the test command
         coverage_report_separator = "COVERAGE_REPORT_STARTING_HERE"
+        test_commands = [
+            f'npx nyc --all --no-source-map --reporter=text --reporter=lcov jasmine --filter="{desc}" {file}'
+            for desc, file in tests_to_run.items()
+        ]
         test_command = (
             "/bin/sh -c 'cd /app/testbed && "
-            f"coverage run --branch -m pytest -rA -vv -o console_output_style=classic --tb=short {" ".join(tests_to_run)} ; " # Here we use ";" instead of "&&" so that the next command runs even if the test fails
-            "coverage report -m > coverage_report.txt && "
+            f"{' ; '.join(test_commands)} ; "
+            "npx nyc report --reporter=text > coverage_report.txt && "
             f"echo '{coverage_report_separator}' && "
             "cat coverage_report.txt'"
         )
@@ -928,11 +920,15 @@ def run_test_in_container(client, image_tag, model_test_patch, tests_to_run, gol
             logger.info("Internal error: docker command failed with: %s" % stdout_output_all)
         logger.info("[+] Test command executed.")
 
-        # Determine PASS/FAIL from output
-        if "= FAILURES =" in stdout or "= ERRORS =" in stdout: # if at least one test failed, we consider it a failure
-            test_result = "FAIL" # because we may run one AI test with many developer tests
+        # Extract only the number of failures from the output.
+        match = re.search(r'\b(\d+)\s+failures\b', stdout)
+        if match:
+            num_failures = int(match.group(1))
+            test_result = "PASS" if num_failures == 0 else "FAIL"
         else:
-            test_result = "PASS"
+            # If the summary line cannot be found, consider it a failure (or handle as needed)
+            logger.info("Could not determine test summary from output.")
+            test_result = "FAIL"
 
         logger.info(f"[+] Test result: {test_result}")
 

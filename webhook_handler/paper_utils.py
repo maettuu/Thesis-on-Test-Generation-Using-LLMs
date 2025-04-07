@@ -328,7 +328,7 @@ def inject_test(row, repo_dir, new_test):
         print("No suitable file found for %s, skipping" % row['instance_id'])
         return None, None, None
 
-    new_test_file_content = append_function(test_content, new_test, insert_in_class="NOCLASS")
+    new_test_file_content = append_function(test_content, new_test, insert_in_block="NOCLASS")
 
     return test_file_to_inject, test_content, new_test_file_content
 
@@ -496,10 +496,10 @@ def run_libro_injection(repo_dir, commitID, new_test, i, libro_granularity):
         # Append the function to the test file contents
         if libro_granularity == "file":
             # File-level
-            new_test_file_contents = append_function(test_content, new_test, insert_in_class="NOCLASS")
+            new_test_file_contents = append_function(test_content, new_test, insert_in_block="NOCLASS")
         else:
             # Class-level
-            new_test_file_contents = append_function(test_content, new_test, insert_in_class=test_class)
+            new_test_file_contents = append_function(test_content, new_test, insert_in_block=test_class)
 
         return test_filename, test_content, new_test_file_contents
     
@@ -666,76 +666,6 @@ def cleanup(original_branch, original_dir):
 ################################################################
 
 ################## Golden Injection ############################
-
-def extract_function_signatures(code_string):
-    """
-    Extract the signatures of all functions from a string of Python code.
-
-    Assumes functions have only positional arguments and no default arguments.
-
-    Parameters:
-        code_string (str): A string of Python code defining one or more functions.
-
-    Returns:
-        list: A list of function signatures as strings.
-    """
-    # Parse the code into an Abstract Syntax Tree (AST)
-    tree = ast.parse(code_string)
-    
-    # Collect all function signatures
-    function_signatures = []
-    
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef):
-            # Extract function name
-            func_name = node.name
-            
-            # Extract positional arguments
-            args = [arg.arg for arg in node.args.args]
-            
-            # Construct the function signature
-            args_str = ", ".join(args)
-            signature = f"{func_name}({args_str})"
-            
-            # Append the signature to the list
-            function_signatures.append(signature)
-    
-    return function_signatures
-
-
-def add_self_argument(function_signature):
-    """
-    Adds 'self' as the first argument in a Python function signature.
-
-    Args:
-        function_signature (str): The function signature as a string.
-
-    Returns:
-        str: The updated function signature with 'self' as the first argument.
-    """
-    # Regex to match the function name and argument list
-    pattern = re.compile(r'^(\w+\s*\()(.*)(\))$')
-    match = pattern.match(function_signature)
-    if match:
-        function_name = match.group(1)         # The function name and opening parenthesis
-        arguments     = match.group(2).strip() # The argument list
-        closing_parenthesis = match.group(3)   # The closing parenthesis
-
-        if arguments:
-            # if there are already arguments
-            if "self" not in arguments: 
-                # and they do not already contain "self", add it.
-                # This is necessary to avoid adding "self" two times
-                updated_arguments = f"self, {arguments}"
-            else:
-                # if "self" is already there, don't change anything. Sometimes the LLM
-                # will output the function with "self" as a param
-                updated_arguments = arguments
-        else:
-            updated_arguments = "self"
-
-        return f"{function_name}{updated_arguments}{closing_parenthesis}"
-    return function_signature
 
 def get_best_file_to_inject_golden(initial_content_arr, changed_content_arr, fname_arr, new_test):
     """The golden test patch may contain >1 edited test file. In that case,
@@ -1203,19 +1133,21 @@ def apply_patch(file_content_arr, patch):
 
 def adjust_function_indentation(function_code: str) -> str:
     """
-    Adjusts the indentation of a Python function so that the function definition
+    Adjusts the indentation of a Javascript function so that the function definition
     has no leading spaces, and the internal code indentation is adjusted accordingly.
 
-    :param function_code: A string representing the Python function.
+    :param function_code: A string representing the Javascript function.
     :return: The adjusted function code as a string.
 
     # Example Usage
     function_code = \"\"\"
-        def example_function(param):
-            if param:
-                print("Hello, world!")
-            else:
-                print("Goodbye, world!")
+        function exampleFunction(param) {
+            if (param) {
+                console.log("Hello, world!");
+            } else {
+                console.log("Goodbye, world!");
+            }
+        }
     \"\"\"
 
     adjusted_code = adjust_function_indentation(function_code)
@@ -1241,115 +1173,128 @@ def adjust_function_indentation(function_code: str) -> str:
     return "\n".join(adjusted_lines)
 
 
-def append_function(file_content: str, new_function: str, insert_in_class: str = "NOCLASS") -> str:
+def get_call_expression(node: Node) -> Node:
+    """Returns the call expression of an expression statement."""
+    return next((
+        child for child in node.named_children
+        if child.type == "call_expression"
+    ))
+
+def get_call_expression_description(node: Node, fallback="") -> str:
+    """Returns the description (i.e., name) of a call expression"""
+    args = get_call_expression(node).child_by_field_name("arguments")
+    identifier = next((
+            child for child in args.named_children
+            if child.type == "string"
+        ), None)
+    raw_name = identifier.text.decode("utf-8") if identifier else fallback
+    return raw_name.strip('"').strip("'")
+
+def get_call_expression_type(node: Node, fallback="") -> str:
+    """Returns the type of a call expression (i.e., 'describe', 'it')"""
+    callee = get_call_expression(node).child_by_field_name("function")
+    return callee.text.decode("utf-8") if callee.type == "identifier" else fallback
+
+def get_call_expression_content(node: Node) -> list:
+    """Returns the content of a call expression"""
+    args = get_call_expression(node).child_by_field_name("arguments")
+    content = next((
+        child for child in args.named_children
+        if child.type == "function_expression"
+    ), None)
+    body = content.child_by_field_name("body")
+    return body.named_children if body else []
+
+def append_function(file_content: str, new_function: str, insert_in_block: str = "NOBLOCK") -> str:
     """
-    Append the function new_function to file_content. If insert_in_class is a class name, 
-    insert new_function as a method of that class. Otherwise, insert new_function at the bottom
+    Append the function new_function to file_content. If insert_in_class is a 'describe' block name,
+    insert new_function as a method of that block. Otherwise, insert new_function at the bottom
     of the file_content.
 
     This handles the indentation.
     """
-    # Parse the content using the AST module
-    tree = ast.parse(file_content)
+    # Parse the content using tree-sitter
+    tree = Parser(JS_LANGUAGE).parse(bytes(file_content, 'utf-8'))
     
-    if insert_in_class != "NOCLASS":
-        # Add the self argument - if not already exists
-        new_function_signature = extract_function_signatures(new_function)
-        for signature in new_function_signature: # we may have >1 added functions
-            signature_with_self = add_self_argument(signature)
-            new_function = new_function.replace(signature, signature_with_self)
-            
+    if insert_in_block != "NOBLOCK":
         # Search for the specified class
         target_class = None
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef) and node.name == insert_in_class:
-                target_class = node
+        for root_child in tree.root_node.children:
+            if root_child.type == "expression_statement" and get_call_expression_description(root_child) == insert_in_block:
+                target_class = root_child
                 break
         
         if target_class is None:
-            raise ValueError(f"Class '{insert_in_class}' not found in the file content!")
+            raise ValueError(f"Describe block '{insert_in_block}' not found in the file content!")
 
         # Find the indentation level of the class
         lines = file_content.splitlines()
-        class_start_line = target_class.lineno - 1
+        class_start_line = target_class.start_point[0]
         class_indentation = len(lines[class_start_line]) - len(lines[class_start_line].lstrip())
 
         # Locate the last method in the class
         last_method = None
-        for body_node in target_class.body:
-            if isinstance(body_node, ast.FunctionDef):
-                last_method = body_node
+        for child in get_call_expression_content(target_class):
+            if child.type == "expression_statement":
+                last_method = child
 
         if last_method:
-            # Insert after the last method
-            last_line = last_method.end_lineno  # Use end_lineno for accurate insertion
+            # Insert after the last nested block
+            last_code_line = last_method.end_point[0] + 1  # Use end_point for accurate insertion
         else:
-            # If no methods, insert at the end of the class
-            last_line = target_class.end_lineno
+            # If no nested block, insert at the end of the root block
+            last_code_line = target_class.end_point[0] + 1
 
-        # Format the new function with the correct indentation
-        indented_new_function = "\n".join(
-            " " * (class_indentation + 4) + line if line.strip() else "" for line in new_function.splitlines()
-        )
-        
-        # Insert the new function
-        updated_lines = lines[:last_line] + [indented_new_function] + lines[last_line:]
-        return "\n".join(updated_lines)
+        last_line_content = lines[last_code_line - 1]
+        indentation = len(last_line_content) - len(last_line_content.lstrip())
 
     else:
         # Default behavior: Append to the bottom of the file
         top_level_items = []
 
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef) or isinstance(node, ast.ClassDef):
-                top_level_items.append(node)
+        for root_child in tree.root_node.children:
+            if root_child.type == "expression_statement":
+                top_level_items.append(root_child)
 
         if not top_level_items:
-            raise ValueError("No top-level classes or functions found in the file content!")
+            raise ValueError("No top-level blocks found in the file content!")
 
         # Find the last top-level item
         last_item = top_level_items[-1]
 
-        if isinstance(last_item, ast.ClassDef): # last function was class
-            # Add the self argument - if not already exists
-            new_function_signature = extract_function_signatures(new_function)
-            for signature in new_function_signature: # we may have >1 added functions
-                signature_with_self = add_self_argument(signature)
-                new_function = new_function.replace(signature, signature_with_self)
-
-            # Handle classes by finding the last method
+        if get_call_expression_type(last_item) == "describe": # last block was 'describe'
+            # Handle blocks by finding the nested block
             last_method = None
-            for body_node in last_item.body:
-                if isinstance(body_node, ast.FunctionDef):
-                    last_method = body_node
+            for child in get_call_expression_content(last_item):
+                if child.type == "expression_statement":
+                    last_method = child
 
 
             if not last_method:
-                raise ValueError(f"No methods found in the class '{last_item.name}'!")
+                raise ValueError(f"No nested blocks found in the describe block '{last_item.name}'!")
 
             # Determine indentation
-            last_func_line = last_method.lineno - 1 # line of the last function def
-            last_code_line = last_method.end_lineno # last code line of the above function def
+            last_func_line = last_method.start_point[0] # line before the last block
+            last_code_line = last_method.end_point[0] + 1 # last code line of the above block
 
         else: # last function was a function in the top-level, not inside a class
             # For top-level functions
-            last_func_line = last_item.lineno - 1 # line of the last function def
-            last_code_line = last_item.end_lineno # last code line of the above function def
+            last_func_line = last_item.start_point[0] # line before the last block
+            last_code_line = last_item.end_point[0] + 1 # last code line of the above block
 
         # Extract indentation
         lines = file_content.splitlines()
         last_func_line_content = lines[last_func_line]
         indentation = len(last_func_line_content) - len(last_func_line_content.lstrip())
 
-        # Add the new function
-        indented_new_function = "\n".join(
-            " " * indentation + line if line.strip() else "" for line in new_function.splitlines()
-        )
+    # Add the new function
+    indented_new_function = "\n".join(
+        " " * indentation + line if line.strip() else "" for line in new_function.splitlines()
+    )
 
-        #updated_content = file_content.rstrip() + "\n\n" + indented_new_function + "\n"
-        updated_lines = lines[:last_code_line] + ["\n"+indented_new_function] + lines[last_code_line:]
-        updated_content =  "\n".join(updated_lines)
-        return updated_content
+    #updated_content = file_content.rstrip() + "\n\n" + indented_new_function + "\n"
+    updated_lines = lines[:last_code_line] + ["\n"+indented_new_function] + lines[last_code_line:]
+    return "\n".join(updated_lines)
     
 def unified_diff(string1, string2, fromfile="original", tofile="modified", context_lines=3):
     """
@@ -1512,7 +1457,11 @@ def slice_golden_file(golden_contents_before_arr, patch, issue_description, retu
 
         sliced_code_arr.append(sliced_code)
     return sliced_code_arr
-    
+
+def get_node_body(node: Node) -> list | None:
+    """Return the body of a node (i.e., function / class body)."""
+    body = node.child_by_field_name("body")
+    return body.named_children if body else []
 
 def get_edited_functions(code_before: str, code_after: str, diff: str) -> tuple:
     """
@@ -1627,7 +1576,7 @@ def get_edited_functions(code_before: str, code_after: str, diff: str) -> tuple:
             prev = node.prev_sibling
             if prev:
                 txt = prev.text.decode("utf-8")
-                if all([
+                if all([  # If decorate found and without empty previous lines
                     (txt.startswith("@") or txt.startswith("/**")),
                     node.start_point[0] - 1 == prev.end_point[0]
                 ]):
@@ -1636,15 +1585,12 @@ def get_edited_functions(code_before: str, code_after: str, diff: str) -> tuple:
 
         def visit_body(node: Node, scope_name: str) -> None:
             # Visit the function/class body if available
-            body = node.child_by_field_name("body")
-            if body:
-                for child in body.named_children:
-                    visit_node(child, scope_name)
+            for child in get_node_body(node):
+                visit_node(child, scope_name)
 
         def visit_node(node: Node, scope_name: str = "global") -> None:
             if node.type in {"function_declaration", "method_definition"}:
-                identifier = node.child_by_field_name("name")
-                new_scope = identifier.text.decode("utf-8") if identifier else "<function>"
+                new_scope = get_node_name(node, "<function>")
                 scope_name = f"{scope_name}.{new_scope}"  # Concatenate with dot for methods
 
                 mark_decorators(node, scope_name)
@@ -1652,8 +1598,7 @@ def get_edited_functions(code_before: str, code_after: str, diff: str) -> tuple:
                 visit_body(node, scope_name)
 
             elif node.type == "class_declaration":
-                identifier = node.child_by_field_name("name")
-                new_scope = identifier.text.decode("utf-8") if identifier else "<class>"
+                new_scope = get_node_name(node, "<class>")
                 if scope_name != "global":
                     new_scope = f"{scope_name}:{new_scope}"  # If class is nested, concatenate with colon to easily differentiate
 
@@ -1793,11 +1738,6 @@ def slice_javascript_code(
         """Mark all lines [start, end] (inclusive) to be kept if skipped unintentionally (i.e., decorators)."""
         lines_to_skip.difference_update(list(range(start, end + 1)))
 
-    def get_node_name(node: Node) -> str:
-        """Return the name of a node (i.e., function / class name)."""
-        identifier = node.child_by_field_name("name")
-        return identifier.text.decode("utf-8") if identifier else ""
-
     def keep_top_level_node(node: Node) -> bool:
         """Decide if a top-level node is to be kept."""
         # 1. Keep import statements
@@ -1915,7 +1855,12 @@ def slice_javascript_code(
         res_cln = re.sub(r'(\n )+', r'\n ', res_cln) 
     return res_cln
 
-### Dealing with decorators in the slice_python_code function
+### Dealing with decorators in the slice_javascript_code function
+def get_node_name(node: Node, fallback="") -> str:
+    """Return the name of a node (i.e., function / class name)."""
+    identifier = node.child_by_field_name("name")
+    return identifier.text.decode("utf-8") if identifier else fallback
+
 def is_decorator_start(line: str) -> bool:
     """
     Check if a line starts with optional digits/spaces followed by '@'.
@@ -2013,7 +1958,7 @@ def filter_stray_decorators(text: str) -> str:
             i += 1
 
     return "\n".join(kept)
-### End - Dealing with decorators in the slice_python_code function
+### End - Dealing with decorators in the slice_javascript_code function
 
 
 # We use this to extract functions called from the issue description
