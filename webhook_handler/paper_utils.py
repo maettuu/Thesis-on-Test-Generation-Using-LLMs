@@ -380,13 +380,13 @@ def find_file_to_inject(row, repo_dir):
             for coedited_file in coedited_files: # coedited_file is a tuple (fname, #coedits)
                 # we need to check if these files still exist because they 
                 # come from a past commit
-                if os.path.isfile(os.path.join(repo_dir, coedited_file[0])):
-                    test_file_to_inject = os.path.join(repo_dir, coedited_file[0])
+                if os.path.isfile(repo_dir + '/' + coedited_file[0]):
+                    test_file_to_inject = repo_dir + '/' + coedited_file[0]
                     break # the first one we find that exists we keep it
             
             if not test_file_to_inject: # if none of the coedited files exist anymore, select the first file you find again
                 first_random_test_file = get_first_test_file(repo_dir)
-                test_file_to_inject = os.path.join(repo_dir, first_random_test_file)
+                test_file_to_inject = repo_dir + '/' + first_random_test_file
 
         # Read the contents of the test file
         with open(test_file_to_inject, 'r', encoding='utf-8') as f:
@@ -1175,14 +1175,18 @@ def adjust_function_indentation(function_code: str) -> str:
 
 def get_call_expression(node: Node) -> Node:
     """Returns the call expression of an expression statement."""
-    return next((
+    call_expression = next((
         child for child in node.named_children
         if child.type == "call_expression"
     ), None)
+    return call_expression
 
 def get_call_expression_description(node: Node, fallback="") -> str:
     """Returns the description (i.e., name) of a call expression"""
-    args = get_call_expression(node).child_by_field_name("arguments")
+    call_expression = get_call_expression(node)
+    if not call_expression:
+        return fallback
+    args = call_expression.child_by_field_name("arguments")
     identifier = next((
             child for child in args.named_children
             if child.type == "string"
@@ -1192,12 +1196,18 @@ def get_call_expression_description(node: Node, fallback="") -> str:
 
 def get_call_expression_type(node: Node, fallback="") -> str:
     """Returns the type of a call expression (i.e., 'describe', 'it')"""
-    callee = get_call_expression(node).child_by_field_name("function")
+    call_expression = get_call_expression(node)
+    if not call_expression:
+        return fallback
+    callee = call_expression.child_by_field_name("function")
     return callee.text.decode("utf-8") if callee.type == "identifier" else fallback
 
 def get_call_expression_content(node: Node) -> list:
     """Returns the content of a call expression"""
-    args = get_call_expression(node).child_by_field_name("arguments")
+    call_expression = get_call_expression(node)
+    if not call_expression:
+        return []
+    args = call_expression.child_by_field_name("arguments")
     content = next((
         child for child in args.named_children
         if child.type == "function_expression"

@@ -755,8 +755,8 @@ def build_expression_map(tree: Tree) -> tuple:
 
 def extract_test_scope(test_file_content, new_test_file_content, test_filename) -> dict:
     # Extract string of the type fname describe it
-    _, contributing_its_old = build_expression_map(test_file_content)
-    it2describe, contributing_its_new = build_expression_map(new_test_file_content)
+    _, contributing_its_old = build_expression_map(Parser(JS_LANGUAGE).parse(bytes(test_file_content, 'utf-8')))
+    it2describe, contributing_its_new = build_expression_map(Parser(JS_LANGUAGE).parse(bytes(new_test_file_content, 'utf-8')))
 
     contributing_its = find_changed_its(contributing_its_old, contributing_its_new)
     it2test_arr      = {}
