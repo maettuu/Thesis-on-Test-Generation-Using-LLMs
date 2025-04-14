@@ -116,13 +116,13 @@ def build_prompt(
             cot_text = "Think step-by-step to generate the test:\n1. Select one or more ###NOT COVERED### line(s) from <code>.\n2. If the line(s) you selected belongs to a file already tested by one of the <developer_tests>, modify the developer test to cover the ###NOT COVERED### line(s) \n3. If, on the other hand, the line(s) you selected 1. are not covered by any developer test, write a new test function to cover them.\n"
             task3 = ", without any explanation or any natural language in general."
     else:
-        task = "Your task is to write one test function that fails before the changes in the <patch> and passes after the changes in the <patch>, hence verifying that the <patch> resolves the <issue>. "
-        task2 = "Generate one test function that checks whether the <patch> resolves the <issue>.\n"
+        task = "Your task is to write one javascript test 'it' that fails before the changes in the <patch> and passes after the changes in the <patch>, hence verifying that the <patch> resolves the <issue>. "
+        task2 = "Generate one test that checks whether the <patch> resolves the <issue>.\n"
         if include_predicted_test_file:
-            predicted_test_file_text = "Your generated test function will then be manually inserted by us in the test file shown in the <test_file> brackets; you can use the contents in these brackets for motivation if needed. "
+            predicted_test_file_text = "Your generated test will then be manually inserted by us in the test file shown in the <test_file> brackets; you can use the contents in these brackets for motivation if needed. "
             predicted_test_file_contents = "<test_file>\n%s\n</test_file>\n\n" % row["predicted_test_file_content_sliced"]
             
-            task3 = ", or at most you can include a decorator to parameterize the test inputs, if one is used by the a test in <test_file> from which you drew motivation (if any). The test function should be self-contained (e.g., no parameters unless a decorator is used to parameterize inputs) and to-the-point."
+            task3 = ", or at most you can include a decorator to parameterize the test inputs, if one is used by the a test in <test_file> from which you drew motivation (if any). The test should be self-contained (e.g., no parameters unless a decorator is used to parameterize inputs) and to-the-point."
 
     if include_issue_description:
         issue_text = row['problem_statement']
@@ -183,7 +183,7 @@ def build_prompt(
 {golden_patch}
 </patch>
 
-{code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}Return only one test function at the default indentation level WITHOUT considering the integration to the test file, e.g., in a unittest.TestCase class because your raw test function will then be inserted in a file by us, either as a standalone function or as a method of an existing unittest.TestCase class, depending on the file conventions; Return only one test function and nothing else{task3}. Import anything you need inside that test function"""            
+{code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else{task3}. Import anything you need inside that test"""
 
 #     if include_predicted_test_file:
 #         x1 = "in the <test_file>"
@@ -380,13 +380,13 @@ def find_file_to_inject(row, repo_dir):
             for coedited_file in coedited_files: # coedited_file is a tuple (fname, #coedits)
                 # we need to check if these files still exist because they 
                 # come from a past commit
-                if os.path.isfile(repo_dir + '/' + coedited_file[0]):
-                    test_file_to_inject = repo_dir + '/' + coedited_file[0]
+                if os.path.isfile(os.path.join(repo_dir, coedited_file[0])):
+                    test_file_to_inject = os.path.join(repo_dir, coedited_file[0])
                     break # the first one we find that exists we keep it
             
             if not test_file_to_inject: # if none of the coedited files exist anymore, select the first file you find again
                 first_random_test_file = get_first_test_file(repo_dir)
-                test_file_to_inject = repo_dir + '/' + first_random_test_file
+                test_file_to_inject = os.path.join(repo_dir, first_random_test_file)
 
         # Read the contents of the test file
         with open(test_file_to_inject, 'r', encoding='utf-8') as f:
@@ -1178,7 +1178,7 @@ def get_call_expression(node: Node) -> Node:
     return next((
         child for child in node.named_children
         if child.type == "call_expression"
-    ))
+    ), None)
 
 def get_call_expression_description(node: Node, fallback="") -> str:
     """Returns the description (i.e., name) of a call expression"""
@@ -1762,14 +1762,18 @@ def slice_javascript_code(
         Decide if a node *inside* a class body is to be kept.
         """
         # Keep class-level assignments
-        if node.type in {"variable_declaration", "lexical_declaration", "comment"}:
+        if node.type in {"variable_declaration", "lexical_declaration", "field_definition"}:
             return True
+        # Only keep comments, mark decorators later for allowed methods
+        if node.type == "comment":
+            return not is_jsdoc(node)
         # Keep methods if they match criteria
         if node.type == "method_definition":
             if get_node_name(node) == 'constructor':
                 return True
             # Or if the method is in the allowed list (split last segment to get method name from scope)
-            if get_node_name(node) in [method_name.split(".")[-1] for method_name in class_methods[class_name]]:
+            allowed_list = [method_name.split(".") for method_name in class_methods[class_name]]
+            if any(get_node_name(node) in sublist for sublist in allowed_list):
                 return True
         # Otherwise, skip
         return False
@@ -1812,7 +1816,7 @@ def slice_javascript_code(
             mark_lines_skip(start_line, end_line)
             return
 
-        if node.type in {"class_declaration", "function_declaration"}:
+        if node.type in {"class_declaration", "function_declaration", "method_definition"}:
             keep_decorators(node)
         # If it's a class declaration, we need to process children
         if node.type == "class_declaration":
