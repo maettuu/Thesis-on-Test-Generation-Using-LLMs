@@ -1,0 +1,93 @@
+import requests
+import time
+import re
+import subprocess
+
+from webhook_handler.core.config import Config
+from webhook_handler.data_models.pr_data import PullRequestData
+
+
+class GitHubApi:
+    def __init__(self, config: Config, pr_data: PullRequestData, logger):
+        self.config = config
+        self.pr_data = pr_data
+        self.logger = logger
+        self.api_url = "https://api.github.com/repos"
+
+    def fetch_pr_files(self) -> dict:
+        url = f"{self.api_url}/{self.pr_data.owner}/{self.pr_data.repo}/pulls/{self.pr_data.number}/files"
+        response = requests.get(url, headers=self.config.headers)
+        if response.status_code == 403 and "X-RateLimit-Reset" in response.headers:
+            reset_time = int(response.headers["X-RateLimit-Reset"])
+            wait_time = reset_time - int(time.time()) + 1
+            # logger.info(f"Rate limit exceeded. Waiting for {wait_time} seconds...")
+            time.sleep(max(wait_time, 1))
+            return self.fetch_pr_files()
+
+        response.raise_for_status()
+        return response.json()
+
+    def fetch_file_version(self, commit: str, file_name: str) -> str:
+        url = f"https://raw.githubusercontent.com/{self.pr_data.owner}/{self.pr_data.repo}/{commit}/{file_name}"
+        response_after = requests.get(url, headers=self.config.headers)
+        if response_after.status_code == 200:
+            return response_after.text
+        return ""
+
+    def get_full_statement(self) -> str:
+        has_linked, issue, title, description = self.check_if_has_linked_issue()
+        if has_linked:
+            self.logger.info(f"Linked issue: {issue}")
+        else:
+            self.logger.info("No linked issue")
+        return "\n".join(value for value in (title, description) if value)  # concatenate title and description
+
+    def check_if_has_linked_issue(self):
+        # Seach for "Closes #2" etc
+        issue_pattern = r'\b(?:Closes|Fixes|Resolves)\s+#(\d+)\b'
+        matches = re.findall(issue_pattern, self.pr_data.description)
+
+        # Since PRs and Issues are treated the same by the GH API, we need to check if the
+        # referenced entity is PR or GH Issue
+        for match in matches:
+            match_int = int(match)  # match was originally string
+            issue_or_pr, title, description = self.is_issue_or_pr(match_int)
+            if issue_or_pr == "Issue":
+                self.logger.info("Linked with issue #%d" % match_int)
+                return True, match_int, title, description  # we don't support linking of >1 issues yet
+
+        return False, None, None, None
+
+    def is_issue_or_pr(self, number):
+        url = f"{self.api_url}/{self.pr_data.owner}/{self.pr_data.repo}/issues/{number}"
+
+        response = requests.get(url, headers=self.config.headers)
+
+        if response.status_code == 200:
+            issue_data = response.json()
+            if "pull_request" in issue_data:
+                return "PR", None, None
+            else:
+                return "Issue", issue_data["title"], issue_data["body"]
+        else:
+            self.logger.info(f"Failed to fetch data for #{number}: {response.status_code}")
+            return None, None, None
+
+    def add_comment_to_pr(self, comment):
+        """Add a comment to the PR"""
+        url = f"{self.api_url}/{self.pr_data.owner}/{self.pr_data.repo}/issues/{self.pr_data.number}/comments"
+        headers = {
+            "Authorization": f"Bearer {self.config.github_token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        data = {"body": comment}
+        response = requests.post(url, json=data, headers=headers)
+        return response.status_code, response.json()
+
+    def clone_repo(self, tmp_repo_dir: str):
+        self.logger.info(f"[*] Cloning repository https://github.com/{self.pr_data.owner}/{self.pr_data.repo}.git")
+        res = subprocess.run(
+            ["git", "clone", f"https://github.com/{self.pr_data.owner}/{self.pr_data.repo}.git",
+             tmp_repo_dir],
+            capture_output=True, check=True)
+        self.logger.info(f"[+] Cloning successful.")
