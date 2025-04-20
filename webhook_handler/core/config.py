@@ -43,6 +43,7 @@ class Config:
         if is_in_server:
             self.webhook_raw_log_dir = "/home/ubuntu/logs/raw/" # for raw requests
             self.webhook_log_dir     = "/home/ubuntu/logs/" # for parsed requests
+            self.dockerfiles_dir     = "/home/ubuntu/dockerfiles/"
         else:
             working_dir = Path.cwd()
             self.webhook_raw_log_dir = Path(working_dir, "bot_logs") # for raw requests
