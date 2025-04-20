@@ -147,6 +147,7 @@ class DockerService:
                 f"echo '{coverage_report_separator}' && "
                 "cat coverage_report.txt'"
             )
+            self.logger.info("[*] Running test command...")
             exec_result = container.exec_run(test_command, stdout=True, stderr=True)
             stdout_output_all = exec_result.output.decode()
             try:  # TODO: fix, find a better way to handle the "test-not-ran" error
@@ -171,7 +172,8 @@ class DockerService:
 
         finally:
             # Cleanup
+            self.logger.info("[*] Stopping and removing container...")
             os.remove(patch_file_path)
             container.stop()
             container.remove()
-            self.logger.info("[*] Container stopped and removed.")
+            self.logger.info("[+] Container stopped and removed.")
