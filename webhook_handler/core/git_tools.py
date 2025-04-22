@@ -37,11 +37,11 @@ def unified_diff_with_function_context(string1, string2, fname="tempfile.py", co
         file2 = os.path.join(temp_dir, f"{fname}.newfordiffonly")
 
         # Write original content
-        with open(file1, "w") as f:
+        with open(file1, "w", encoding="utf-8") as f:
             f.write(string1)
 
         # Write modified content
-        with open(file2, "w") as f:
+        with open(file2, "w", encoding="utf-8") as f:
             f.write(string2)
 
         # Run `git diff --no-index`
@@ -158,17 +158,17 @@ def apply_patch(file_content_arr, patch):
         patch = patch.replace(original_file_bprefix, file_path_bprefix)
 
         # Write the file content and patch content to their respective files
-        with open(temp_dir + file_path, "w") as file:
+        with open(temp_dir + file_path, "w", encoding="utf-8") as file:
             file.write(file_content)
 
     patch_path = "patch.diff"
-    with open(temp_dir + patch_path, "w") as patch_file:
+    with open(temp_dir + patch_path, "w", encoding="utf-8") as patch_file:
         patch_file.write(patch)
 
     # Apply the patch using git apply
     try:
         # subprocess.run(["git", "apply", patch_path], check=True)
-        # with open(patch_path, "r") as file:
+        # with open(patch_path, "r", encoding="utf-8") as file:
         # result = subprocess.run(
         #     ["patch", "-p1"],
         #     stdin=file,  # equivalent to "patch -p1 > patch.diff" but redirection does not work with subprocess

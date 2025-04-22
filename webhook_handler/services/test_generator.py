@@ -94,7 +94,7 @@ class TestGenerator:
             raise ValueError("")
 
         generation_dir = Path(self.log_dir, "generation")
-        with open(Path(generation_dir, "prompt.txt"), "w") as f:
+        with open(Path(generation_dir, "prompt.txt"), "w", encoding="utf-8") as f:
             f.write(prompt)
 
         if self.model_test_generation is None:  # if not mock, query model
@@ -107,12 +107,12 @@ class TestGenerator:
                 response.replace('```javascript', '').replace('```', '')
             )  # TODO: Required for Javascript?
 
-            with open(Path(generation_dir, "raw_model_response.txt"), "w") as f:
+            with open(Path(generation_dir, "raw_model_response.txt"), "w", encoding="utf-8") as f:
                 f.write(response)
         else:
             new_test = self.model_test_generation
 
-        with open(Path(generation_dir, "generated_test.txt"), "w") as f:
+        with open(Path(generation_dir, "generated_test.txt"), "w", encoding="utf-8") as f:
             f.write(new_test)
 
         # Append generated test to existing test file
@@ -141,11 +141,11 @@ class TestGenerator:
             model_test_patch,
             test_to_run
         )
-        with open(Path(generation_dir, "before.txt"), "w") as f:
+        with open(Path(generation_dir, "before.txt"), "w", encoding="utf-8") as f:
             f.write(stdout_before)
-        with open(Path(generation_dir, "coverage_report_before.txt"), "w") as f:
+        with open(Path(generation_dir, "coverage_report_before.txt"), "w", encoding="utf-8") as f:
             f.write(coverage_report_before)
-        with open(Path(generation_dir, "new_test_file_content.js"), "w") as f:
+        with open(Path(generation_dir, "new_test_file_content.js"), "w", encoding="utf-8") as f:
             f.write("#%s\n%s" % (test_filename, new_test_file_content))
 
         #### Run test in post-PR codebase
@@ -155,9 +155,9 @@ class TestGenerator:
             test_to_run,
             golden_code_patch=golden_code_patch
         )
-        with open(Path(generation_dir, "after.txt"), "w") as f:
+        with open(Path(generation_dir, "after.txt"), "w", encoding="utf-8") as f:
             f.write(stdout_after)
-        with open(Path(generation_dir, "coverage_report_after.txt"), "w") as f:
+        with open(Path(generation_dir, "coverage_report_after.txt"), "w", encoding="utf-8") as f:
             f.write(coverage_report_after)
 
         isFail2Pass = (test_result_before == "FAIL") and (test_result_after == "PASS")

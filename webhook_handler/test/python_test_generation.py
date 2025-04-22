@@ -16,7 +16,7 @@ class TestGenerationBugbot2583(TestCase):
         # Load the local JSON file
         mock_payload = "test_mocks/webhook_2025-02-12_18-44-22.json"
         payload_path = os.path.join(os.path.dirname(__file__), mock_payload)
-        with open(payload_path, "r") as f:
+        with open(payload_path, "r", encoding="utf-8") as f:
             self.payload = json.load(f)
 
 
@@ -57,7 +57,7 @@ class TestGenerationBugbot2586(TestCase):
         # Load the local JSON file
         mock_payload = "test_mocks/bugbot_2586.json"
         payload_path = os.path.join(os.path.dirname(__file__), mock_payload)
-        with open(payload_path, "r") as f:
+        with open(payload_path, "r", encoding="utf-8") as f:
             self.payload = json.load(f)
 
 
@@ -98,12 +98,12 @@ class TestGenerationBugbot2587(TestCase):
         # Load the local JSON file
         mock_payload = "test_mocks/bugbot_2587.json"
         payload_path = os.path.join(os.path.dirname(__file__), mock_payload)
-        with open(payload_path, "r") as f:
+        with open(payload_path, "r", encoding="utf-8") as f:
             self.payload = json.load(f)
 
         mock_model_test_generation = "test_mocks/generated_test_2587.txt"
         mock_model_test_generation_path = os.path.join(os.path.dirname(__file__), mock_model_test_generation)
-        with open(mock_model_test_generation_path, "r") as f:
+        with open(mock_model_test_generation_path, "r", encoding="utf-8") as f:
             self.model_test_generation = f.read()
 
 
@@ -144,7 +144,7 @@ class TestGenerationBugbot2588(TestCase):
         # Load the local JSON file
         mock_payload = "test_mocks/bugbot_2588.json"
         payload_path = os.path.join(os.path.dirname(__file__), mock_payload)
-        with open(payload_path, "r") as f:
+        with open(payload_path, "r", encoding="utf-8") as f:
             self.payload = json.load(f)
 
     def test_run_function_with_local_payload(self):
@@ -183,12 +183,12 @@ class TestGenerationBugbot2588_cachedTest(TestCase):
         # Load the local JSON file
         mock_payload = "test_mocks/bugbot_2588.json"
         payload_path = os.path.join(os.path.dirname(__file__), mock_payload)
-        with open(payload_path, "r") as f:
+        with open(payload_path, "r", encoding="utf-8") as f:
             self.payload = json.load(f)
 
         mock_model_test_generation = "test_mocks/bugbot_2588_test.txt"
         mock_model_test_generation_path = os.path.join(os.path.dirname(__file__), mock_model_test_generation)
-        with open(mock_model_test_generation_path, "r") as f:
+        with open(mock_model_test_generation_path, "r", encoding="utf-8") as f:
             self.model_test_generation = f.read()
 
     def test_run_function_with_local_payload(self):

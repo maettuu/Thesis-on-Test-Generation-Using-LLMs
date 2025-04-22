@@ -65,9 +65,9 @@ class TestAmplifier:
 
             # 2) log outputs
             amplification_dir = Path(self.log_dir, "amplification")
-            with open(Path(amplification_dir, "dev.txt"), "w") as f:
+            with open(Path(amplification_dir, "dev.txt"), "w", encoding="utf-8") as f:
                 f.write(stdout_dev)
-            with open(Path(amplification_dir, "coverage_report_dev.txt"), "w") as f:
+            with open(Path(amplification_dir, "coverage_report_dev.txt"), "w", encoding="utf-8") as f:
                 f.write(coverage_report_dev)
 
             # 3) compute offsets
@@ -98,7 +98,7 @@ class TestAmplifier:
                 test_code_sliced=self.prompt_combinations["test_code_sliced"][self.iAttempt],
                 include_uncovered_lines_by_dvlpr_test=True,
             )
-            with open(Path(amplification_dir, "prompt.txt"), "w") as f:
+            with open(Path(amplification_dir, "prompt.txt"), "w", encoding="utf-8") as f:
                 f.write(prompt)
 
             if len(prompt) >= 1048576:  # gpt4o limit (can I get it from a config or sth?)
@@ -108,7 +108,7 @@ class TestAmplifier:
             # 6) query or mock
             if self.model_test_amplification is None:
                 response = self.llm_handler.query_model(prompt, model=self.model, T=0.0)
-                with open(Path(amplification_dir, "raw_model_response.txt"), "w") as f:
+                with open(Path(amplification_dir, "raw_model_response.txt"), "w", encoding="utf-8") as f:
                     f.write(response)
                 new_test = helpers.adjust_function_indentation(
                     response.replace('```javascript', '').replace('```', '')
@@ -117,7 +117,7 @@ class TestAmplifier:
                 self.logger.info("Using mocked model response for amplification")
                 new_test = self.model_test_amplification
 
-            with open(Path(amplification_dir, "generated_test.txt"), "w") as f:
+            with open(Path(amplification_dir, "generated_test.txt"), "w", encoding="utf-8") as f:
                 f.write(new_test)
 
             # Inject test
@@ -204,9 +204,9 @@ class TestAmplifier:
                 coverage_report_dev_and_ai
             )
 
-            with open(Path(amplification_dir, "dev_and_ai.txt"), "w") as f:
+            with open(Path(amplification_dir, "dev_and_ai.txt"), "w", encoding="utf-8") as f:
                 f.write(stdout_dev_and_ai)
-            with open(Path(amplification_dir, "coverage_report_dev_and_ai.txt"), "w") as f:
+            with open(Path(amplification_dir, "coverage_report_dev_and_ai.txt"), "w", encoding="utf-8") as f:
                 f.write(test_result_dev_and_ai)
 
             # The lines modified by the developer code patch

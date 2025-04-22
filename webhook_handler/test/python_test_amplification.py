@@ -17,18 +17,18 @@ class TestAmplificationAndGeneration(TestCase):
         mock_payload = "test_mocks/2_kitsiosk_bugbug.json"
         # mock_payload = "test_mocks/webhook_2025-02-10_16-37-53.json"
         payload_path = os.path.join(os.path.dirname(__file__), mock_payload)
-        with open(payload_path, "r") as f:
+        with open(payload_path, "r", encoding="utf-8") as f:
             self.payload = json.load(f)
 
         mock_model_test_generation = "test_mocks/2_generated_test_generation.txt"
         # mock_model_test_generation = "test_mocks/3_generated_test_generation.txt"
         mock_model_test_generation_path = os.path.join(os.path.dirname(__file__), mock_model_test_generation)
-        with open(mock_model_test_generation_path, "r") as f:
+        with open(mock_model_test_generation_path, "r", encoding="utf-8") as f:
             self.model_test_generation = f.read()
 
         mock_model_test_amplification = "test_mocks/2_generated_test_amplification.txt"
         mock_model_test_amplification_path = os.path.join(os.path.dirname(__file__), mock_model_test_amplification)
-        with open(mock_model_test_amplification_path, "r") as f:
+        with open(mock_model_test_amplification_path, "r", encoding="utf-8") as f:
             self.model_test_amplification = f.read()
 
         self.dockerfile = "dockerfiles/Dockerfile_bugbug_old1"
