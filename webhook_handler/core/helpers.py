@@ -506,15 +506,17 @@ def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
             matching_test_files = []  # could be more than 1 matching files in different dirs
 
             # ".../x.js" => ".../x_spec.js"
-            name, ext = os.path.splitext(edited_file.split('/')[-1])
-            potential_test_file = f"{name}_spec{ext}"
-            # Search in all test_ folders for that name
-            for root, dirs, files in os.walk(repo_dir):
-                if any(part.startswith("test") for part in root.split(os.sep)):
-                    for file in files:
-                        if file == potential_test_file:
-                            test_file_to_inject = root + '/' + file
-                            matching_test_files.append(test_file_to_inject)
+            edited_path = Path(edited_file)
+            stem = edited_path.stem  # filename without suffix
+            suffix = edited_path.suffix  # “.py”, “.js”, etc.
+            potential_test_file = f"{stem}_spec{suffix}"
+
+            repo_path = Path(repo_dir)
+            for file_path in repo_path.rglob(potential_test_file):
+                # file_path.parts is a tuple of all path segments from repo_path down to the file
+                if any(part.startswith("test") for part in file_path.parts):
+                    # if you need a string path rather than a Path object:
+                    matching_test_files.append(file_path.as_posix())
             if matching_test_files:  # stop in the first file for which we find (possibly >1) matching tests
                 break
 

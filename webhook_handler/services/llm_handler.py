@@ -8,7 +8,6 @@ class LLMHandler:
     def __init__(self, config: Config, data: PullRequestPipelineData):
         self.config = config
         self.data = data
-        openai.api_key = self.config.openai_api_key
 
     def build_prompt(
             self,
@@ -190,6 +189,7 @@ class LLMHandler:
 
     def query_model(self, prompt, model="meta-llama/Llama-3.3-70B-Instruct", T=0.0):
         # model: "gpt-4o" | "meta-llama/Llama-3.3-70B-Instruct" | "microsoft/Phi-3.5-mini-instruct"
+        openai.api_key = self.config.openai_api_key
         if model.startswith("gpt"):
             response = openai.ChatCompletion.create(
                 model=model,
