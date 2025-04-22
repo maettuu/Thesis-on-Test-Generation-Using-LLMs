@@ -21,11 +21,11 @@ RUN npm install -g nyc
 ARG commit_hash
 RUN echo "Cloning commit: ${commit_hash}"
 
-RUN git clone https://github.com/maettuu/pdf.js-sandbox.git /app/testbed
+RUN git clone https://github.com/mozilla/pdf.js.git /app/testbed
 
 WORKDIR /app/testbed
 RUN git checkout ${commit_hash}
-RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci  # necessary to skip outdated downloads (for old commits)
+RUN npm ci
 RUN npx gulp generic
 
 CMD ["node", "-e", "console.log('environment is ready')"]

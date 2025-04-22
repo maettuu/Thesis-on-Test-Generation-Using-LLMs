@@ -6,6 +6,8 @@ import tarfile
 import re
 import os
 
+from docker.errors import ImageNotFound, APIError, BuildError
+
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.pr_data import PullRequestData
 
@@ -33,10 +35,22 @@ class DockerService:
 
         # # Write a temporary Dockerfile (this avoids modifying the original file)
         # temp_dockerfile = "Dockerfile.temp"
-        # with open(temp_dockerfile, "w") as f:
+        # with open(temp_dockerfile, "w", encoding="utf-8") as f:
         #     f.write(dockerfile_content)
 
-        self.logger.info(f"[*] Building Docker image based on commit {self.pr_data.base_commit}")
+        image_tag = self.pr_data.image_tag
+
+        # Check whether the image is already built
+        try:
+            self.client.images.get(image_tag)
+            self.logger.info(f"[+] Docker image '{image_tag}' already exists – skipping build.")
+            return
+        except ImageNotFound:
+            # image not found locally, proceed with build
+            self.logger.info(f"[*] No existing image '{image_tag}' found. Building from scratch based on commit {self.pr_data.base_commit}")
+        except APIError as e:
+            self.logger.error(f"[!] Docker API error when checking for existing image: {e}")
+            self.logger.info(f"[*] Building Docker image based on commit {self.pr_data.base_commit}")
 
         # Build the Docker image
         build_args = {"commit_hash": self.pr_data.base_commit}
@@ -55,10 +69,17 @@ class DockerService:
             #     if "stream" in log:
             #         print(log["stream"].strip())
             self.logger.info(f"[+] Docker image '{self.pr_data.image_tag}' built successfully.")
-        except docker.errors.BuildError as e:
+        except BuildError as e:
+            # Print every line from the build logs to stdout/stderr
+            for chunk in e.build_log:
+                if 'stream' in chunk:
+                    print(chunk['stream'].rstrip())
             self.logger.info(f"[!] Build failed: {e}")
             sys.exit(1)
-        except docker.errors.APIError as e:
+        # except BuildError as e:
+        #     self.logger.info(f"[!] Build failed: {e}")
+        #     sys.exit(1)
+        except APIError as e:
             self.logger.info(f"[!] Docker API error: {e}")
             sys.exit(1)
 
