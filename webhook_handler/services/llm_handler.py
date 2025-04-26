@@ -1,4 +1,4 @@
-import openai
+from openai import OpenAI
 
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
@@ -8,6 +8,7 @@ class LLMHandler:
     def __init__(self, config: Config, data: PullRequestPipelineData):
         self.config = config
         self.data = data
+        self.openai_client = OpenAI(api_key=self.config.openai_api_key)
 
     def build_prompt(
             self,
@@ -189,16 +190,15 @@ class LLMHandler:
 
     def query_model(self, prompt, model="meta-llama/Llama-3.3-70B-Instruct", T=0.0):
         # model: "gpt-4o" | "meta-llama/Llama-3.3-70B-Instruct" | "microsoft/Phi-3.5-mini-instruct"
-        openai.api_key = self.config.openai_api_key
         if model.startswith("gpt"):
-            response = openai.ChatCompletion.create(
+            response = self.openai_client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=T
             )
             return response.choices[0].message.content.strip()
         elif model.startswith("o1"):  # temperature does not apply in o1 series
-            response = openai.ChatCompletion.create(
+            response = self.openai_client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
             )
