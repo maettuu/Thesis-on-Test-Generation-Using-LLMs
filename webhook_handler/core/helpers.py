@@ -177,7 +177,7 @@ def get_call_expression_content(node: Node) -> list:
     args = call_expression.child_by_field_name("arguments")
     content = next((
         child for child in args.named_children
-        if child.type == "function_expression"
+        if child.type in {"function_expression", "arrow_function"}
     ), None)
     body = content.child_by_field_name("body")
     return body.named_children if body else []
@@ -209,10 +209,15 @@ def get_call_expression_description(node: Node, fallback="") -> str:
     args = call_expression.child_by_field_name("arguments")
     identifier = next((
             child for child in args.named_children
-            if child.type == "string"
+            if child.type in {"string", "binary_expression"}
         ), None)
     raw_name = identifier.text.decode("utf-8") if identifier else fallback
-    return raw_name.strip('"').strip("'")
+    # 1) Remove the quotes and pluses
+    clean_name = raw_name.replace('"', '').replace('+', '')
+    # 2) Turn any literal \n or \t (or others) into a space
+    clean_name = clean_name.replace('\n', ' ').replace('\t', ' ').replace('\r', ' ')
+    # 3) Collapse any runs of whitespace into one space
+    return ' '.join(clean_name.split())
 
 
 def adjust_function_indentation(function_code: str) -> str:

@@ -42,7 +42,7 @@ class DockerService:
 
         # Check whether the image is already built
         try:
-            self.client.images.get(image_tag)
+            self.client.images.get(f"{image_tag}:latest")
             self.logger.info(f"[+] Docker image '{image_tag}' already exists – skipping build.")
             return
         except ImageNotFound:
