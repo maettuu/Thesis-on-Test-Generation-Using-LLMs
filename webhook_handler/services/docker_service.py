@@ -159,7 +159,7 @@ class DockerService:
             # Run the test command
             coverage_report_separator = "COVERAGE_REPORT_STARTING_HERE"
             test_commands = [
-                f'npx nyc --reporter=text --reporter=lcov jasmine --filter="{desc}" {file}'
+                f'TEST_FILTER="{desc}" npx nyc --reporter=text --reporter=lcov gulp unittest-single'
                 # f'npx nyc --all --no-source-map --reporter=text --reporter=lcov jasmine --filter="{desc}" {file}'
                 for desc, file in tests_to_run.items()
             ]
