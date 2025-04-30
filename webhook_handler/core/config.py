@@ -41,14 +41,13 @@ class Config:
         ################## Path Config ##################
         is_in_server = Path("/home/ubuntu").is_dir() # Directory where webhook requests will be saved
         if is_in_server:
+            self.project_root = "/home/ubuntu/"
             self.webhook_raw_log_dir = "/home/ubuntu/logs/raw/" # for raw requests
             self.webhook_log_dir     = "/home/ubuntu/logs/" # for parsed requests
-            self.dockerfiles_dir     = "/home/ubuntu/dockerfiles/"
         else:
-            working_dir = Path.cwd()
-            self.webhook_raw_log_dir = Path(working_dir, "bot_logs") # for raw requests
-            self.webhook_log_dir     = Path(working_dir, "bot_logs") # for parsed requests
-            self.dockerfiles_dir     = Path(working_dir, "dockerfiles")
+            self.project_root = Path.cwd()
+            self.webhook_raw_log_dir = Path(self.project_root, "bot_logs") # for raw requests
+            self.webhook_log_dir     = Path(self.project_root, "bot_logs") # for parsed requests
 
     def setup_log_dir(self, instance_id: str, timestamp: str, iAttempt: int, model: str) -> Path:
         Path(self.webhook_log_dir).mkdir(parents=True, exist_ok=True)

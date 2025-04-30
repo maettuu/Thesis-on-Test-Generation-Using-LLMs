@@ -57,6 +57,8 @@ class TestGenerator:
         tmp_repo_dir = "tmp_repo_dir"
         if not Path(tmp_repo_dir).exists():
             self.gh_api.clone_repo(tmp_repo_dir)
+        else:
+            self.logger.info(f"[+] Temporary repository '{self.data.pr_data.repo}' already cloned – skipped")
         try:
             test_filename, test_file_content, test_file_content_sliced = helpers.get_contents_of_test_file_to_inject(
                 self.config.parse_language,

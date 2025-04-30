@@ -7,6 +7,7 @@ import re
 import os
 
 from docker.errors import ImageNotFound, APIError, BuildError
+from pathlib import Path
 
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.pr_data import PullRequestData
@@ -24,8 +25,8 @@ class DockerService:
         if dockerfile_path:
             return dockerfile_path
         if (self.pr_data.owner, self.pr_data.repo, self.pr_data.number) == ("kitsiosk", "bugbug", 5):
-            return (self.config.dockerfiles_dir / "Dockerfile_bugbug_old1").as_posix()
-        return (self.config.dockerfiles_dir / f"Dockerfile_{self.pr_data.repo}").as_posix()
+            return Path("dockerfiles", "Dockerfile_bugbug_old1").as_posix()
+        return Path("dockerfiles", f"Dockerfile_{self.pr_data.repo}").as_posix()
 
     def build(self):
         """Builds a Docker image using the Python Docker SDK."""
@@ -43,20 +44,21 @@ class DockerService:
         # Check whether the image is already built
         try:
             self.client.images.get(f"{image_tag}:latest")
-            self.logger.info(f"[+] Docker image '{image_tag}' already exists – skipping build.")
+            self.logger.info(f"[+] Docker image '{image_tag}' already exists – skipped")
             return
         except ImageNotFound:
             # image not found locally, proceed with build
-            self.logger.info(f"[*] No existing image '{image_tag}' found. Building from scratch based on commit {self.pr_data.base_commit}")
+            self.logger.info(f"[!] No existing image '{image_tag}' found.")
         except APIError as e:
             self.logger.error(f"[!] Docker API error when checking for existing image: {e}")
-            self.logger.info(f"[*] Building Docker image based on commit {self.pr_data.base_commit}")
+
+        self.logger.info(f"[*] Building from scratch based on commit {self.pr_data.base_commit}")
 
         # Build the Docker image
         build_args = {"commit_hash": self.pr_data.base_commit}
         try:
             image, build_logs = self.client.images.build(
-                path="..",
+                path=self.config.project_root.as_posix(),
                 tag=self.pr_data.image_tag,
                 dockerfile=self.dockerfile_path,
                 buildargs=build_args,
