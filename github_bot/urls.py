@@ -15,6 +15,12 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.views.defaults import (
+    bad_request,
+    permission_denied,
+    page_not_found,
+    server_error
+)
 
 from django.urls import include, path
 
@@ -23,3 +29,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('webhook/', include('webhook_handler.urls')),
 ]
+
+handler400 = bad_request
+handler403 = permission_denied
+handler404 = page_not_found
+handler500 = server_error
