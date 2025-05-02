@@ -4,7 +4,7 @@ import hmac
 import hashlib
 
 from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse, HttpResponseForbidden
+from django.http import JsonResponse, HttpResponseForbidden, HttpResponse, HttpResponseNotAllowed
 from datetime import datetime
 from pathlib import Path
 
@@ -19,10 +19,15 @@ config = Config()
 @csrf_exempt
 def github_webhook(request):
     """Handle GitHub webhook events"""
-    if request.method != 'POST':
-        logger.info("Method is not POST")
-        return HttpResponseForbidden("Invalid method")
+    # 1) Allow HEAD for health checks (optional)
+    if request.method == 'HEAD':
+        return HttpResponse(status=200)
 
+    # 2) Enforce POST only
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+
+    # 3) Signature check
     if not verify_signature(request):
         logger.info("Invalid signature")
         return HttpResponseForbidden("Invalid signature")

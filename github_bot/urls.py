@@ -21,12 +21,13 @@ from django.views.defaults import (
     page_not_found,
     server_error
 )
-
 from django.urls import include, path
+from django.http import HttpResponse
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('healthz/', lambda req: HttpResponse("OK"), name='healthz'),
     path('webhook/', include('webhook_handler.urls')),
 ]
 
