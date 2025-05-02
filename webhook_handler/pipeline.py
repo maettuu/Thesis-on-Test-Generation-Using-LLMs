@@ -37,7 +37,7 @@ def run(
     pr_data = PullRequestData.from_payload(payload)
 
     # 2. Prepare logging
-    log_dir = config.setup_log_dir(pr_data.id, timestamp, iAttempt, model)
+    config.setup_log_dir(pr_data.id, timestamp, iAttempt, model)
 
     # 3. Setup GitHub Api
     gh_api = GitHubApi(config, pr_data, logger)
@@ -80,7 +80,6 @@ def run(
         gh_api,
         llm_handler,
         docker_service,
-        log_dir,
         post_comment,
         model_test_amplification,
         iAttempt,
@@ -95,7 +94,6 @@ def run(
         gh_api,
         llm_handler,
         docker_service,
-        log_dir,
         post_comment,
         model_test_generation,
         iAttempt,

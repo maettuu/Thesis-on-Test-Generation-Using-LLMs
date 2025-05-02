@@ -10,9 +10,9 @@ class LLMHandler:
     def __init__(self, config: Config, data: PullRequestPipelineData):
         self.config = config
         self.data = data
-        self.openai_client = OpenAI(api_key=self.config.openai_api_key)
-        self.hug_client = InferenceClient(api_key=self.config.hug_api_key)
-        self.groq_client = Groq(api_key=self.config.groq_api_key)
+        self.openai_client = OpenAI(api_key=config.openai_api_key)
+        self.hug_client = InferenceClient(api_key=config.hug_api_key)
+        self.groq_client = Groq(api_key=config.groq_api_key)
 
     def build_prompt(
             self,

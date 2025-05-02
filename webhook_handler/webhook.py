@@ -63,7 +63,7 @@ def github_webhook(request):
                         iAttempt += 1
                         if stop:
                             post_comment = False
-                        with open(Path(config.webhook_log_dir, 'results.csv'), 'a') as f:
+                        with open(Path(config.model_log_dir, 'results.csv'), 'a') as f:
                             f.write("%s,%s,%s,%s\n" % (payload["number"], model, iAttempt, stop))
 
                 if not stop:
@@ -78,7 +78,7 @@ def github_webhook(request):
                                          post_comment=post_comment)
                     if stop:
                         post_comment = False
-                    with open(Path(config.webhook_log_dir, 'results.csv'), 'a') as f:
+                    with open(Path(config.model_log_dir, 'results.csv'), 'a') as f:
                         f.write("%s,%s,%s,%s\n" % (payload["number"], model, 1, stop))
 
                 return response

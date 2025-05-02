@@ -5,8 +5,8 @@ from webhook_handler.core import (
     git_tools,
     helpers
 )
-from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
-from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
+from webhook_handler_models.pr_file_diff import PullRequestFileDiff
+from webhook_handler_models.pr_pipeline_data import PullRequestPipelineData
 from webhook_handler.services.docker_service import DockerService
 from webhook_handler.services.gh_api import GitHubApi
 from webhook_handler.services.llm_handler import LLMHandler
@@ -21,7 +21,6 @@ class TestAmplifier:
         gh_api: GitHubApi,
         llm_handler: LLMHandler,
         docker_service: DockerService,
-        log_dir: Path,
         post_comment: bool,
         model_test_amplification: str = None,
         iAttempt: int = 0,
@@ -31,11 +30,12 @@ class TestAmplifier:
     ):
         self.config                   = config
         self.logger                   = logger
-        self.data                     = data
+        self.pr_data                  = data.pr_data
+        self.pr_diff_ctx              = data.pr_diff_ctx
         self.gh_api                   = gh_api
         self.llm_handler              = llm_handler
         self.docker_service           = docker_service
-        self.log_dir                  = log_dir
+        self.log_dir                  = config.model_log_dir
         self.post_comment             = post_comment
         self.model_test_amplification = model_test_amplification
         self.iAttempt                 = iAttempt
@@ -45,19 +45,19 @@ class TestAmplifier:
 
     def amplify(self) -> tuple[bool, bool]:
         """Returns (amplification_succeeded, should_run_generation)"""
-        if self.data.pr_diff_ctx.has_at_least_one_test_file:
+        if self.pr_diff_ctx.has_at_least_one_test_file:
             amplification_completed = False
             self.logger.info("=============== Test Amplification Started ===============")
 
             # 1) run developer tests
             tests_to_run = []
-            for pr_file_diff in self.data.pr_diff_ctx.test_file_diffs:
+            for pr_file_diff in self.pr_diff_ctx.test_file_diffs:
                 tests_to_run += helpers.extract_test_descriptions(self.config.parse_language, pr_file_diff)
 
             test_result_dev, stdout_dev, coverage_report_dev = self.docker_service.run_test_in_container(
-                self.data.pr_diff_ctx.golden_test_patch,
+                self.pr_diff_ctx.golden_test_patch,
                 tests_to_run,
-                golden_code_patch=self.data.pr_diff_ctx.golden_code_patch,
+                golden_code_patch=self.pr_diff_ctx.golden_code_patch,
             )
             if test_result_dev == "FAIL":
                 self.logger.info("Developer tests failed, skipping amplification...")
@@ -71,21 +71,21 @@ class TestAmplifier:
                 f.write(coverage_report_dev)
 
             # 3) compute offsets
-            code_after_arr, stderr = self.data.pr_diff_ctx.apply_code_patch()
+            code_after_arr, stderr = self.pr_diff_ctx.apply_code_patch()
             try:
                 offsets = helpers.extract_offsets_from_stderr(stderr)
             except AssertionError as e:
-                self.logger.info("Different offsets in a single file for %s, skipping" % self.data.pr_data.id)
+                self.logger.info("Different offsets in a single file for %s, skipping" % self.pr_data.id)
                 exit(0)
 
             # 4) decorate patch
             missed_lines_dev, decorated_patch_dev = git_tools.get_missed_lines_and_decorate_patch(
-                self.data.pr_diff_ctx,
+                self.pr_diff_ctx,
                 code_after_arr,
                 offsets,
                 coverage_report_dev,
             )
-            self.data.patch_labeled = decorated_patch_dev
+            self.patch_labeled = decorated_patch_dev
 
             # 5) build amplification prompt
             prompt = self.llm_handler.build_prompt(
@@ -122,7 +122,7 @@ class TestAmplifier:
 
             # Inject test
             most_similar_changed_func_or_class, most_similar_file, success = helpers.get_best_file_to_inject_golden(
-                self.data.pr_diff_ctx,
+                self.pr_diff_ctx,
                 new_test
             )
             if success:
@@ -138,13 +138,13 @@ class TestAmplifier:
                     insert_in_block = most_similar_changed_func_or_class[1]
             else:
                 # Grab the first test file and insert at the end
-                most_similar_file = [xx for xx in self.data.pr_diff_ctx.test_before if
+                most_similar_file = [xx for xx in self.pr_diff_ctx.test_before if
                                      "spec" in xx.split('/')[-1] and xx.endswith('.js')][0]
                 insert_in_block = "NOBLOCK"
 
-            most_similar_file_idx = self.data.pr_diff_ctx.test_names.index(most_similar_file)
-            golden_test_content = self.data.pr_diff_ctx.test_before[most_similar_file_idx]
-            golden_test_content_after = self.data.pr_diff_ctx.test_after[most_similar_file_idx]
+            most_similar_file_idx = self.pr_diff_ctx.test_names.index(most_similar_file)
+            golden_test_content = self.pr_diff_ctx.test_before[most_similar_file_idx]
+            golden_test_content_after = self.pr_diff_ctx.test_after[most_similar_file_idx]
 
             # Add the model test on top of the developer test to measure difference
             try:
@@ -160,7 +160,7 @@ class TestAmplifier:
 
             model_test_patch = ""
             tests_to_run = []
-            for idx, pr_file_diff in enumerate(self.data.pr_diff_ctx.test_file_diffs):
+            for idx, pr_file_diff in enumerate(self.pr_diff_ctx.test_file_diffs):
                 if idx == most_similar_file_idx:
                     model_test_patch += git_tools.unified_diff(pr_file_diff.before,
                                                                new_test_file_contents,
@@ -193,12 +193,12 @@ class TestAmplifier:
                 self.docker_service.run_test_in_container(
                     model_test_patch,
                     tests_to_run,
-                    golden_code_patch=self.data.pr_diff_ctx.golden_code_patch
+                    golden_code_patch=self.pr_diff_ctx.golden_code_patch
                 )
             )
             # Extract missed lines
             missed_lines_dev_and_ai, decorated_patch_dev_and_ai = git_tools.get_missed_lines_and_decorate_patch(
-                self.data.pr_diff_ctx,
+                self.pr_diff_ctx,
                 code_after_arr,
                 offsets,
                 coverage_report_dev_and_ai
@@ -211,7 +211,7 @@ class TestAmplifier:
 
             # The lines modified by the developer code patch
             modified_lines = [
-                l[1:].strip() for l in self.data.pr_diff_ctx.golden_code_patch.splitlines() if
+                l[1:].strip() for l in self.pr_diff_ctx.golden_code_patch.splitlines() if
                 l.startswith('+') and not l.startswith('+++')
             ]
             n_modified = len(modified_lines)

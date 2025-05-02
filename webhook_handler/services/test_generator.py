@@ -1,5 +1,3 @@
-import subprocess
-
 from pathlib import Path
 
 from webhook_handler.core.config import Config
@@ -7,8 +5,8 @@ from webhook_handler.core import (
     git_tools,
     helpers
 )
-from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
-from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
+from webhook_handler_models.pr_file_diff import PullRequestFileDiff
+from webhook_handler_models.pr_pipeline_data import PullRequestPipelineData
 from webhook_handler.services.docker_service import DockerService
 from webhook_handler.services.gh_api import GitHubApi
 from webhook_handler.services.llm_handler import LLMHandler
@@ -23,7 +21,6 @@ class TestGenerator:
         gh_api: GitHubApi,
         llm_handler: LLMHandler,
         docker_service: DockerService,
-        log_dir: Path,
         post_comment: bool,
         model_test_generation: str = None,
         iAttempt: int = 0,
@@ -33,11 +30,12 @@ class TestGenerator:
     ):
         self.config                = config
         self.logger                = logger
-        self.data                  = data
+        self.pr_data               = data.pr_data
+        self.pr_diff_ctx           = data.pr_diff_ctx
         self.gh_api                = gh_api
         self.llm_handler           = llm_handler
         self.docker_service        = docker_service
-        self.log_dir               = log_dir
+        self.log_dir               = config.model_log_dir
         self.post_comment          = post_comment
         self.model_test_generation = model_test_generation
         self.iAttempt              = iAttempt
@@ -58,20 +56,20 @@ class TestGenerator:
         if not Path(tmp_repo_dir).exists():
             self.gh_api.clone_repo(tmp_repo_dir)
         else:
-            self.logger.info(f"[+] Temporary repository '{self.data.pr_data.repo}' already cloned – skipped")
+            self.logger.info(f"[+] Temporary repository '{self.pr_data.repo}' already cloned – skipped")
         try:
             test_filename, test_file_content, test_file_content_sliced = helpers.get_contents_of_test_file_to_inject(
                 self.config.parse_language,
-                self.data.pr_data.base_commit,
-                self.data.pr_diff_ctx.golden_code_patch,
-                self.data.pr_data.id,
+                self.pr_data.base_commit,
+                self.pr_diff_ctx.golden_code_patch,
+                self.pr_data.id,
                 tmp_repo_dir
             )
             if test_filename == "":
-                self.logger.info("No suitable file found for %s, skipping" % self.data.pr_data.id)
+                self.logger.info("No suitable file found for %s, skipping" % self.pr_data.id)
                 exit(0)
             test_filename = test_filename.replace(tmp_repo_dir + '/', '')
-            self.data.predicted_test_sliced = test_file_content_sliced
+            self.predicted_test_sliced = test_file_content_sliced
         finally:
             helpers.remove_dir(Path(tmp_repo_dir))
 
@@ -151,7 +149,7 @@ class TestGenerator:
             f.write("#%s\n%s" % (test_filename, new_test_file_content))
 
         #### Run test in post-PR codebase
-        golden_code_patch = self.data.pr_diff_ctx.golden_code_patch
+        golden_code_patch = self.pr_diff_ctx.golden_code_patch
         test_result_after, stdout_after, coverage_report_after = self.docker_service.run_test_in_container(
             model_test_patch,
             test_to_run,
@@ -164,16 +162,16 @@ class TestGenerator:
 
         isFail2Pass = (test_result_before == "FAIL") and (test_result_after == "PASS")
 
-        code_after_arr, stderr = self.data.pr_diff_ctx.apply_code_patch()
+        code_after_arr, stderr = self.pr_diff_ctx.apply_code_patch()
         try:
             offsets = helpers.extract_offsets_from_stderr(stderr)
         except AssertionError as e:
-            self.logger.info("Different offsets in a single file for %s, skipping" % self.data.pr_data.id)
+            self.logger.info("Different offsets in a single file for %s, skipping" % self.pr_data.id)
             exit(0)
 
         if isFail2Pass:
             missed_lines, decorated_patch = git_tools.get_missed_lines_and_decorate_patch(
-                self.data.pr_diff_ctx,
+                self.pr_diff_ctx,
                 code_after_arr,
                 offsets,
                 coverage_report_after
@@ -205,7 +203,7 @@ class TestGenerator:
                                                patch_coverage * 100)
             # If the task was amplification, we don't post a comment upon successful
             # generation, we just run it to benchmark our pipeline
-            if self.post_comment and not self.data.pr_diff_ctx.has_at_least_one_test_file:
+            if self.post_comment and not self.pr_diff_ctx.has_at_least_one_test_file:
                 status_code, response_data = self.gh_api.add_comment_to_pr(comment)
             else:
                 status_code, response_data = 201, ""
