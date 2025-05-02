@@ -42,48 +42,45 @@ def github_webhook(request):
         try:
             # Only trigger when PR opens (or if it is my repo)
             if payload.get("action") == "opened" or payload["repository"]["owner"]["login"] == "kitsiosk":
-
-                iAttempt = 0
                 stop = False  # we stop when successful
+                post_comment = True
+                models = [
+                    "gpt-4o",
+                    "meta-llama/Llama-3.3-70B-Instruct",
+                    "llama-3.3-70b-versatile",
+                    "deepseek-r1-distill-qwen-32b"
+                ]
+                for model in models:
+                    iAttempt = 1
+                    while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
+                        response, stop = run(payload,
+                                             config,
+                                             logger,
+                                             model=model,
+                                             iAttempt=iAttempt,
+                                             timestamp=timestamp,
+                                             post_comment=False)
+                        iAttempt += 1
+                        if stop:
+                            post_comment = False
+                        with open(Path(config.webhook_log_dir, 'results.csv'), 'a') as f:
+                            f.write("%s,%s,%s,%s\n" % (payload["number"], model, iAttempt, stop))
 
-                # gpt-4o
-                while iAttempt < len(config.prompt_combinations_gen) and not stop:
-                    response, stop = run(
-                        payload,
-                        config,
-                        logger,
-                        iAttempt=iAttempt,
-                        model="gpt-4o",
-                        timestamp=timestamp,
-                        post_comment=True
-                    )
-                    iAttempt += 1
-
-                # llama3.3
-                iAttempt = 0
-                while iAttempt < len(config.prompt_combinations_gen) and not stop:
-                    response, stop = run(
-                        payload,
-                        config,
-                        logger,
-                        iAttempt=iAttempt,
-                        model="meta-llama/Llama-3.3-70B-Instruct",
-                        timestamp=timestamp,
-                        post_comment=True
-                    )
-                    iAttempt += 1
-
-                # o3-mini-high (last resort)
                 if not stop:
-                    response, stop = run(
-                        payload,
-                        config,
-                        logger,
-                        iAttempt=1,
-                        model="o3-mini",
-                        timestamp=timestamp,
-                        post_comment=True
-                    )
+                    model = "o3-mini"
+                    logger.info("[*] Starting o3-mini...")
+                    response, stop = run(payload,
+                                         config,
+                                         logger,
+                                         model=model,
+                                         iAttempt=1,
+                                         timestamp=timestamp,
+                                         post_comment=post_comment)
+                    if stop:
+                        post_comment = False
+                    with open(Path(config.webhook_log_dir, 'results.csv'), 'a') as f:
+                        f.write("%s,%s,%s,%s\n" % (payload["number"], model, 1, stop))
+
                 return response
 
             else:

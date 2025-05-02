@@ -54,7 +54,6 @@ class Config:
             self.webhook_log_dir     = Path(self.project_root, "bot_logs") # for parsed requests
 
     def setup_log_dir(self, instance_id: str, timestamp: str, iAttempt: int, model: str) -> Path:
-        Path(self.webhook_log_dir).mkdir(parents=True, exist_ok=True)
         log_dir = Path(
             self.webhook_log_dir,
             instance_id + "_%s" % timestamp,
