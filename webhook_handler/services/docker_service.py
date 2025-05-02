@@ -31,14 +31,6 @@ class DockerService:
     def build(self):
         """Builds a Docker image using the Python Docker SDK."""
 
-        # # Read the modified Dockerfile content
-        # dockerfile_content = read_dockerfile(commit_hash, dockerfile_path)
-
-        # # Write a temporary Dockerfile (this avoids modifying the original file)
-        # temp_dockerfile = "Dockerfile.temp"
-        # with open(temp_dockerfile, "w", encoding="utf-8") as f:
-        #     f.write(dockerfile_content)
-
         image_tag = self.pr_data.image_tag
 
         # Check whether the image is already built
