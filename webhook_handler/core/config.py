@@ -1,10 +1,13 @@
 import os
 import tree_sitter_javascript
+import logging
 
 from dotenv import load_dotenv
-from huggingface_hub import InferenceClient
 from tree_sitter import Language
 from pathlib import Path
+
+
+logger = logging.getLogger("myapp")
 
 
 class Config:
@@ -14,13 +17,14 @@ class Config:
         self.github_webhook_secret = os.getenv('GITHUB_WEBHOOK_SECRET')
         self.github_token = os.getenv('GITHUB_TOKEN')
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        self.hug_api_key = os.getenv('HUG_API_KEY')
+        self.groq_api_key = os.getenv('GROQ_API_KEY')
 
         ################### API Config ##################
         self.headers = {
             "Accept": "application/vnd.github.v3+json",
             "Authorization": f"Bearer {self.github_token}",
         }
-        self.hug_client = InferenceClient(api_key="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")  # for huggingface client
 
         ################# General Config ################
         self.parse_language = Language(tree_sitter_javascript.language())
@@ -51,7 +55,11 @@ class Config:
 
     def setup_log_dir(self, instance_id: str, timestamp: str, iAttempt: int, model: str) -> Path:
         Path(self.webhook_log_dir).mkdir(parents=True, exist_ok=True)
-        log_dir = Path(self.webhook_log_dir, instance_id + "_%s" % timestamp, "i%s" % iAttempt + "_%s" % model)
+        log_dir = Path(
+            self.webhook_log_dir,
+            instance_id + "_%s" % timestamp,
+            "i%s" % iAttempt + "_%s" % model
+        )
         Path(log_dir).mkdir(parents=True, exist_ok=True)
         Path(log_dir, "generation").mkdir(parents=True)
         Path(log_dir, "amplification").mkdir(parents=True)

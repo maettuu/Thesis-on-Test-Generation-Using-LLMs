@@ -1,4 +1,6 @@
+from huggingface_hub import InferenceClient
 from openai import OpenAI
+from groq import Groq
 
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
@@ -9,6 +11,8 @@ class LLMHandler:
         self.config = config
         self.data = data
         self.openai_client = OpenAI(api_key=self.config.openai_api_key)
+        self.hug_client = InferenceClient(api_key=self.config.hug_api_key)
+        self.groq_client = Groq(api_key=self.config.groq_api_key)
 
     def build_prompt(
             self,
@@ -111,7 +115,7 @@ class LLMHandler:
             pr_desc_string2 = ""
 
         _, repo_name, _ = self.parse_instanceID_string()
-        prompt = f"""The following text contains a user issue (in <issue> brackets) posted at the {repo_name} repository. A developer has submitted a Pull Request (PR) that resolves this issue{pr_desc_string}. Their modification is provided in the form of a unified diff format inside the <patch> brackets. {code_string}{task}{predicted_test_file_text}You must only return a raw test function and you must import anything you need inside that test function. More details at the end of this text.
+        prompt = f"""The following text contains a user issue (in <issue> brackets) posted at the {repo_name} repository. A developer has submitted a Pull Request (PR) that resolves this issue{pr_desc_string}. Their modification is provided in the form of a unified diff format inside the <patch> brackets. {code_string}{task}{predicted_test_file_text}You must only return a raw test and you must import anything you need inside that test which isn't already imported. More details at the end of this text.
     
         <issue>
         {issue_text}{comments_string}
@@ -121,7 +125,7 @@ class LLMHandler:
         {golden_patch}
         </patch>
         
-        {code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else{task3}. Import anything you need inside that test"""
+        {code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else{task3}. Import anything you need inside that test which isn't already imported."""
 
         #     if include_predicted_test_file:
         #         x1 = "in the <test_file>"
@@ -188,13 +192,19 @@ class LLMHandler:
             pr_number = tmp[-1]
         return owner, repo, pr_number
 
-    def query_model(self, prompt, model="meta-llama/Llama-3.3-70B-Instruct", T=0.0):
+    def query_model(self, prompt, model="gpt-4o", T=0.0):
         # model: "gpt-4o" | "meta-llama/Llama-3.3-70B-Instruct" | "microsoft/Phi-3.5-mini-instruct"
         if model.startswith("gpt"):
             response = self.openai_client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=T
+            )
+            return response.choices[0].message.content.strip()
+        elif model.startswith("o3"):  # does not accept temperature
+            response = self.openai_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
             )
             return response.choices[0].message.content.strip()
         elif model.startswith("o1"):  # temperature does not apply in o1 series
@@ -204,11 +214,28 @@ class LLMHandler:
             )
             return response.choices[0].message.content.strip()
         elif model.startswith("meta") or model.startswith('microsoft'):
-            messages = [{"role": "user", "content": prompt}]
-            completion = self.config.hug_client.chat.completions.create(
+            response = self.hug_client.chat.completions.create(
                 model=model,
-                messages=messages,
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,
                 temperature=T
             )
-            return completion.choices[0].message['content']
+            return response.choices[0].message['content']
+        elif model.startswith("llama"):
+            completion = self.groq_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=700,
+                temperature=T
+            )
+            return completion.choices[0].message.content
+        elif model.startswith("deepseek"):
+            response = self.groq_client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system",
+                     "content": "You are an experienced software tester specializing in developing regression tests. Follow the user's instructions for generating a regression test. The output format is STRICT: do all your reasoning in the beginning, but the end of your output should ONLY contain javascript code, i.e., NO natural language after the code."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content
