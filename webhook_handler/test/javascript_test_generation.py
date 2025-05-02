@@ -62,7 +62,7 @@ class TestHelper():
                                      post_comment=False)
                 if stop:
                     post_comment = False
-                with open(Path(config.model_log_dir, 'results.csv'), 'a') as f:
+                with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
                     f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt, stop))
 
                 iAttempt += 1
@@ -79,7 +79,7 @@ class TestHelper():
                                  post_comment=post_comment)
             if stop:
                 post_comment = False
-            with open(Path(config.model_log_dir, 'results.csv'), 'a') as f:
+            with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
                 f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, 1, stop))
 
         return response

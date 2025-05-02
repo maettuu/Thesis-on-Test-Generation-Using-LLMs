@@ -2,6 +2,7 @@ import os
 import tree_sitter_javascript
 import logging
 
+from django.contrib.gis.gdal.libgdal import lgdal
 from dotenv import load_dotenv
 from tree_sitter import Language
 from pathlib import Path
@@ -52,16 +53,16 @@ class Config:
             self.project_root = Path.cwd()
             self.webhook_raw_log_dir = Path(self.project_root, "bot_logs") # for raw requests
             self.webhook_log_dir     = Path(self.project_root, "bot_logs") # for parsed requests
-        self.model_log_dir = None
+        self.run_log_dir = None
 
-    def setup_log_dir(self, instance_id: str, timestamp: str, iAttempt: int, model: str) -> None:
+    def setup_log_dir(self, instance_id: str, timestamp: str, iAttempt: int, model: str) -> Path:
         Path(self.webhook_log_dir).mkdir(parents=True, exist_ok=True)
+        self.run_log_dir = Path(self.webhook_log_dir, instance_id + "_%s" % timestamp)
         log_dir = Path(
-            self.webhook_log_dir,
-            instance_id + "_%s" % timestamp,
+            self.run_log_dir,
             "i%s" % iAttempt + "_%s" % model
         )
         Path(log_dir).mkdir(parents=True, exist_ok=True)
         Path(log_dir, "generation").mkdir(parents=True)
         Path(log_dir, "amplification").mkdir(parents=True)
-        self.model_log_dir = log_dir
+        return log_dir

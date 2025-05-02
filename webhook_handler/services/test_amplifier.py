@@ -21,6 +21,7 @@ class TestAmplifier:
         gh_api: GitHubApi,
         llm_handler: LLMHandler,
         docker_service: DockerService,
+        log_dir: Path,
         post_comment: bool,
         model_test_amplification: str = None,
         iAttempt: int = 0,
@@ -35,7 +36,7 @@ class TestAmplifier:
         self.gh_api                   = gh_api
         self.llm_handler              = llm_handler
         self.docker_service           = docker_service
-        self.log_dir                  = config.model_log_dir
+        self.log_dir                  = log_dir
         self.post_comment             = post_comment
         self.model_test_amplification = model_test_amplification
         self.iAttempt                 = iAttempt
