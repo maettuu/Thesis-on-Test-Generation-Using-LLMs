@@ -2,7 +2,6 @@ import os
 import tree_sitter_javascript
 import logging
 
-from django.contrib.gis.gdal.libgdal import lgdal
 from dotenv import load_dotenv
 from tree_sitter import Language
 from pathlib import Path
