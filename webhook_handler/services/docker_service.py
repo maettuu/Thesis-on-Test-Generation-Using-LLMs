@@ -43,12 +43,19 @@ class DockerService:
 
         # Check whether the image is already built
         try:
-            self.client.images.get(f"{image_tag}:latest")
+            self.client.images.get(f"{image_tag}")
             self.logger.info(f"[+] Docker image '{image_tag}' already exists – skipped")
             return
         except ImageNotFound:
+            try:
+                self.client.images.get(f"{image_tag}:latest")
+                self.logger.info(f"[+] Docker image '{image_tag}' already exists – skipped")
+                return
+            except ImageNotFound:
             # image not found locally, proceed with build
-            self.logger.info(f"[!] No existing image '{image_tag}' found.")
+                self.logger.info(f"[!] No existing image '{image_tag}' found.")
+            except APIError as e:
+                self.logger.error(f"[!] Docker API error when checking for existing image: {e}")
         except APIError as e:
             self.logger.error(f"[!] Docker API error when checking for existing image: {e}")
 
