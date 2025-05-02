@@ -73,7 +73,7 @@ class TestGenerator:
             test_filename = test_filename.replace(tmp_repo_dir + '/', '')
             self.data.predicted_test_sliced = test_file_content_sliced
         finally:
-            res = subprocess.run(helpers.get_remove_command(tmp_repo_dir), capture_output=True, check=True)
+            helpers.remove_dir(Path(tmp_repo_dir))
 
         # Build prompt
         include_issue_description = True
@@ -106,7 +106,7 @@ class TestGenerator:
             response = self.llm_handler.query_model(prompt, model=self.model, T=T)
 
             new_test = helpers.adjust_function_indentation(
-                response.replace('```javascript', '').replace('```', '')
+                response.removeprefix('```javascript').replace('```', '').lstrip('\n')
             )  # TODO: Required for Javascript?
 
             with open(Path(generation_dir, "raw_model_response.txt"), "w", encoding="utf-8") as f:
@@ -133,7 +133,7 @@ class TestGenerator:
             tofile=test_filename
         ) + "\n"
 
-        test_to_run = helpers.extract_test_scope(
+        test_to_run = helpers.extract_test_descriptions(
             self.config.parse_language,
             PullRequestFileDiff(test_filename, test_file_content, new_test_file_content)
         )
@@ -191,8 +191,10 @@ class TestGenerator:
             decorated_patch_new = "\n".join(decorated_patch_new_lines)
 
             # Calculate patch coverage
-            modified_lines = [l[1:].strip() for l in golden_code_patch.splitlines() if
-                              l.startswith('+') and not l.startswith('+++')]
+            modified_lines = [
+                l[1:].strip() for l in golden_code_patch.splitlines() if
+                l.startswith('+') and not l.startswith('+++')
+            ]
             n_modified = len(modified_lines)
             patch_coverage = (n_modified - len(missed_lines)) / n_modified
 

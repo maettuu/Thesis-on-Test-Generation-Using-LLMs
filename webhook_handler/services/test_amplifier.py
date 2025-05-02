@@ -52,7 +52,7 @@ class TestAmplifier:
             # 1) run developer tests
             tests_to_run = []
             for pr_file_diff in self.data.pr_diff_ctx.test_file_diffs:
-                tests_to_run += helpers.extract_test_scope(self.config.parse_language, pr_file_diff)
+                tests_to_run += helpers.extract_test_descriptions(self.config.parse_language, pr_file_diff)
 
             test_result_dev, stdout_dev, coverage_report_dev = self.docker_service.run_test_in_container(
                 self.data.pr_diff_ctx.golden_test_patch,
@@ -111,7 +111,7 @@ class TestAmplifier:
                 with open(Path(amplification_dir, "raw_model_response.txt"), "w", encoding="utf-8") as f:
                     f.write(response)
                 new_test = helpers.adjust_function_indentation(
-                    response.replace('```javascript', '').replace('```', '')
+                    response.removeprefix('```javascript').replace('```', '').lstrip('\n')
                 )
             else:
                 self.logger.info("Using mocked model response for amplification")
@@ -168,7 +168,7 @@ class TestAmplifier:
                                                                tofile=pr_file_diff.name,
                                                                context_lines=40) + "\n"
 
-                    this_file_tests_to_run = helpers.extract_test_scope(
+                    this_file_tests_to_run = helpers.extract_test_descriptions(
                         self.config.parse_language,
                         PullRequestFileDiff(pr_file_diff.before, new_test_file_contents, pr_file_diff.name)
                     )
@@ -181,7 +181,7 @@ class TestAmplifier:
                     # we write many context lines in the file because the edited
                     # function name must appear in order for TDD-Bench to run the test
 
-                    this_file_tests_to_run = helpers.extract_test_scope(
+                    this_file_tests_to_run = helpers.extract_test_descriptions(
                         self.config.parse_language,
                         pr_file_diff
                     )
@@ -210,8 +210,10 @@ class TestAmplifier:
                 f.write(test_result_dev_and_ai)
 
             # The lines modified by the developer code patch
-            modified_lines = [l[1:].strip() for l in self.data.pr_diff_ctx.golden_code_patch.splitlines() if
-                              l.startswith('+') and not l.startswith('+++')]
+            modified_lines = [
+                l[1:].strip() for l in self.data.pr_diff_ctx.golden_code_patch.splitlines() if
+                l.startswith('+') and not l.startswith('+++')
+            ]
             n_modified = len(modified_lines)
             # The lines covered by AI only
             new_lines = set(missed_lines_dev) - set(missed_lines_dev_and_ai)
@@ -225,8 +227,7 @@ class TestAmplifier:
                         new_lines))
 
                 patch_for_comment_lines = []
-                for (ldev, ldevai) in zip(decorated_patch_dev.splitlines(),
-                                          decorated_patch_dev_and_ai.splitlines()):
+                for (ldev, ldevai) in zip(decorated_patch_dev.splitlines(), decorated_patch_dev_and_ai.splitlines()):
                     if ldev != ldevai:
                         patch_for_comment_lines.append(
                             ldev.replace("###NOT COVERED###", "### ✅ Only covered by above test ✅"))

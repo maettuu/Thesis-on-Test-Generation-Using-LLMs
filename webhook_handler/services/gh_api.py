@@ -60,9 +60,7 @@ class GitHubApi:
 
     def is_issue_or_pr(self, number):
         url = f"{self.api_url}/{self.pr_data.owner}/{self.pr_data.repo}/issues/{number}"
-
         response = requests.get(url, headers=self.config.headers)
-
         if response.status_code == 200:
             issue_data = response.json()
             if "pull_request" in issue_data:

@@ -61,15 +61,20 @@ class TestGenerationPdfJs17905(TestCase):
         iAttempt = 0
         stop = False  # we stop when successful
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        # while iAttempt < len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
-        #     response, stop = run(self.payload,
-        #                          config,
-        #                          logger,
-        #                          model="gpt-4o",
-        #                          iAttempt=iAttempt,
-        #                          timestamp=timestamp,
-        #                          post_comment=False)
-        #     iAttempt += 1
+        # mock_model_test_generation = "test_mocks/pdf_js_17905_response.txt"
+        # mock_model_test_generation_path = os.path.join(os.path.dirname(__file__), mock_model_test_generation)
+        # with open(mock_model_test_generation_path, "r", encoding="utf-8") as f:
+        #     self.model_test_generation = f.read()
+        while iAttempt < len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
+            response, stop = run(self.payload,
+                                 config,
+                                 logger,
+                                 model="gpt-4o",
+                                 # model_test_generation=self.model_test_generation,
+                                 iAttempt=iAttempt,
+                                 timestamp=timestamp,
+                                 post_comment=False)
+            iAttempt += 1
 
         iAttempt = 0
         while iAttempt < len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
@@ -77,6 +82,7 @@ class TestGenerationPdfJs17905(TestCase):
                                  config,
                                  logger,
                                  model="meta-llama/Llama-3.3-70B-Instruct",
+                                 # model_test_generation=self.model_test_generation,
                                  iAttempt=iAttempt,
                                  timestamp=timestamp,
                                  post_comment=False)

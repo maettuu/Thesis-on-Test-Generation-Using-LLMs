@@ -161,7 +161,7 @@ class DockerService:
             test_commands = [
                 f'TEST_FILTER="{desc}" npx nyc --reporter=text --reporter=lcov gulp unittest-single'
                 # f'npx nyc --all --no-source-map --reporter=text --reporter=lcov jasmine --filter="{desc}" {file}'
-                for desc, file in tests_to_run.items()
+                for desc in tests_to_run
             ]
             test_command = (
                 "/bin/sh -c 'cd /app/testbed && "

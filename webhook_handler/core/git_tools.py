@@ -59,7 +59,7 @@ def unified_diff_with_function_context(string1, string2, fname="tempfile.py", co
         diff = "\n".join(diff_lines)
         return diff
     finally:
-        subprocess.run(helpers.get_remove_command(temp_dir), check=True)
+        helpers.remove_dir(Path(temp_dir))
 
 
 def unified_diff(string1, string2, fromfile="original", tofile="modified", context_lines=3):
@@ -188,14 +188,9 @@ def apply_patch(file_content_arr, patch):
         for file_path in file_path_arr:
             os.remove(temp_dir + file_path)
             # pass
-        subprocess.run(
-            helpers.get_remove_command(f"{temp_dir}.git"),
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+        helpers.remove_dir(Path(temp_dir, ".git"))
         ###
-        subprocess.run(helpers.get_remove_command(temp_dir), check=True)
+        helpers.remove_dir(Path(temp_dir))
         ###
 
         raise ValueError(f"Failed to apply patch: {e}")
@@ -210,14 +205,9 @@ def apply_patch(file_content_arr, patch):
         updated_content_all_files.append(updated_content)
 
     os.remove(temp_dir + patch_path)
-    subprocess.run(
-        helpers.get_remove_command(f"{temp_dir}.git"),
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+    helpers.remove_dir(Path(temp_dir, ".git"))
     ###
-    subprocess.run(helpers.get_remove_command(temp_dir), check=True)
+    helpers.remove_dir(Path(temp_dir))
     ###
 
     return updated_content_all_files, res.stderr
@@ -260,9 +250,9 @@ def get_missed_lines_and_decorate_patch(
                 line_no_adjusted = line_no + offset - 1
                 assert line == code_after.splitlines()[line_no_adjusted].strip(), "Line mismatch"
                 # Make it 1-indexed again
-                if line_no_adjusted + 1 in missed_lines or all_lines_in_file_missed:
-                    modified_and_missed_lines.append(
-                        code_after.splitlines()[line_no_adjusted].strip())  # here it's 0-indexed
+                if all_lines_in_file_missed or line_no_adjusted + 1 in missed_lines:
+                    # here it's 0-indexed
+                    modified_and_missed_lines.append(code_after.splitlines()[line_no_adjusted].strip())
                     code_after_labeled[line_no_adjusted] = code_after_labeled[line_no_adjusted] + " ###NOT COVERED###"
 
         code_after_labeled_arr.append("\n".join(code_after_labeled) + "\n")

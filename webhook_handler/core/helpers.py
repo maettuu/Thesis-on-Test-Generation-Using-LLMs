@@ -1,15 +1,19 @@
-import sys
+import shutil
 import re
 import difflib
 import ast
 import tokenize
 import subprocess
 import os
+import stat
+import time
 
 from tree_sitter import Parser, Tree, Node
 from io import BytesIO
 from pathlib import Path
 from collections import Counter
+
+from .config import logger
 
 
 def is_test_file(filepath, test_folder=''):
@@ -99,7 +103,7 @@ def extract_offsets_from_stderr(stderr: str):
     return [offset if offset is not None else 0 for offset in file_offsets.values()]
 
 
-def extract_test_scope(parse_language, pr_file_diff) -> dict:
+def extract_test_descriptions(parse_language, pr_file_diff) -> list:
     # Extract string of the type "fname scope test"
     _, contributing_tests_old = build_call_expression_scope_map(
         Parser(parse_language).parse(bytes(pr_file_diff.before, 'utf-8'))
@@ -109,16 +113,16 @@ def extract_test_scope(parse_language, pr_file_diff) -> dict:
     )
 
     contributing_tests = find_changed_tests(contributing_tests_old, contributing_tests_new)
-    test2test_content      = {}
+    test2test_content = []
     if contributing_tests:
         for test in contributing_tests:
             scope = test2scope.get(test, "")
             if scope == "":
                 pass
             elif scope == "global":
-                test2test_content[test] = pr_file_diff.name
+                test2test_content.append(test)
             else: # describe scope
-                test2test_content[f"{scope} {test}"] = pr_file_diff.name
+                test2test_content.append(f"{scope} {test}")
 
     return test2test_content
 
@@ -213,9 +217,18 @@ def get_call_expression_description(node: Node, fallback="") -> str:
         ), None)
     raw_name = identifier.text.decode("utf-8") if identifier else fallback
     # 1) Remove the quotes and pluses
-    clean_name = raw_name.replace('"', '').replace('+', '')
+    clean_name = (
+        raw_name.replace('"', '')
+        .replace('+', '')
+        .replace("'", '')
+        .replace("`", '')
+    )
     # 2) Turn any literal \n or \t (or others) into a space
-    clean_name = clean_name.replace('\n', ' ').replace('\t', ' ').replace('\r', ' ')
+    clean_name = (
+        clean_name.replace('\n', ' ')
+        .replace('\t', ' ')
+        .replace('\r', ' ')
+    )
     # 3) Collapse any runs of whitespace into one space
     return ' '.join(clean_name.split())
 
@@ -240,7 +253,7 @@ def adjust_function_indentation(function_code: str) -> str:
     \"\"\"
 
     adjusted_code = adjust_function_indentation(function_code)
-    print(adjusted_code)
+    logger.info(adjusted_code)
     """
     lines = function_code.splitlines()
 
@@ -403,8 +416,8 @@ def append_function(parse_language, file_content: str, new_function: str, insert
         # Search for the specified class
         target_class = None
         for root_child in tree.root_node.children:
-            if root_child.type == "expression_statement" and get_call_expression_description(
-                    root_child) == insert_in_block:
+            if (root_child.type == "expression_statement"
+                    and get_call_expression_description(root_child) == insert_in_block):
                 target_class = root_child
                 break
 
@@ -491,7 +504,7 @@ def get_contents_of_test_file_to_inject(
 ):
     test_filename, test_file_content = find_file_to_inject(base_commit, golden_code_patch, repo_dir)
     if test_filename is None:
-        print("No suitable file found for %s, skipping" % pr_id)
+        logger.info("No suitable file found for %s, skipping" % pr_id)
         return "", "", ""
     else:
         test_file_content_sliced = keep_first_N_defs(parse_language, test_file_content)
@@ -547,7 +560,7 @@ def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
             for coedited_file in coedited_files:  # coedited_file is a tuple (fname, #coedits)
                 # we need to check if these files still exist because they
                 # come from a past commit
-                if os.path.isfile(repo_dir + '/' + coedited_file[0]):
+                if coedited_file[0] and os.path.isfile(repo_dir + '/' + coedited_file[0]):
                     test_file_to_inject = repo_dir + '/' + coedited_file[0]
                     break  # the first one we find that exists we keep it
 
@@ -616,11 +629,21 @@ def run_command(command, cwd=None):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def get_remove_command(temp_dir: str) -> list:
-    if sys.platform.startswith("win"):
-        # Use absolute path on Windows to avoid potential issues
-        return ["cmd", "/c", "rmdir", "/s", "/q", os.path.abspath(temp_dir)]
-    return ["rm", "-rf", temp_dir]
+def remove_dir(path: Path, max_retries: int = 3, delay: float = 0.1) -> None:
+    def on_error(func, path, _) -> None:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    for attempt in range(max_retries):
+        try:
+            shutil.rmtree(path, onerror=on_error)
+            return
+        except Exception as e:
+            if attempt < max_retries:
+                logger.warning("[!] Failed attempt {attempt} removing {path}: {e}, retrying in {delay}s")
+                time.sleep(delay)
+            else:
+                logger.error(f"[!] Final attempt failed removing {path}: {e}")
+                raise
 
 
 def extract_edited_files(diff_content):
@@ -709,8 +732,11 @@ def get_first_test_file(root_dir: str) -> str | None:
 
     # First search in folders starting with "test" for files starting with "test"
     for dirpath, _, filenames in os.walk(root_dir):
-        if not any(part.startswith(".") for part in dirpath.split(os.sep)) and any(
-                part.startswith("test") for part in dirpath.split(os.sep)):
+        if not any(
+                part.startswith(".") for part in dirpath.split(os.sep)
+        ) and any(
+            part.startswith("test") for part in dirpath.split(os.sep)
+        ):
             for filename in filenames:
                 if "spec" in filename:
                     return os.path.relpath(os.path.join(dirpath, filename), root_dir)

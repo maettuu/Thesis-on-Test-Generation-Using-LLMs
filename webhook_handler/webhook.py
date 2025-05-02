@@ -1,4 +1,3 @@
-import logging
 import json
 import traceback
 import hmac
@@ -10,10 +9,10 @@ from datetime import datetime
 from pathlib import Path
 
 from webhook_handler.core import Config
+from webhook_handler.core.config import logger
 from .pipeline import run
 
 # Initiate pipeline logger & config
-logger = logging.getLogger("myapp")
 logger.debug("Entered webhook")
 config = Config()
 
