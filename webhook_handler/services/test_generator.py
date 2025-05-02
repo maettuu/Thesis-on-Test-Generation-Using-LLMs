@@ -5,8 +5,8 @@ from webhook_handler.core import (
     git_tools,
     helpers
 )
-from webhook_handler_models.pr_file_diff import PullRequestFileDiff
-from webhook_handler_models.pr_pipeline_data import PullRequestPipelineData
+from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
+from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
 from webhook_handler.services.docker_service import DockerService
 from webhook_handler.services.gh_api import GitHubApi
 from webhook_handler.services.llm_handler import LLMHandler
