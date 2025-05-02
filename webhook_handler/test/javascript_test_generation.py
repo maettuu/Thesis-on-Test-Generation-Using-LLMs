@@ -89,7 +89,7 @@ class TestGenerationPdfJs17905(TestCase):
         ]
         for model in models:
             iAttempt = 1
-            while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
+            while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]):
                 response, stop = run(self.payload,
                                      config,
                                      logger,
@@ -105,17 +105,19 @@ class TestGenerationPdfJs17905(TestCase):
                     f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt, stop))
 
         if not stop:
+            model = "o3-mini"
+            logger.info("[*] Starting o3-mini...")
             response, stop = run(self.payload,
                                  config,
                                  logger,
-                                 model="o3-mini",
+                                 model=model,
                                  iAttempt=1,
                                  timestamp=timestamp,
                                  post_comment=post_comment)
             if stop:
                 post_comment = False
             with open(Path(config.webhook_log_dir, 'results.csv'), 'a') as f:
-                f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt, stop))
+                f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, 1, stop))
 
         self.assertIsNotNone(response)  # Ensure response is not None
         self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse

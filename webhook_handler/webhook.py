@@ -52,7 +52,7 @@ def github_webhook(request):
                 ]
                 for model in models:
                     iAttempt = 1
-                    while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
+                    while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]):
                         response, stop = run(payload,
                                              config,
                                              logger,
