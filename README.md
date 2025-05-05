@@ -55,8 +55,8 @@ This Bot automatically generates and amplifies regression-style “fail-to-pass�
 
 3. **Install dependencies & migrate**  
    ```bash
-   python -m venv .gh-bot-js
-   source .gh-bot-js/bin/activate
+   python -m venv .gh-bot-js-venv
+   source .gh-bot-js-venv/bin/activate
    pip install -r requirements.txt
    python manage.py migrate
    ```
@@ -100,7 +100,7 @@ Specific commit
 
 ## Webhook Explained
 
-- **Endpoint:** `POST /webhook/`  
+- **Endpoint:** `POST /webhook-js/`  
 - **Signature:** Verifies `X-Hub-Signature-256` with `GITHUB_WEBHOOK_SECRET`.  
 - **Events:** Listens to PR events (`opened`, `synchronize`, etc.).  
 - **Flow:**  
@@ -115,7 +115,7 @@ Specific commit
 ## Key Components
 
 - **Django App (`webhook_handler/`)**  
-  - Exposes `POST /webhook/` for GitHub PR events, verifies signatures, and dispatches to the pipeline.
+  - Exposes `POST /webhook-js/` for GitHub PR events, verifies signatures, and dispatches to the pipeline.
 
 - **Pipeline (`pipeline.py`)**  
   - Coordinates diff slicing, LLM prompting, and test generation/amplification.
@@ -180,6 +180,6 @@ Specific commit
 
 - **OpenAI from openai:** GPT-4o, o1, o3-mini
 - **InferenceClient from huggingface_hub:** meta-llama/Llama-3.3-70B-Instruct
-- **Groq from groq:** llama-3.3-70b-versatile, deepseek-r1-distill-qwen-32b
+- **Groq from groq:** llama-3.3-70b-versatile, qwen-qwq-32b
 
 _With this setup, every Pull Request triggers automated, AI-driven regression tests—helping catch regressions early and reducing manual QA overhead._
