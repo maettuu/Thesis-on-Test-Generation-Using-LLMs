@@ -90,6 +90,7 @@ def github_webhook(request):
                 except Exception as e:
                     err = traceback.format_exc()
                     logger.error("[!] Failed with error:\n%s" % err)
+                logger.info("[+] o3-mini finished successfully.")
                 if stop:
                     post_comment = False
                 with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
