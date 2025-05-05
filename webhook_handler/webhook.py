@@ -44,20 +44,21 @@ def github_webhook(request):
 
     event = request.headers.get('X-GitHub-Event')
     if event == "pull_request":
-        try:
-            # Only trigger when PR opens (or if it is my repo)
-            if payload.get("action") == "opened" or payload["repository"]["owner"]["login"] == "kitsiosk":
-                stop = False  # we stop when successful
-                post_comment = True
-                models = [
-                    "gpt-4o",
-                    "meta-llama/Llama-3.3-70B-Instruct",
-                    "llama-3.3-70b-versatile",
-                    "qwen-qwq-32b"
-                ]
-                for model in models:
-                    iAttempt = 1
-                    while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]):
+        # Only trigger when PR opens (or if it is my repo)
+        if payload.get("action") == "opened" or payload["repository"]["owner"]["login"] == "kitsiosk":
+            stop = False  # we stop when successful
+            post_comment = True
+            models = [
+                "gpt-4o",
+                "meta-llama/Llama-3.3-70B-Instruct",
+                "llama-3.3-70b-versatile",
+                "qwen-qwq-32b"
+            ]
+            for model in models:
+                iAttempt = 1
+                while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]):
+                    logger.info("[*] Starting combination %d with model %s" % (iAttempt, model))
+                    try:
                         response, stop = run(payload,
                                              config,
                                              logger,
@@ -65,15 +66,20 @@ def github_webhook(request):
                                              iAttempt=iAttempt,
                                              timestamp=timestamp,
                                              post_comment=False)
-                        iAttempt += 1
-                        if stop:
-                            post_comment = False
-                        with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
-                            f.write("%s,%s,%s,%s\n" % (payload["number"], model, iAttempt, stop))
+                    except Exception as e:
+                        err = traceback.format_exc()
+                        logger.error("[!] Failed with error:\n%s" % err)
+                    if stop:
+                        post_comment = False
+                    with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
+                        f.write("%s,%s,%s,%s\n" % (payload["number"], model, iAttempt, stop))
 
-                if not stop:
-                    model = "o3-mini"
-                    logger.info("[*] Starting o3-mini...")
+                    iAttempt += 1
+
+            if not stop:
+                model = "o3-mini"
+                logger.info("[*] Starting o3-mini...")
+                try:
                     response, stop = run(payload,
                                          config,
                                          logger,
@@ -81,19 +87,19 @@ def github_webhook(request):
                                          iAttempt=1,
                                          timestamp=timestamp,
                                          post_comment=post_comment)
-                    if stop:
-                        post_comment = False
-                    with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
-                        f.write("%s,%s,%s,%s\n" % (payload["number"], model, 1, stop))
+                except Exception as e:
+                    err = traceback.format_exc()
+                    logger.error("[!] Failed with error:\n%s" % err)
+                if stop:
+                    post_comment = False
+                with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
+                    f.write("%s,%s,%s,%s\n" % (payload["number"], model, 1, stop))
 
-                return response
+            return response
 
-            else:
-                logger.info("PR event, but not opening of a PR, so skipping...")
-                return JsonResponse({"status": "success"})
-        except Exception as e:
-            traceback.print_exc()
-            return JsonResponse({"error": str(e)}, status=400)
+        else:
+            logger.info("PR event, but not opening of a PR, so skipping...")
+            return JsonResponse({"status": "success"})
     else:
         logger.info("Non-PR event")
         return JsonResponse({"status": "success"})
