@@ -27,7 +27,7 @@ from django.http import HttpResponse
 
 urlpatterns = [
     path('admin-js/', admin.site.urls),
-    path('healthz-js/', lambda req: HttpResponse("OK"), name='healthz'),
+    path('healthz-js/', lambda req: HttpResponse("OK"), name='healthz-js'),
     path('webhook-js/', include('webhook_handler.urls')),
 ]
 
