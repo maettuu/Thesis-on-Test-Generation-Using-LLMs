@@ -26,9 +26,9 @@ from django.http import HttpResponse
 
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('healthz/', lambda req: HttpResponse("OK"), name='healthz'),
-    path('webhook/', include('webhook_handler.urls')),
+    path('admin-js/', admin.site.urls),
+    path('healthz-js/', lambda req: HttpResponse("OK"), name='healthz'),
+    path('webhook-js/', include('webhook_handler.urls')),
 ]
 
 handler400 = bad_request
