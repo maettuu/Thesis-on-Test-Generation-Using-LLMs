@@ -46,7 +46,7 @@ class TestHelper():
             "gpt-4o",
             "meta-llama/Llama-3.3-70B-Instruct",
             "llama-3.3-70b-versatile",
-            "deepseek-r1-distill-qwen-32b"
+            "qwen-qwq-32b"
         ]
         for model in models:
             iAttempt = 1

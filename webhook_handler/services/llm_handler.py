@@ -229,7 +229,7 @@ class LLMHandler:
                 temperature=T
             )
             return completion.choices[0].message.content
-        elif model.startswith("deepseek"):
+        elif model.startswith("qwen"):
             response = self.groq_client.chat.completions.create(
                 model=model,
                 messages=[
