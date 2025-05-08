@@ -11,6 +11,7 @@ from pathlib import Path
 
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.pr_data import PullRequestData
+from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
 
 
 class DockerService:
@@ -84,7 +85,7 @@ class DockerService:
             self.logger.info(f"[!] Docker API error: {e}")
             sys.exit(1)
 
-    def run_test_in_container(self, model_test_patch, tests_to_run, golden_code_patch=None):
+    def run_test_in_container(self, model_test_patch, tests_to_run, test_file_diff: PullRequestFileDiff, golden_code_patch=None):
         """Creates a container, applies the patch, runs the test, and returns the result."""
 
         # Create a temporary patch file
@@ -103,6 +104,22 @@ class DockerService:
 
             container.start()
             self.logger.info(f"[+] Container {container.short_id} started.")
+
+            remote_test_path = f"/app/testbed/{test_file_diff.name}"
+            # 0a) check if the file is already in the container
+            exists = container.exec_run(f"/bin/sh -c 'test -f {remote_test_path}'")
+            if exists.exit_code != 0:
+                # Build an in-memory tar containing the new test file
+                tar_stream = io.BytesIO()
+                with tarfile.open(fileobj=tar_stream, mode="w") as tar:
+                    with tempfile.NamedTemporaryFile(delete=False, mode="w", newline='\n') as added_test_file:
+                        added_test_file.write(test_file_diff.after)
+                        added_test_file_path = added_test_file.name
+                    tar.add(added_test_file_path, arcname=test_file_diff.name)
+                tar_stream.seek(0)
+
+                # Copy it into /app/testbed
+                container.put_archive("/app/testbed", tar_stream.getvalue())
 
             #### A) Test patch (Always)
             model_test_patch_fname = "test_patch.diff"
@@ -196,6 +213,8 @@ class DockerService:
             # Cleanup
             self.logger.info("[*] Stopping and removing container...")
             os.remove(patch_file_path)
+            if os.path.exists(added_test_file_path):
+                os.remove(added_test_file_path)
             container.stop()
             container.remove()
             self.logger.info("[+] Container stopped and removed.")

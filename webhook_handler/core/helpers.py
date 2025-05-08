@@ -503,9 +503,9 @@ def get_contents_of_test_file_to_inject(
         repo_dir
 ):
     test_filename, test_file_content = find_file_to_inject(base_commit, golden_code_patch, repo_dir)
-    if test_filename is None:
-        logger.info("No suitable file found for %s, skipping" % pr_id)
-        return "", "", ""
+    if not test_file_content:
+        logger.warning("[!] No suitable file found for %s. New file created." % pr_id)
+        return test_filename, "", ""
     else:
         test_file_content_sliced = keep_first_N_defs(parse_language, test_file_content)
 
@@ -519,7 +519,7 @@ def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
 
     try:
         edited_files = extract_edited_files(golden_code_patch)
-        ### First search for the file "test_<x>.py" where "<x>.py" was changed by the golden patch
+        ### First search for the file "test_<x>.js" where "<x>.js" was changed by the golden patch
         for edited_file in edited_files:
             matching_test_files = []  # could be more than 1 matching files in different dirs
 
@@ -544,15 +544,12 @@ def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
             test_file_to_inject = find_most_similar_matching_test_file(edited_file, matching_test_files_relative)
             test_file_to_inject = repo_dir + '/%s' % test_file_to_inject  # make absolute again
         else:
-            n_last_commits = 10
-            coedited_files = find_coedited_files(edited_files, repo_dir, n_last_commits)
+            coedited_files = find_coedited_files(edited_files, repo_dir, 100)
             if not coedited_files:
-                # if we did not find in the last 10 commits, go to last 100 (only in pylint-dev__pylint-4661)
-                coedited_files = find_coedited_files(edited_files, repo_dir, 100)
+                # if we did not find in the last 100 commits, go to last 1000 (only in pylint-dev__pylint-4661)
+                coedited_files = find_coedited_files(edited_files, repo_dir, 1000)
                 if not coedited_files:
-                    # inject to the first test file we find
-                    first_random_test_file = get_first_test_file(repo_dir)
-                    coedited_files = [(first_random_test_file, 1)]  # name is just to fit in
+                    return Path("test", "unit", potential_test_file).as_posix(), ""
 
             coedited_files = sorted(coedited_files, key=lambda x: -x[1])  # sort by # of co-edits
 
@@ -564,10 +561,9 @@ def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
                     test_file_to_inject = repo_dir + '/' + coedited_file[0]
                     break  # the first one we find that exists we keep it
 
-            # if none of the coedited files exist anymore, select the first file you find again
+            # if none of the coedited files exist anymore, create new test file
             if not test_file_to_inject:
-                first_random_test_file = get_first_test_file(repo_dir)
-                test_file_to_inject = repo_dir + '/' + first_random_test_file
+                return Path("test", "unit", potential_test_file).as_posix(), ""
 
         # Read the contents of the test file
         with open(test_file_to_inject, 'r', encoding='utf-8') as f:
