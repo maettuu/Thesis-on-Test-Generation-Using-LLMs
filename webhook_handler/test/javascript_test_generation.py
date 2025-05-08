@@ -62,6 +62,9 @@ class TestHelper():
                                      post_comment=False)
                 if stop:
                     post_comment = False
+                if iAttempt == 1:
+                    with open(Path(config.run_log_dir, 'results.csv'), 'w') as f:
+                        f.write("prNumber,model,iAttempt,stop\n")
                 with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
                     f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt, stop))
 
