@@ -58,6 +58,7 @@ class TestAmplifier:
             test_result_dev, stdout_dev, coverage_report_dev = self.docker_service.run_test_in_container(
                 self.pr_diff_ctx.golden_test_patch,
                 tests_to_run,
+                pr_file_diff,
                 golden_code_patch=self.pr_diff_ctx.golden_code_patch,
             )
             if test_result_dev == "FAIL":
@@ -86,7 +87,6 @@ class TestAmplifier:
                 offsets,
                 coverage_report_dev,
             )
-            self.patch_labeled = decorated_patch_dev
 
             # 5) build amplification prompt
             prompt = self.llm_handler.build_prompt(
@@ -98,6 +98,7 @@ class TestAmplifier:
                 include_golden_test_code=True,
                 test_code_sliced=self.prompt_combinations["test_code_sliced"][self.iAttempt],
                 include_uncovered_lines_by_dvlpr_test=True,
+                patch_labeled=decorated_patch_dev
             )
             with open(Path(amplification_dir, "prompt.txt"), "w", encoding="utf-8") as f:
                 f.write(prompt)
@@ -194,6 +195,7 @@ class TestAmplifier:
                 self.docker_service.run_test_in_container(
                     model_test_patch,
                     tests_to_run,
+                    pr_file_diff,
                     golden_code_patch=self.pr_diff_ctx.golden_code_patch
                 )
             )

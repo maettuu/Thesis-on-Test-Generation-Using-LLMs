@@ -66,7 +66,7 @@ def run(
         code_sliced=code_sliced,
         test_sliced=test_sliced,
         problem_statement=issue_statement,
-        hints_text="",
+        hints_text=""
     )
 
     # 9. Setup Model Handler
@@ -86,7 +86,7 @@ def run(
         iAttempt,
         config.prompt_combinations_ampl,
         templates.COMMENT_TEMPLATE_AMPLIFICATION,
-        model,
+        model
     )
     generator = TestGenerator(
         config,
@@ -101,7 +101,7 @@ def run(
         iAttempt,
         config.prompt_combinations_gen,
         templates.COMMENT_TEMPLATE_GENERATION,
-        model,
+        model
     )
 
     ampl_ok = True

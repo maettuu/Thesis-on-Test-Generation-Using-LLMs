@@ -10,8 +10,6 @@ class PullRequestPipelineData:
     test_sliced: list[str]
     problem_statement: str
     hints_text: str
-    predicted_test_sliced: list[str] = None
-    patch_labeled: str = None
 
     def __post_init__(self):
         # ensure description is never None

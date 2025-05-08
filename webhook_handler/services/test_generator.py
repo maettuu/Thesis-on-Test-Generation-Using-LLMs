@@ -66,11 +66,7 @@ class TestGenerator:
                 self.pr_data.id,
                 tmp_repo_dir
             )
-            if test_filename == "":
-                self.logger.info("No suitable file found for %s, skipping" % self.pr_data.id)
-                exit(0)
             test_filename = test_filename.replace(tmp_repo_dir + '/', '')
-            self.predicted_test_sliced = test_file_content_sliced
         finally:
             helpers.remove_dir(Path(tmp_repo_dir))
 
@@ -87,7 +83,8 @@ class TestGenerator:
             sliced=sliced,
             include_issue_comments=include_issue_comments,
             include_pr_desc=include_pr_desc,
-            include_predicted_test_file=include_predicted_test_file
+            include_predicted_test_file=include_predicted_test_file,
+            test_file_content=test_file_content_sliced
         )
 
         if len(prompt) >= 1048576:  # gpt4o limit
@@ -117,12 +114,15 @@ class TestGenerator:
             f.write(new_test)
 
         # Append generated test to existing test file
-        new_test_file_content = helpers.append_function(
-            self.config.parse_language,
-            test_file_content,
-            new_test,
-            insert_in_block="NOBLOCK"
-        )
+        if test_file_content:
+            new_test_file_content = helpers.append_function(
+                self.config.parse_language,
+                test_file_content,
+                new_test,
+                insert_in_block="NOBLOCK"
+            )
+        else:
+            new_test_file_content = new_test
 
         # Construct test patch
         model_test_patch = git_tools.unified_diff(
@@ -132,28 +132,35 @@ class TestGenerator:
             tofile=test_filename
         ) + "\n"
 
+        test_file_diff = PullRequestFileDiff(test_filename, test_file_content, new_test_file_content)
+
         test_to_run = helpers.extract_test_descriptions(
             self.config.parse_language,
-            PullRequestFileDiff(test_filename, test_file_content, new_test_file_content)
+            test_file_diff
         )
 
         #### Run test in pre-PR codebase
         test_result_before, stdout_before, coverage_report_before = self.docker_service.run_test_in_container(
             model_test_patch,
-            test_to_run
+            test_to_run,
+            test_file_diff
         )
         with open(Path(generation_dir, "before.txt"), "w", encoding="utf-8") as f:
             f.write(stdout_before)
         with open(Path(generation_dir, "coverage_report_before.txt"), "w", encoding="utf-8") as f:
             f.write(coverage_report_before)
         with open(Path(generation_dir, "new_test_file_content.js"), "w", encoding="utf-8") as f:
-            f.write("#%s\n%s" % (test_filename, new_test_file_content))
+            if test_file_content:
+                f.write("#%s\n%s" % (test_filename, new_test_file_content))
+            else:
+                f.write("#%s\n%s" % (test_filename, new_test))
 
         #### Run test in post-PR codebase
         golden_code_patch = self.pr_diff_ctx.golden_code_patch
         test_result_after, stdout_after, coverage_report_after = self.docker_service.run_test_in_container(
             model_test_patch,
             test_to_run,
+            test_file_diff,
             golden_code_patch=golden_code_patch
         )
         with open(Path(generation_dir, "after.txt"), "w", encoding="utf-8") as f:
