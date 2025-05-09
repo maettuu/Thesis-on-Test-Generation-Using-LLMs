@@ -143,7 +143,7 @@ class TestGenerator:
         test_result_before, stdout_before, coverage_report_before = self.docker_service.run_test_in_container(
             model_test_patch,
             test_to_run,
-            test_file_diff
+            test_file_diff.name
         )
         with open(Path(generation_dir, "before.txt"), "w", encoding="utf-8") as f:
             f.write(stdout_before)
@@ -160,7 +160,7 @@ class TestGenerator:
         test_result_after, stdout_after, coverage_report_after = self.docker_service.run_test_in_container(
             model_test_patch,
             test_to_run,
-            test_file_diff,
+            test_file_diff.name,
             golden_code_patch=golden_code_patch
         )
         with open(Path(generation_dir, "after.txt"), "w", encoding="utf-8") as f:

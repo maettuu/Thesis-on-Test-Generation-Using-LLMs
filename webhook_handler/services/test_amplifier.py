@@ -58,7 +58,7 @@ class TestAmplifier:
             test_result_dev, stdout_dev, coverage_report_dev = self.docker_service.run_test_in_container(
                 self.pr_diff_ctx.golden_test_patch,
                 tests_to_run,
-                pr_file_diff,
+                pr_file_diff.name,
                 golden_code_patch=self.pr_diff_ctx.golden_code_patch,
             )
             if test_result_dev == "FAIL":
@@ -195,7 +195,7 @@ class TestAmplifier:
                 self.docker_service.run_test_in_container(
                     model_test_patch,
                     tests_to_run,
-                    pr_file_diff,
+                    pr_file_diff.name,
                     golden_code_patch=self.pr_diff_ctx.golden_code_patch
                 )
             )
