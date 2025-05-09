@@ -63,7 +63,7 @@ def github_webhook(request):
                                              config,
                                              logger,
                                              model=model,
-                                             iAttempt=iAttempt,
+                                             iAttempt=iAttempt-1,
                                              timestamp=timestamp,
                                              post_comment=False)
                     except Exception as e:
@@ -87,7 +87,7 @@ def github_webhook(request):
                                          config,
                                          logger,
                                          model=model,
-                                         iAttempt=1,
+                                         iAttempt=0,
                                          timestamp=timestamp,
                                          post_comment=post_comment)
                 except Exception as e:

@@ -57,7 +57,7 @@ class TestHelper():
                                      model=model,
                                      model_test_generation=self.mock_response_generation,
                                      model_test_amplification=self.mock_response_amplification,
-                                     iAttempt=iAttempt,
+                                     iAttempt=iAttempt-1,
                                      timestamp=timestamp,
                                      post_comment=False)
                 if stop:
@@ -77,7 +77,7 @@ class TestHelper():
                                  config,
                                  logger,
                                  model=model,
-                                 iAttempt=1,
+                                 iAttempt=0,
                                  timestamp=timestamp,
                                  post_comment=post_comment)
             if stop:
