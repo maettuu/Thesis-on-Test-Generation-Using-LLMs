@@ -85,7 +85,7 @@ class DockerService:
             self.logger.info(f"[!] Docker API error: {e}")
             sys.exit(1)
 
-    def run_test_in_container(self, model_test_patch, tests_to_run, test_file_diff: PullRequestFileDiff, golden_code_patch=None):
+    def run_test_in_container(self, model_test_patch, tests_to_run, added_test_file: str, golden_code_patch=None):
         """Creates a container, applies the patch, runs the test, and returns the result."""
 
         # Create a temporary patch file
@@ -105,18 +105,15 @@ class DockerService:
             container.start()
             self.logger.info(f"[+] Container {container.short_id} started.")
 
-            remote_test_path = f"/app/testbed/{test_file_diff.name}"
+            remote_test_path = f"/app/testbed/{added_test_file}"
             # 0a) check if the file is already in the container
             exists = container.exec_run(f"/bin/sh -c 'test -f {remote_test_path}'")
             if exists.exit_code != 0:
-                # Build an in-memory tar containing the new test file
                 tar_stream = io.BytesIO()
                 with tarfile.open(fileobj=tar_stream, mode="w") as tar:
-                    with tempfile.NamedTemporaryFile(delete=False, mode="w", newline='\n') as added_test_file:
-                        added_test_file.write(test_file_diff.after)
-                        added_test_file_path = added_test_file.name
-                    tar.add(added_test_file_path, arcname=test_file_diff.name)
-                tar_stream.seek(0)
+                    ti = tarfile.TarInfo(name=added_test_file)
+                    ti.size = 0  # zero-length file
+                    tar.addfile(ti, io.BytesIO())
 
                 # Copy it into /app/testbed
                 container.put_archive("/app/testbed", tar_stream.getvalue())
@@ -195,15 +192,18 @@ class DockerService:
                 self.logger.info("Internal error: docker command failed with: %s" % stdout_output_all)
             self.logger.info("[+] Test command executed.")
 
-            # Extract only the number of failures from the output.
-            match = re.search(r'\b(\d+)\s+failures?\b', stdout)
-            if match:
-                num_failures = int(match.group(1))
-                test_result = "PASS" if num_failures == 0 else "FAIL"
-            else:
-                # If the summary line cannot be found, consider it a failure (or handle as needed)
-                self.logger.info("Could not determine test summary from output.")
+            if re.search(r'\b0\s+specs\b', stdout):  # No tests were executed
                 test_result = "FAIL"
+            else:
+                # Extract only the number of failures from the output.
+                match = re.search(r'\b(\d+)\s+failures?\b', stdout)
+                if match:
+                    num_failures = int(match.group(1))
+                    test_result = "PASS" if num_failures == 0 else "FAIL"
+                else:
+                    # If the summary line cannot be found, consider it a failure (or handle as needed)
+                    self.logger.info("Could not determine test summary from output.")
+                    test_result = "FAIL"
 
             self.logger.info(f"[+] Test result: {test_result}")
 
@@ -213,8 +213,6 @@ class DockerService:
             # Cleanup
             self.logger.info("[*] Stopping and removing container...")
             os.remove(patch_file_path)
-            if os.path.exists(added_test_file_path):
-                os.remove(added_test_file_path)
             container.stop()
             container.remove()
             self.logger.info("[+] Container stopped and removed.")
