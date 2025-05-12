@@ -33,7 +33,7 @@ class LLMHandler:
         cot_text = ""
         predicted_test_file_text = ""
         predicted_test_file_contents = ""
-        task3 = ". The test function should be self-contained and to-the-point, containing only the necessary assertions to verify that the issue is resolved."
+        task3 = ". The test should be self-contained and to-the-point, containing only the necessary assertions to verify that the issue is resolved."
 
         if include_golden_test_code:
             # If we include the golden_test_code, we are talking about Test Amplification, where we give the
@@ -51,14 +51,14 @@ class LLMHandler:
 
             if include_uncovered_lines_by_dvlpr_test:
                 golden_patch = patch_labeled
-                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code; specifically, the <patch> lines that are not covered end with the comment ###NOT COVERED###. Your task is to **write an additional fail-to-pass test that covers at least some ###NOT COVERED### lines**. If a test function from the <developer_tests> can be modified to cover ###NOT COVERED### lines, feel free to do it, otherwise (e.g., not covered lines are in a different file) you can ignore the <developer_tests>. You must import any needed modules in your test which aren't already imported. "
+                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code; specifically, the <patch> lines that are not covered end with the comment ###NOT COVERED###. Your task is to **write an additional fail-to-pass test that covers at least some ###NOT COVERED### lines**. If a test from the <developer_tests> can be modified to cover ###NOT COVERED### lines, feel free to do it, otherwise (e.g., not covered lines are in a different file) you can ignore the <developer_tests>. You must only use the provided imports in your test. Import the provided code file if necessary by 'import { ... } from ...' (traverse to the parent directory twice). "
                 task2 = "<developer_tests>\n%s\n</developer_tests>\n\nGenerate another fail-to-pass test that covers lines of the new code (<patch>) that were not covered by the <developer_tests>. " % test_names_with_code
             else:
-                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code. Your task is to **write an additional fail-to-pass test that covers at least some of the lines missed by the <developer_tests>. You must import any needed modules in your test which aren't already imported. "
+                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code. Your task is to **write an additional fail-to-pass test that covers at least some of the lines missed by the <developer_tests>. You must only use the provided imports in your test. Import the provided code file if necessary by 'import { ... } from ...' (traverse to the parent directory twice). "
                 task2 = "<developer_tests>\n%s\n</developer_tests>\n\nGenerate another fail-to-pass test that covers lines of the new code (<patch>) that were not covered by the <developer_tests>. " % test_names_with_code
 
             if isCoT_amplification:
-                cot_text = "Think step-by-step to generate the test:\n1. Select one or more ###NOT COVERED### line(s) from <code>.\n2. If the line(s) you selected belongs to a file already tested by one of the <developer_tests>, modify the developer test to cover the ###NOT COVERED### line(s) \n3. If, on the other hand, the line(s) you selected 1. are not covered by any developer test, write a new test function to cover them.\n"
+                cot_text = "Think step-by-step to generate the test:\n1. Select one or more ###NOT COVERED### line(s) from <code>.\n2. If the line(s) you selected belongs to a file already tested by one of the <developer_tests>, modify the developer test to cover the ###NOT COVERED### line(s) \n3. If, on the other hand, the line(s) you selected 1. are not covered by any developer test, write a new test to cover them.\n"
                 task3 = ", without any explanation or any natural language in general."
         else:
             task = "Your task is to write one javascript test 'it' that fails before the changes in the <patch> and passes after the changes in the <patch>, hence verifying that the <patch> resolves the <issue>. "
@@ -70,7 +70,7 @@ class LLMHandler:
 
                     task3 = ", or at most you can include a decorator to parameterize the test inputs, if one is used by the a test in <test_file> from which you drew motivation (if any). The test should be self-contained (e.g., no parameters unless a decorator is used to parameterize inputs) and to-the-point."
                 else:
-                    predicted_test_file_text = "Since there is no given test file, your generated test will then be manually inserted by us in a new file. Therefore, include all necessary imports from scratch first, add an outer describe block in which you then put your test 'it' "
+                    predicted_test_file_text = "Since there is no given test file, your generated test will then be manually inserted by us in a new file. Therefore, include any provided imports first, add an outer describe block in which you then put your test 'it'. You must only use the provided imports in your test, do not import anything additionally. Import the provided code file if necessary by 'import { ... } from ...' (traverse to the parent directory twice). "
                     task3 = ". The test should be self-contained (e.g., no parameters unless a decorator is used to parameterize inputs) and to-the-point."
 
         if include_issue_description:
@@ -121,7 +121,7 @@ class LLMHandler:
             pr_desc_string2 = ""
 
         _, repo_name, _ = self.parse_instanceID_string()
-        prompt = f"""The following text contains a user issue (in <issue> brackets) posted at the {repo_name} repository. A developer has submitted a Pull Request (PR) that resolves this issue{pr_desc_string}. Their modification is provided in the form of a unified diff format inside the <patch> brackets. {code_string}{task}{predicted_test_file_text}You must only return a raw test and you must import anything you need inside that test which isn't already imported. More details at the end of this text.
+        prompt = f"""The following text contains a user issue (in <issue> brackets) posted at the {repo_name} repository. A developer has submitted a Pull Request (PR) that resolves this issue{pr_desc_string}. Their modification is provided in the form of a unified diff format inside the <patch> brackets. {code_string}{task}{predicted_test_file_text}You must only return a raw test and you must only use the provided imports in your test. Import the provided code file if necessary. More details at the end of this text.
     
         <issue>
         {issue_text}{comments_string}
@@ -131,7 +131,7 @@ class LLMHandler:
         {golden_patch}
         </patch>
         
-        {code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else{task3} Import anything you need inside that test which isn't already imported."""
+        {code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else{task3} You must only use the provided imports in your test. Import the provided code file if necessary."""
 
         #     if include_predicted_test_file:
         #         x1 = "in the <test_file>"
@@ -200,48 +200,51 @@ class LLMHandler:
 
     def query_model(self, prompt, model="gpt-4o", T=0.0):
         # model: "gpt-4o" | "meta-llama/Llama-3.3-70B-Instruct" | "microsoft/Phi-3.5-mini-instruct"
-        if model.startswith("gpt"):
-            response = self.openai_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=T
-            )
-            return response.choices[0].message.content.strip()
-        elif model.startswith("o3"):  # does not accept temperature
-            response = self.openai_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.choices[0].message.content.strip()
-        elif model.startswith("o1"):  # temperature does not apply in o1 series
-            response = self.openai_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.choices[0].message.content.strip()
-        elif model.startswith("meta") or model.startswith('microsoft'):
-            response = self.hug_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,
-                temperature=T
-            )
-            return response.choices[0].message['content']
-        elif model.startswith("llama"):
-            completion = self.groq_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=700,
-                temperature=T
-            )
-            return completion.choices[0].message.content
-        elif model.startswith("qwen"):
-            response = self.groq_client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system",
-                     "content": "You are an experienced software tester specializing in developing regression tests. Follow the user's instructions for generating a regression test. The output format is STRICT: do all your reasoning in the beginning, but the end of your output should ONLY contain javascript code, i.e., NO natural language after the code."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return response.choices[0].message.content
+        try:
+            if model.startswith("gpt"):
+                response = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=T
+                )
+                return response.choices[0].message.content.strip()
+            elif model.startswith("o3"):  # does not accept temperature
+                response = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return response.choices[0].message.content.strip()
+            elif model.startswith("o1"):  # temperature does not apply in o1 series
+                response = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return response.choices[0].message.content.strip()
+            elif model.startswith("meta") or model.startswith('microsoft'):
+                response = self.hug_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=500,
+                    temperature=T
+                )
+                return response.choices[0].message['content']
+            elif model.startswith("llama"):
+                completion = self.groq_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=700,
+                    temperature=T
+                )
+                return completion.choices[0].message.content
+            elif model.startswith("qwen"):
+                response = self.groq_client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system",
+                         "content": "You are an experienced software tester specializing in developing regression tests. Follow the user's instructions for generating a regression test. The output format is STRICT: do all your reasoning in the beginning, but the end of your output should ONLY contain javascript code, i.e., NO natural language after the code."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                return response.choices[0].message.content
+        except Exception as e:
+            return ""

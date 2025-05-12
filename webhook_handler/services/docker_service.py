@@ -1,17 +1,15 @@
 import docker
 import sys
-import tempfile
 import io
 import tarfile
 import re
-import os
+import json
 
 from docker.errors import ImageNotFound, APIError, BuildError
 from pathlib import Path
 
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.pr_data import PullRequestData
-from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
 
 
 class DockerService:
@@ -87,12 +85,6 @@ class DockerService:
 
     def run_test_in_container(self, model_test_patch, tests_to_run, added_test_file: str, golden_code_patch=None):
         """Creates a container, applies the patch, runs the test, and returns the result."""
-
-        # Create a temporary patch file
-        with tempfile.NamedTemporaryFile(delete=False, mode="w", newline='\n') as patch_file:
-            patch_file.write(model_test_patch)
-            patch_file_path = patch_file.name
-
         try:
             self.logger.info("[*] Creating container...")
             container = self.client.containers.create(
@@ -101,118 +93,124 @@ class DockerService:
                 tty=True,  # Allocate a TTY for interactive use
                 detach=True
             )
-
             container.start()
             self.logger.info(f"[+] Container {container.short_id} started.")
 
-            remote_test_path = f"/app/testbed/{added_test_file}"
-            # 0a) check if the file is already in the container
-            exists = container.exec_run(f"/bin/sh -c 'test -f {remote_test_path}'")
+            # Check if the test file is already in the container, add stub otherwise
+            exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{added_test_file}'")
             if exists.exit_code != 0:
-                tar_stream = io.BytesIO()
-                with tarfile.open(fileobj=tar_stream, mode="w") as tar:
-                    ti = tarfile.TarInfo(name=added_test_file)
-                    ti.size = 0  # zero-length file
-                    tar.addfile(ti, io.BytesIO())
+                self.add_file_to_container(container, added_test_file)
+                self.whitelist_stub(container, added_test_file.split("/")[-1])
 
-                # Copy it into /app/testbed
-                container.put_archive("/app/testbed", tar_stream.getvalue())
-
-            #### A) Test patch (Always)
-            model_test_patch_fname = "test_patch.diff"
-            patch_dest_path = f"/app/testbed/{model_test_patch_fname}"
-            # Create a tar archive
-            tar_stream = io.BytesIO()
-            with tarfile.open(fileobj=tar_stream, mode="w") as tar:
-                tar.add(patch_file_path, arcname=model_test_patch_fname)
-            tar_stream.seek(0)
-            # Copy the tar archive to the container
-            container.put_archive("/app/testbed", tar_stream.getvalue())
-            self.logger.info(f"[+] Patch file copied to {patch_dest_path}")
-
-            # Apply the patch inside the container
-            apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && git apply {model_test_patch_fname}'"
-            exec_result = container.exec_run(apply_patch_cmd)
-
-            if exec_result.exit_code != 0:
-                self.logger.info(f"[!] Failed to apply patch: {exec_result.output.decode()}")
-                return "ERROR", exec_result.output.decode()
-
-            self.logger.info("[+] Test patch applied successfully.")
+            self.copy_and_apply_patch(
+                container,
+                code_patch_content=model_test_patch,
+                code_patch_name="test_patch.diff"
+            )
 
             if golden_code_patch is not None:
+                self.copy_and_apply_patch(
+                    container,
+                    code_patch_content=golden_code_patch,
+                    code_patch_name="golden_code_patch.diff"
+                )
 
-                # Create a temporary patch file
-                with tempfile.NamedTemporaryFile(delete=False, mode="w", newline='\n') as patch_file:
-                    patch_file.write(golden_code_patch)
-                    patch_file_path = patch_file.name
-
-                #### B) Model patch (Only in post-PR code)
-                golden_code_patch_fname = "golden_code_patch.diff"
-                patch_dest_path = f"/app/testbed/{golden_code_patch_fname}"
-                # Create a tar archive
-                tar_stream = io.BytesIO()
-                with tarfile.open(fileobj=tar_stream, mode="w") as tar:
-                    tar.add(patch_file_path, arcname=golden_code_patch_fname)
-                tar_stream.seek(0)
-                # Copy the tar archive to the container
-                container.put_archive("/app/testbed", tar_stream.getvalue())
-                self.logger.info(f"[+] Patch file copied to {patch_dest_path}")
-
-                # Apply the patch inside the container
-                apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && git apply {golden_code_patch_fname}'"
-                exec_result = container.exec_run(apply_patch_cmd)
-
-                if exec_result.exit_code != 0:
-                    self.logger.info(f"[!] Failed to apply patch: {exec_result.output.decode()}")
-                    return "ERROR", exec_result.exit_code
-
-                self.logger.info("[+] Code patch applied successfully.")
-
-            # Run the test command
-            coverage_report_separator = "COVERAGE_REPORT_STARTING_HERE"
-            test_commands = [
-                f'TEST_FILTER="{desc}" npx nyc --reporter=text --reporter=lcov gulp unittest-single'
-                # f'npx nyc --all --no-source-map --reporter=text --reporter=lcov jasmine --filter="{desc}" {file}'
-                for desc in tests_to_run
-            ]
-            test_command = (
-                "/bin/sh -c 'cd /app/testbed && "
-                f"{' ; '.join(test_commands)} ; "
-                "npx nyc report --reporter=text > coverage_report.txt && "
-                f"echo '{coverage_report_separator}' && "
-                "cat coverage_report.txt'"
-            )
-            self.logger.info("[*] Running test command...")
-            exec_result = container.exec_run(test_command, stdout=True, stderr=True)
-            stdout_output_all = exec_result.output.decode()
-            try:  # TODO: fix, find a better way to handle the "test-not-ran" error
-                stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
-            except:
-                self.logger.info("Internal error: docker command failed with: %s" % stdout_output_all)
-            self.logger.info("[+] Test command executed.")
-
-            if re.search(r'\b0\s+specs\b', stdout):  # No tests were executed
-                test_result = "FAIL"
-            else:
-                # Extract only the number of failures from the output.
-                match = re.search(r'\b(\d+)\s+failures?\b', stdout)
-                if match:
-                    num_failures = int(match.group(1))
-                    test_result = "PASS" if num_failures == 0 else "FAIL"
-                else:
-                    # If the summary line cannot be found, consider it a failure (or handle as needed)
-                    self.logger.info("Could not determine test summary from output.")
-                    test_result = "FAIL"
-
-            self.logger.info(f"[+] Test result: {test_result}")
-
+            stdout, coverage_report = self.run_test(container, tests_to_run)
+            test_result = self.evaluate_test(stdout)
             return test_result, stdout, coverage_report
 
         finally:
             # Cleanup
             self.logger.info("[*] Stopping and removing container...")
-            os.remove(patch_file_path)
             container.stop()
             container.remove()
             self.logger.info("[+] Container stopped and removed.")
+
+    @staticmethod
+    def add_file_to_container(container, file_path, file_content: str = ""):
+        tar_stream = io.BytesIO()
+        with tarfile.open(fileobj=tar_stream, mode="w") as tar:
+            ti = tarfile.TarInfo(name=file_path)
+            ti.size = len(file_content)
+            tar.addfile(ti, io.BytesIO(file_content.encode("utf-8")))
+        # Copy it into /app/testbed
+        container.put_archive("/app/testbed", tar_stream.getvalue())
+
+    def whitelist_stub(self, container, added_test_file):
+        whitelist_path = "test/unit/clitests.json"
+        read = container.exec_run(f"/bin/sh -c 'cd /app/testbed && cat {whitelist_path}'")
+        if read.exit_code != 0:
+            self.logger.warning(f"Could not read clitests.json: {read.output.decode()}")
+            return "ERROR", read.exit_code, ""
+
+        whitelist = json.loads(read.output.decode())
+        if added_test_file not in whitelist["spec_files"]:
+            whitelist["spec_files"].append(added_test_file)
+            updated_whitelist = json.dumps(whitelist, indent=2) + "\n"
+            self.add_file_to_container(container, whitelist_path, updated_whitelist)
+
+    def copy_and_apply_patch(self, container, code_patch_content, code_patch_name):
+        self.add_file_to_container(container, code_patch_name, code_patch_content)
+        self.logger.info(f"[+] Patch file copied to /app/testbed/{code_patch_name}")
+
+        # Apply the patch inside the container
+        apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && git apply {code_patch_name}'"
+        exec_result = container.exec_run(apply_patch_cmd)
+
+        if exec_result.exit_code != 0:
+            self.logger.info(f"[!] Failed to apply patch: {exec_result.output.decode()}")
+            return "ERROR", exec_result.exit_code, ""
+
+        self.logger.info("[+] Patch applied successfully.")
+
+    def run_test(self, container, tests_to_run):
+        coverage_report_separator = "COVERAGE_REPORT_STARTING_HERE"
+        test_commands = [
+            f'TEST_FILTER="{desc}" npx nyc gulp unittest-single'
+            # f'npx nyc --all --no-source-map --reporter=text --reporter=lcov jasmine --filter="{desc}" {file}'
+            for desc in tests_to_run
+        ]
+        test_command = (
+            "/bin/sh -c 'cd /app/testbed && "
+            f"{' ; '.join(test_commands)} ; "
+            "npx nyc report --reporter=text > coverage_report.txt && "
+            f"echo '{coverage_report_separator}' && "
+            "cat coverage_report.txt'"
+        )
+
+        self.logger.info("[*] Running test command...")
+        exec_result = container.exec_run(test_command, stdout=True, stderr=True, stream=True, demux=True, tty=False)
+        stdout_chunks = []
+        for out, err in exec_result.output:
+            if out:
+                text = out.decode(errors="ignore").rstrip()
+                self.logger.info(text)
+                stdout_chunks.append(text)
+            if err:
+                err_text = err.decode(errors="ignore").rstrip()
+                self.logger.error(err_text)
+        stdout_output_all = "".join(stdout_chunks)
+        try:  # TODO: fix, find a better way to handle the "test-not-ran" error
+            stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
+        except:
+            self.logger.info("Internal error: docker command failed with: %s" % stdout_output_all)
+        self.logger.info("[+] Test command executed.")
+
+        return stdout, coverage_report
+
+    def evaluate_test(self, stdout) -> str:
+        if re.search(r'\b0\s+specs\b', stdout):  # No tests were executed
+            test_result = "FAIL"
+        else:
+            # Extract only the number of failures from the output.
+            match = re.search(r'\b(\d+)\s+failures?\b', stdout)
+            if match:
+                num_failures = int(match.group(1))
+                test_result = "PASS" if num_failures == 0 else "FAIL"
+            else:
+                # If the summary line cannot be found, consider it a failure (or handle as needed)
+                self.logger.info("Could not determine test summary from output.")
+                test_result = "FAIL"
+
+        self.logger.info(f"[+] Test result: {test_result}")
+        return test_result

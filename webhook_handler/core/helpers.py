@@ -504,7 +504,7 @@ def get_contents_of_test_file_to_inject(
 ):
     test_filename, test_file_content = find_file_to_inject(base_commit, golden_code_patch, repo_dir)
     if not test_file_content:
-        logger.warning("[!] No suitable file found for %s. New file created." % pr_id)
+        logger.warning(f"[!] No suitable test file {test_filename} found. New file created.")
         return test_filename, "", ""
     else:
         test_file_content_sliced = keep_first_N_defs(parse_language, test_file_content)
