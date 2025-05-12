@@ -189,7 +189,7 @@ class DockerService:
             if err:
                 err_text = err.decode(errors="ignore").rstrip()
                 self.logger.error(err_text)
-        stdout_output_all = "".join(stdout_chunks)
+        stdout_output_all = "\n".join(stdout_chunks)
         try:  # TODO: fix, find a better way to handle the "test-not-ran" error
             stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
         except:
