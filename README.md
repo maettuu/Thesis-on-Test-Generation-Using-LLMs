@@ -8,7 +8,8 @@ A GitHub bot that generates regression-style “fail-to-pass” tests for JavaSc
 
 - [Purpose](#purpose)  
 - [Prerequisites](#prerequisites)  
-- [Setup](#setup)  
+- [Local Setup](#local-setup)  
+- [Webhook Setup](#webhook-setup)  
 - [Build Independently](#build-independently)
 - [Webhook Explained](#webhook-explained)  
 - [Key Components](#key-components)  
@@ -37,19 +38,20 @@ This Bot automatically generates and amplifies regression-style “fail-to-pass�
 
 ---
 
-## Setup
+## Local Setup
 
 1. **Clone the repo**  
    ```bash
    git clone --branch gh-bot-js --single-branch https://github.com/your-org/gh-bot.git
-   cd gh-bot
+   cd gh-bot-js
    ```
 
 2. **Environment file**  
    ```bash
    cp .env.example .env
+   
    # Then populate:
-   # GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET,
+   # GITHUB_WEBHOOK_SECRET, GITHUB_TOKEN,
    # OPENAI_API_KEY, HUG_API_KEY, GROQ_API_KEY
    ```
 
@@ -60,6 +62,35 @@ This Bot automatically generates and amplifies regression-style “fail-to-pass�
    pip install -r requirements.txt
    python manage.py migrate
    ```
+
+---
+
+## Webhook Setup
+
+1. **Add webhook to repository**  
+   1. In GitHub, open the target repository.
+   2. Open the tab **Settings**.
+   3. In the left sidebar, select **Webhooks**.
+   2. Click **Add webhhook**.
+
+2. **Configure webhook**  
+
+| Field                | Value                            |
+|----------------------|----------------------------------|
+| **Payload URL**      | `http://<SERVER_IP>/webhook-js/` |
+| **Content type**     | `application/json`               |
+| **Secret**           | `<WEBHOOK_SECRET>`               |
+| **SSL verification** | _Keep enabled_                   |
+
+3. **Configure triggers**  
+   1. Select **Let me select individual events.**
+   2. Tick only **Pull requests**, leave everything else unchecked.
+
+4. **Save and verify**
+   1. Keep the checkbox **Active** ticked.
+   2. Click **Add webhook**.
+   3. The setup is completed. In the webhooks list you will now find the entry: \
+   `http://<SERVER_IP>/webhook-js/` _(pull_request)_
 
 ---
 
