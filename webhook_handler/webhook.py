@@ -33,6 +33,9 @@ def github_webhook(request):
         return HttpResponseForbidden("Invalid signature")
 
     payload = json.loads(request.body)
+    if not payload:
+        logger.info("Empty payload")
+        return HttpResponseForbidden("Empty payload")
     # Save the payload to the logs
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     Path(config.webhook_raw_log_dir).mkdir(parents=True, exist_ok=True)
