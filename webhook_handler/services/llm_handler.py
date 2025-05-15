@@ -193,48 +193,51 @@ class LLMHandler:
         return owner, repo, pr_number
 
     def query_model(self, prompt, model="gpt-4o", T=0.0):
-        if model.startswith("gpt"):
-            response = self.openai_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=T
-            )
-            return response.choices[0].message.content.strip()
-        elif model.startswith("o3"):  # does not accept temperature
-            response = self.openai_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.choices[0].message.content.strip()
-        elif model.startswith("o1"):  # temperature does not apply in o1 series
-            response = self.openai_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.choices[0].message.content.strip()
-        # elif model.startswith("meta") or model.startswith('microsoft'):
-        #     response = self.hug_client.chat.completions.create(
-        #         model=model,
-        #         messages=[{"role": "user", "content": prompt}],
-        #         max_tokens=500,
-        #         temperature=T
-        #     )
-        #     return response.choices[0].message['content']
-        elif model.startswith("llama"):
-            completion = self.groq_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=700,
-                temperature=T
-            )
-            return completion.choices[0].message.content
-        elif model.startswith("qwen") or model.startswith("deepseek"):
-            response = self.groq_client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system",
-                     "content": "You are an experienced software tester specializing in developing regression tests. Follow the user's instructions for generating a regression test. The output format is STRICT: do all your reasoning in the beginning, but the end of your output should ONLY contain javascript code, i.e., NO natural language after the code."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return response.choices[0].message.content
+        try:
+            if model.startswith("gpt"):
+                response = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=T
+                )
+                return response.choices[0].message.content.strip()
+            elif model.startswith("o3"):  # does not accept temperature
+                response = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return response.choices[0].message.content.strip()
+            elif model.startswith("o1"):  # temperature does not apply in o1 series
+                response = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return response.choices[0].message.content.strip()
+            # elif model.startswith("meta") or model.startswith('microsoft'):
+            #     response = self.hug_client.chat.completions.create(
+            #         model=model,
+            #         messages=[{"role": "user", "content": prompt}],
+            #         max_tokens=500,
+            #         temperature=T
+            #     )
+            #     return response.choices[0].message['content']
+            elif model.startswith("llama"):
+                completion = self.groq_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=700,
+                    temperature=T
+                )
+                return completion.choices[0].message.content
+            elif model.startswith("qwen") or model.startswith("deepseek"):
+                response = self.groq_client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system",
+                         "content": "You are an experienced software tester specializing in developing regression tests. Follow the user's instructions for generating a regression test. The output format is STRICT: do all your reasoning in the beginning, but the end of your output should ONLY contain javascript code, i.e., NO natural language after the code."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                return response.choices[0].message.content
+        except Exception as e:
+            return ""

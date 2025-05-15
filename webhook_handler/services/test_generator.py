@@ -103,6 +103,8 @@ class TestGenerator:
             # model = "o1-2024-12-17"
             T = 0.0
             response = self.llm_handler.query_model(prompt, model=self.model, T=T)
+            if not response:
+                return generation_completed
 
             new_test = helpers.adjust_function_indentation(
                 response.removeprefix('```javascript').replace('```', '').lstrip('\n')
