@@ -193,7 +193,6 @@ class LLMHandler:
         return owner, repo, pr_number
 
     def query_model(self, prompt, model="gpt-4o", T=0.0):
-        # model: "gpt-4o" | "meta-llama/Llama-3.3-70B-Instruct" | "microsoft/Phi-3.5-mini-instruct"
         if model.startswith("gpt"):
             response = self.openai_client.chat.completions.create(
                 model=model,
@@ -213,14 +212,14 @@ class LLMHandler:
                 messages=[{"role": "user", "content": prompt}],
             )
             return response.choices[0].message.content.strip()
-        elif model.startswith("meta") or model.startswith('microsoft'):
-            response = self.hug_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,
-                temperature=T
-            )
-            return response.choices[0].message['content']
+        # elif model.startswith("meta") or model.startswith('microsoft'):
+        #     response = self.hug_client.chat.completions.create(
+        #         model=model,
+        #         messages=[{"role": "user", "content": prompt}],
+        #         max_tokens=500,
+        #         temperature=T
+        #     )
+        #     return response.choices[0].message['content']
         elif model.startswith("llama"):
             completion = self.groq_client.chat.completions.create(
                 model=model,
@@ -229,7 +228,7 @@ class LLMHandler:
                 temperature=T
             )
             return completion.choices[0].message.content
-        elif model.startswith("qwen"):
+        elif model.startswith("qwen") or model.startswith("deepseek"):
             response = self.groq_client.chat.completions.create(
                 model=model,
                 messages=[
