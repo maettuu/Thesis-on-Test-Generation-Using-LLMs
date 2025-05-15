@@ -56,7 +56,7 @@ def github_webhook(request):
             ]
             for model in models:
                 iAttempt = 1
-                while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]):
+                while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
                     logger.info("[*] Starting combination %d with model %s" % (iAttempt, model))
                     try:
                         response, stop = run(payload,
@@ -65,7 +65,7 @@ def github_webhook(request):
                                              model=model,
                                              iAttempt=iAttempt,
                                              timestamp=timestamp,
-                                             post_comment=False)
+                                             post_comment=post_comment)
                     except Exception as e:
                         err = traceback.format_exc()
                         logger.error("[!] Failed with error:\n%s" % err)

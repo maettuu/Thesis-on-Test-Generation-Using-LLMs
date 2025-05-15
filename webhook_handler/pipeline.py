@@ -54,6 +54,8 @@ def run(
 
     # 6. Check for linked GitHub Issues
     issue_statement = gh_api.get_full_statement()
+    if not issue_statement:
+        return JsonResponse({"status": "success"}), True
 
     # 7. Build Docker image
     docker_service = DockerService(config, pr_data, logger, dockerfile)

@@ -44,12 +44,15 @@ class GitHubApi:
 
     def check_if_has_linked_issue(self):
         # Seach for "Closes #2" etc
-        issue_pattern = r'\b(?:Closes|Fixes|Resolves)\s+#(\d+)\b'
-        matches = re.findall(issue_pattern, self.pr_data.description)
+        issue_pattern = r'\b(?:Closes|Fixes|Resolves)\s+#(\d+)\b|\(?\b(?:bug|issue)\b\s+(\d+)\)?'
+        matches = re.findall(issue_pattern, f"{self.pr_data.title} {self.pr_data.description}", re.IGNORECASE)
 
         # Since PRs and Issues are treated the same by the GH API, we need to check if the
         # referenced entity is PR or GH Issue
         for match in matches:
+            match_str = match[0] or match[1]
+            if not match_str:
+                continue
             match_int = int(match)  # match was originally string
             issue_or_pr, title, description = self.is_issue_or_pr(match_int)
             if issue_or_pr == "Issue":
