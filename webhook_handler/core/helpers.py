@@ -7,11 +7,12 @@ import subprocess
 import os
 import stat
 import time
+import json
 
 from tree_sitter import Parser, Tree, Node
 from io import BytesIO
 from pathlib import Path
-from collections import Counter
+from collections import Counter, defaultdict
 
 from .config import logger
 from .webhook_execution_error import WebhookExecutionError
@@ -514,7 +515,6 @@ def get_contents_of_test_file_to_inject(
 
 
 def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
-    base_commit = base_commit
     current_branch = run_command("git rev-parse --abbrev-ref HEAD", cwd=repo_dir)
     run_command(f"git checkout {base_commit}", cwd=repo_dir)
 
@@ -617,6 +617,75 @@ def keep_first_N_defs(parse_language, source_code: str, N: int = 3) -> str:
     result_lines = [source_lines[i] for i in sorted(kept_lines) if i < len(source_lines)]
 
     return "\n".join(result_lines)
+
+
+def extract_packages(base_commit: str, repo_dir):
+    current_branch = run_command("git rev-parse --abbrev-ref HEAD", cwd=repo_dir)
+    run_command(f"git checkout {base_commit}", cwd=repo_dir)
+    try:
+        package_json_path = Path(repo_dir, "package.json")
+        if not package_json_path.is_file():
+            logger.info('No package.json found')
+            return ""
+        package_data = json.loads(package_json_path.read_text(encoding="utf-8"))
+        dependencies = package_data.get("dependencies", {})
+        dev_dependencies = package_data.get("devDependencies", {})
+        engines = package_data.get("engines", {})
+        output_lines = ["Available Packages"]
+        if not dependencies and not dev_dependencies:
+            return ""
+        if dependencies:
+            output_lines.append("Dependencies:")
+            for pkg, version in dependencies.items():
+                output_lines.append(f"- {pkg}: {version}")
+            output_lines.append("\n")
+        if dev_dependencies:
+            output_lines.append("Dev Dependencies:")
+            for pkg, version in dev_dependencies.items():
+                output_lines.append(f"- {pkg}: {version}")
+            output_lines.append("\n")
+        if engines:
+            output_lines.append("Engines:")
+            for engine, version in engines.items():
+                output_lines.append(f"- {engine}: {version}")
+
+        return "\n".join(output_lines)
+    finally:
+        run_command(f"git checkout {current_branch}", cwd=repo_dir)  # Reset to the original commit
+
+
+def extract_relative_imports(base_commit:str, repo_dir):
+    current_branch = run_command("git rev-parse --abbrev-ref HEAD", cwd=repo_dir)
+    run_command(f"git checkout {base_commit}", cwd=repo_dir)
+    try:
+        import_block_pattern = re.compile(
+            r'import\s+(?P<imports>[^;]+?)\s+from\s+[\'"](?P<path>(\./|\.\./)[^\'"]+)[\'"]',
+            re.DOTALL # for multi-line imports
+        )
+        import_map = defaultdict(set)
+        for file in Path(repo_dir, 'test', 'unit').rglob("*.js"):
+            content = file.read_text(encoding="utf-8")
+            for match in import_block_pattern.finditer(content):
+                import_path = match.group("path")
+                raw_imports = match.group("imports")
+                raw_imports = raw_imports.replace("{", "").replace("}", "")
+                symbols = [s.strip() for s in raw_imports.split(",") if s.strip()]
+                for sym in symbols:
+                    # Handle "A as B" → resolve to A
+                    if " as " in sym:
+                        original_sym = sym.split(" as ")[0].strip()
+                    else:
+                        original_sym = sym
+                    if original_sym:
+                        import_map[import_path].add(original_sym)
+
+        output_lines = ["Relative Imports Used in Unit Tests"]
+        for path in sorted(import_map):
+            symbols = sorted(import_map[path])
+            output_lines.append(f"- `{path}`: {', '.join(symbols)}")
+        return "\n".join(output_lines) if import_map else ""
+    finally:
+        run_command(f"git checkout {current_branch}", cwd=repo_dir)  # Reset to the original commit
 
 
 # Function to run a shell command and return its output

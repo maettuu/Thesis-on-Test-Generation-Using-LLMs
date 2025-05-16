@@ -68,6 +68,19 @@ class TestGenerator:
                 tmp_repo_dir
             )
             test_filename = test_filename.replace(tmp_repo_dir + '/', '')
+        except:
+            self.logger.warning(f'[!] Failed to determine test file for injection')
+            raise WebhookExecutionError(f'Failed to determine test file for injection')
+        try:
+            available_packages = helpers.extract_packages(self.pr_data.base_commit, tmp_repo_dir)
+        except:
+            self.logger.warning(f'[!] Failed to determine available packages')
+            available_packages = ""
+        try:
+            available_relative_imports = helpers.extract_relative_imports(self.pr_data.base_commit, tmp_repo_dir)
+        except:
+            self.logger.warning(f'[!] Failed to determine available relative imports')
+            available_relative_imports = ""
         finally:
             helpers.remove_dir(Path(tmp_repo_dir))
 
@@ -85,7 +98,9 @@ class TestGenerator:
             include_issue_comments=include_issue_comments,
             include_pr_desc=include_pr_desc,
             include_predicted_test_file=include_predicted_test_file,
-            test_file_content=test_file_content_sliced
+            test_file_content=test_file_content_sliced,
+            available_packages=available_packages,
+            available_relative_imports=available_relative_imports
         )
 
         if len(prompt) >= 1048576:  # gpt4o limit

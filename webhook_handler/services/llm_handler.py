@@ -27,7 +27,9 @@ class LLMHandler:
             isCoT_amplification=False,
             include_predicted_test_file=False,
             patch_labeled="",
-            test_file_content=""
+            test_file_content="",
+            available_packages="",
+            available_relative_imports=""
     ):
         golden_patch = self.data.pr_diff_ctx.golden_code_patch
         cot_text = ""
@@ -51,10 +53,10 @@ class LLMHandler:
 
             if include_uncovered_lines_by_dvlpr_test:
                 golden_patch = patch_labeled
-                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code; specifically, the <patch> lines that are not covered end with the comment ###NOT COVERED###. Your task is to **write an additional fail-to-pass test that covers at least some ###NOT COVERED### lines**. If a test from the <developer_tests> can be modified to cover ###NOT COVERED### lines, feel free to do it, otherwise (e.g., not covered lines are in a different file) you can ignore the <developer_tests>. You must only use the provided imports in your test. Import the provided code file if necessary by 'import { ... } from ...' (traverse to the parent directory twice). "
+                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code; specifically, the <patch> lines that are not covered end with the comment ###NOT COVERED###. Your task is to **write an additional fail-to-pass test that covers at least some ###NOT COVERED### lines**. If a test from the <developer_tests> can be modified to cover ###NOT COVERED### lines, feel free to do it, otherwise (e.g., not covered lines are in a different file) you can ignore the <developer_tests>. Import anything you need from the available packages and imports in the <imports> brackets dynamically for compatibility with Node.js. "
                 task2 = "<developer_tests>\n%s\n</developer_tests>\n\nGenerate another fail-to-pass test that covers lines of the new code (<patch>) that were not covered by the <developer_tests>. " % test_names_with_code
             else:
-                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code. Your task is to **write an additional fail-to-pass test that covers at least some of the lines missed by the <developer_tests>. You must only use the provided imports in your test. Import the provided code file if necessary by 'import { ... } from ...' (traverse to the parent directory twice). "
+                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code. Your task is to **write an additional fail-to-pass test that covers at least some of the lines missed by the <developer_tests>. You must only use the provided imports in the <imports> brackets for the test. "
                 task2 = "<developer_tests>\n%s\n</developer_tests>\n\nGenerate another fail-to-pass test that covers lines of the new code (<patch>) that were not covered by the <developer_tests>. " % test_names_with_code
 
             if isCoT_amplification:
@@ -65,12 +67,12 @@ class LLMHandler:
             task2 = "Generate one test that checks whether the <patch> resolves the <issue>.\n"
             if include_predicted_test_file:
                 if test_file_content:
-                    predicted_test_file_text = "Your generated test will then be manually inserted by us in the test file shown in the <test_file> brackets; you can use the contents in these brackets for motivation if needed. "
+                    predicted_test_file_text = "Your generated test will then be manually inserted by us in the test file shown in the <test_file> brackets; you can use the contents in these brackets for motivation if needed. You must only return a raw test and you must only use the provided imports in the <imports> brackets for the test. "
                     predicted_test_file_contents = "<test_file>\n%s\n</test_file>\n\n" % test_file_content
 
-                    task3 = ", or at most you can include a decorator to parameterize the test inputs, if one is used by the a test in <test_file> from which you drew motivation (if any). The test should be self-contained (e.g., no parameters unless a decorator is used to parameterize inputs) and to-the-point."
+                    task3 = ", or at most you can include a decorator to parameterize the test inputs, if one is used by the a test in <test_file> from which you drew motivation (if any). The test should be self-contained (e.g., no parameters unless a decorator is used to parameterize inputs) and to-the-point. Import anything you need from the available packages and imports in the <imports> brackets dynamically for compatibility with Node.js."
                 else:
-                    predicted_test_file_text = "Since there is no given test file, your generated test will then be manually inserted by us in a new file. Therefore, include any provided imports first, add an outer describe block in which you then put your test 'it'. You must only use the provided imports in your test, do not import anything additionally. Import the provided code file if necessary by 'import { ... } from ...' (traverse to the parent directory twice). "
+                    predicted_test_file_text = "Since there is no given test file, your generated test will then be manually inserted by us in a new file. Therefore, include any imports first, add an outer describe block in which you then put your test 'it'. Import anything you need from the available packages and imports in the <imports> brackets. Do not use anything you cannot import. "
                     task3 = ". The test should be self-contained (e.g., no parameters unless a decorator is used to parameterize inputs) and to-the-point."
 
         if include_issue_description:
@@ -121,17 +123,22 @@ class LLMHandler:
             pr_desc_string2 = ""
 
         _, repo_name, _ = self.parse_instanceID_string()
-        prompt = f"""The following text contains a user issue (in <issue> brackets) posted at the {repo_name} repository. A developer has submitted a Pull Request (PR) that resolves this issue{pr_desc_string}. Their modification is provided in the form of a unified diff format inside the <patch> brackets. {code_string}{task}{predicted_test_file_text}You must only return a raw test and you must only use the provided imports in your test. Import the provided code file if necessary. More details at the end of this text.
+        prompt = f"""The following text contains a user issue (in <issue> brackets) posted at the {repo_name} repository. A developer has submitted a Pull Request (PR) that resolves this issue{pr_desc_string}. Their modification is provided in the form of a unified diff format inside the <patch> brackets. {code_string}{task}{predicted_test_file_text}More details at the end of this text.
     
-        <issue>
-        {issue_text}{comments_string}
-        </issue>
+<issue>
+{issue_text}{comments_string}
+</issue>
         
-        <patch>
-        {golden_patch}
-        </patch>
+<patch>
+{golden_patch}
+</patch>
         
-        {code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else{task3} You must only use the provided imports in your test. Import the provided code file if necessary."""
+<imports>
+{available_packages}\n
+{available_relative_imports}
+</imports>
+        
+{code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else{task3} You must only use the provided imports in your test."""
 
         #     if include_predicted_test_file:
         #         x1 = "in the <test_file>"
