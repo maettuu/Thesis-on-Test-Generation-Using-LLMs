@@ -1,6 +1,8 @@
 import os
 import tree_sitter_javascript
 import logging
+import sys
+import io
 
 from dotenv import load_dotenv
 from tree_sitter import Language
@@ -9,6 +11,8 @@ from pathlib import Path
 
 logger = logging.getLogger("myapp")
 
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 class Config:
     def __init__(self):
