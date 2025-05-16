@@ -44,9 +44,10 @@ class TestHelper():
         post_comment = True
         models = [
             "gpt-4o",
-            "meta-llama/Llama-3.3-70B-Instruct",
+            # "meta-llama/Llama-3.3-70B-Instruct",
             "llama-3.3-70b-versatile",
-            "qwen-qwq-32b"
+            "deepseek-r1-distill-llama-70b",
+            # "qwen-qwq-32b"
         ]
         for model in models:
             iAttempt = 1

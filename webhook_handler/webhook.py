@@ -33,6 +33,9 @@ def github_webhook(request):
         return HttpResponseForbidden("Invalid signature")
 
     payload = json.loads(request.body)
+    if not payload:
+        logger.info("Empty payload")
+        return HttpResponseForbidden("Empty payload")
     # Save the payload to the logs
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     Path(config.webhook_raw_log_dir).mkdir(parents=True, exist_ok=True)
@@ -50,13 +53,14 @@ def github_webhook(request):
             post_comment = True
             models = [
                 "gpt-4o",
-                "meta-llama/Llama-3.3-70B-Instruct",
+                # "meta-llama/Llama-3.3-70B-Instruct",
                 "llama-3.3-70b-versatile",
-                "qwen-qwq-32b"
+                "deepseek-r1-distill-llama-70b",
+                # "qwen-qwq-32b"
             ]
             for model in models:
                 iAttempt = 1
-                while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]):
+                while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
                     logger.info("[*] Starting combination %d with model %s" % (iAttempt, model))
                     try:
                         response, stop = run(payload,
@@ -65,7 +69,7 @@ def github_webhook(request):
                                              model=model,
                                              iAttempt=iAttempt-1,
                                              timestamp=timestamp,
-                                             post_comment=False)
+                                             post_comment=post_comment)
                     except Exception as e:
                         err = traceback.format_exc()
                         logger.error("[!] Failed with error:\n%s" % err)
