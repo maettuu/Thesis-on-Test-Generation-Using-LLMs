@@ -5,6 +5,7 @@ from webhook_handler.core import (
     git_tools,
     helpers
 )
+from webhook_handler.core.webhook_execution_error import WebhookExecutionError
 from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
 from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
 from webhook_handler.services.docker_service import DockerService
@@ -66,11 +67,20 @@ class TestGenerator:
                 self.pr_data.id,
                 tmp_repo_dir
             )
-            if test_filename == "":
-                self.logger.info("No suitable file found for %s, skipping" % self.pr_data.id)
-                exit(0)
             test_filename = test_filename.replace(tmp_repo_dir + '/', '')
-            self.predicted_test_sliced = test_file_content_sliced
+        except:
+            self.logger.warning(f'[!] Failed to determine test file for injection')
+            raise WebhookExecutionError(f'Failed to determine test file for injection')
+        try:
+            available_packages = helpers.extract_packages(self.pr_data.base_commit, tmp_repo_dir)
+        except:
+            self.logger.warning(f'[!] Failed to determine available packages')
+            available_packages = ""
+        try:
+            available_relative_imports = helpers.extract_relative_imports(self.pr_data.base_commit, tmp_repo_dir)
+        except:
+            self.logger.warning(f'[!] Failed to determine available relative imports')
+            available_relative_imports = ""
         finally:
             helpers.remove_dir(Path(tmp_repo_dir))
 
@@ -87,7 +97,10 @@ class TestGenerator:
             sliced=sliced,
             include_issue_comments=include_issue_comments,
             include_pr_desc=include_pr_desc,
-            include_predicted_test_file=include_predicted_test_file
+            include_predicted_test_file=include_predicted_test_file,
+            test_file_content=test_file_content_sliced,
+            available_packages=available_packages,
+            available_relative_imports=available_relative_imports
         )
 
         if len(prompt) >= 1048576:  # gpt4o limit
@@ -95,8 +108,7 @@ class TestGenerator:
             raise ValueError("")
 
         generation_dir = Path(self.log_dir, "generation")
-        with open(Path(generation_dir, "prompt.txt"), "w", encoding="utf-8") as f:
-            f.write(prompt)
+        (generation_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
         if self.model_test_generation is None:  # if not mock, query model
             # Query model
@@ -110,21 +122,22 @@ class TestGenerator:
                 response.removeprefix('```javascript').replace('```', '').lstrip('\n')
             )  # TODO: Required for Javascript?
 
-            with open(Path(generation_dir, "raw_model_response.txt"), "w", encoding="utf-8") as f:
-                f.write(response)
+            (generation_dir / "raw_model_response.txt").write_text(response, encoding="utf-8")
         else:
             new_test = self.model_test_generation
 
-        with open(Path(generation_dir, "generated_test.txt"), "w", encoding="utf-8") as f:
-            f.write(new_test)
+        (generation_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
 
         # Append generated test to existing test file
-        new_test_file_content = helpers.append_function(
-            self.config.parse_language,
-            test_file_content,
-            new_test,
-            insert_in_block="NOBLOCK"
-        )
+        if test_file_content:
+            new_test_file_content = helpers.append_function(
+                self.config.parse_language,
+                test_file_content,
+                new_test,
+                insert_in_block="NOBLOCK"
+            )
+        else:
+            new_test_file_content = new_test
 
         # Construct test patch
         model_test_patch = git_tools.unified_diff(
@@ -134,43 +147,43 @@ class TestGenerator:
             tofile=test_filename
         ) + "\n"
 
+        test_file_diff = PullRequestFileDiff(test_filename, test_file_content, new_test_file_content)
+
         test_to_run = helpers.extract_test_descriptions(
             self.config.parse_language,
-            PullRequestFileDiff(test_filename, test_file_content, new_test_file_content)
+            test_file_diff
         )
 
         #### Run test in pre-PR codebase
         test_result_before, stdout_before, coverage_report_before = self.docker_service.run_test_in_container(
             model_test_patch,
-            test_to_run
+            test_to_run,
+            test_file_diff.name
         )
-        with open(Path(generation_dir, "before.txt"), "w", encoding="utf-8") as f:
-            f.write(stdout_before)
-        with open(Path(generation_dir, "coverage_report_before.txt"), "w", encoding="utf-8") as f:
-            f.write(coverage_report_before)
-        with open(Path(generation_dir, "new_test_file_content.js"), "w", encoding="utf-8") as f:
-            f.write("#%s\n%s" % (test_filename, new_test_file_content))
+        (generation_dir / "before.txt").write_text(stdout_before, encoding="utf-8")
+        (generation_dir / "coverage_report_before.txt").write_text(coverage_report_before, encoding="utf-8")
+        new_test_file = f"#{test_filename}\n{new_test_file_content}" if test_file_content else f"#{test_filename}\n{new_test}"
+        (generation_dir / "new_test_file_content.js").write_text(new_test_file, encoding="utf-8")
 
         #### Run test in post-PR codebase
         golden_code_patch = self.pr_diff_ctx.golden_code_patch
         test_result_after, stdout_after, coverage_report_after = self.docker_service.run_test_in_container(
             model_test_patch,
             test_to_run,
+            test_file_diff.name,
             golden_code_patch=golden_code_patch
         )
-        with open(Path(generation_dir, "after.txt"), "w", encoding="utf-8") as f:
-            f.write(stdout_after)
-        with open(Path(generation_dir, "coverage_report_after.txt"), "w", encoding="utf-8") as f:
-            f.write(coverage_report_after)
+        (generation_dir / "after.txt").write_text(stdout_after, encoding="utf-8")
+        (generation_dir / "coverage_report_after.txt").write_text(coverage_report_after, encoding="utf-8")
 
         isFail2Pass = (test_result_before == "FAIL") and (test_result_after == "PASS")
 
         code_after_arr, stderr = self.pr_diff_ctx.apply_code_patch()
         try:
             offsets = helpers.extract_offsets_from_stderr(stderr)
-        except AssertionError as e:
+        except AssertionError:
             self.logger.info("Different offsets in a single file for %s, skipping" % self.pr_data.id)
-            exit(0)
+            raise WebhookExecutionError(f'Different offsets in a single file')
 
         if isFail2Pass:
             missed_lines, decorated_patch = git_tools.get_missed_lines_and_decorate_patch(

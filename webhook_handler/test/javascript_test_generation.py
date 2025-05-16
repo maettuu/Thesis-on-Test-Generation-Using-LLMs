@@ -58,11 +58,13 @@ class TestHelper():
                                      model=model,
                                      model_test_generation=self.mock_response_generation,
                                      model_test_amplification=self.mock_response_amplification,
-                                     iAttempt=iAttempt,
+                                     iAttempt=iAttempt-1,
                                      timestamp=timestamp,
                                      post_comment=False)
                 if stop:
                     post_comment = False
+                if iAttempt == 1:
+                    Path(config.run_log_dir, 'results.csv').write_text("prNumber,model,iAttempt,stop\n", encoding="utf-8")
                 with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
                     f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt, stop))
 
@@ -75,7 +77,7 @@ class TestHelper():
                                  config,
                                  logger,
                                  model=model,
-                                 iAttempt=1,
+                                 iAttempt=0,
                                  timestamp=timestamp,
                                  post_comment=post_comment)
             if stop:

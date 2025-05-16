@@ -7,13 +7,15 @@ import subprocess
 import os
 import stat
 import time
+import json
 
 from tree_sitter import Parser, Tree, Node
 from io import BytesIO
 from pathlib import Path
-from collections import Counter
+from collections import Counter, defaultdict
 
 from .config import logger
+from .webhook_execution_error import WebhookExecutionError
 
 
 def is_test_file(filepath, test_folder=''):
@@ -503,9 +505,9 @@ def get_contents_of_test_file_to_inject(
         repo_dir
 ):
     test_filename, test_file_content = find_file_to_inject(base_commit, golden_code_patch, repo_dir)
-    if test_filename is None:
-        logger.info("No suitable file found for %s, skipping" % pr_id)
-        return "", "", ""
+    if not test_file_content:
+        logger.warning(f"[!] No suitable test file {test_filename} found. New file created.")
+        return test_filename, "", ""
     else:
         test_file_content_sliced = keep_first_N_defs(parse_language, test_file_content)
 
@@ -513,13 +515,12 @@ def get_contents_of_test_file_to_inject(
 
 
 def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
-    base_commit = base_commit
     current_branch = run_command("git rev-parse --abbrev-ref HEAD", cwd=repo_dir)
     run_command(f"git checkout {base_commit}", cwd=repo_dir)
 
     try:
         edited_files = extract_edited_files(golden_code_patch)
-        ### First search for the file "test_<x>.py" where "<x>.py" was changed by the golden patch
+        ### First search for the file "test_<x>.js" where "<x>.js" was changed by the golden patch
         for edited_file in edited_files:
             matching_test_files = []  # could be more than 1 matching files in different dirs
 
@@ -544,15 +545,12 @@ def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
             test_file_to_inject = find_most_similar_matching_test_file(edited_file, matching_test_files_relative)
             test_file_to_inject = repo_dir + '/%s' % test_file_to_inject  # make absolute again
         else:
-            n_last_commits = 10
-            coedited_files = find_coedited_files(edited_files, repo_dir, n_last_commits)
+            coedited_files = find_coedited_files(edited_files, repo_dir, 100)
             if not coedited_files:
-                # if we did not find in the last 10 commits, go to last 100 (only in pylint-dev__pylint-4661)
-                coedited_files = find_coedited_files(edited_files, repo_dir, 100)
+                # if we did not find in the last 100 commits, go to last 1000 (only in pylint-dev__pylint-4661)
+                coedited_files = find_coedited_files(edited_files, repo_dir, 1000)
                 if not coedited_files:
-                    # inject to the first test file we find
-                    first_random_test_file = get_first_test_file(repo_dir)
-                    coedited_files = [(first_random_test_file, 1)]  # name is just to fit in
+                    return Path("test", "unit", potential_test_file).as_posix(), ""
 
             coedited_files = sorted(coedited_files, key=lambda x: -x[1])  # sort by # of co-edits
 
@@ -564,14 +562,12 @@ def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
                     test_file_to_inject = repo_dir + '/' + coedited_file[0]
                     break  # the first one we find that exists we keep it
 
-            # if none of the coedited files exist anymore, select the first file you find again
+            # if none of the coedited files exist anymore, create new test file
             if not test_file_to_inject:
-                first_random_test_file = get_first_test_file(repo_dir)
-                test_file_to_inject = repo_dir + '/' + first_random_test_file
+                return Path("test", "unit", potential_test_file).as_posix(), ""
 
         # Read the contents of the test file
-        with open(test_file_to_inject, 'r', encoding='utf-8') as f:
-            test_content = f.read()
+        test_content = Path(test_file_to_inject).read_text(encoding='utf-8')
 
     finally:
         run_command(f"git checkout {current_branch}", cwd=repo_dir)  # Reset to the original commit
@@ -623,6 +619,75 @@ def keep_first_N_defs(parse_language, source_code: str, N: int = 3) -> str:
     return "\n".join(result_lines)
 
 
+def extract_packages(base_commit: str, repo_dir):
+    current_branch = run_command("git rev-parse --abbrev-ref HEAD", cwd=repo_dir)
+    run_command(f"git checkout {base_commit}", cwd=repo_dir)
+    try:
+        package_json_path = Path(repo_dir, "package.json")
+        if not package_json_path.is_file():
+            logger.info('No package.json found')
+            return ""
+        package_data = json.loads(package_json_path.read_text(encoding="utf-8"))
+        dependencies = package_data.get("dependencies", {})
+        dev_dependencies = package_data.get("devDependencies", {})
+        engines = package_data.get("engines", {})
+        output_lines = ["Available Packages"]
+        if not dependencies and not dev_dependencies:
+            return ""
+        if dependencies:
+            output_lines.append("Dependencies:")
+            for pkg, version in dependencies.items():
+                output_lines.append(f"- {pkg}: {version}")
+            output_lines.append("\n")
+        if dev_dependencies:
+            output_lines.append("Dev Dependencies:")
+            for pkg, version in dev_dependencies.items():
+                output_lines.append(f"- {pkg}: {version}")
+            output_lines.append("\n")
+        if engines:
+            output_lines.append("Engines:")
+            for engine, version in engines.items():
+                output_lines.append(f"- {engine}: {version}")
+
+        return "\n".join(output_lines)
+    finally:
+        run_command(f"git checkout {current_branch}", cwd=repo_dir)  # Reset to the original commit
+
+
+def extract_relative_imports(base_commit:str, repo_dir):
+    current_branch = run_command("git rev-parse --abbrev-ref HEAD", cwd=repo_dir)
+    run_command(f"git checkout {base_commit}", cwd=repo_dir)
+    try:
+        import_block_pattern = re.compile(
+            r'import\s+(?P<imports>[^;]+?)\s+from\s+[\'"](?P<path>(\./|\.\./)[^\'"]+)[\'"]',
+            re.DOTALL # for multi-line imports
+        )
+        import_map = defaultdict(set)
+        for file in Path(repo_dir, 'test', 'unit').rglob("*.js"):
+            content = file.read_text(encoding="utf-8")
+            for match in import_block_pattern.finditer(content):
+                import_path = match.group("path")
+                raw_imports = match.group("imports")
+                raw_imports = raw_imports.replace("{", "").replace("}", "")
+                symbols = [s.strip() for s in raw_imports.split(",") if s.strip()]
+                for sym in symbols:
+                    # Handle "A as B" → resolve to A
+                    if " as " in sym:
+                        original_sym = sym.split(" as ")[0].strip()
+                    else:
+                        original_sym = sym
+                    if original_sym:
+                        import_map[import_path].add(original_sym)
+
+        output_lines = ["Relative Imports Used in Unit Tests"]
+        for path in sorted(import_map):
+            symbols = sorted(import_map[path])
+            output_lines.append(f"- `{path}`: {', '.join(symbols)}")
+        return "\n".join(output_lines) if import_map else ""
+    finally:
+        run_command(f"git checkout {current_branch}", cwd=repo_dir)  # Reset to the original commit
+
+
 # Function to run a shell command and return its output
 def run_command(command, cwd=None):
     result = subprocess.run(command, cwd=cwd, shell=True, text=True, capture_output=True)
@@ -643,7 +708,7 @@ def remove_dir(path: Path, max_retries: int = 3, delay: float = 0.1) -> None:
                 time.sleep(delay)
             else:
                 logger.error(f"[!] Final attempt failed removing {path}: {e}")
-                raise
+                raise WebhookExecutionError(f'Failed to remove temp directory, must be removed manually')
 
 
 def extract_edited_files(diff_content):

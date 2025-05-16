@@ -5,7 +5,9 @@ import re
 
 from pathlib import Path
 
-from webhook_handler.core import helpers
+from .config import logger
+from . import helpers
+from .webhook_execution_error import WebhookExecutionError
 
 
 def unified_diff_with_function_context(string1, string2, fname="tempfile.py", context_lines=3):
@@ -37,12 +39,10 @@ def unified_diff_with_function_context(string1, string2, fname="tempfile.py", co
         file2 = os.path.join(temp_dir, f"{fname}.newfordiffonly")
 
         # Write original content
-        with open(file1, "w", encoding="utf-8") as f:
-            f.write(string1)
+        Path(file1).write_text(string1, encoding="utf-8")
 
         # Write modified content
-        with open(file2, "w", encoding="utf-8") as f:
-            f.write(string2)
+        Path(file2).write_text(string2, encoding="utf-8")
 
         # Run `git diff --no-index`
         result = subprocess.run(
@@ -158,12 +158,10 @@ def apply_patch(file_content_arr, patch):
         patch = patch.replace(original_file_bprefix, file_path_bprefix)
 
         # Write the file content and patch content to their respective files
-        with open(temp_dir + file_path, "w", encoding="utf-8") as file:
-            file.write(file_content)
+        Path(temp_dir, file_path).write_text(file_content, encoding="utf-8")
 
     patch_path = "patch.diff"
-    with open(temp_dir + patch_path, "w", encoding="utf-8") as patch_file:
-        patch_file.write(patch)
+    Path(temp_dir, patch_path).write_text(patch, encoding="utf-8")
 
     # Apply the patch using git apply
     try:
@@ -192,14 +190,13 @@ def apply_patch(file_content_arr, patch):
         ###
         helpers.remove_dir(Path(temp_dir))
         ###
-
-        raise ValueError(f"Failed to apply patch: {e}")
+        logger.error(f"Failed to apply patch: {e}")
+        raise WebhookExecutionError(f"Failed to apply patch")
 
     updated_content_all_files = []
     for file_path in file_path_arr:
         # Read the updated file content
-        with open(temp_dir + file_path, "r", encoding="utf-8") as file:
-            updated_content = file.read()
+        updated_content = Path(temp_dir, file_path).read_text(encoding="utf-8")
 
         os.remove(temp_dir + file_path)
         updated_content_all_files.append(updated_content)

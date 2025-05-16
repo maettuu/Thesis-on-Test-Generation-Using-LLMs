@@ -10,6 +10,7 @@ from pathlib import Path
 
 from webhook_handler.core import Config
 from webhook_handler.core.config import logger
+from webhook_handler.core.webhook_execution_error import WebhookExecutionError
 from .pipeline import run
 
 # Initiate pipeline logger & config
@@ -19,23 +20,25 @@ config = Config()
 @csrf_exempt
 def github_webhook(request):
     """Handle GitHub webhook events"""
-    # 1) Allow HEAD for health checks (optional)
+    # 1) Allow HEAD for health checks
     if request.method == 'HEAD':
         return HttpResponse(status=200)
 
     # 2) Enforce POST only
     if request.method != 'POST':
-        return HttpResponseNotAllowed(['POST'])
+        return HttpResponseNotAllowed(['POST'], 'Only POST method is allowed')
 
     # 3) Signature check
     if not verify_signature(request):
         logger.info("Invalid signature")
         return HttpResponseForbidden("Invalid signature")
 
+    # 4) Payload check
     payload = json.loads(request.body)
     if not payload:
         logger.info("Empty payload")
         return HttpResponseForbidden("Empty payload")
+
     # Save the payload to the logs
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     Path(config.webhook_raw_log_dir).mkdir(parents=True, exist_ok=True)
@@ -44,7 +47,6 @@ def github_webhook(request):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=4)
     logger.info(f"Webhook saved to {file_path}")  # Log the save action
-
     event = request.headers.get('X-GitHub-Event')
     if event == "pull_request":
         # Only trigger when PR opens (or if it is my repo)
@@ -67,14 +69,19 @@ def github_webhook(request):
                                              config,
                                              logger,
                                              model=model,
-                                             iAttempt=iAttempt,
+                                             iAttempt=iAttempt-1,
                                              timestamp=timestamp,
                                              post_comment=post_comment)
-                    except Exception as e:
+                    except WebhookExecutionError:
                         err = traceback.format_exc()
                         logger.error("[!] Failed with error:\n%s" % err)
+                        return JsonResponse({'status': 'failed', 'error': 'Internal error occurred'}, status=500)
+                    except:
+                        return JsonResponse({'status': 'failed', 'error': f'Unexpected error occurred'}, status=500)
                     if stop:
                         post_comment = False
+                    if iAttempt == 1:
+                        Path(config.run_log_dir, 'results.csv').write_text("prNumber,model,iAttempt,stop\n", encoding="utf-8")
                     with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
                         f.write("%s,%s,%s,%s\n" % (payload["number"], model, iAttempt, stop))
 
@@ -88,12 +95,15 @@ def github_webhook(request):
                                          config,
                                          logger,
                                          model=model,
-                                         iAttempt=1,
+                                         iAttempt=0,
                                          timestamp=timestamp,
                                          post_comment=post_comment)
-                except Exception as e:
+                except WebhookExecutionError:
                     err = traceback.format_exc()
                     logger.error("[!] Failed with error:\n%s" % err)
+                    return JsonResponse({'status': 'failed', 'error': 'Internal error occurred'}, status=500)
+                except:
+                    return JsonResponse({'status': 'failed', 'error': f'Unexpected error occurred'}, status=500)
                 logger.info("[+] o3-mini finished successfully.")
                 if stop:
                     post_comment = False
@@ -104,10 +114,10 @@ def github_webhook(request):
 
         else:
             logger.info("PR event, but not opening of a PR, so skipping...")
-            return JsonResponse({"status": "success"})
+            return JsonResponse({'status': 'success', 'message': 'Pull request action is not "opened"'}, status=200)
     else:
         logger.info("Non-PR event")
-        return JsonResponse({"status": "success"})
+        return JsonResponse({'status': 'success', 'message': 'Webhook event is not a pull request'}, status=200)
 
 def verify_signature(request):
     """Verify the webhook signature."""

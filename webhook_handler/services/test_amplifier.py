@@ -5,6 +5,7 @@ from webhook_handler.core import (
     git_tools,
     helpers
 )
+from webhook_handler.core.webhook_execution_error import WebhookExecutionError
 from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
 from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
 from webhook_handler.services.docker_service import DockerService
@@ -58,6 +59,7 @@ class TestAmplifier:
             test_result_dev, stdout_dev, coverage_report_dev = self.docker_service.run_test_in_container(
                 self.pr_diff_ctx.golden_test_patch,
                 tests_to_run,
+                pr_file_diff.name,
                 golden_code_patch=self.pr_diff_ctx.golden_code_patch,
             )
             if test_result_dev == "FAIL":
@@ -66,18 +68,16 @@ class TestAmplifier:
 
             # 2) log outputs
             amplification_dir = Path(self.log_dir, "amplification")
-            with open(Path(amplification_dir, "dev.txt"), "w", encoding="utf-8") as f:
-                f.write(stdout_dev)
-            with open(Path(amplification_dir, "coverage_report_dev.txt"), "w", encoding="utf-8") as f:
-                f.write(coverage_report_dev)
+            (amplification_dir / "dev.txt").write_text(stdout_dev, encoding="utf-8")
+            (amplification_dir / "coverage_report_dev.txt").write_text(coverage_report_dev, encoding="utf-8")
 
             # 3) compute offsets
             code_after_arr, stderr = self.pr_diff_ctx.apply_code_patch()
             try:
                 offsets = helpers.extract_offsets_from_stderr(stderr)
-            except AssertionError as e:
+            except AssertionError:
                 self.logger.info("Different offsets in a single file for %s, skipping" % self.pr_data.id)
-                exit(0)
+                raise WebhookExecutionError(f'Different offsets in a single file')
 
             # 4) decorate patch
             missed_lines_dev, decorated_patch_dev = git_tools.get_missed_lines_and_decorate_patch(
@@ -86,7 +86,6 @@ class TestAmplifier:
                 offsets,
                 coverage_report_dev,
             )
-            self.patch_labeled = decorated_patch_dev
 
             # 5) build amplification prompt
             prompt = self.llm_handler.build_prompt(
@@ -98,9 +97,9 @@ class TestAmplifier:
                 include_golden_test_code=True,
                 test_code_sliced=self.prompt_combinations["test_code_sliced"][self.iAttempt],
                 include_uncovered_lines_by_dvlpr_test=True,
+                patch_labeled=decorated_patch_dev
             )
-            with open(Path(amplification_dir, "prompt.txt"), "w", encoding="utf-8") as f:
-                f.write(prompt)
+            (amplification_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
             if len(prompt) >= 1048576:  # gpt4o limit (can I get it from a config or sth?)
                 self.logger.info("Prompt exceeds limits, skipping...")
@@ -109,8 +108,7 @@ class TestAmplifier:
             # 6) query or mock
             if self.model_test_amplification is None:
                 response = self.llm_handler.query_model(prompt, model=self.model, T=0.0)
-                with open(Path(amplification_dir, "raw_model_response.txt"), "w", encoding="utf-8") as f:
-                    f.write(response)
+                (amplification_dir / "raw_model_response.txt").write_text(response, encoding="utf-8")
                 new_test = helpers.adjust_function_indentation(
                     response.removeprefix('```javascript').replace('```', '').lstrip('\n')
                 )
@@ -118,8 +116,7 @@ class TestAmplifier:
                 self.logger.info("Using mocked model response for amplification")
                 new_test = self.model_test_amplification
 
-            with open(Path(amplification_dir, "generated_test.txt"), "w", encoding="utf-8") as f:
-                f.write(new_test)
+            (amplification_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
 
             # Inject test
             most_similar_changed_func_or_class, most_similar_file, success = helpers.get_best_file_to_inject_golden(
@@ -194,6 +191,7 @@ class TestAmplifier:
                 self.docker_service.run_test_in_container(
                     model_test_patch,
                     tests_to_run,
+                    pr_file_diff.name,
                     golden_code_patch=self.pr_diff_ctx.golden_code_patch
                 )
             )
@@ -205,10 +203,8 @@ class TestAmplifier:
                 coverage_report_dev_and_ai
             )
 
-            with open(Path(amplification_dir, "dev_and_ai.txt"), "w", encoding="utf-8") as f:
-                f.write(stdout_dev_and_ai)
-            with open(Path(amplification_dir, "coverage_report_dev_and_ai.txt"), "w", encoding="utf-8") as f:
-                f.write(test_result_dev_and_ai)
+            (amplification_dir / "dev_and_ai.txt").write_text(stdout_dev_and_ai, encoding="utf-8")
+            (amplification_dir / "coverage_report_dev_and_ai.txt").write_text(test_result_dev_and_ai, encoding="utf-8")
 
             # The lines modified by the developer code patch
             modified_lines = [
