@@ -101,7 +101,7 @@ def github_webhook(request):
                 except WebhookExecutionError:
                     err = traceback.format_exc()
                     logger.error("[!] Failed with error:\n%s" % err)
-                    return JsonResponse({'status': 'failed', 'error': 'Internal error occurred'}, status=500)
+                    return JsonResponse({'status': 'failed', 'error': 'Internal execution error occurred'}, status=500)
                 except:
                     return JsonResponse({'status': 'failed', 'error': f'Unexpected error occurred'}, status=500)
                 logger.info("[+] o3-mini finished successfully.")
