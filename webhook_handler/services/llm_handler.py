@@ -122,6 +122,11 @@ class LLMHandler:
             pr_desc_string = ""
             pr_desc_string2 = ""
 
+        if test_file_content:
+            integration_consideration = "Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else. You must only use the provided imports in your test."
+        else:
+            integration_consideration = "Return the full file content: imports, describe block and 'it' test. Only import and use what is listed in the <imports> brackets"
+
         _, repo_name, _ = self.parse_instanceID_string()
         prompt = f"""The following text contains a user issue (in <issue> brackets) posted at the {repo_name} repository. A developer has submitted a Pull Request (PR) that resolves this issue{pr_desc_string}. Their modification is provided in the form of a unified diff format inside the <patch> brackets. {code_string}{task}{predicted_test_file_text}More details at the end of this text.
     
@@ -138,7 +143,7 @@ class LLMHandler:
 {available_relative_imports}
 </imports>
         
-{code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else{task3} You must only use the provided imports in your test."""
+{code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}{integration_consideration}{task3}"""
 
         #     if include_predicted_test_file:
         #         x1 = "in the <test_file>"
