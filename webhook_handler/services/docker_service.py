@@ -186,11 +186,11 @@ class DockerService:
         stdout_chunks = []
         for out, err in exec_result.output:
             if out:
-                text = out.decode(errors="ignore").rstrip()
+                text = out.decode(errors="replace").rstrip()
                 self.logger.info(text)
                 stdout_chunks.append(text)
             if err:
-                err_text = err.decode(errors="ignore").rstrip()
+                err_text = err.decode(errors="replace").rstrip()
                 self.logger.error(err_text)
         stdout_output_all = "\n".join(stdout_chunks)
         try:  # TODO: fix, find a better way to handle the "test-not-ran" error

@@ -567,8 +567,7 @@ def find_file_to_inject(base_commit: str, golden_code_patch: str, repo_dir):
                 return Path("test", "unit", potential_test_file).as_posix(), ""
 
         # Read the contents of the test file
-        with open(test_file_to_inject, 'r', encoding='utf-8') as f:
-            test_content = f.read()
+        test_content = Path(test_file_to_inject).read_text(encoding='utf-8')
 
     finally:
         run_command(f"git checkout {current_branch}", cwd=repo_dir)  # Reset to the original commit

@@ -93,8 +93,7 @@ class TestGenerator:
             raise ValueError("")
 
         generation_dir = Path(self.log_dir, "generation")
-        with open(Path(generation_dir, "prompt.txt"), "w", encoding="utf-8") as f:
-            f.write(prompt)
+        (generation_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
         if self.model_test_generation is None:  # if not mock, query model
             # Query model
@@ -108,13 +107,11 @@ class TestGenerator:
                 response.removeprefix('```javascript').replace('```', '').lstrip('\n')
             )  # TODO: Required for Javascript?
 
-            with open(Path(generation_dir, "raw_model_response.txt"), "w", encoding="utf-8") as f:
-                f.write(response)
+            (generation_dir / "raw_model_response.txt").write_text(response, encoding="utf-8")
         else:
             new_test = self.model_test_generation
 
-        with open(Path(generation_dir, "generated_test.txt"), "w", encoding="utf-8") as f:
-            f.write(new_test)
+        (generation_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
 
         # Append generated test to existing test file
         if test_file_content:
@@ -148,15 +145,10 @@ class TestGenerator:
             test_to_run,
             test_file_diff.name
         )
-        with open(Path(generation_dir, "before.txt"), "w", encoding="utf-8") as f:
-            f.write(stdout_before)
-        with open(Path(generation_dir, "coverage_report_before.txt"), "w", encoding="utf-8") as f:
-            f.write(coverage_report_before)
-        with open(Path(generation_dir, "new_test_file_content.js"), "w", encoding="utf-8") as f:
-            if test_file_content:
-                f.write("#%s\n%s" % (test_filename, new_test_file_content))
-            else:
-                f.write("#%s\n%s" % (test_filename, new_test))
+        (generation_dir / "before.txt").write_text(stdout_before, encoding="utf-8")
+        (generation_dir / "coverage_report_before.txt").write_text(coverage_report_before, encoding="utf-8")
+        new_test_file = f"#{test_filename}\n{new_test_file_content}" if test_file_content else f"#{test_filename}\n{new_test}"
+        (generation_dir / "new_test_file_content.js").write_text(new_test_file, encoding="utf-8")
 
         #### Run test in post-PR codebase
         golden_code_patch = self.pr_diff_ctx.golden_code_patch
@@ -166,10 +158,8 @@ class TestGenerator:
             test_file_diff.name,
             golden_code_patch=golden_code_patch
         )
-        with open(Path(generation_dir, "after.txt"), "w", encoding="utf-8") as f:
-            f.write(stdout_after)
-        with open(Path(generation_dir, "coverage_report_after.txt"), "w", encoding="utf-8") as f:
-            f.write(coverage_report_after)
+        (generation_dir / "after.txt").write_text(stdout_after, encoding="utf-8")
+        (generation_dir / "coverage_report_after.txt").write_text(coverage_report_after, encoding="utf-8")
 
         isFail2Pass = (test_result_before == "FAIL") and (test_result_after == "PASS")
 
