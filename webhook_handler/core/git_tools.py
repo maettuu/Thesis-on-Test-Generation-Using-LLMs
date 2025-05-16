@@ -5,7 +5,9 @@ import re
 
 from pathlib import Path
 
-from webhook_handler.core import helpers
+from .config import logger
+from . import helpers
+from .webhook_execution_error import WebhookExecutionError
 
 
 def unified_diff_with_function_context(string1, string2, fname="tempfile.py", context_lines=3):
@@ -192,8 +194,8 @@ def apply_patch(file_content_arr, patch):
         ###
         helpers.remove_dir(Path(temp_dir))
         ###
-
-        raise ValueError(f"Failed to apply patch: {e}")
+        logger.error(f"Failed to apply patch: {e}")
+        raise WebhookExecutionError(f"Failed to apply patch")
 
     updated_content_all_files = []
     for file_path in file_path_arr:

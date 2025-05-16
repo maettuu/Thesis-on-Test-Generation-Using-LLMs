@@ -14,6 +14,7 @@ from pathlib import Path
 from collections import Counter
 
 from .config import logger
+from .webhook_execution_error import WebhookExecutionError
 
 
 def is_test_file(filepath, test_folder=''):
@@ -639,7 +640,7 @@ def remove_dir(path: Path, max_retries: int = 3, delay: float = 0.1) -> None:
                 time.sleep(delay)
             else:
                 logger.error(f"[!] Final attempt failed removing {path}: {e}")
-                raise
+                raise WebhookExecutionError(f'Failed to remove temp directory, must be removed manually')
 
 
 def extract_edited_files(diff_content):

@@ -9,6 +9,7 @@ from docker.errors import ImageNotFound, APIError, BuildError
 from pathlib import Path
 
 from webhook_handler.core.config import Config
+from webhook_handler.core.webhook_execution_error import WebhookExecutionError
 from webhook_handler.data_models.pr_data import PullRequestData
 
 
@@ -47,8 +48,10 @@ class DockerService:
                 self.logger.info(f"[!] No existing image '{image_tag}' found.")
             except APIError as e:
                 self.logger.error(f"[!] Docker API error when checking for existing image: {e}")
+                raise WebhookExecutionError(f'Docker API error')
         except APIError as e:
             self.logger.error(f"[!] Docker API error when checking for existing image: {e}")
+            raise WebhookExecutionError(f'Docker API error')
 
         self.logger.info(f"[*] Building from scratch based on commit {self.pr_data.base_commit}")
 
@@ -75,13 +78,13 @@ class DockerService:
                 if 'stream' in chunk:
                     print(chunk['stream'].rstrip())
             self.logger.info(f"[!] Build failed: {e}")
-            sys.exit(1)
+            raise WebhookExecutionError(f'Docker build failed')
         # except BuildError as e:
         #     self.logger.info(f"[!] Build failed: {e}")
         #     sys.exit(1)
         except APIError as e:
             self.logger.info(f"[!] Docker API error: {e}")
-            sys.exit(1)
+            raise WebhookExecutionError(f'Docker API error')
 
     def run_test_in_container(self, model_test_patch, tests_to_run, added_test_file: str, golden_code_patch=None):
         """Creates a container, applies the patch, runs the test, and returns the result."""
@@ -194,6 +197,7 @@ class DockerService:
             stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
         except:
             self.logger.info("Internal error: docker command failed with: %s" % stdout_output_all)
+            raise WebhookExecutionError(f'Docker command failed')
         self.logger.info("[+] Test command executed.")
 
         return stdout, coverage_report

@@ -5,6 +5,7 @@ from webhook_handler.core import (
     git_tools,
     helpers
 )
+from webhook_handler.core.webhook_execution_error import WebhookExecutionError
 from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
 from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
 from webhook_handler.services.docker_service import DockerService
@@ -76,9 +77,9 @@ class TestAmplifier:
             code_after_arr, stderr = self.pr_diff_ctx.apply_code_patch()
             try:
                 offsets = helpers.extract_offsets_from_stderr(stderr)
-            except AssertionError as e:
+            except AssertionError:
                 self.logger.info("Different offsets in a single file for %s, skipping" % self.pr_data.id)
-                exit(0)
+                raise WebhookExecutionError(f'Different offsets in a single file')
 
             # 4) decorate patch
             missed_lines_dev, decorated_patch_dev = git_tools.get_missed_lines_and_decorate_patch(
