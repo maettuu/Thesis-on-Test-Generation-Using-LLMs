@@ -77,6 +77,8 @@ def github_webhook(request):
                         logger.error("[!] Failed with error:\n%s" % err)
                         return JsonResponse({'status': 'failed', 'error': 'Internal error occurred'}, status=500)
                     except:
+                        err = traceback.format_exc()
+                        logger.error("[!] Failed with unexpected error:\n%s" % err)
                         return JsonResponse({'status': 'failed', 'error': f'Unexpected error occurred'}, status=500)
                     if stop:
                         post_comment = False
