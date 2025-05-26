@@ -53,7 +53,7 @@ class GitHubApi:
             match_str = match[0] or match[1]
             if not match_str:
                 continue
-            match_int = int(match)  # match was originally string
+            match_int = int(match_str)  # match was originally string
             issue_or_pr, title, description = self.is_issue_or_pr(match_int)
             if issue_or_pr == "Issue":
                 self.logger.info("Linked with issue #%d" % match_int)
