@@ -36,10 +36,6 @@ class GitHubApi:
 
     def get_full_statement(self) -> str:
         has_linked, issue, title, description = self.check_if_has_linked_issue()
-        if has_linked:
-            self.logger.info(f"Linked issue: {issue}")
-        else:
-            self.logger.info("No linked issue")
         return "\n".join(value for value in (title, description) if value)  # concatenate title and description
 
     def check_if_has_linked_issue(self):
@@ -59,6 +55,7 @@ class GitHubApi:
                 self.logger.info("Linked with issue #%d" % match_int)
                 return True, match_int, title, description  # we don't support linking of >1 issues yet
 
+        self.logger.info("No linked issue")
         return False, None, None, None
 
     def is_issue_or_pr(self, number):

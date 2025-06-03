@@ -704,7 +704,7 @@ def remove_dir(path: Path, max_retries: int = 3, delay: float = 0.1) -> None:
             return
         except Exception as e:
             if attempt < max_retries:
-                logger.warning("[!] Failed attempt {attempt} removing {path}: {e}, retrying in {delay}s")
+                logger.warning(f"[!] Failed attempt {attempt} removing {path}: {e}, retrying in {delay}s")
                 time.sleep(delay)
             else:
                 logger.error(f"[!] Final attempt failed removing {path}: {e}")

@@ -120,7 +120,7 @@ class TestGenerator:
 
             new_test = helpers.adjust_function_indentation(
                 response.removeprefix('```javascript').replace('```', '').lstrip('\n')
-            )  # TODO: Required for Javascript?
+            )
 
             (generation_dir / "raw_model_response.txt").write_text(response, encoding="utf-8")
         else:

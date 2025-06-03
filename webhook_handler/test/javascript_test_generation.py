@@ -195,9 +195,69 @@ class TestGenerationPdfJs19504(TestCase):
 
 class TestGenerationPdfJs19935(TestCase):
     def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19935.json", run_all_models=True)
+        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19935.json")
 
     def test_generation_pdf_js_19935(self):
+        response = self.test_helper.run_payload()
+        self.assertIsNotNone(response)  # Ensure response is not None
+        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+
+
+class TestGenerationPdfJs19949(TestCase):
+    def setUp(self):
+        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19949.json")
+
+    def test_generation_pdf_js_19949(self):
+        response = self.test_helper.run_payload()
+        self.assertIsNotNone(response)  # Ensure response is not None
+        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+
+
+class TestGenerationPdfJs19952(TestCase):
+    def setUp(self):
+        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19952.json")
+
+    def test_generation_pdf_js_19952(self):
+        response = self.test_helper.run_payload()
+        self.assertIsNotNone(response)  # Ensure response is not None
+        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+
+
+class TestGenerationPdfJs19955(TestCase):
+    def setUp(self):
+        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19955.json")
+
+    def test_generation_pdf_js_19955(self):
+        response = self.test_helper.run_payload()
+        self.assertIsNotNone(response)  # Ensure response is not None
+        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+
+
+class TestGenerationPdfJs19962(TestCase):
+    def setUp(self):
+        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19962.json")
+
+    def test_generation_pdf_js_19962(self):
+        response = self.test_helper.run_payload()
+        self.assertIsNotNone(response)  # Ensure response is not None
+        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+
+
+class TestGenerationPdfJs19967(TestCase):
+    def setUp(self):
+        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19967.json")
+
+    def test_generation_pdf_js_19967(self):
+        response = self.test_helper.run_payload()
+        self.assertIsNotNone(response)  # Ensure response is not None
+        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+
+
+class TestGenerationPdfJs19972(TestCase):
+    def setUp(self):
+        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19972.json")
+
+    def test_generation_pdf_js_19972(self):
         response = self.test_helper.run_payload()
         self.assertIsNotNone(response)  # Ensure response is not None
         self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
