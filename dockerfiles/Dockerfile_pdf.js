@@ -30,7 +30,7 @@ RUN git checkout ${commit_hash}
 RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci  # necessary to skip outdated downloads (for old commits)
 RUN npx gulp generic
 
-# 6. Append `unittest-single` task to gulpfile.mjs
+# 5. Append `unittest-single` task to gulpfile.mjs
 RUN printf '\ngulp.task(\n' >> gulpfile.mjs \
  && printf '  "unittest-single",\n' >> gulpfile.mjs \
  && printf '  gulp.series(\n' >> gulpfile.mjs \

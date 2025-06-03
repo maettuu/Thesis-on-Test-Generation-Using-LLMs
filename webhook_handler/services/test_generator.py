@@ -123,10 +123,11 @@ class TestGenerator:
             )
 
             (generation_dir / "raw_model_response.txt").write_text(response, encoding="utf-8")
+            (generation_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
+            new_test = new_test.replace('src/', '')
         else:
             new_test = self.model_test_generation
-
-        (generation_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
+            (generation_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
 
         # Append generated test to existing test file
         if test_file_content:
@@ -213,7 +214,7 @@ class TestGenerator:
             patch_coverage = (n_modified - len(missed_lines)) / n_modified
 
             # Add comment to the PR
-            comment = self.comment_template % (new_test,
+            comment = self.comment_template % ((generation_dir / "generated_test.txt").read_text(encoding="utf-8"),
                                                test_filename,
                                                decorated_patch_new,
                                                patch_coverage * 100)
