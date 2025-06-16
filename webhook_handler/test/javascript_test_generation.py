@@ -5,6 +5,8 @@ from django.test import TestCase
 from datetime import datetime
 from pathlib import Path
 
+
+from webhook_handler.core import helpers
 from webhook_handler.pipeline import run
 from webhook_handler.webhook import logger, config
 
@@ -52,6 +54,7 @@ class TestHelper():
         for model in models:
             iAttempt = 0
             while iAttempt < len(config.prompt_combinations_gen["include_golden_code"]) and (not stop or self.run_all_models):
+                logger.info("[*] Starting combination %d with model %s" % (iAttempt + 1, model))
                 response, stop = run(self.payload,
                                      config,
                                      logger,
@@ -63,7 +66,7 @@ class TestHelper():
                                      post_comment=False)
                 if stop:
                     post_comment = False
-                if iAttempt == 0:
+                if not Path(config.run_log_dir, 'results.csv').exists():
                     Path(config.run_log_dir, 'results.csv').write_text("prNumber,model,iAttempt,stop\n", encoding="utf-8")
                 with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
                     f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt + 1, stop))
@@ -87,12 +90,22 @@ class TestHelper():
 
         return response
 
+    @staticmethod
+    def cleanup():
+        helpers.remove_dir(Path(config.cloned_repo_dir))
+
 #
 # RUN With: python manage.py test webhook_handler.test.<filename>.<testname>
 #
 class TestGenerationPdfJs16275(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_16275.json", run_all_models=True)
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_16275(self):
         response = self.test_helper.run_payload()
@@ -103,6 +116,12 @@ class TestGenerationPdfJs16275(TestCase):
 class TestGenerationPdfJs16318(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_16318.json", run_all_models=True)
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_16318(self):
         response = self.test_helper.run_payload()
@@ -113,6 +132,12 @@ class TestGenerationPdfJs16318(TestCase):
 class TestGenerationPdfJs16798(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_16798.json", run_all_models=True)
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_16798(self):
         response = self.test_helper.run_payload()
@@ -123,6 +148,12 @@ class TestGenerationPdfJs16798(TestCase):
 class TestGenerationPdfJs17602(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_17602.json", run_all_models=True)
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_17602(self):
         response = self.test_helper.run_payload()
@@ -136,6 +167,12 @@ class TestGenerationPdfJs17905(TestCase):
             payload_path="test_mocks/pdf_js_17905.json",
             mock_response_generation_path="test_mocks/pdf_js_17905_response.txt"
         )
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_17905(self):
         response = self.test_helper.run_payload()
@@ -146,6 +183,12 @@ class TestGenerationPdfJs17905(TestCase):
 class TestGenerationPdfJs18430(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_18430.json", run_all_models=True)
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_18430(self):
         response = self.test_helper.run_payload()
@@ -156,6 +199,12 @@ class TestGenerationPdfJs18430(TestCase):
 class TestGenerationPdfJs19010(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19010.json", run_all_models=True)
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19010(self):
         response = self.test_helper.run_payload()
@@ -166,6 +215,12 @@ class TestGenerationPdfJs19010(TestCase):
 class TestGenerationPdfJs19232(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19232.json", run_all_models=True)
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19232(self):
         response = self.test_helper.run_payload()
@@ -176,6 +231,12 @@ class TestGenerationPdfJs19232(TestCase):
 class TestGenerationPdfJs19470(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19470.json", run_all_models=True)
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19470(self):
         response = self.test_helper.run_payload()
@@ -186,6 +247,12 @@ class TestGenerationPdfJs19470(TestCase):
 class TestGenerationPdfJs19504(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19504.json", run_all_models=True)
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19504(self):
         response = self.test_helper.run_payload()
@@ -196,6 +263,12 @@ class TestGenerationPdfJs19504(TestCase):
 class TestGenerationPdfJs19935(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19935.json")
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19935(self):
         response = self.test_helper.run_payload()
@@ -206,6 +279,12 @@ class TestGenerationPdfJs19935(TestCase):
 class TestGenerationPdfJs19949(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19949.json")
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19949(self):
         response = self.test_helper.run_payload()
@@ -216,6 +295,12 @@ class TestGenerationPdfJs19949(TestCase):
 class TestGenerationPdfJs19952(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19952.json")
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19952(self):
         response = self.test_helper.run_payload()
@@ -226,6 +311,12 @@ class TestGenerationPdfJs19952(TestCase):
 class TestGenerationPdfJs19955(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19955.json")
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19955(self):
         response = self.test_helper.run_payload()
@@ -236,6 +327,12 @@ class TestGenerationPdfJs19955(TestCase):
 class TestGenerationPdfJs19962(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19962.json")
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19962(self):
         response = self.test_helper.run_payload()
@@ -246,6 +343,12 @@ class TestGenerationPdfJs19962(TestCase):
 class TestGenerationPdfJs19967(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19967.json")
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19967(self):
         response = self.test_helper.run_payload()
@@ -256,6 +359,12 @@ class TestGenerationPdfJs19967(TestCase):
 class TestGenerationPdfJs19972(TestCase):
     def setUp(self):
         self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19972.json")
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19972(self):
         response = self.test_helper.run_payload()
@@ -269,6 +378,12 @@ class TestGenerationPdfJs19992(TestCase):
             payload_path="test_mocks/pdf_js_19992.json",
             mock_response_generation_path = "test_mocks/pdf_js_19992_response.txt"
         )
+        if (Path(config.cloned_repo_dir)).exists():
+            helpers.remove_dir(Path(config.cloned_repo_dir))
+
+    def tearDown(self):
+        self.test_helper.cleanup()
+        del self.test_helper
 
     def test_generation_pdf_js_19992(self):
         response = self.test_helper.run_payload()

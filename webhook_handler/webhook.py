@@ -10,6 +10,7 @@ from pathlib import Path
 
 from webhook_handler.core import Config
 from webhook_handler.core.config import logger
+from webhook_handler.core import helpers
 from webhook_handler.core.webhook_execution_error import WebhookExecutionError
 from .pipeline import run
 
@@ -60,10 +61,12 @@ def github_webhook(request):
                 "deepseek-r1-distill-llama-70b",
                 # "qwen-qwq-32b"
             ]
+            if (Path(config.cloned_repo_dir)).exists():
+                helpers.remove_dir(Path(config.cloned_repo_dir))
             for model in models:
                 iAttempt = 0
                 while iAttempt < len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
-                    logger.info("[*] Starting combination %d with model %s" % (iAttempt, model))
+                    logger.info("[*] Starting combination %d with model %s" % (iAttempt + 1, model))
                     try:
                         response, stop = run(payload,
                                              config,
@@ -78,9 +81,11 @@ def github_webhook(request):
                     except:
                         logger.exception("[!] Failed with unexpected error")
                         return JsonResponse({'status': 'failed', 'error': f'Unexpected error occurred'}, status=500)
+                    finally:
+                        helpers.remove_dir(Path(config.cloned_repo_dir))
                     if stop:
                         post_comment = False
-                    if iAttempt == 0:
+                    if not Path(config.run_log_dir, 'results.csv').exists():
                         Path(config.run_log_dir, 'results.csv').write_text("prNumber,model,iAttempt,stop\n", encoding="utf-8")
                     with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
                         f.write("%s,%s,%s,%s\n" % (payload["number"], model, iAttempt + 1, stop))
@@ -104,12 +109,15 @@ def github_webhook(request):
                     return JsonResponse({'status': 'failed', 'error': 'Internal execution error occurred'}, status=500)
                 except:
                     return JsonResponse({'status': 'failed', 'error': f'Unexpected error occurred'}, status=500)
+                finally:
+                    helpers.remove_dir(Path(config.cloned_repo_dir))
                 logger.info("[+] o3-mini finished successfully.")
                 if stop:
                     post_comment = False
                 with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
                     f.write("%s,%s,%s,%s\n" % (payload["number"], model, 1, stop))
 
+            helpers.remove_dir(Path(config.cloned_repo_dir))
             return response
 
         else:

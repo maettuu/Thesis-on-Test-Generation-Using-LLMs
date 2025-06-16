@@ -54,7 +54,7 @@ class TestGenerator:
         generation_completed = False
 
         # Calculate temporal coupling to find where to inject the test
-        tmp_repo_dir = "tmp_repo_dir"
+        tmp_repo_dir = self.config.cloned_repo_dir
         if not Path(tmp_repo_dir).exists():
             self.gh_api.clone_repo(tmp_repo_dir)
         else:
@@ -81,8 +81,6 @@ class TestGenerator:
         except:
             self.logger.warning(f'[!] Failed to determine available relative imports')
             available_relative_imports = ""
-        finally:
-            helpers.remove_dir(Path(tmp_repo_dir))
 
         # Build prompt
         include_issue_description = True
@@ -165,6 +163,12 @@ class TestGenerator:
         (generation_dir / "coverage_report_before.txt").write_text(coverage_report_before, encoding="utf-8")
         new_test_file = f"#{test_filename}\n{new_test_file_content}" if test_file_content else f"#{test_filename}\n{new_test}"
         (generation_dir / "new_test_file_content.js").write_text(new_test_file, encoding="utf-8")
+
+        if test_result_before == "PASS":
+            self.logger.info("No Fail-to-Pass test generated")
+            generation_completed = False
+            self.logger.info("=============== Test Generation Finished ===============")
+            return generation_completed
 
         #### Run test in post-PR codebase
         golden_code_patch = self.pr_diff_ctx.golden_code_patch
