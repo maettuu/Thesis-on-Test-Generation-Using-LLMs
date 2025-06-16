@@ -263,3 +263,13 @@ class TestGenerationPdfJs19972(TestCase):
         self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
 
 
+class TestGenerationPdfJs19992(TestCase):
+    def setUp(self):
+        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19992.json")
+
+    def test_generation_pdf_js_19992(self):
+        response = self.test_helper.run_payload()
+        self.assertIsNotNone(response)  # Ensure response is not None
+        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+
+
