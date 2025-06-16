@@ -123,11 +123,11 @@ class TestGenerator:
             )
 
             (generation_dir / "raw_model_response.txt").write_text(response, encoding="utf-8")
-            (generation_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
-            new_test = new_test.replace('src/', '')
         else:
             new_test = self.model_test_generation
-            (generation_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
+
+        (generation_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
+        new_test = new_test.replace('src/', '')
 
         # Append generated test to existing test file
         if test_file_content:

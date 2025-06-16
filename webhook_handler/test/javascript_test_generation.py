@@ -50,23 +50,23 @@ class TestHelper():
             # "qwen-qwq-32b"
         ]
         for model in models:
-            iAttempt = 1
-            while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]) and (not stop or self.run_all_models):
+            iAttempt = 0
+            while iAttempt < len(config.prompt_combinations_gen["include_golden_code"]) and (not stop or self.run_all_models):
                 response, stop = run(self.payload,
                                      config,
                                      logger,
                                      model=model,
                                      model_test_generation=self.mock_response_generation,
                                      model_test_amplification=self.mock_response_amplification,
-                                     iAttempt=iAttempt-1,
+                                     iAttempt=iAttempt,
                                      timestamp=timestamp,
                                      post_comment=False)
                 if stop:
                     post_comment = False
-                if iAttempt == 1:
+                if iAttempt == 0:
                     Path(config.run_log_dir, 'results.csv').write_text("prNumber,model,iAttempt,stop\n", encoding="utf-8")
                 with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
-                    f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt, stop))
+                    f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt + 1, stop))
 
                 iAttempt += 1
 
@@ -265,7 +265,10 @@ class TestGenerationPdfJs19972(TestCase):
 
 class TestGenerationPdfJs19992(TestCase):
     def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19992.json")
+        self.test_helper = TestHelper(
+            payload_path="test_mocks/pdf_js_19992.json",
+            mock_response_generation_path = "test_mocks/pdf_js_19992_response.txt"
+        )
 
     def test_generation_pdf_js_19992(self):
         response = self.test_helper.run_payload()

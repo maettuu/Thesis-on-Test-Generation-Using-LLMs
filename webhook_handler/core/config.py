@@ -63,7 +63,7 @@ class Config:
         self.run_log_dir = Path(self.webhook_log_dir, instance_id + "_%s" % timestamp)
         log_dir = Path(
             self.run_log_dir,
-            "i%s" % iAttempt + "_%s" % model
+            "i%s" % (iAttempt + 1) + "_%s" % model
         )
         Path(log_dir).mkdir(parents=True, exist_ok=True)
         Path(log_dir, "generation").mkdir(parents=True)

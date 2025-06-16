@@ -112,12 +112,12 @@ class TestAmplifier:
                 new_test = helpers.adjust_function_indentation(
                     response.removeprefix('```javascript').replace('```', '').lstrip('\n')
                 )
-                (amplification_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
-                new_test = new_test.replace('src/', '')
             else:
                 self.logger.info("Using mocked model response for amplification")
                 new_test = self.model_test_amplification
-                (amplification_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
+
+            (amplification_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
+            new_test = new_test.replace('src/', '')
 
             # Inject test
             most_similar_changed_func_or_class, most_similar_file, success = helpers.get_best_file_to_inject_golden(

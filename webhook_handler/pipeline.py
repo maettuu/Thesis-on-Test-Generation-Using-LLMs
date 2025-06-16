@@ -104,11 +104,11 @@ def run(
         model
     )
 
-    ampl_ok = True
-    gen_ok = generator.generate(True)
     # ampl_ok, go_to_gen = amplifier.amplify()
     # gen_ok = generator.generate(go_to_gen)
 
     # 11. Whether to stop or try again with different prompt inputs
-    stop = (pr_diff_ctx.has_at_least_one_test_file and ampl_ok) or (not pr_diff_ctx.has_at_least_one_test_file and gen_ok)
-    return JsonResponse({'status': 'success', 'message': 'Execution completed successfully'}, status=200), stop
+    # stop = (pr_diff_ctx.has_at_least_one_test_file and ampl_ok) or (not pr_diff_ctx.has_at_least_one_test_file and gen_ok)
+    # return JsonResponse({'status': 'success', 'message': 'Execution completed successfully'}, status=200), stop
+
+    return JsonResponse({'status': 'success', 'message': 'Execution completed successfully'}, status=200), generator.generate(True)

@@ -61,15 +61,15 @@ def github_webhook(request):
                 # "qwen-qwq-32b"
             ]
             for model in models:
-                iAttempt = 1
-                while iAttempt <= len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
+                iAttempt = 0
+                while iAttempt < len(config.prompt_combinations_gen["include_golden_code"]) and not stop:
                     logger.info("[*] Starting combination %d with model %s" % (iAttempt, model))
                     try:
                         response, stop = run(payload,
                                              config,
                                              logger,
                                              model=model,
-                                             iAttempt=iAttempt-1,
+                                             iAttempt=iAttempt,
                                              timestamp=timestamp,
                                              post_comment=post_comment)
                     except WebhookExecutionError:
@@ -80,10 +80,10 @@ def github_webhook(request):
                         return JsonResponse({'status': 'failed', 'error': f'Unexpected error occurred'}, status=500)
                     if stop:
                         post_comment = False
-                    if iAttempt == 1:
+                    if iAttempt == 0:
                         Path(config.run_log_dir, 'results.csv').write_text("prNumber,model,iAttempt,stop\n", encoding="utf-8")
                     with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
-                        f.write("%s,%s,%s,%s\n" % (payload["number"], model, iAttempt, stop))
+                        f.write("%s,%s,%s,%s\n" % (payload["number"], model, iAttempt + 1, stop))
 
                     iAttempt += 1
 
