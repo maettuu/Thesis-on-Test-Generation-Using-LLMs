@@ -39,10 +39,12 @@ def unified_diff_with_function_context(string1, string2, fname="tempfile.py", co
         file2 = os.path.join(temp_dir, f"{fname}.newfordiffonly")
 
         # Write original content
-        Path(file1).write_text(string1, encoding="utf-8")
+        with open(file1, "w", encoding="utf-8", newline="\n") as f:
+            f.write(string1)
 
         # Write modified content
-        Path(file2).write_text(string2, encoding="utf-8")
+        with open(file2, "w", encoding="utf-8", newline="\n") as f:
+            f.write(string2)
 
         # Run `git diff --no-index`
         result = subprocess.run(
@@ -158,10 +160,12 @@ def apply_patch(file_content_arr, patch):
         patch = patch.replace(original_file_bprefix, file_path_bprefix)
 
         # Write the file content and patch content to their respective files
-        Path(temp_dir, file_path).write_text(file_content, encoding="utf-8")
+        with open(Path(temp_dir, file_path), "w", encoding="utf-8", newline="\n") as file:
+            file.write(file_content)
 
     patch_path = "patch.diff"
-    Path(temp_dir, patch_path).write_text(patch, encoding="utf-8")
+    with open(Path(temp_dir, patch_path), "w", encoding="utf-8", newline="\n") as patch_file:
+        patch_file.write(patch)
 
     # Apply the patch using git apply
     try:
