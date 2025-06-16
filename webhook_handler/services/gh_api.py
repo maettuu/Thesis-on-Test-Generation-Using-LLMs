@@ -68,6 +68,21 @@ class GitHubApi:
             else:
                 return "Issue", issue_data["title"], issue_data["body"]
         else:
+            self.logger.info("[!] No GitHub issue found. Checking Bugzilla...")
+            return self.is_bugzilla_issue(number)
+
+    def is_bugzilla_issue(self, number: int):
+        bugzilla_url = f"https://bugzilla.mozilla.org/rest/bug/{number}"
+        response = requests.get(bugzilla_url)
+        if response.status_code == 200:
+            bug_data = response.json()
+            if "bugs" in bug_data and bug_data["bugs"]:
+                bug = bug_data["bugs"][0]
+                return "Issue", bug.get("summary"), bug.get("description", "")
+            else:
+                self.logger.info(f"No bug found in Bugzilla with ID {number}")
+                return None, None, None
+        else:
             self.logger.info(f"Failed to fetch data for #{number}: {response.status_code}")
             return None, None, None
 
