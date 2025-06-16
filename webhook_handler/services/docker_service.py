@@ -35,20 +35,11 @@ class DockerService:
 
         # Check whether the image is already built
         try:
-            self.client.images.get(f"{image_tag}")
+            self.client.images.get(f"{image_tag}:latest")
             self.logger.info(f"[+] Docker image '{image_tag}' already exists – skipped")
             return
         except ImageNotFound:
-            try:
-                self.client.images.get(f"{image_tag}:latest")
-                self.logger.info(f"[+] Docker image '{image_tag}' already exists – skipped")
-                return
-            except ImageNotFound:
-            # image not found locally, proceed with build
-                self.logger.info(f"[!] No existing image '{image_tag}' found.")
-            except APIError as e:
-                self.logger.error(f"[!] Docker API error when checking for existing image: {e}")
-                raise WebhookExecutionError(f'Docker API error')
+            self.logger.info(f"[!] No existing image '{image_tag}' found.")
         except APIError as e:
             self.logger.error(f"[!] Docker API error when checking for existing image: {e}")
             raise WebhookExecutionError(f'Docker API error')
@@ -60,17 +51,13 @@ class DockerService:
         try:
             image, build_logs = self.client.images.build(
                 path=self.config.project_root.as_posix(),
-                tag=self.pr_data.image_tag,
+                tag=f"{self.pr_data.image_tag}:latest",
                 dockerfile=self.dockerfile_path,
                 buildargs=build_args,
                 network_mode="host",
                 rm=True
             )
 
-            # # Print build logs
-            # for log in build_logs:
-            #     if "stream" in log:
-            #         print(log["stream"].strip())
             self.logger.info(f"[+] Docker image '{self.pr_data.image_tag}' built successfully.")
         except BuildError as e:
             # Print every line from the build logs to stdout/stderr
