@@ -16,7 +16,8 @@ class PullRequestDiffContext:
             file_name = raw_file["filename"]
             before = gh_api.fetch_file_version(pr_data.base_commit, file_name)
             after  = gh_api.fetch_file_version(pr_data.head_commit, file_name)
-            self.pr_file_diffs.append(PullRequestFileDiff(file_name, before, after))
+            if before != after:
+                self.pr_file_diffs.append(PullRequestFileDiff(file_name, before, after))
 
     @property
     def code_file_diffs(self) -> list[PullRequestFileDiff]:
@@ -61,11 +62,11 @@ class PullRequestDiffContext:
     @property
     def golden_code_patch(self) -> str:
         # join with double‑newline so each file’s context is clear
-        return "\n\n".join(pr_file_diff.unified_code_diff() for pr_file_diff in self.code_file_diffs) + "\n"
+        return "\n\n".join(pr_file_diff.unified_code_diff() for pr_file_diff in self.code_file_diffs) + "\n\n"
 
     @property
     def golden_test_patch(self) -> str:
-        return "\n".join(pr_file_diff.unified_test_diff() for pr_file_diff in self.test_file_diffs) + "\n"
+        return "\n\n".join(pr_file_diff.unified_test_diff() for pr_file_diff in self.test_file_diffs) + "\n\n"
 
     def apply_code_patch(self):
         return git_tools.apply_patch(self.code_before, self.golden_code_patch)
