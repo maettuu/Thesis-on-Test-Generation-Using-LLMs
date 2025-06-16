@@ -144,7 +144,7 @@ class DockerService:
         self.logger.info(f"[+] Patch file copied to /app/testbed/{code_patch_name}")
 
         # Apply the patch inside the container
-        apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && git apply {code_patch_name}'"
+        apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && patch -p1 < {code_patch_name}'"
         exec_result = container.exec_run(apply_patch_cmd)
 
         if exec_result.exit_code != 0:
@@ -157,7 +157,7 @@ class DockerService:
         coverage_report_separator = "COVERAGE_REPORT_STARTING_HERE"
         test_commands = [
             f'TEST_FILTER="{desc}" npx nyc gulp unittest-single'
-            # f'npx nyc --all --no-source-map --reporter=text --reporter=lcov jasmine --filter="{desc}" {file}'
+            # f'TEST_FILTER="{desc}" npx nyc --all --no-source-map gulp unittest-single'
             for desc in tests_to_run
         ]
         test_command = (
@@ -169,17 +169,8 @@ class DockerService:
         )
 
         self.logger.info("[*] Running test command...")
-        exec_result = container.exec_run(test_command, stdout=True, stderr=True, stream=True, demux=True, tty=False)
-        stdout_chunks = []
-        for out, err in exec_result.output:
-            if out:
-                text = out.decode(errors="replace").rstrip()
-                self.logger.info(text)
-                stdout_chunks.append(text)
-            if err:
-                err_text = err.decode(errors="replace").rstrip()
-                self.logger.error(err_text)
-        stdout_output_all = "\n".join(stdout_chunks)
+        exec_result = container.exec_run(test_command, stdout=True, stderr=True)
+        stdout_output_all = exec_result.output.decode()
         try:  # TODO: fix, find a better way to handle the "test-not-ran" error
             stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
         except:
