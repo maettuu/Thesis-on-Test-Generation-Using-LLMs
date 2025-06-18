@@ -326,7 +326,10 @@ class TestGenerationPdfJs19955(TestCase):
 
 class TestGenerationPdfJs19962(TestCase):
     def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19962.json")
+        self.test_helper = TestHelper(
+            payload_path="test_mocks/pdf_js_19962.json",
+            mock_response_generation_path="test_mocks/pdf_js_19962_response.txt"
+        )
         if (Path(config.cloned_repo_dir)).exists():
             helpers.remove_dir(Path(config.cloned_repo_dir))
 
