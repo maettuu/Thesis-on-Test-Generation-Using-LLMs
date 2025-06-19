@@ -8,9 +8,9 @@ import json
 from docker.errors import ImageNotFound, APIError, BuildError
 from pathlib import Path
 
-from webhook_handler.core.config import Config
-from webhook_handler.core.webhook_execution_error import WebhookExecutionError
-from webhook_handler.data_models.pr_data import PullRequestData
+from scrape_handler.core.config import Config
+from scrape_handler.core.webhook_execution_error import WebhookExecutionError
+from scrape_handler.data_models.pr_data import PullRequestData
 
 
 class DockerService:

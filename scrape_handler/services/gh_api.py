@@ -3,8 +3,8 @@ import time
 import re
 import subprocess
 
-from webhook_handler.core.config import Config
-from webhook_handler.data_models.pr_data import PullRequestData
+from scrape_handler.core.config import Config
+from scrape_handler.data_models.pr_data import PullRequestData
 
 
 class GitHubApi:

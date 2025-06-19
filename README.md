@@ -202,7 +202,7 @@ Specific commit
 
 3. **Run**  
    ```bash
-   python manage.py test webhook_handler.test.javascript_test_generation:YourTestClass
+   python manage.py test scrape_handler.test.javascript_test_generation:YourTestClass
    ```
 
 ---

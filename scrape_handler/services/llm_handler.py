@@ -2,8 +2,8 @@ from huggingface_hub import InferenceClient
 from openai import OpenAI
 from groq import Groq
 
-from webhook_handler.core.config import Config
-from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
+from scrape_handler.core.config import Config
+from scrape_handler.data_models.pr_pipeline_data import PullRequestPipelineData
 
 
 class LLMHandler:

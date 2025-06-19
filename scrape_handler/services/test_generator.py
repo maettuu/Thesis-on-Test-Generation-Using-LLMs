@@ -1,16 +1,16 @@
 from pathlib import Path
 
-from webhook_handler.core.config import Config
-from webhook_handler.core import (
+from scrape_handler.core.config import Config
+from scrape_handler.core import (
     git_tools,
     helpers
 )
-from webhook_handler.core.webhook_execution_error import WebhookExecutionError
-from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
-from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
-from webhook_handler.services.docker_service import DockerService
-from webhook_handler.services.gh_api import GitHubApi
-from webhook_handler.services.llm_handler import LLMHandler
+from scrape_handler.core.webhook_execution_error import WebhookExecutionError
+from scrape_handler.data_models.pr_file_diff import PullRequestFileDiff
+from scrape_handler.data_models.pr_pipeline_data import PullRequestPipelineData
+from scrape_handler.services.docker_service import DockerService
+from scrape_handler.services.gh_api import GitHubApi
+from scrape_handler.services.llm_handler import LLMHandler
 
 
 class TestGenerator:

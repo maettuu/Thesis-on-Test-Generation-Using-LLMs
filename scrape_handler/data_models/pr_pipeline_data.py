@@ -16,7 +16,7 @@ class PullRequestPipelineData:
         if self.hints_text is None:
             self.hints_text = ""
         # ensure instance types
-        from webhook_handler.data_models.pr_data import PullRequestData
+        from scrape_handler.data_models.pr_data import PullRequestData
         assert isinstance(self.pr_data, PullRequestData)
-        from webhook_handler.services.pr_diff_context import PullRequestDiffContext
+        from scrape_handler.services.pr_diff_context import PullRequestDiffContext
         assert isinstance(self.pr_diff_ctx, PullRequestDiffContext)

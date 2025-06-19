@@ -2,9 +2,9 @@ import re
 
 from tree_sitter import Parser, Tree, Node
 
-from webhook_handler.core.config import Config
-from webhook_handler.core import git_tools
-from webhook_handler.services.pr_diff_context import PullRequestDiffContext
+from scrape_handler.core.config import Config
+from scrape_handler.core import git_tools
+from scrape_handler.services.pr_diff_context import PullRequestDiffContext
 
 
 class GoldenFileSlicer:

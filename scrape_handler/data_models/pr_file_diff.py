@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from webhook_handler.core import git_tools
+from scrape_handler.core import git_tools
 
 
 @dataclass

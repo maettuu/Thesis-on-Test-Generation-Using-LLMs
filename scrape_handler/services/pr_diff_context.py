@@ -1,7 +1,7 @@
-from webhook_handler.core import git_tools
-from webhook_handler.data_models.pr_data import PullRequestData
-from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
-from webhook_handler.services.gh_api import GitHubApi
+from scrape_handler.core import git_tools
+from scrape_handler.data_models.pr_data import PullRequestData
+from scrape_handler.data_models.pr_file_diff import PullRequestFileDiff
+from scrape_handler.services.gh_api import GitHubApi
 
 
 class PullRequestDiffContext:
