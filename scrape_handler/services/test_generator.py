@@ -193,9 +193,10 @@ class TestGenerator:
             offsets = helpers.extract_offsets_from_stderr(stderr)
         except AssertionError:
             logger.critical("Different offsets in a single file for %s, skipping" % self.pr_data.id)
-            raise ExecutionError(f'Different offsets in a single file')
+            raise ExecutionError('Different offsets in a single file')
 
         if isFail2Pass:
+            logger.success("Fail-to-Pass test generated")
             missed_lines, decorated_patch = git_tools.get_missed_lines_and_decorate_patch(
                 self.pr_diff_ctx,
                 code_after_arr,
