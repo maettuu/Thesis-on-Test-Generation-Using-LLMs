@@ -4,28 +4,29 @@ import io
 import tarfile
 import re
 import json
+import logging
 
 from docker.errors import ImageNotFound, APIError, BuildError
 from pathlib import Path
 
 from scrape_handler.core.config import Config
-from scrape_handler.core.webhook_execution_error import WebhookExecutionError
+from scrape_handler.core.execution_error import ExecutionError
 from scrape_handler.data_models.pr_data import PullRequestData
 
 
+logger = logging.getLogger(__name__)
+
+
 class DockerService:
-    def __init__(self, config: Config, pr_data: PullRequestData, logger, dockerfile_path: str = None):
+    def __init__(self, config: Config, pr_data: PullRequestData, dockerfile_path: str = None):
         self.config = config
         self.pr_data = pr_data
-        self.logger = logger
         self.dockerfile_path = self._get_dockerfile(dockerfile_path)
         self.client = docker.from_env()
 
     def _get_dockerfile(self, dockerfile_path: str) -> str:
         if dockerfile_path:
             return dockerfile_path
-        if (self.pr_data.owner, self.pr_data.repo, self.pr_data.number) == ("kitsiosk", "bugbug", 5):
-            return Path("dockerfiles", "Dockerfile_bugbug_old1").as_posix()
         return Path("dockerfiles", f"Dockerfile_{self.pr_data.repo}").as_posix()
 
     def build(self):
@@ -36,15 +37,14 @@ class DockerService:
         # Check whether the image is already built
         try:
             self.client.images.get(f"{image_tag}:latest")
-            self.logger.info(f"[+] Docker image '{image_tag}' already exists – skipped")
+            logger.info(f"Docker image '{image_tag}' already exists – skipped")
             return
         except ImageNotFound:
-            self.logger.info(f"[!] No existing image '{image_tag}' found.")
+            logger.warning(f"No existing image '{image_tag}' found.")
         except APIError as e:
-            self.logger.error(f"[!] Docker API error when checking for existing image: {e}")
-            raise WebhookExecutionError(f'Docker API error')
+            logger.error(f"Docker API error when checking for existing image: {e}")
 
-        self.logger.info(f"[*] Building from scratch based on commit {self.pr_data.base_commit}")
+        logger.info(f"Building from scratch based on commit {self.pr_data.base_commit}")
 
         # Build the Docker image
         build_args = {"commit_hash": self.pr_data.base_commit}
@@ -58,25 +58,22 @@ class DockerService:
                 rm=True
             )
 
-            self.logger.info(f"[+] Docker image '{self.pr_data.image_tag}' built successfully.")
+            logger.success(f"Docker image '{self.pr_data.image_tag}' built successfully.")
         except BuildError as e:
             # Print every line from the build logs to stdout/stderr
             for chunk in e.build_log:
                 if 'stream' in chunk:
                     print(chunk['stream'].rstrip())
-            self.logger.info(f"[!] Build failed: {e}")
-            raise WebhookExecutionError(f'Docker build failed')
-        # except BuildError as e:
-        #     self.logger.info(f"[!] Build failed: {e}")
-        #     sys.exit(1)
+            logger.critical(f"Build failed: {e}")
+            raise ExecutionError(f'Docker build failed')
         except APIError as e:
-            self.logger.info(f"[!] Docker API error: {e}")
-            raise WebhookExecutionError(f'Docker API error')
+            logger.critical(f"Docker API error: {e}")
+            raise ExecutionError(f'Docker API error')
 
     def run_test_in_container(self, model_test_patch, tests_to_run, added_test_file: str, golden_code_patch=None):
         """Creates a container, applies the patch, runs the test, and returns the result."""
         try:
-            self.logger.info("[*] Creating container...")
+            logger.info("Creating container...")
             container = self.client.containers.create(
                 image=self.pr_data.image_tag,
                 command="/bin/sh -c 'sleep infinity'",  # Keep the container running
@@ -84,7 +81,7 @@ class DockerService:
                 detach=True
             )
             container.start()
-            self.logger.info(f"[+] Container {container.short_id} started.")
+            logger.success(f"Container {container.short_id} started.")
 
             # Check if the test file is already in the container, add stub otherwise
             exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{added_test_file}'")
@@ -111,10 +108,10 @@ class DockerService:
 
         finally:
             # Cleanup
-            self.logger.info("[*] Stopping and removing container...")
+            logger.warning("Stopping and removing container...")
             container.stop()
             container.remove()
-            self.logger.info("[+] Container stopped and removed.")
+            logger.success("Container stopped and removed.")
 
     @staticmethod
     def add_file_to_container(container, file_path, file_content: str = ""):
@@ -130,7 +127,7 @@ class DockerService:
         whitelist_path = "test/unit/clitests.json"
         read = container.exec_run(f"/bin/sh -c 'cd /app/testbed && cat {whitelist_path}'")
         if read.exit_code != 0:
-            self.logger.warning(f"Could not read clitests.json: {read.output.decode()}")
+            logger.fail(f"Could not read clitests.json: {read.output.decode()}")
             return "ERROR", read.exit_code, ""
 
         whitelist = json.loads(read.output.decode())
@@ -141,17 +138,17 @@ class DockerService:
 
     def copy_and_apply_patch(self, container, code_patch_content, code_patch_name):
         self.add_file_to_container(container, code_patch_name, code_patch_content)
-        self.logger.info(f"[+] Patch file copied to /app/testbed/{code_patch_name}")
+        logger.success(f"Patch file copied to /app/testbed/{code_patch_name}")
 
         # Apply the patch inside the container
         apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && patch -p1 < {code_patch_name}'"
         exec_result = container.exec_run(apply_patch_cmd)
 
         if exec_result.exit_code != 0:
-            self.logger.info(f"[!] Failed to apply patch: {exec_result.output.decode()}")
+            logger.fail(f"Failed to apply patch: {exec_result.output.decode()}")
             return "ERROR", exec_result.exit_code, ""
 
-        self.logger.info("[+] Patch applied successfully.")
+        logger.success("Patch applied successfully.")
 
     def run_test(self, container, tests_to_run):
         coverage_report_separator = "COVERAGE_REPORT_STARTING_HERE"
@@ -168,15 +165,15 @@ class DockerService:
             "cat coverage_report.txt'"
         )
 
-        self.logger.info("[*] Running test command...")
+        logger.info("Running test command...")
         exec_result = container.exec_run(test_command, stdout=True, stderr=True)
         stdout_output_all = exec_result.output.decode()
         try:  # TODO: fix, find a better way to handle the "test-not-ran" error
             stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
         except:
-            self.logger.info("Internal error: docker command failed with: %s" % stdout_output_all)
-            raise WebhookExecutionError(f'Docker command failed')
-        self.logger.info("[+] Test command executed.")
+            logger.critical("Internal error: docker command failed with: %s" % stdout_output_all)
+            raise ExecutionError(f'Docker command failed')
+        logger.success("Test command executed.")
 
         return stdout, coverage_report
 
@@ -191,8 +188,8 @@ class DockerService:
                 test_result = "PASS" if num_failures == 0 else "FAIL"
             else:
                 # If the summary line cannot be found, consider it a failure (or handle as needed)
-                self.logger.info("Could not determine test summary from output.")
+                logger.fail("Could not determine test summary from output.")
                 test_result = "FAIL"
 
-        self.logger.info(f"[+] Test result: {test_result}")
+        logger.info(f"Test PASSed") if test_result == "PASS" else logger.fail(f"Test FAILed")
         return test_result

@@ -2,13 +2,15 @@ import subprocess
 import difflib
 import os
 import re
+import logging
 
 from pathlib import Path
 
-from .config import logger
 from . import helpers
-from .webhook_execution_error import WebhookExecutionError
+from .execution_error import ExecutionError
 
+
+logger = logging.getLogger(__name__)
 
 def unified_diff_with_function_context(string1, string2, fname="tempfile.py", context_lines=3):
     """
@@ -194,8 +196,8 @@ def apply_patch(file_content_arr, patch):
         ###
         helpers.remove_dir(Path(temp_dir))
         ###
-        logger.error(f"Failed to apply patch: {e}")
-        raise WebhookExecutionError(f"Failed to apply patch")
+        logger.critical(f"Failed to apply patch: {e}")
+        raise ExecutionError(f"Failed to apply patch")
 
     updated_content_all_files = []
     for file_path in file_path_arr:

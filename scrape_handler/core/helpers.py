@@ -8,15 +8,17 @@ import os
 import stat
 import time
 import json
+import logging
 
 from tree_sitter import Parser, Tree, Node
 from io import BytesIO
 from pathlib import Path
 from collections import Counter, defaultdict
 
-from .config import logger
-from .webhook_execution_error import WebhookExecutionError
+from .execution_error import ExecutionError
 
+
+logger = logging.getLogger(__name__)
 
 def is_test_file(filepath, test_folder=''):
     is_in_test_folder = False
@@ -506,7 +508,7 @@ def get_contents_of_test_file_to_inject(
 ):
     test_filename, test_file_content = find_file_to_inject(base_commit, golden_code_patch, repo_dir)
     if not test_file_content:
-        logger.warning(f"[!] No suitable test file {test_filename} found. New file created.")
+        logger.warning(f"No suitable test file {test_filename} found. New file created.")
         return test_filename, "", ""
     else:
         test_file_content_sliced = keep_first_N_defs(parse_language, test_file_content)
@@ -625,7 +627,7 @@ def extract_packages(base_commit: str, repo_dir):
     try:
         package_json_path = Path(repo_dir, "package.json")
         if not package_json_path.is_file():
-            logger.info('No package.json found')
+            logger.warning('No package.json found')
             return ""
         package_data = json.loads(package_json_path.read_text(encoding="utf-8"))
         dependencies = package_data.get("dependencies", {})
@@ -694,21 +696,21 @@ def run_command(command, cwd=None):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def remove_dir(path: Path, max_retries: int = 3, delay: float = 0.1) -> None:
+def remove_dir(path: Path, max_retries: int = 3, delay: float = 0.1, temp_repo: bool = False) -> None:
     def on_error(func, path, _) -> None:
         os.chmod(path, stat.S_IWRITE)
         func(path)
     for attempt in range(max_retries):
         try:
             shutil.rmtree(path, onerror=on_error)
+            if temp_repo: logger.success(f"Directory {path} removed successfully.")
             return
         except Exception as e:
             if attempt < max_retries:
-                logger.warning(f"[!] Failed attempt {attempt} removing {path}: {e}, retrying in {delay}s")
+                logger.warning(f"Failed attempt {attempt} removing {path}: {e}, retrying in {delay}s")
                 time.sleep(delay)
             else:
-                logger.error(f"[!] Final attempt failed removing {path}: {e}")
-                raise WebhookExecutionError(f'Failed to remove temp directory, must be removed manually')
+                logger.error(f"Final attempt failed removing {path}, must be removed manually: {e}")
 
 
 def extract_edited_files(diff_content):

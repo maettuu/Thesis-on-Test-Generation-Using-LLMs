@@ -165,8 +165,8 @@ print(f"[*] Found {len(valid_payloads_amp)} valid payloads with test files\n")
 
 for payload in valid_payloads:
     number = payload["pull_request"]["number"]
-    filename  = f"pdf_js_{number}.json"
-    path      = OUTPUT_DIR / "code_only" / filename
+    filename = f"pdf_js_{number}.json"
+    path = OUTPUT_DIR / "code_only" / filename
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=4)
     print(f"[+] Saved PR #{number} to {path}")
@@ -174,8 +174,8 @@ for payload in valid_payloads:
 print()
 for payload in valid_payloads_amp:
     number = payload["pull_request"]["number"]
-    filename  = f"pdf_js_{number}.json"
-    path      = OUTPUT_DIR / "code_test" / filename
+    filename = f"pdf_js_{number}.json"
+    path = OUTPUT_DIR / "code_test" / filename
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=4)
     print(f"[+] Saved PR #{number} to {path}")

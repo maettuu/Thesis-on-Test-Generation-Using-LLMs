@@ -1,3 +1,5 @@
+import logging
+
 from scrape_handler.core import (
     Config,
     templates
@@ -14,10 +16,12 @@ from scrape_handler.services import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 def run(
         pr_data,
         config: Config,
-        logger,
         log_dir,
         dockerfile=None,
         model_test_generation=None,
@@ -27,7 +31,7 @@ def run(
         model="gpt-4o"
 ):
     # 1. Setup GitHub Api
-    gh_api = GitHubApi(config, pr_data, logger)
+    gh_api = GitHubApi(config, pr_data)
 
     # 2. Check for linked GitHub Issues
     issue_statement = gh_api.get_full_statement()
@@ -37,7 +41,7 @@ def run(
     # 3. Compute diffs & file contexts
     pr_diff_ctx = PullRequestDiffContext(pr_data, gh_api)
     if not pr_diff_ctx.has_at_least_one_code_file:  # if the PR changed only non-javascript files return
-        logger.info("No .js code files (except maybe for test) were modified, skipping")
+        logger.warning("No .js code files (except maybe for test) were modified, skipping")
         return {'status': 'success', 'message': 'Pull request opened, linked issue found, but no .js file modified'}, True
 
     # 4. Slice golden code + tests
@@ -45,7 +49,7 @@ def run(
     code_sliced, test_sliced = file_slicer.slice_all()
 
     # 5. Build Docker image
-    docker_service = DockerService(config, pr_data, logger, dockerfile)
+    docker_service = DockerService(config, pr_data, dockerfile)
     docker_service.build()
 
     # 6. Gather pipeline data
@@ -64,7 +68,6 @@ def run(
     # 8. Amplification & Generation
     amplifier = TestAmplifier(
         config,
-        logger,
         pr_pipeline_data,
         gh_api,
         llm_handler,
@@ -79,7 +82,6 @@ def run(
     )
     generator = TestGenerator(
         config,
-        logger,
         pr_pipeline_data,
         gh_api,
         llm_handler,

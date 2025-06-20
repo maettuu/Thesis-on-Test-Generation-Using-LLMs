@@ -2,16 +2,19 @@ import requests
 import time
 import re
 import subprocess
+import logging
 
 from scrape_handler.core.config import Config
 from scrape_handler.data_models.pr_data import PullRequestData
 
 
+logger = logging.getLogger(__name__)
+
+
 class GitHubApi:
-    def __init__(self, config: Config, pr_data: PullRequestData, logger):
+    def __init__(self, config: Config, pr_data: PullRequestData):
         self.config = config
         self.pr_data = pr_data
-        self.logger = logger
         self.api_url = "https://api.github.com/repos"
 
     def fetch_pr_files(self) -> dict:
@@ -20,7 +23,7 @@ class GitHubApi:
         if response.status_code == 403 and "X-RateLimit-Reset" in response.headers:
             reset_time = int(response.headers["X-RateLimit-Reset"])
             wait_time = reset_time - int(time.time()) + 1
-            # logger.info(f"Rate limit exceeded. Waiting for {wait_time} seconds...")
+            logger.warning(f"Rate limit exceeded. Waiting for {wait_time} seconds...")
             time.sleep(max(wait_time, 1))
             return self.fetch_pr_files()
 
@@ -52,10 +55,10 @@ class GitHubApi:
             match_int = int(match_str)  # match was originally string
             issue_or_pr, title, description = self.is_issue_or_pr(match_int)
             if issue_or_pr == "Issue":
-                self.logger.info("Linked with issue #%d" % match_int)
+                logger.success("Linked with issue #%d" % match_int)
                 return True, match_int, title, description  # we don't support linking of >1 issues yet
 
-        self.logger.info("No linked issue")
+        logger.fail("No linked issue")
         return False, None, None, None
 
     def is_issue_or_pr(self, number):
@@ -68,7 +71,7 @@ class GitHubApi:
             else:
                 return "Issue", issue_data["title"], issue_data["body"]
         else:
-            self.logger.info("[!] No GitHub issue found. Checking Bugzilla...")
+            logger.warning("No GitHub issue found. Checking Bugzilla...")
             return self.is_bugzilla_issue(number)
 
     def is_bugzilla_issue(self, number: int):
@@ -80,10 +83,10 @@ class GitHubApi:
                 bug = bug_data["bugs"][0]
                 return "Issue", bug.get("summary"), bug.get("description", "")
             else:
-                self.logger.info(f"No bug found in Bugzilla with ID {number}")
+                logger.warning(f"No bug found in Bugzilla with ID {number}")
                 return None, None, None
         else:
-            self.logger.info(f"Failed to fetch data for #{number}: {response.status_code}")
+            logger.fail(f"Failed to fetch data for #{number}: {response.status_code}")
             return None, None, None
 
     def add_comment_to_pr(self, comment):
@@ -98,9 +101,9 @@ class GitHubApi:
         return response.status_code, response.json()
 
     def clone_repo(self, tmp_repo_dir: str):
-        self.logger.info(f"[*] Cloning repository https://github.com/{self.pr_data.owner}/{self.pr_data.repo}.git")
+        logger.info(f"Cloning repository https://github.com/{self.pr_data.owner}/{self.pr_data.repo}.git")
         res = subprocess.run(
             ["git", "clone", f"https://github.com/{self.pr_data.owner}/{self.pr_data.repo}.git",
              tmp_repo_dir],
             capture_output=True, check=True)
-        self.logger.info(f"[+] Cloning successful.")
+        logger.success(f"Cloning successful.")

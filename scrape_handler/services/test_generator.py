@@ -1,11 +1,13 @@
+import logging
+
 from pathlib import Path
 
 from scrape_handler.core.config import Config
 from scrape_handler.core import (
+    ExecutionError,
     git_tools,
     helpers
 )
-from scrape_handler.core.webhook_execution_error import WebhookExecutionError
 from scrape_handler.data_models.pr_file_diff import PullRequestFileDiff
 from scrape_handler.data_models.pr_pipeline_data import PullRequestPipelineData
 from scrape_handler.services.docker_service import DockerService
@@ -13,11 +15,13 @@ from scrape_handler.services.gh_api import GitHubApi
 from scrape_handler.services.llm_handler import LLMHandler
 
 
+logger = logging.getLogger(__name__)
+
+
 class TestGenerator:
     def __init__(
         self,
         config: Config,
-        logger,
         data: PullRequestPipelineData,
         gh_api: GitHubApi,
         llm_handler: LLMHandler,
@@ -31,7 +35,6 @@ class TestGenerator:
         model: str = "gpt-4o",
     ):
         self.config                = config
-        self.logger                = logger
         self.pr_data               = data.pr_data
         self.pr_diff_ctx           = data.pr_diff_ctx
         self.gh_api                = gh_api
@@ -47,10 +50,10 @@ class TestGenerator:
 
     def generate(self, go_to_gen: bool) -> bool:
         if not go_to_gen:
-            self.logger.info("Test Generation aborted.")
+            logger.fail("Test Generation aborted.")
             return False
 
-        self.logger.info("=============== Test Generation Started ===============")
+        logger.info("=============== Test Generation Started ===============")
         generation_completed = False
 
         # Calculate temporal coupling to find where to inject the test
@@ -58,7 +61,7 @@ class TestGenerator:
         if not Path(tmp_repo_dir).exists():
             self.gh_api.clone_repo(tmp_repo_dir)
         else:
-            self.logger.info(f"[+] Temporary repository '{self.pr_data.repo}' already cloned – skipped")
+            logger.info(f"Temporary repository '{self.pr_data.repo}' already cloned – skipped")
         try:
             test_filename, test_file_content, test_file_content_sliced = helpers.get_contents_of_test_file_to_inject(
                 self.config.parse_language,
@@ -69,17 +72,17 @@ class TestGenerator:
             )
             test_filename = test_filename.replace(tmp_repo_dir + '/', '')
         except:
-            self.logger.warning(f'[!] Failed to determine test file for injection')
-            raise WebhookExecutionError(f'Failed to determine test file for injection')
+            logger.critical(f'Failed to determine test file for injection')
+            raise ExecutionError(f'Failed to determine test file for injection')
         try:
             available_packages = helpers.extract_packages(self.pr_data.base_commit, tmp_repo_dir)
         except:
-            self.logger.warning(f'[!] Failed to determine available packages')
+            logger.warning(f'Failed to determine available packages')
             available_packages = ""
         try:
             available_relative_imports = helpers.extract_relative_imports(self.pr_data.base_commit, tmp_repo_dir)
         except:
-            self.logger.warning(f'[!] Failed to determine available relative imports')
+            logger.warning(f'Failed to determine available relative imports')
             available_relative_imports = ""
 
         # Build prompt
@@ -102,7 +105,7 @@ class TestGenerator:
         )
 
         if len(prompt) >= 1048576:  # gpt4o limit
-            self.logger.info("Prompt exceeds limits, skipping...")
+            logger.warning("Prompt exceeds limits, skipping...")
             raise ValueError("")
 
         generation_dir = Path(self.log_dir, "generation")
@@ -111,11 +114,14 @@ class TestGenerator:
         if self.model_test_generation is None:  # if not mock, query model
             # Query model
             # model = "o1-2024-12-17"
+            logger.info("Querying LLM...")
             T = 0.0
             response = self.llm_handler.query_model(prompt, model=self.model, T=T)
             if not response:
-                return generation_completed
+                logger.critical("Failed to query model")
+                raise ExecutionError('Failed to query model')
 
+            logger.success("LLM response received")
             new_test = helpers.adjust_function_indentation(
                 response.removeprefix('```javascript').replace('```', '').lstrip('\n')
             )
@@ -165,9 +171,8 @@ class TestGenerator:
         (generation_dir / "new_test_file_content.js").write_text(new_test_file, encoding="utf-8")
 
         if test_result_before == "PASS":
-            self.logger.info("No Fail-to-Pass test generated")
-            generation_completed = False
-            self.logger.info("=============== Test Generation Finished ===============")
+            logger.fail("No Fail-to-Pass test generated")
+            logger.info("=============== Test Generation Finished ===============")
             return generation_completed
 
         #### Run test in post-PR codebase
@@ -187,8 +192,8 @@ class TestGenerator:
         try:
             offsets = helpers.extract_offsets_from_stderr(stderr)
         except AssertionError:
-            self.logger.info("Different offsets in a single file for %s, skipping" % self.pr_data.id)
-            raise WebhookExecutionError(f'Different offsets in a single file')
+            logger.critical("Different offsets in a single file for %s, skipping" % self.pr_data.id)
+            raise ExecutionError(f'Different offsets in a single file')
 
         if isFail2Pass:
             missed_lines, decorated_patch = git_tools.get_missed_lines_and_decorate_patch(
@@ -226,19 +231,17 @@ class TestGenerator:
             # generation, we just run it to benchmark our pipeline
             if self.post_comment and not self.pr_diff_ctx.has_at_least_one_test_file:
                 status_code, response_data = self.gh_api.add_comment_to_pr(comment)
+                if status_code == 201:
+                    logger.success("Comment added successfully!")
+                else:
+                    logger.fail(f"Failed to add comment: {status_code}", response_data)
             else:
-                status_code, response_data = 201, ""
-                self.logger.info("Debugging: would add this comment to PR:\n%s\n" % comment)
-
-            if status_code == 201:
-                self.logger.info("Comment added successfully!")
-            else:
-                self.logger.info(f"Failed to add comment: {status_code}", response_data)
+                logger.info("Suggested test for PR:\n\n%s" % comment)
 
             generation_completed = True
         elif not isFail2Pass:
-            self.logger.info("No Fail-to-Pass test generated")
+            logger.fail("No Fail-to-Pass test generated")
             generation_completed = False
 
-        self.logger.info("=============== Test Generation Finished ===============")
+        logger.info("=============== Test Generation Finished ===============")
         return generation_completed

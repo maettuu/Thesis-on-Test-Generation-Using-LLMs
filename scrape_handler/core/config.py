@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 from tree_sitter import Language
 from pathlib import Path
 
-logger: logging.Logger | None = None
 
 class Config:
     def __init__(self):
@@ -41,49 +40,11 @@ class Config:
         }
 
         ################## Path Config ##################
-        is_in_server = Path("/home/ubuntu").is_dir() # Directory where webhook requests will be saved
-        if is_in_server:
-            self.project_root = "/home/ubuntu/"
-            self.bot_log_dir = "/home/ubuntu/logs_js/" # for parsed requests
-        else:
-            self.project_root = Path(__file__).resolve().parent.parent.parent
-            self.bot_log_dir = Path(self.project_root, "bot_logs") # for parsed requests
+        self.project_root = Path(__file__).resolve().parent.parent.parent
+        self.bot_log_dir = Path(self.project_root, "scrape_logs") # for parsed requests
         self.run_log_dir = None
 
         self.cloned_repo_dir = "tmp_repo_dir"
-
-    def init_logger(self, run_id: str) -> logging.Logger:
-        global logger
-
-        logfile = Path(self.run_log_dir, f"{run_id}.log")
-
-        # get root logger (or you can pick a named one)
-        logger = logging.getLogger()
-        logger.setLevel("INFO")
-
-        # remove any existing handlers (so pytest reruns don't duplicate)
-        for h in list(logger.handlers):
-            logger.removeHandler(h)
-
-        # Console handler
-        ch = logging.StreamHandler()
-        ch.setLevel("INFO")
-        ch.setFormatter(logging.Formatter(
-            "[%(asctime)s] %(levelname)s %(name)s: %(message)s",
-            datefmt="%H:%M:%S"
-        ))
-        logger.addHandler(ch)
-
-        # File handler (overwrite each run)
-        fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
-        fh.setLevel("INFO")
-        fh.setFormatter(logging.Formatter(
-            "[%(asctime)s] %(levelname)s %(name)s: %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
-        ))
-        logger.addHandler(fh)
-
-        return logger
 
     def setup_log_dir(self, instance_id: str, timestamp: str, iAttempt: int, model: str) -> Path:
         Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
@@ -96,3 +57,70 @@ class Config:
         Path(log_dir, "generation").mkdir(parents=True)
         Path(log_dir, "amplification").mkdir(parents=True)
         return log_dir
+
+
+SUCCESS_LEVEL_NUM = 25
+logging.addLevelName(SUCCESS_LEVEL_NUM, "SUCCESS")
+def success(self, message, *args, **kws):
+    if self.isEnabledFor(SUCCESS_LEVEL_NUM):
+        self._log(SUCCESS_LEVEL_NUM, message, args, **kws)
+logging.Logger.success = success
+
+FAIL_LEVEL_NUM = 35
+logging.addLevelName(FAIL_LEVEL_NUM, "FAIL")
+def fail(self, message, *args, **kws):
+    if self.isEnabledFor(FAIL_LEVEL_NUM):
+        self._log(FAIL_LEVEL_NUM, message, args, **kws)
+logging.Logger.fail = fail
+
+
+class ColoredFormatter(logging.Formatter):
+    RESET  = "\x1b[0m"
+    COLORS = {
+        logging.DEBUG:     "\x1b[90m",        # grey
+        logging.INFO:      "\x1b[34m",        # blue
+        SUCCESS_LEVEL_NUM: "\x1b[32m",        # green
+        logging.WARNING:   "\x1b[38;5;202m",  # orange
+        FAIL_LEVEL_NUM:    "\x1b[31m",        # red
+        logging.ERROR:     "\x1b[31m",        # red
+        logging.CRITICAL:  "\x1b[31;1m"       # bold red
+    }
+
+    def format(self, record):
+        color = self.COLORS.get(record.levelno, self.RESET)
+        msg = super().format(record)
+        return f"{color}{msg}{self.RESET}"
+
+
+def configure_logger(run_log_dir, run_id: str):
+    logfile = Path(run_log_dir, f"{run_id}.log")
+
+    # get root logger (or you can pick a named one)
+    root = logging.getLogger()
+    root.setLevel("INFO")
+
+    # remove any existing handlers (so pytest reruns don't duplicate)
+    for h in list(root.handlers):
+        root.removeHandler(h)
+
+    # Console handler
+    ch = logging.StreamHandler()
+    ch.setLevel("INFO")
+    ch.setFormatter(ColoredFormatter(
+        "[%(asctime)s] %(levelname)-8s: %(message)s",
+        datefmt="%H:%M:%S"
+    ))
+    root.addHandler(ch)
+
+    # File handler (overwrite each run)
+    fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
+    fh.setLevel("INFO")
+    fh.setFormatter(logging.Formatter(
+        "[%(asctime)s] %(levelname)-8s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    root.addHandler(fh)
+
+    openai_logger = logging.getLogger("openai.api_requestor")
+    openai_logger.setLevel(logging.WARNING)
+    openai_logger.propagate = False

@@ -1,3 +1,5 @@
+import logging
+
 from pathlib import Path
 
 from scrape_handler.core.config import Config
@@ -5,7 +7,7 @@ from scrape_handler.core import (
     git_tools,
     helpers
 )
-from scrape_handler.core.webhook_execution_error import WebhookExecutionError
+from scrape_handler.core.execution_error import ExecutionError
 from scrape_handler.data_models.pr_file_diff import PullRequestFileDiff
 from scrape_handler.data_models.pr_pipeline_data import PullRequestPipelineData
 from scrape_handler.services.docker_service import DockerService
@@ -13,11 +15,13 @@ from scrape_handler.services.gh_api import GitHubApi
 from scrape_handler.services.llm_handler import LLMHandler
 
 
+logger = logging.getLogger(__name__)
+
+
 class TestAmplifier:
     def __init__(
         self,
         config: Config,
-        logger,
         data: PullRequestPipelineData,
         gh_api: GitHubApi,
         llm_handler: LLMHandler,
@@ -31,7 +35,6 @@ class TestAmplifier:
         model: str = "gpt-4o",
     ):
         self.config                   = config
-        self.logger                   = logger
         self.pr_data                  = data.pr_data
         self.pr_diff_ctx              = data.pr_diff_ctx
         self.gh_api                   = gh_api
@@ -49,7 +52,7 @@ class TestAmplifier:
         """Returns (amplification_succeeded, should_run_generation)"""
         if self.pr_diff_ctx.has_at_least_one_test_file:
             amplification_completed = False
-            self.logger.info("=============== Test Amplification Started ===============")
+            logger.info("=============== Test Amplification Started ===============")
 
             # 1) run developer tests
             tests_to_run = []
@@ -63,7 +66,7 @@ class TestAmplifier:
                 golden_code_patch=self.pr_diff_ctx.golden_code_patch,
             )
             if test_result_dev == "FAIL":
-                self.logger.info("Developer tests failed, skipping amplification...")
+                logger.fail("Developer tests failed, skipping amplification...")
                 return amplification_completed, False
 
             # 2) log outputs
@@ -76,8 +79,8 @@ class TestAmplifier:
             try:
                 offsets = helpers.extract_offsets_from_stderr(stderr)
             except AssertionError:
-                self.logger.info("Different offsets in a single file for %s, skipping" % self.pr_data.id)
-                raise WebhookExecutionError(f'Different offsets in a single file')
+                logger.critical("Different offsets in a single file for %s, skipping" % self.pr_data.id)
+                raise ExecutionError(f'Different offsets in a single file')
 
             # 4) decorate patch
             missed_lines_dev, decorated_patch_dev = git_tools.get_missed_lines_and_decorate_patch(
@@ -102,7 +105,7 @@ class TestAmplifier:
             (amplification_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
             if len(prompt) >= 1048576:  # gpt4o limit (can I get it from a config or sth?)
-                self.logger.info("Prompt exceeds limits, skipping...")
+                logger.warning("Prompt exceeds limits, skipping...")
                 raise ValueError("")
 
             # 6) query or mock
@@ -113,7 +116,7 @@ class TestAmplifier:
                     response.removeprefix('```javascript').replace('```', '').lstrip('\n')
                 )
             else:
-                self.logger.info("Using mocked model response for amplification")
+                logger.info("Using mocked model response for amplification")
                 new_test = self.model_test_amplification
 
             (amplification_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
@@ -130,7 +133,7 @@ class TestAmplifier:
                     # for a test was changed (see astropy__astropy-12907)
                     # In this case, append to the end
                     insert_in_block = "NOBLOCK"
-                    self.logger.info("Never goes in here anymore I think")
+                    logger.warning("Never goes in here anymore I think")
                 elif most_similar_changed_func_or_class[0] == 'function':
                     insert_in_block = "NOBLOCK"
                 else:
@@ -154,7 +157,7 @@ class TestAmplifier:
                     insert_in_block=insert_in_block
                 )
             except:
-                self.logger.info("Generated code does not compile, skipping")
+                logger.fail("Generated code does not compile, skipping")
                 return amplification_completed, False
 
             model_test_patch = ""
@@ -217,10 +220,10 @@ class TestAmplifier:
             new_lines = set(missed_lines_dev) - set(missed_lines_dev_and_ai)
             coverage_dev = (n_modified - len(set(missed_lines_dev))) / n_modified
             coverage_dev_and_ai = (n_modified - len(set(missed_lines_dev_and_ai))) / n_modified
-            self.logger.info("Coverage dev: %0.2f\nCoverage dev+AI: %0.2f\n" % (coverage_dev, coverage_dev_and_ai))
+            logger.info("Coverage dev: %0.2f\nCoverage dev+AI: %0.2f\n" % (coverage_dev, coverage_dev_and_ai))
 
             if len(new_lines) > 0 and test_result_dev_and_ai == "PASS":
-                self.logger.info(
+                logger.info(
                     "These lines were missed by the developer test by covered by the AI test:\n%s" % "\n".join(
                         new_lines))
 
@@ -245,22 +248,22 @@ class TestAmplifier:
                     status_code, response_data = self.gh_api.add_comment_to_pr(comment)
                 else:
                     status_code, response_data = 201, ""
-                    self.logger.info("Would add this comment:\n%s\n" % comment)
+                    logger.info("Would add this comment:\n%s\n" % comment)
 
                 if status_code == 201:
-                    self.logger.info("Comment added successfully!")
+                    logger.success("Comment added successfully!")
                 else:
-                    self.logger.info(f"Failed to add comment: {status_code}", response_data)
+                    logger.fail(f"Failed to add comment: {status_code}", response_data)
 
                 amplification_completed = True
             elif test_result_dev_and_ai == "FAIL":
-                self.logger.info("The AI test failed")
+                logger.fail("The AI test failed")
                 amplification_completed = False
             elif len(new_lines) == 0:
-                self.logger.info("No new lines covered by AI")
+                logger.warning("No new lines covered by AI")
                 amplification_completed = False
 
-            self.logger.info("=============== Test Amplification Finished ===============")
+            logger.info("=============== Test Amplification Finished ===============")
             return amplification_completed, True
         else:
             return True, True

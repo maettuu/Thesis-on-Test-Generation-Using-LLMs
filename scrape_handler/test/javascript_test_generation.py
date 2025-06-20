@@ -1,13 +1,20 @@
 import os
 import json
 import pytest
+import traceback
+import docker
+import logging
 
 from datetime import datetime
 from pathlib import Path
+from docker.errors import ImageNotFound
 
-from scrape_handler.core import Config, helpers
+from scrape_handler.core import Config, configure_logger, ExecutionError, helpers
 from scrape_handler.pipeline import run
 from scrape_handler.data_models import PullRequestData
+
+
+logger = logging.getLogger(__name__)
 
 
 class TestHelper:
@@ -23,7 +30,6 @@ class TestHelper:
         self.payload = self._get_payload(payload_path)
         self.config = config
         self.run_id = run_id
-        self.logger = None
         self.mock_response_generation = self._get_file_content(mock_response_generation_path)
         self.mock_response_amplification = self._get_file_content(mock_response_amplification_path)
         self.run_all_models = run_all_models
@@ -60,18 +66,27 @@ class TestHelper:
             while iAttempt < len(self.config.prompt_combinations_gen["include_golden_code"]) and (not stop or self.run_all_models):
                 pr_data = PullRequestData.from_payload(self.payload)
                 log_dir = self.config.setup_log_dir(pr_data.id, timestamp, iAttempt, model)
-                self.logger = self.config.init_logger(self.run_id)
+                configure_logger(self.config.run_log_dir, self.run_id)
+                logger.info("Starting combination %d with model %s" % (iAttempt + 1, model))
 
-                self.logger.info("[*] Starting combination %d with model %s" % (iAttempt + 1, model))
-                response, stop = run(pr_data,
-                                     self.config,
-                                     self.logger,
-                                     log_dir=log_dir,
-                                     model=model,
-                                     model_test_generation=self.mock_response_generation,
-                                     model_test_amplification=self.mock_response_amplification,
-                                     iAttempt=iAttempt,
-                                     post_comment=False)
+                try:
+                    response, stop = run(pr_data,
+                                         self.config,
+                                         log_dir=log_dir,
+                                         model=model,
+                                         model_test_generation=self.mock_response_generation,
+                                         model_test_amplification=self.mock_response_amplification,
+                                         iAttempt=iAttempt,
+                                         post_comment=False)
+                except ExecutionError:
+                    err = traceback.format_exc()
+                    logger.critical("Failed with error:\n%s" % err)
+                    return {'status': 'failed', 'error': 'Internal execution error occurred'}
+                except Exception as e:
+                    logger.critical("Failed with unexpected error:\n%s" % e)
+                    return {'status': 'failed', 'error': f'Unexpected error occurred'}
+
+                logger.success(f"Combination %d with model %s finished successfully." % (iAttempt + 1, model))
                 if stop:
                     post_comment = False
                 if not Path(self.config.run_log_dir, 'results.csv').exists():
@@ -83,18 +98,27 @@ class TestHelper:
 
         if not stop:
             model = "o3-mini"
-            self.logger.info("[*] Starting o3-mini...")
+            logger.info("Starting o3-mini...")
             pr_data = PullRequestData.from_payload(self.payload)
             log_dir = self.config.setup_log_dir(pr_data.id, timestamp, 0, model)
-            self.logger = self.config.init_logger(self.run_id)
+            configure_logger(self.config.run_log_dir, self.run_id)
 
-            response, stop = run(pr_data,
-                                 self.config,
-                                 self.logger,
-                                 log_dir=log_dir,
-                                 model=model,
-                                 iAttempt=0,
-                                 post_comment=post_comment)
+            try:
+                response, stop = run(pr_data,
+                                     self.config,
+                                     log_dir=log_dir,
+                                     model=model,
+                                     iAttempt=0,
+                                     post_comment=post_comment)
+            except ExecutionError:
+                err = traceback.format_exc()
+                logger.critical("Failed with error:\n%s" % err)
+                return {'status': 'failed', 'error': 'Internal execution error occurred'}
+            except Exception as e:
+                logger.critical("Failed with unexpected error:\n%s" % e)
+                return {'status': 'failed', 'error': f'Unexpected error occurred'}
+
+            logger.success("o3-mini finished successfully.")
             if stop:
                 post_comment = False
             with open(Path(self.config.run_log_dir, 'results.csv'), 'a') as f:
@@ -103,10 +127,21 @@ class TestHelper:
         return response
 
     def cleanup(self):
-        helpers.remove_dir(Path(self.config.cloned_repo_dir))
+        helpers.remove_dir(Path(self.config.cloned_repo_dir), temp_repo=True)
+        image_tag = f"image_{self.payload["repository"]["owner"]["login"]}__{self.payload["repository"]["name"]}-{self.payload["number"]}:latest"
+        try:
+            client = docker.from_env()
+            client.images.remove(image=image_tag, force=True)
+            logger.success(f"Removed Docker image '{image_tag}'")
+        except ImageNotFound:
+            logger.error(f"Tried to remove image '{image_tag}', but it was not found.")
+        except Exception as e:
+            logger.error(f"Failed to remove Docker image '{image_tag}': {e}")
 
 
-@pytest.mark.parametrize("mock_file", sorted(Path("scrape_mocks", "code_only").glob("*.json")))
+mock_files = sorted(Path("scrape_mocks", "code_only").glob("*.json"))
+
+@pytest.mark.parametrize("mock_file", mock_files, ids=[mf.stem for mf in mock_files])
 def test_pr_payload(mock_file):
     run_id = mock_file.stem
     config = Config()
