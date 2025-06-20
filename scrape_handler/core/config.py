@@ -41,7 +41,7 @@ class Config:
 
         ################## Path Config ##################
         self.project_root = Path(__file__).resolve().parent.parent.parent
-        self.bot_log_dir = Path(self.project_root, "scrape_logs") # for parsed requests
+        self.bot_log_dir = Path(self.project_root, "scrape_handler", "test", "scrape_logs") # for parsed requests
         self.run_log_dir = None
 
         self.cloned_repo_dir = "tmp_repo_dir"
