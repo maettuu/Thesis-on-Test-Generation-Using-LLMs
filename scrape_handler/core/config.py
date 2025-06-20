@@ -120,7 +120,3 @@ def configure_logger(run_log_dir, run_id: str):
         datefmt="%Y-%m-%d %H:%M:%S"
     ))
     root.addHandler(fh)
-
-    openai_logger = logging.getLogger("openai.api_requestor")
-    openai_logger.setLevel(logging.WARNING)
-    openai_logger.propagate = False
