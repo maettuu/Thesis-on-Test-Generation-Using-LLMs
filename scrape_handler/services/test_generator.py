@@ -231,11 +231,12 @@ class TestGenerator:
             # If the task was amplification, we don't post a comment upon successful
             # generation, we just run it to benchmark our pipeline
             if self.post_comment and not self.pr_diff_ctx.has_at_least_one_test_file:
-                status_code, response_data = self.gh_api.add_comment_to_pr(comment)
-                if status_code == 201:
-                    logger.success("Comment added successfully!")
-                else:
-                    logger.fail(f"Failed to add comment: {status_code}", response_data)
+                # status_code, response_data = self.gh_api.add_comment_to_pr(comment)
+                # if status_code == 201:
+                #     logger.success("Comment added successfully!")
+                # else:
+                #     logger.fail(f"Failed to add comment: {status_code}", response_data)
+                pass
             else:
                 logger.info("Suggested test for PR:\n\n%s" % comment)
 

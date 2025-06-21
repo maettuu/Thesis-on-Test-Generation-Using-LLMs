@@ -245,7 +245,8 @@ class TestAmplifier:
                                                    coverage_dev_and_ai * 100)
 
                 if self.post_comment:
-                    status_code, response_data = self.gh_api.add_comment_to_pr(comment)
+                    # status_code, response_data = self.gh_api.add_comment_to_pr(comment)
+                    pass
                 else:
                     status_code, response_data = 201, ""
                     logger.info("Would add this comment:\n%s\n" % comment)
