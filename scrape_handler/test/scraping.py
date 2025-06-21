@@ -100,7 +100,25 @@ def is_test_file(filename) -> bool:
 def is_code_file(filename) -> bool:
     return filename.endswith(".js")
 
+def save_pr(payload):
+    pr_number = payload["pull_request"]["number"]
+    filename = f"pdf_js_{pr_number}.json"
+    path = OUTPUT_DIR / "code_only" / filename
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4)
+    print(f"[+] Saved PR #{pr_number} to {path}\n")
+
+def save_pr_amp(payload):
+    pr_number = payload["pull_request"]["number"]
+    filename = f"pdf_js_{pr_number}.json"
+    path = OUTPUT_DIR / "code_test" / filename
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4)
+    print(f"[+] Saved PR #{pr_number} to {path}\n")
+
 def process_pr(curr_pr: dict) -> bool:
+    global valid_payloads, valid_payloads_amp
+
     pr_number = curr_pr["number"]
     print(f"[*] Processing PR #{pr_number}...")
 
@@ -131,10 +149,11 @@ def process_pr(curr_pr: dict) -> bool:
 
     if has_js_code:
         if has_test_code:
-            valid_payloads_amp.append(current_payload)
+            valid_payloads_amp += 1
+            save_pr_amp(current_payload)
         else:
-            valid_payloads.append(current_payload)
-        print(f"[+] Success for PR #{pr_number}\n")
+            valid_payloads += 1
+            save_pr(current_payload)
         return True
     else:
         print(f"[!] No .js changes in PR #{pr_number}\n")
@@ -142,40 +161,23 @@ def process_pr(curr_pr: dict) -> bool:
 
 
 
-TARGET = 5
-OUTPUT_DIR = Path("test", "scrape_mocks")
+TARGET = 1000
+OUTPUT_DIR = Path("scrape_mocks")
 
-valid_payloads = []
-valid_payloads_amp = []
+valid_payloads = 0
+valid_payloads_amp = 0
 page = 1
 
-while len(valid_payloads) < TARGET:
+while valid_payloads < TARGET:
     pr_list = fetch_pr_list(page)
     if not pr_list:
         break
 
     for pr in pr_list:
-        if process_pr(pr) and len(valid_payloads) >= TARGET:
+        if process_pr(pr) and valid_payloads >= TARGET:
             break
 
     page += 1
 
-print(f"[*] Found {len(valid_payloads)} valid payloads")
-print(f"[*] Found {len(valid_payloads_amp)} valid payloads with test files\n")
-
-for payload in valid_payloads:
-    number = payload["pull_request"]["number"]
-    filename = f"pdf_js_{number}.json"
-    path = OUTPUT_DIR / "code_only" / filename
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=4)
-    print(f"[+] Saved PR #{number} to {path}")
-
-print()
-for payload in valid_payloads_amp:
-    number = payload["pull_request"]["number"]
-    filename = f"pdf_js_{number}.json"
-    path = OUTPUT_DIR / "code_test" / filename
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=4)
-    print(f"[+] Saved PR #{number} to {path}")
+print(f"[*] Found {valid_payloads} valid payloads")
+print(f"[*] Found {valid_payloads_amp} valid payloads with test files\n")
