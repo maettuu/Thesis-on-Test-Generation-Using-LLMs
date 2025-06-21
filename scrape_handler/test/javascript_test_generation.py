@@ -17,7 +17,7 @@ from scrape_handler.data_models import PullRequestData
 logger = logging.getLogger(__name__)
 
 
-class TestHelper:
+class RunHelper:
     def __init__(
             self,
             payload_path: str,
@@ -152,7 +152,7 @@ def test_pr_payload(mock_file):
     run_id = mock_file.stem
     config = Config()
 
-    helper = TestHelper(payload_path=str(mock_file), config=config, run_id=run_id, run_all_models=False)
+    helper = RunHelper(payload_path=str(mock_file), config=config, run_id=run_id, run_all_models=False)
     response = helper.run_payload()
     assert response is not None
     assert isinstance(response, dict) or hasattr(response, "status_code")
