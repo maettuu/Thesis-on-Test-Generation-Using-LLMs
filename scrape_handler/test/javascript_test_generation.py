@@ -53,7 +53,6 @@ class TestHelper:
     def run_payload(self):
         stop = False  # we stop when successful
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        post_comment = True
         models = [
             "gpt-4o",
             # "meta-llama/Llama-3.3-70B-Instruct",
@@ -87,8 +86,6 @@ class TestHelper:
                     return {'status': 'failed', 'error': f'Unexpected error occurred'}
 
                 logger.success(f"Combination %d with model %s finished successfully." % (iAttempt + 1, model))
-                if stop:
-                    post_comment = False
                 if not Path(self.config.bot_log_dir, 'results.csv').exists():
                     Path(self.config.bot_log_dir, 'results.csv').write_text(
                         "{:<9},{:<30},{:<9},{:<7}\n".format("prNumber","model","iAttempt","stop"),
@@ -114,7 +111,7 @@ class TestHelper:
                                      log_dir=log_dir,
                                      model=model,
                                      iAttempt=0,
-                                     post_comment=post_comment)
+                                     post_comment=False)
             except ExecutionError:
                 err = traceback.format_exc()
                 logger.critical("Failed with error:\n%s" % err)
@@ -124,8 +121,6 @@ class TestHelper:
                 return {'status': 'failed', 'error': f'Unexpected error occurred'}
 
             logger.success("o3-mini finished successfully.")
-            if stop:
-                post_comment = False
             with open(Path(self.config.run_log_dir, 'results.csv'), 'a') as f:
                 f.write(
                     "{:<9},{:<30},{:<9},{:<7}\n".format(self.payload["number"], model, 1, stop)
