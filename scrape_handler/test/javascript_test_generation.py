@@ -89,10 +89,15 @@ class TestHelper:
                 logger.success(f"Combination %d with model %s finished successfully." % (iAttempt + 1, model))
                 if stop:
                     post_comment = False
-                if not Path(self.config.run_log_dir, 'results.csv').exists():
-                    Path(self.config.run_log_dir, 'results.csv').write_text("prNumber,model,iAttempt,stop\n", encoding="utf-8")
-                with open(Path(self.config.run_log_dir, 'results.csv'), 'a') as f:
-                    f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt + 1, stop))
+                if not Path(self.config.bot_log_dir, 'results.csv').exists():
+                    Path(self.config.bot_log_dir, 'results.csv').write_text(
+                        "{:<9},{:<30},{:<9},{:<7}\n".format("prNumber","model","iAttempt","stop"),
+                        encoding="utf-8"
+                    )
+                with open(Path(self.config.bot_log_dir, 'results.csv'), 'a') as f:
+                    f.write(
+                        "{:<9},{:<30},{:<9},{:<7}\n".format(self.payload["number"], model, iAttempt + 1, stop)
+                    )
 
                 iAttempt += 1
 
@@ -122,7 +127,9 @@ class TestHelper:
             if stop:
                 post_comment = False
             with open(Path(self.config.run_log_dir, 'results.csv'), 'a') as f:
-                f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, 1, stop))
+                f.write(
+                    "{:<9},{:<30},{:<9},{:<7}\n".format(self.payload["number"], model, 1, stop)
+                )
 
         return response
 
