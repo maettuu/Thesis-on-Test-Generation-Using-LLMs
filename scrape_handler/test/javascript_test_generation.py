@@ -139,7 +139,11 @@ class TestHelper:
             logger.error(f"Failed to remove Docker image '{image_tag}': {e}")
 
 
-mock_files = sorted(Path("scrape_mocks", "code_only").glob("*.json"))
+mock_files = sorted(
+    Path("scrape_mocks", "code_only").glob("*.json"),
+    key=lambda p: int(p.stem.rsplit("_", 1)[-1]),
+    reverse=True
+)
 
 @pytest.mark.parametrize("mock_file", mock_files, ids=[mf.stem for mf in mock_files])
 def test_pr_payload(mock_file):
