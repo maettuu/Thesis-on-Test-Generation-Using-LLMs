@@ -181,7 +181,7 @@ class DockerService:
                 return stdout, coverage_report
             else:
                 logger.fail("Test command could not execute.")
-                return result, ""
+                return result[0], ""
         except:
             logger.critical("Docker command failed with: %s" % stdout_output_all)
             raise ExecutionError(f'Docker command failed')
