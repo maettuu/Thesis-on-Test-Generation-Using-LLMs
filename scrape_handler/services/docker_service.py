@@ -173,16 +173,12 @@ class DockerService:
         logger.info("Running test command...")
         exec_result = container.exec_run(test_command, stdout=True, stderr=True)
         stdout_output_all = exec_result.output.decode()
-        try:
-            result = stdout_output_all.split(coverage_report_separator)
-            if len(result) == 2:
-                stdout, coverage_report = result
-                logger.success("Test command executed.")
-                return stdout, coverage_report
-            else:
-                logger.fail("Test command could not execute.")
-                return result[0], ""
-        except:
+        result = stdout_output_all.split(coverage_report_separator)
+        if len(result) == 2:
+            stdout, coverage_report = result
+            logger.success("Test command executed.")
+            return stdout, coverage_report
+        else:
             logger.critical("Docker command failed with: %s" % stdout_output_all)
             raise ExecutionError(f'Docker command failed')
 
