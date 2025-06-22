@@ -72,7 +72,7 @@ class TestAmplifier:
             # 2) log outputs
             amplification_dir = Path(self.log_dir, "amplification")
             (amplification_dir / "dev.txt").write_text(stdout_dev, encoding="utf-8")
-            (amplification_dir / "coverage_report_dev.txt").write_text(coverage_report_dev, encoding="utf-8")
+            if coverage_report_dev: (amplification_dir / "coverage_report_dev.txt").write_text(coverage_report_dev, encoding="utf-8")
 
             # 3) compute offsets
             code_after_arr, stderr = self.pr_diff_ctx.apply_code_patch()
@@ -208,7 +208,8 @@ class TestAmplifier:
             )
 
             (amplification_dir / "dev_and_ai.txt").write_text(stdout_dev_and_ai, encoding="utf-8")
-            (amplification_dir / "coverage_report_dev_and_ai.txt").write_text(test_result_dev_and_ai, encoding="utf-8")
+            if coverage_report_dev_and_ai:
+                (amplification_dir / "coverage_report_dev_and_ai.txt").write_text(coverage_report_dev_and_ai, encoding="utf-8")
 
             # The lines modified by the developer code patch
             modified_lines = [

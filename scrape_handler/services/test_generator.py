@@ -166,7 +166,7 @@ class TestGenerator:
             test_file_diff.name
         )
         (generation_dir / "before.txt").write_text(stdout_before, encoding="utf-8")
-        (generation_dir / "coverage_report_before.txt").write_text(coverage_report_before, encoding="utf-8")
+        if coverage_report_before: (generation_dir / "coverage_report_before.txt").write_text(coverage_report_before, encoding="utf-8")
         new_test_file = f"#{test_filename}\n{new_test_file_content}" if test_file_content else f"#{test_filename}\n{new_test}"
         (generation_dir / "new_test_file_content.js").write_text(new_test_file, encoding="utf-8")
 
@@ -184,7 +184,7 @@ class TestGenerator:
             golden_code_patch=golden_code_patch
         )
         (generation_dir / "after.txt").write_text(stdout_after, encoding="utf-8")
-        (generation_dir / "coverage_report_after.txt").write_text(coverage_report_after, encoding="utf-8")
+        if coverage_report_after: (generation_dir / "coverage_report_after.txt").write_text(coverage_report_after, encoding="utf-8")
 
         isFail2Pass = (test_result_before == "FAIL") and (test_result_after == "PASS")
 

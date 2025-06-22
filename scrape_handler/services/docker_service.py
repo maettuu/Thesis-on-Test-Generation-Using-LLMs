@@ -157,25 +157,34 @@ class DockerService:
             # f'TEST_FILTER="{desc}" npx nyc --all --no-source-map gulp unittest-single'
             for desc in tests_to_run
         ]
+        all_cmds = test_commands + [
+            "npx nyc report --reporter=text > coverage_report.txt",
+            f"echo '{coverage_report_separator}'",
+            "cat coverage_report.txt",
+        ]
+        joined_cmds = " && ".join(all_cmds)
         test_command = (
-            "/bin/sh -c 'cd /app/testbed && "
-            f"{' ; '.join(test_commands)} ; "
-            "npx nyc report --reporter=text > coverage_report.txt && "
-            f"echo '{coverage_report_separator}' && "
-            "cat coverage_report.txt'"
+            "/bin/sh -c '"
+            "cd /app/testbed && "
+            f"{joined_cmds}"
+            "'"
         )
 
         logger.info("Running test command...")
         exec_result = container.exec_run(test_command, stdout=True, stderr=True)
         stdout_output_all = exec_result.output.decode()
-        try:  # TODO: fix, find a better way to handle the "test-not-ran" error
-            stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
+        try:
+            result = stdout_output_all.split(coverage_report_separator)
+            if len(result) == 2:
+                stdout, coverage_report = result
+                logger.success("Test command executed.")
+                return stdout, coverage_report
+            else:
+                logger.fail("Test command could not execute.")
+                return result, ""
         except:
-            logger.critical("Internal error: docker command failed with: %s" % stdout_output_all)
+            logger.critical("Docker command failed with: %s" % stdout_output_all)
             raise ExecutionError(f'Docker command failed')
-        logger.success("Test command executed.")
-
-        return stdout, coverage_report
 
     def evaluate_test(self, stdout) -> str:
         if re.search(r'\b0\s+specs\b', stdout):  # No tests were executed
