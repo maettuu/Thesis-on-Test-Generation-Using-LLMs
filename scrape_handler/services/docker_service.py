@@ -201,5 +201,5 @@ class DockerService:
                 logger.error("Error in test execution. Evaluation failed.")
                 return "FAIL"
 
-        logger.info(f"Test evaluated as 'PASS'") if test_result == "PASS" else logger.fail(f"Test evaluated as 'FAIL'")
+        logger.info(f"Test evaluated as PASS") if test_result == "PASS" else logger.fail(f"Test evaluated as FAIL")
         return test_result
