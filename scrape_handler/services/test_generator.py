@@ -26,7 +26,6 @@ class TestGenerator:
         gh_api: GitHubApi,
         llm_handler: LLMHandler,
         docker_service: DockerService,
-        log_dir: Path,
         post_comment: bool,
         model_test_generation: str = None,
         iAttempt: int = 0,
@@ -40,7 +39,6 @@ class TestGenerator:
         self.gh_api                = gh_api
         self.llm_handler           = llm_handler
         self.docker_service        = docker_service
-        self.log_dir               = log_dir
         self.post_comment          = post_comment
         self.model_test_generation = model_test_generation
         self.iAttempt              = iAttempt
@@ -50,7 +48,7 @@ class TestGenerator:
 
     def generate(self, go_to_gen: bool) -> bool:
         if not go_to_gen:
-            logger.fail("Test Generation aborted.")
+            logger.fail("Test Generation aborted")
             return False
 
         logger.info("=============== Test Generation Started ===============")
@@ -108,7 +106,7 @@ class TestGenerator:
             logger.warning("Prompt exceeds limits, skipping...")
             raise ValueError("")
 
-        generation_dir = Path(self.log_dir, "generation")
+        generation_dir = Path(self.config.output_dir, "generation")
         (generation_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
         if self.model_test_generation is None:  # if not mock, query model
@@ -150,7 +148,7 @@ class TestGenerator:
             new_test_file_content,
             fromfile=test_filename,
             tofile=test_filename
-        ) + "\n"
+        ) + "\n\n"
 
         test_file_diff = PullRequestFileDiff(test_filename, test_file_content, new_test_file_content)
 
@@ -233,7 +231,7 @@ class TestGenerator:
             if self.post_comment and not self.pr_diff_ctx.has_at_least_one_test_file:
                 # status_code, response_data = self.gh_api.add_comment_to_pr(comment)
                 # if status_code == 201:
-                #     logger.success("Comment added successfully!")
+                #     logger.success("Comment added successfully")
                 # else:
                 #     logger.fail(f"Failed to add comment: {status_code}", response_data)
                 pass

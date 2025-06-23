@@ -505,11 +505,13 @@ def get_contents_of_test_file_to_inject(
         pr_id,
         repo_dir
 ):
+    logger.info("Fetching test file for injection...")
     test_filename, test_file_content = find_file_to_inject(base_commit, golden_code_patch, repo_dir)
     if not test_file_content:
         logger.warning(f"No suitable test file {test_filename} found. New file created.")
         return test_filename, "", ""
     else:
+        logger.success("Test file found")
         test_file_content_sliced = keep_first_N_defs(parse_language, test_file_content)
 
     return test_filename, test_file_content, test_file_content_sliced
@@ -702,7 +704,7 @@ def remove_dir(path: Path, max_retries: int = 3, delay: float = 0.1, temp_repo: 
     for attempt in range(max_retries):
         try:
             shutil.rmtree(path, onerror=on_error)
-            if temp_repo: logger.success(f"Directory {path} removed successfully.")
+            if temp_repo: logger.success(f"Directory {path} removed successfully")
             return
         except Exception as e:
             if attempt < max_retries:

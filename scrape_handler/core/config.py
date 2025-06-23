@@ -42,21 +42,23 @@ class Config:
         ################## Path Config ##################
         self.project_root = Path(__file__).resolve().parent.parent.parent
         self.bot_log_dir = Path(self.project_root, "scrape_handler", "test", "scrape_logs") # for parsed requests
-        self.run_log_dir = None
-
+        Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
+        self.pr_log_dir = None
+        self.output_dir = None
         self.cloned_repo_dir = "tmp_repo_dir"
 
-    def setup_log_dir(self, instance_id: str, timestamp: str, iAttempt: int, model: str) -> Path:
-        Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
-        self.run_log_dir = Path(self.bot_log_dir, instance_id + "_%s" % timestamp)
-        log_dir = Path(
-            self.run_log_dir,
+    def setup_pr_log_dir(self, instance_id: str, timestamp: str):
+        self.pr_log_dir = Path(self.bot_log_dir, instance_id + "_%s" % timestamp)
+        Path(self.pr_log_dir).mkdir(parents=True, exist_ok=True)
+
+    def setup_output_dir(self, iAttempt: int, model: str):
+        self.output_dir = Path(
+            self.pr_log_dir,
             "i%s" % (iAttempt + 1) + "_%s" % model
         )
-        Path(log_dir).mkdir(parents=True, exist_ok=True)
-        Path(log_dir, "generation").mkdir(parents=True)
-        Path(log_dir, "amplification").mkdir(parents=True)
-        return log_dir
+        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        Path(self.output_dir, "generation").mkdir(parents=True)
+        Path(self.output_dir, "amplification").mkdir(parents=True)
 
 
 SUCCESS_LEVEL_NUM = 25
@@ -92,8 +94,8 @@ class ColoredFormatter(logging.Formatter):
         return f"{color}{msg}{self.RESET}"
 
 
-def configure_logger(run_log_dir, run_id: str):
-    logfile = Path(run_log_dir, f"{run_id}.log")
+def configure_logger(pr_log_dir, run_id: str):
+    logfile = Path(pr_log_dir, f"{run_id}.log")
 
     # get root logger (or you can pick a named one)
     root = logging.getLogger()
@@ -107,7 +109,7 @@ def configure_logger(run_log_dir, run_id: str):
     ch = logging.StreamHandler()
     ch.setLevel("INFO")
     ch.setFormatter(ColoredFormatter(
-        "[%(asctime)s] %(levelname)-8s: %(message)s",
+        "[%(asctime)s] %(levelname)-9s: %(message)s",
         datefmt="%H:%M:%S"
     ))
     root.addHandler(ch)

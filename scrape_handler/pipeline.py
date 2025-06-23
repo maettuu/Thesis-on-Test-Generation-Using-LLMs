@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 def run(
         pr_data,
         config: Config,
-        log_dir,
         dockerfile=None,
         model_test_generation=None,
         model_test_amplification=None,
@@ -72,7 +71,6 @@ def run(
         gh_api,
         llm_handler,
         docker_service,
-        log_dir,
         post_comment,
         model_test_amplification,
         iAttempt,
@@ -86,7 +84,6 @@ def run(
         gh_api,
         llm_handler,
         docker_service,
-        log_dir,
         post_comment,
         model_test_generation,
         iAttempt,

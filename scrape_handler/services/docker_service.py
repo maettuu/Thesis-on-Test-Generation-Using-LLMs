@@ -39,7 +39,7 @@ class DockerService:
             logger.info(f"Docker image '{image_tag}' already exists – skipped")
             return
         except ImageNotFound:
-            logger.warning(f"No existing image '{image_tag}' found.")
+            logger.warning(f"No existing image '{image_tag}' found")
         except APIError as e:
             logger.error(f"Docker API error when checking for existing image: {e}")
 
@@ -57,7 +57,7 @@ class DockerService:
                 rm=True
             )
 
-            logger.success(f"Docker image '{self.pr_data.image_tag}' built successfully.")
+            logger.success(f"Docker image '{self.pr_data.image_tag}' built successfully")
         except BuildError as e:
             # Print every line from the build logs to stdout/stderr
             for chunk in e.build_log:
@@ -67,7 +67,7 @@ class DockerService:
             raise ExecutionError(f'Docker build failed')
         except APIError as e:
             logger.critical(f"Docker API error: {e}")
-            raise ExecutionError(f'Docker API error')
+            raise ExecutionError('Docker API error')
 
     def run_test_in_container(self, model_test_patch, tests_to_run, added_test_file: str, golden_code_patch=None):
         """Creates a container, applies the patch, runs the test, and returns the result."""
@@ -80,7 +80,7 @@ class DockerService:
                 detach=True
             )
             container.start()
-            logger.success(f"Container {container.short_id} started.")
+            logger.success(f"Container {container.short_id} started")
 
             # Check if the test file is already in the container, add stub otherwise
             exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{added_test_file}'")
@@ -110,7 +110,7 @@ class DockerService:
             logger.warning("Stopping and removing container...")
             container.stop()
             container.remove()
-            logger.success("Container stopped and removed.")
+            logger.success("Container stopped and removed")
 
     @staticmethod
     def add_file_to_container(container, file_path, file_content: str = ""):
@@ -119,15 +119,20 @@ class DockerService:
             ti = tarfile.TarInfo(name=file_path)
             ti.size = len(file_content)
             tar.addfile(ti, io.BytesIO(file_content.encode("utf-8")))
-        # Copy it into /app/testbed
-        container.put_archive("/app/testbed", tar_stream.getvalue())
+        try:
+            # Copy it into /app/testbed
+            container.put_archive("/app/testbed", tar_stream.getvalue())
+        except APIError as e:
+            logger.critical(f"Docker API error: {e}")
+            raise ExecutionError('Docker API error')
+
 
     def whitelist_stub(self, container, added_test_file):
         whitelist_path = "test/unit/clitests.json"
         read = container.exec_run(f"/bin/sh -c 'cd /app/testbed && cat {whitelist_path}'")
         if read.exit_code != 0:
-            logger.fail(f"Could not read clitests.json: {read.output.decode()}")
-            return "ERROR", read.exit_code, ""
+            logger.critical(f"Could not read clitests.json: {read.output.decode()}")
+            raise ExecutionError('Failed to whitelist stub')
 
         whitelist = json.loads(read.output.decode())
         if added_test_file not in whitelist["spec_files"]:
@@ -137,17 +142,17 @@ class DockerService:
 
     def copy_and_apply_patch(self, container, code_patch_content, code_patch_name):
         self.add_file_to_container(container, code_patch_name, code_patch_content)
-        logger.success(f"Patch file copied to /app/testbed/{code_patch_name}")
+        logger.info(f"Patch file copied to /app/testbed/{code_patch_name}")
 
         # Apply the patch inside the container
         apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && patch -p1 < {code_patch_name}'"
         exec_result = container.exec_run(apply_patch_cmd)
 
         if exec_result.exit_code != 0:
-            logger.fail(f"Failed to apply patch: {exec_result.output.decode()}")
-            return "ERROR", exec_result.exit_code, ""
+            logger.critical(f"Failed to apply patch: {exec_result.output.decode()}")
+            raise ExecutionError('Failed to apply patch')
 
-        logger.success("Patch applied successfully.")
+        logger.success("Patch applied successfully")
 
     @staticmethod
     def run_test(container, tests_to_run):
@@ -175,7 +180,7 @@ class DockerService:
         stdout_output_all = exec_result.output.decode()
         try:
             stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
-            logger.success("Test command executed.")
+            logger.success("Test command executed")
             return stdout, coverage_report
         except:
             logger.critical("Docker command failed with: %s" % stdout_output_all)
@@ -193,7 +198,7 @@ class DockerService:
                 test_result = "PASS" if num_failures == 0 else "FAIL"
             else:
                 # If the summary line cannot be found, consider it a failure (or handle as needed)
-                logger.fail("Could not determine test summary from output.")
+                logger.error("Test execution failed")
                 test_result = "FAIL"
 
         logger.info(f"Test PASSed") if test_result == "PASS" else logger.fail(f"Test FAILed")

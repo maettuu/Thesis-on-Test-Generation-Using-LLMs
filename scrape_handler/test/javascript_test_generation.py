@@ -53,6 +53,16 @@ class RunHelper:
     def run_payload(self):
         stop = False  # we stop when successful
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        pr_data = PullRequestData.from_payload(self.payload)
+        self.config.setup_pr_log_dir(pr_data.id, timestamp)
+        configure_logger(self.config.pr_log_dir, self.run_id)
+        logger.info(f"============ Running Payload #{self.run_id.rsplit("_", 1)[-1]} ============")
+        if not Path(self.config.bot_log_dir, 'results.csv').exists():
+            Path(self.config.bot_log_dir, 'results.csv').write_text(
+                "{:<9},{:<30},{:<9},{:<7}\n".format("prNumber", "model", "iAttempt", "stop"),
+                encoding="utf-8"
+            )
+
         models = [
             "gpt-4o",
             # "meta-llama/Llama-3.3-70B-Instruct",
@@ -63,15 +73,11 @@ class RunHelper:
         for model in models:
             iAttempt = 0
             while iAttempt < len(self.config.prompt_combinations_gen["include_golden_code"]) and (not stop or self.run_all_models):
-                pr_data = PullRequestData.from_payload(self.payload)
-                log_dir = self.config.setup_log_dir(pr_data.id, timestamp, iAttempt, model)
-                configure_logger(self.config.run_log_dir, self.run_id)
+                self.config.setup_output_dir(iAttempt, model)
                 logger.info("Starting combination %d with model %s" % (iAttempt + 1, model))
-
                 try:
                     response, stop = run(pr_data,
                                          self.config,
-                                         log_dir=log_dir,
                                          model=model,
                                          model_test_generation=self.mock_response_generation,
                                          model_test_amplification=self.mock_response_amplification,
@@ -85,12 +91,7 @@ class RunHelper:
                     logger.critical("Failed with unexpected error:\n%s" % e)
                     return {'status': 'failed', 'error': f'Unexpected error occurred'}
 
-                logger.success(f"Combination %d with model %s finished successfully." % (iAttempt + 1, model))
-                if not Path(self.config.bot_log_dir, 'results.csv').exists():
-                    Path(self.config.bot_log_dir, 'results.csv').write_text(
-                        "{:<9},{:<30},{:<9},{:<7}\n".format("prNumber","model","iAttempt","stop"),
-                        encoding="utf-8"
-                    )
+                logger.success(f"Combination %d with model %s finished successfully" % (iAttempt + 1, model))
                 with open(Path(self.config.bot_log_dir, 'results.csv'), 'a') as f:
                     f.write(
                         "{:<9},{:<30},{:<9},{:<7}\n".format(self.payload["number"], model, iAttempt + 1, stop)
@@ -100,15 +101,11 @@ class RunHelper:
 
         if not stop:
             model = "o3-mini"
-            logger.info("Starting o3-mini...")
-            pr_data = PullRequestData.from_payload(self.payload)
-            log_dir = self.config.setup_log_dir(pr_data.id, timestamp, 0, model)
-            configure_logger(self.config.run_log_dir, self.run_id)
-
+            self.config.setup_output_dir(0, model)
+            logger.info("Starting with model o3-mini")
             try:
                 response, stop = run(pr_data,
                                      self.config,
-                                     log_dir=log_dir,
                                      model=model,
                                      iAttempt=0,
                                      post_comment=False)
@@ -120,8 +117,8 @@ class RunHelper:
                 logger.critical("Failed with unexpected error:\n%s" % e)
                 return {'status': 'failed', 'error': f'Unexpected error occurred'}
 
-            logger.success("o3-mini finished successfully.")
-            with open(Path(self.config.run_log_dir, 'results.csv'), 'a') as f:
+            logger.success("o3-mini finished successfully")
+            with open(Path(self.config.bot_log_dir, 'results.csv'), 'a') as f:
                 f.write(
                     "{:<9},{:<30},{:<9},{:<7}\n".format(self.payload["number"], model, 1, stop)
                 )
@@ -136,7 +133,7 @@ class RunHelper:
             client.images.remove(image=image_tag, force=True)
             logger.success(f"Removed Docker image '{image_tag}'")
         except ImageNotFound:
-            logger.error(f"Tried to remove image '{image_tag}', but it was not found.")
+            logger.error(f"Tried to remove image '{image_tag}', but it was not found")
         except Exception as e:
             logger.error(f"Failed to remove Docker image '{image_tag}': {e}")
 

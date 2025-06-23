@@ -107,4 +107,4 @@ class GitHubApi:
             ["git", "clone", f"https://github.com/{self.pr_data.owner}/{self.pr_data.repo}.git",
              tmp_repo_dir],
             capture_output=True, check=True)
-        logger.success(f"Cloning successful.")
+        logger.success(f"Cloning successful")

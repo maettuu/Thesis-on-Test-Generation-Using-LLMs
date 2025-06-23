@@ -26,7 +26,6 @@ class TestAmplifier:
         gh_api: GitHubApi,
         llm_handler: LLMHandler,
         docker_service: DockerService,
-        log_dir: Path,
         post_comment: bool,
         model_test_amplification: str = None,
         iAttempt: int = 0,
@@ -40,7 +39,6 @@ class TestAmplifier:
         self.gh_api                   = gh_api
         self.llm_handler              = llm_handler
         self.docker_service           = docker_service
-        self.log_dir                  = log_dir
         self.post_comment             = post_comment
         self.model_test_amplification = model_test_amplification
         self.iAttempt                 = iAttempt
@@ -70,7 +68,7 @@ class TestAmplifier:
                 return amplification_completed, False
 
             # 2) log outputs
-            amplification_dir = Path(self.log_dir, "amplification")
+            amplification_dir = Path(self.config.output_dir, "amplification")
             (amplification_dir / "dev.txt").write_text(stdout_dev, encoding="utf-8")
             if coverage_report_dev: (amplification_dir / "coverage_report_dev.txt").write_text(coverage_report_dev, encoding="utf-8")
 
@@ -253,7 +251,7 @@ class TestAmplifier:
                     logger.info("Would add this comment:\n%s\n" % comment)
 
                 if status_code == 201:
-                    logger.success("Comment added successfully!")
+                    logger.success("Comment added successfully")
                 else:
                     logger.fail(f"Failed to add comment: {status_code}", response_data)
 
