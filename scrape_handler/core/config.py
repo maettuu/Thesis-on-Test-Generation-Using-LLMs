@@ -89,7 +89,7 @@ class ColoredFormatter(logging.Formatter):
         logging.INFO:      "\x1b[94m",        # bright blue
         MARKER_LEVEL_NUM:  "\x1b[96m",        # bright cyan
         SUCCESS_LEVEL_NUM: "\x1b[32m",        # green
-        logging.WARNING:   "\x1b[38;5;202m",  # orange
+        logging.WARNING:   "\x1b[38;5;208m",  # bright orange
         FAIL_LEVEL_NUM:    "\x1b[31m",        # red
         logging.ERROR:     "\x1b[31m",        # red
         logging.CRITICAL:  "\x1b[91;1m"       # bold bright red
