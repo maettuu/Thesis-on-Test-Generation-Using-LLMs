@@ -1,5 +1,4 @@
 import docker
-import sys
 import io
 import tarfile
 import re
@@ -150,16 +149,17 @@ class DockerService:
 
         logger.success("Patch applied successfully.")
 
-    def run_test(self, container, tests_to_run):
+    @staticmethod
+    def run_test(container, tests_to_run):
         coverage_report_separator = "COVERAGE_REPORT_STARTING_HERE"
         test_commands = [
-            f'TEST_FILTER="{desc}" npx nyc gulp unittest-single'
+            f"TEST_FILTER=\"{desc}\" npx nyc gulp unittest-single || true"
             # f'TEST_FILTER="{desc}" npx nyc --all --no-source-map gulp unittest-single'
             for desc in tests_to_run
         ]
         all_cmds = test_commands + [
             "npx nyc report --reporter=text > coverage_report.txt",
-            f"echo '{coverage_report_separator}'",
+            f"echo \"{coverage_report_separator}\"",
             "cat coverage_report.txt",
         ]
         joined_cmds = " && ".join(all_cmds)
@@ -173,16 +173,16 @@ class DockerService:
         logger.info("Running test command...")
         exec_result = container.exec_run(test_command, stdout=True, stderr=True)
         stdout_output_all = exec_result.output.decode()
-        result = stdout_output_all.split(coverage_report_separator)
-        if len(result) == 2:
-            stdout, coverage_report = result
+        try:
+            stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
             logger.success("Test command executed.")
             return stdout, coverage_report
-        else:
+        except:
             logger.critical("Docker command failed with: %s" % stdout_output_all)
             raise ExecutionError(f'Docker command failed')
 
-    def evaluate_test(self, stdout) -> str:
+    @staticmethod
+    def evaluate_test(stdout) -> str:
         if re.search(r'\b0\s+specs\b', stdout):  # No tests were executed
             test_result = "FAIL"
         else:

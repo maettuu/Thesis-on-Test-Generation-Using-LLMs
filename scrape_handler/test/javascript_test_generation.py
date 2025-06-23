@@ -157,6 +157,3 @@ def test_pr_payload(mock_file):
     assert response is not None
     assert isinstance(response, dict) or hasattr(response, "status_code")
     helper.cleanup()
-
-
-

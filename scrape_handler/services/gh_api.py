@@ -74,7 +74,8 @@ class GitHubApi:
             logger.warning("No GitHub issue found. Checking Bugzilla...")
             return self.is_bugzilla_issue(number)
 
-    def is_bugzilla_issue(self, number: int):
+    @staticmethod
+    def is_bugzilla_issue(number: int):
         bugzilla_url = f"https://bugzilla.mozilla.org/rest/bug/{number}"
         response = requests.get(bugzilla_url)
         if response.status_code == 200:

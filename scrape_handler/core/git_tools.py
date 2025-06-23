@@ -12,6 +12,7 @@ from .execution_error import ExecutionError
 
 logger = logging.getLogger(__name__)
 
+
 def unified_diff_with_function_context(string1, string2, fname="tempfile.py", context_lines=3):
     """
     Writes two input strings to temporary files and uses `git diff --no-index`

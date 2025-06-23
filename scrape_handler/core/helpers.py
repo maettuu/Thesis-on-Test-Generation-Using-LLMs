@@ -15,10 +15,9 @@ from io import BytesIO
 from pathlib import Path
 from collections import Counter, defaultdict
 
-from .execution_error import ExecutionError
-
 
 logger = logging.getLogger(__name__)
+
 
 def is_test_file(filepath, test_folder=''):
     is_in_test_folder = False
