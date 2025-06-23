@@ -56,7 +56,7 @@ class RunHelper:
         pr_data = PullRequestData.from_payload(self.payload)
         self.config.setup_pr_log_dir(pr_data.id, timestamp)
         configure_logger(self.config.pr_log_dir, self.run_id)
-        logger.marker(f"============ Running Payload #{self.run_id.rsplit("_", 1)[-1]} ============")
+        logger.marker(f"============ Running Payload #{pr_data.number} ============")
         if not Path(self.config.bot_log_dir, 'results.csv').exists():
             Path(self.config.bot_log_dir, 'results.csv').write_text(
                 "{:<9},{:<30},{:<9},{:<7}\n".format("prNumber", "model", "iAttempt", "stop"),
@@ -97,6 +97,12 @@ class RunHelper:
                         "{:<9},{:<30},{:<9},{:<7}\n".format(self.payload["number"], model, iAttempt + 1, stop)
                     )
 
+                if stop:
+                    gen_test = Path(self.config.output_dir, "generation", "generated_test.txt").read_text(
+                        encoding="utf-8")
+                    new_filename = f"{self.run_id}_${self.config.output_dir.name}.txt"
+                    Path(self.config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
+
                 iAttempt += 1
 
         if not stop:
@@ -122,6 +128,11 @@ class RunHelper:
                 f.write(
                     "{:<9},{:<30},{:<9},{:<7}\n".format(self.payload["number"], model, 1, stop)
                 )
+
+            if stop:
+                gen_test = Path(self.config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
+                new_filename = f"{self.run_id}_${self.config.output_dir.name}.txt"
+                Path(self.config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
 
         return response
 

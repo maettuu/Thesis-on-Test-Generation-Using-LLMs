@@ -43,6 +43,8 @@ class Config:
         self.project_root = Path(__file__).resolve().parent.parent.parent
         self.bot_log_dir = Path(self.project_root, "scrape_handler", "test", "scrape_logs") # for parsed requests
         Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
+        self.gen_test_dir = Path(self.project_root, "scrape_handler", "test", "generated_tests")
+        Path(self.gen_test_dir).mkdir(parents=True, exist_ok=True)
         self.pr_log_dir = None
         self.output_dir = None
         self.cloned_repo_dir = "tmp_repo_dir"
