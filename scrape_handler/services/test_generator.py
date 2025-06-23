@@ -51,7 +51,7 @@ class TestGenerator:
             logger.fail("Test Generation aborted")
             return False
 
-        logger.info("=============== Test Generation Started ===============")
+        logger.marker("=============== Test Generation Started ===============")
         generation_completed = False
 
         # Calculate temporal coupling to find where to inject the test
@@ -170,7 +170,7 @@ class TestGenerator:
 
         if test_result_before == "PASS":
             logger.fail("No Fail-to-Pass test generated")
-            logger.info("=============== Test Generation Finished ===============")
+            logger.marker("=============== Test Generation Finished ===============")
             return generation_completed
 
         #### Run test in post-PR codebase
@@ -243,5 +243,5 @@ class TestGenerator:
             logger.fail("No Fail-to-Pass test generated")
             generation_completed = False
 
-        logger.info("=============== Test Generation Finished ===============")
+        logger.marker("=============== Test Generation Finished ===============")
         return generation_completed

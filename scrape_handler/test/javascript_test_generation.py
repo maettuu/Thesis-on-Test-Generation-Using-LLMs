@@ -56,7 +56,7 @@ class RunHelper:
         pr_data = PullRequestData.from_payload(self.payload)
         self.config.setup_pr_log_dir(pr_data.id, timestamp)
         configure_logger(self.config.pr_log_dir, self.run_id)
-        logger.info(f"============ Running Payload #{self.run_id.rsplit("_", 1)[-1]} ============")
+        logger.marker(f"============ Running Payload #{self.run_id.rsplit("_", 1)[-1]} ============")
         if not Path(self.config.bot_log_dir, 'results.csv').exists():
             Path(self.config.bot_log_dir, 'results.csv').write_text(
                 "{:<9},{:<30},{:<9},{:<7}\n".format("prNumber", "model", "iAttempt", "stop"),
@@ -74,7 +74,7 @@ class RunHelper:
             iAttempt = 0
             while iAttempt < len(self.config.prompt_combinations_gen["include_golden_code"]) and (not stop or self.run_all_models):
                 self.config.setup_output_dir(iAttempt, model)
-                logger.info("Starting combination %d with model %s" % (iAttempt + 1, model))
+                logger.marker("Starting combination %d with model %s" % (iAttempt + 1, model))
                 try:
                     response, stop = run(pr_data,
                                          self.config,
@@ -102,7 +102,7 @@ class RunHelper:
         if not stop:
             model = "o3-mini"
             self.config.setup_output_dir(0, model)
-            logger.info("Starting with model o3-mini")
+            logger.marker("Starting with model o3-mini")
             try:
                 response, stop = run(pr_data,
                                      self.config,

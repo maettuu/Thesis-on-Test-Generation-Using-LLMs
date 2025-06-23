@@ -60,6 +60,12 @@ class Config:
         Path(self.output_dir, "generation").mkdir(parents=True)
         Path(self.output_dir, "amplification").mkdir(parents=True)
 
+MARKER_LEVEL_NUM = 21
+logging.addLevelName(MARKER_LEVEL_NUM, "MARKER")
+def marker(self, message, *args, **kws):
+    if self.isEnabledFor(MARKER_LEVEL_NUM):
+        self._log(MARKER_LEVEL_NUM, message, args, **kws)
+logging.Logger.marker = marker
 
 SUCCESS_LEVEL_NUM = 25
 logging.addLevelName(SUCCESS_LEVEL_NUM, "SUCCESS")
@@ -80,12 +86,13 @@ class ColoredFormatter(logging.Formatter):
     RESET  = "\x1b[0m"
     COLORS = {
         logging.DEBUG:     "\x1b[90m",        # grey
-        logging.INFO:      "\x1b[34m",        # blue
+        logging.INFO:      "\x1b[94m",        # bright blue
+        MARKER_LEVEL_NUM:  "\x1b[96m",        # bright cyan
         SUCCESS_LEVEL_NUM: "\x1b[32m",        # green
         logging.WARNING:   "\x1b[38;5;202m",  # orange
         FAIL_LEVEL_NUM:    "\x1b[31m",        # red
         logging.ERROR:     "\x1b[31m",        # red
-        logging.CRITICAL:  "\x1b[31;1m"       # bold red
+        logging.CRITICAL:  "\x1b[91;1m"       # bold bright red
     }
 
     def format(self, record):

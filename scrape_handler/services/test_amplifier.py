@@ -50,7 +50,7 @@ class TestAmplifier:
         """Returns (amplification_succeeded, should_run_generation)"""
         if self.pr_diff_ctx.has_at_least_one_test_file:
             amplification_completed = False
-            logger.info("=============== Test Amplification Started ===============")
+            logger.marker("=============== Test Amplification Started ===============")
 
             # 1) run developer tests
             tests_to_run = []
@@ -263,7 +263,7 @@ class TestAmplifier:
                 logger.warning("No new lines covered by AI")
                 amplification_completed = False
 
-            logger.info("=============== Test Amplification Finished ===============")
+            logger.marker("=============== Test Amplification Finished ===============")
             return amplification_completed, True
         else:
             return True, True
