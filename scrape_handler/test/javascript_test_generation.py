@@ -100,8 +100,9 @@ class RunHelper:
                 if stop:
                     gen_test = Path(self.config.output_dir, "generation", "generated_test.txt").read_text(
                         encoding="utf-8")
-                    new_filename = f"{self.run_id}_${self.config.output_dir.name}.txt"
+                    new_filename = f"{self.run_id}_{self.config.output_dir.name}.txt"
                     Path(self.config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
+                    logger.success(f"Test file copied to {self.config.gen_test_dir}/{new_filename}")
 
                 iAttempt += 1
 
@@ -131,9 +132,11 @@ class RunHelper:
 
             if stop:
                 gen_test = Path(self.config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
-                new_filename = f"{self.run_id}_${self.config.output_dir.name}.txt"
+                new_filename = f"{self.run_id}_{self.config.output_dir.name}.txt"
                 Path(self.config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
+                logger.success(f"Test file copied to {self.config.gen_test_dir}/{new_filename}")
 
+        logger.marker(f"============ Finished Payload #{pr_data.number} ============")
         return response
 
     def cleanup(self):
