@@ -121,11 +121,8 @@ class TestGenerator:
                 raise ExecutionError('Failed to query model')
 
             logger.success("LLM response received")
-            new_test = helpers.adjust_function_indentation(
-                response.removeprefix('```javascript').replace('```', '').lstrip('\n')
-            )
-
             (generation_dir / "raw_model_response.txt").write_text(response, encoding="utf-8")
+            new_test = helpers.postprocess_response(response)
         else:
             new_test = self.model_test_generation
 

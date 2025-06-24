@@ -278,6 +278,14 @@ def adjust_function_indentation(function_code: str) -> str:
     return "\n".join(adjusted_lines)
 
 
+def postprocess_response(raw: str) -> str:
+    cleaned_test = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
+    cleaned_test = cleaned_test.replace('```javascript', '')
+    cleaned_test = cleaned_test.replace('```', '')
+    cleaned_test = cleaned_test.lstrip('\n')
+    return adjust_function_indentation(cleaned_test)
+
+
 def get_best_file_to_inject_golden(pr_diff_ctx, new_test):
     """The golden test patch may contain >1 edited test file. In that case,
     we seek the most similar (token-wise) to the generated test (new_test) and

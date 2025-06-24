@@ -108,11 +108,15 @@ class TestAmplifier:
 
             # 6) query or mock
             if self.model_test_amplification is None:
+                logger.info("Querying LLM...")
                 response = self.llm_handler.query_model(prompt, model=self.model, T=0.0)
+                if not response:
+                    logger.critical("Failed to query model")
+                    raise ExecutionError('Failed to query model')
+
+                logger.success("LLM response received")
                 (amplification_dir / "raw_model_response.txt").write_text(response, encoding="utf-8")
-                new_test = helpers.adjust_function_indentation(
-                    response.removeprefix('```javascript').replace('```', '').lstrip('\n')
-                )
+                new_test = helpers.postprocess_response(response)
             else:
                 logger.info("Using mocked model response for amplification")
                 new_test = self.model_test_amplification
