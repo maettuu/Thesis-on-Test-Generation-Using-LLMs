@@ -98,7 +98,18 @@ def is_test_file(filename) -> bool:
     return False
 
 def is_code_file(filename) -> bool:
-    return filename.endswith(".js")
+    is_in_src_folder = False
+    parts = filename.split('/')
+
+    # We want the file to be in a dir where at least one folder in the dir path starts with src
+    for part in parts[:-1]:
+        if part.startswith('src'):
+            is_in_src_folder = True
+            break
+
+    if is_in_src_folder and parts[-1].endswith(".js"):
+        return True
+    return False
 
 def save_pr(payload):
     pr_number = payload["pull_request"]["number"]
@@ -156,12 +167,12 @@ def process_pr(curr_pr: dict) -> bool:
             save_pr(current_payload)
         return True
     else:
-        print(f"[!] No .js changes in PR #{pr_number}\n")
+        print(f"[!] No .js changes in source code in PR #{pr_number}\n")
         return False
 
 
 
-TARGET = 1000
+TARGET = 500
 OUTPUT_DIR = Path("scrape_mocks")
 
 valid_payloads = 0

@@ -97,6 +97,7 @@ class TestGenerator:
             include_issue_comments=include_issue_comments,
             include_pr_desc=include_pr_desc,
             include_predicted_test_file=include_predicted_test_file,
+            test_file_name=test_filename,
             test_file_content=test_file_content_sliced,
             available_packages=available_packages,
             available_relative_imports=available_relative_imports

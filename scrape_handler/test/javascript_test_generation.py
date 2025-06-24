@@ -50,6 +50,12 @@ class RunHelper:
             content = f.read()
         return content
 
+    def record_result(self, number, model, iAttempt, stop):
+        with open(Path(self.config.bot_log_dir, 'results.csv'), 'a') as f:
+            f.write(
+                "{:<9},{:<30},{:<9},{:<19}\n".format(number, model, iAttempt + 1, stop)
+            )
+
     def run_payload(self):
         stop = False  # we stop when successful
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -59,7 +65,7 @@ class RunHelper:
         logger.marker(f"============ Running Payload #{pr_data.number} ============")
         if not Path(self.config.bot_log_dir, 'results.csv').exists():
             Path(self.config.bot_log_dir, 'results.csv').write_text(
-                "{:<9},{:<30},{:<9},{:<7}\n".format("prNumber", "model", "iAttempt", "stop"),
+                "{:<9},{:<30},{:<9},{:<19}\n".format("prNumber", "model", "iAttempt", "stop"),
                 encoding="utf-8"
             )
 
@@ -83,19 +89,15 @@ class RunHelper:
                                          model_test_amplification=self.mock_response_amplification,
                                          iAttempt=iAttempt,
                                          post_comment=False)
+                    logger.success(f"Combination %d with model %s finished successfully" % (iAttempt + 1, model))
+                    self.record_result(self.payload["number"], model, iAttempt + 1, stop)
                 except ExecutionError:
                     err = traceback.format_exc()
                     logger.critical("Failed with error:\n%s" % err)
-                    return {'status': 'failed', 'error': 'Internal execution error occurred'}
+                    self.record_result(self.payload["number"], model, iAttempt + 1, "error")
                 except Exception as e:
                     logger.critical("Failed with unexpected error:\n%s" % e)
-                    return {'status': 'failed', 'error': f'Unexpected error occurred'}
-
-                logger.success(f"Combination %d with model %s finished successfully" % (iAttempt + 1, model))
-                with open(Path(self.config.bot_log_dir, 'results.csv'), 'a') as f:
-                    f.write(
-                        "{:<9},{:<30},{:<9},{:<7}\n".format(self.payload["number"], model, iAttempt + 1, stop)
-                    )
+                    self.record_result(self.payload["number"], model, iAttempt + 1, "unexpected error")
 
                 if stop:
                     gen_test = Path(self.config.output_dir, "generation", "generated_test.txt").read_text(
@@ -116,19 +118,15 @@ class RunHelper:
                                      model=model,
                                      iAttempt=0,
                                      post_comment=False)
+                logger.success("o3-mini finished successfully")
+                self.record_result(self.payload["number"], model, 1, stop)
             except ExecutionError:
                 err = traceback.format_exc()
                 logger.critical("Failed with error:\n%s" % err)
-                return {'status': 'failed', 'error': 'Internal execution error occurred'}
+                self.record_result(self.payload["number"], model, 1, "error")
             except Exception as e:
                 logger.critical("Failed with unexpected error:\n%s" % e)
-                return {'status': 'failed', 'error': f'Unexpected error occurred'}
-
-            logger.success("o3-mini finished successfully")
-            with open(Path(self.config.bot_log_dir, 'results.csv'), 'a') as f:
-                f.write(
-                    "{:<9},{:<30},{:<9},{:<7}\n".format(self.payload["number"], model, 1, stop)
-                )
+                self.record_result(self.payload["number"], model, 1, "unexpected error")
 
             if stop:
                 gen_test = Path(self.config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
