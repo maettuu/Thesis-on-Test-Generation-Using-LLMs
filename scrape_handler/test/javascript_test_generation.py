@@ -151,7 +151,7 @@ class RunHelper:
         with EXECUTED_TESTS.open("a", encoding='utf-8') as f:
             f.write(f"{self.run_id}\n")
 
-EXECUTED_TESTS = Path("scrape_logs", "completed_tests.txt")
+EXECUTED_TESTS = Path("scrape_logs", "executed_tests.txt")
 EXECUTED_TESTS.touch(exist_ok=True)
 completed = set(EXECUTED_TESTS.read_text(encoding='utf-8').splitlines())
 all_mock_files = sorted(
