@@ -234,7 +234,7 @@ class TestGenerator:
                 #     logger.fail(f"Failed to add comment: {status_code}", response_data)
                 pass
             else:
-                logger.info("Suggested test for PR:\n\n%s" % comment)
+                logger.success("Suggested test for PR:\n\n%s" % comment)
 
             generation_completed = True
         elif not isFail2Pass:
