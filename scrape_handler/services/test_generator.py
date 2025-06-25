@@ -104,8 +104,8 @@ class TestGenerator:
         )
 
         if len(prompt) >= 1048576:  # gpt4o limit
-            logger.warning("Prompt exceeds limits, skipping...")
-            raise ValueError("")
+            logger.critical("Prompt exceeds limits, skipping...")
+            raise ExecutionError("Prompt is too long.")
 
         generation_dir = Path(self.config.output_dir, "generation")
         (generation_dir / "prompt.txt").write_text(prompt, encoding="utf-8")

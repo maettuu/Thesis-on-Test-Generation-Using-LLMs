@@ -76,6 +76,7 @@ class RunHelper:
             "deepseek-r1-distill-llama-70b",
             # "qwen-qwq-32b"
         ]
+        response = None
         for model in models:
             iAttempt = 0
             while iAttempt < len(self.config.prompt_combinations_gen["include_golden_code"]) and (not stop or self.run_all_models):
@@ -168,6 +169,6 @@ def test_pr_payload(mock_file):
 
     helper = RunHelper(payload_path=str(mock_file), config=config, run_id=run_id, run_all_models=False)
     response = helper.run_payload()
+    helper.cleanup()
     assert response is not None
     assert isinstance(response, dict) or hasattr(response, "status_code")
-    helper.cleanup()
