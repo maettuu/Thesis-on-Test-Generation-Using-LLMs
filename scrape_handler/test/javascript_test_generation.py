@@ -53,7 +53,7 @@ class RunHelper:
     def record_result(self, number, model, iAttempt, stop):
         with open(Path(self.config.bot_log_dir, 'results.csv'), 'a') as f:
             f.write(
-                "{:<9},{:<30},{:<9},{:<19}\n".format(number, model, iAttempt + 1, stop)
+                "{:<9},{:<30},{:<9},{:<19}\n".format(number, model, iAttempt, stop)
             )
 
     def run_payload(self):
