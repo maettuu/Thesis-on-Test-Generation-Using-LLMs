@@ -148,13 +148,18 @@ class RunHelper:
             logger.error(f"Tried to remove image '{image_tag}', but it was not found")
         except Exception as e:
             logger.error(f"Failed to remove Docker image '{image_tag}': {e}")
+        with EXECUTED_TESTS.open("a", encoding='utf-8') as f:
+            f.write(f"{self.run_id}\n")
 
-
-mock_files = sorted(
+EXECUTED_TESTS = Path("scrape_logs", "completed_tests.txt")
+EXECUTED_TESTS.touch(exist_ok=True)
+completed = set(EXECUTED_TESTS.read_text(encoding='utf-8').splitlines())
+all_mock_files = sorted(
     Path("scrape_mocks", "code_only").glob("*.json"),
     key=lambda p: int(p.stem.rsplit("_", 1)[-1]),
     reverse=True
 )
+mock_files = [mf for mf in all_mock_files if mf.stem not in completed]
 
 @pytest.mark.parametrize("mock_file", mock_files, ids=[mf.stem for mf in mock_files])
 def test_pr_payload(mock_file):
