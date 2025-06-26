@@ -175,15 +175,15 @@ class DockerService:
 
         logger.info("Running test command...")
         exec_result = container.exec_run(full_test_command, stdout=True, stderr=True)
-        std_out = exec_result.output.decode()
         if exec_result.exit_code == 0:
             logger.success("Test command executed")
-            return std_out, ""
         elif exec_result.exit_code == 124:
             logger.warning("Test command killed by timeout")
-            return std_out, ""
         else:
             logger.error("Test command failed")
+
+        std_out = exec_result.output.decode()
+        return std_out, ""
 
     @staticmethod
     def evaluate_test(stdout) -> str:
