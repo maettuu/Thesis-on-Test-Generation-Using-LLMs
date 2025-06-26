@@ -4,6 +4,7 @@ import tarfile
 import re
 import json
 import logging
+import shlex
 
 from docker.errors import ImageNotFound, APIError, BuildError
 from pathlib import Path
@@ -156,35 +157,31 @@ class DockerService:
 
     @staticmethod
     def run_test(container, tests_to_run):
-        coverage_report_separator = "COVERAGE_REPORT_STARTING_HERE"
-        test_commands = [
-            f"TEST_FILTER=\"{desc}\" npx nyc gulp unittest-single || true"
-            # f'TEST_FILTER="{desc}" npx nyc --all --no-source-map gulp unittest-single'
-            for desc in tests_to_run
-        ]
-        all_cmds = test_commands + [
-            "npx nyc report --reporter=text > coverage_report.txt",
-            f"echo \"{coverage_report_separator}\"",
-            "cat coverage_report.txt",
-        ]
-        joined_cmds = " && ".join(all_cmds)
-        test_command = (
-            "/bin/sh -c '"
-            "cd /app/testbed && "
-            f"{joined_cmds}"
-            "'"
+        test_commands = []
+        for desc in tests_to_run:
+            inner = f"TEST_FILTER='{desc}' npx gulp unittest-single"
+            test_single = shlex.quote(inner)
+            cmd = f"timeout 300 /bin/sh -c {test_single}"
+            test_commands.append(cmd)
+
+        joined_cmds = " && ".join(test_commands)
+
+        cd_test = shlex.quote(f"cd /app/testbed && {joined_cmds}")
+
+        full_test_command = (
+            "/bin/sh -c "
+            f"{cd_test}"
         )
 
         logger.info("Running test command...")
-        exec_result = container.exec_run(test_command, stdout=True, stderr=True)
-        stdout_output_all = exec_result.output.decode()
-        try:
-            stdout, coverage_report = stdout_output_all.split(coverage_report_separator)
+        exec_result = container.exec_run(full_test_command, stdout=True, stderr=True)
+        if exec_result.exit_code == 0:
             logger.success("Test command executed")
-            return stdout, coverage_report
-        except:
-            logger.critical("Docker command failed with: %s" % stdout_output_all)
-            raise ExecutionError(f'Docker command failed')
+            return exec_result.output.decode(), ""
+        elif exec_result.exit_code == 124:
+            logger.warning("Test command killed by timeout")
+        else:
+            logger.error("Test command failed")
 
     @staticmethod
     def evaluate_test(stdout) -> str:
@@ -197,8 +194,8 @@ class DockerService:
                 num_failures = int(match.group(1))
                 test_result = "PASS" if num_failures == 0 else "FAIL"
             else:
-                # If the summary line cannot be found, consider it a failure (or handle as needed)
-                logger.error("Error in test execution. Evaluation failed.")
+                # If the summary line cannot be found, consider it a failure
+                logger.error("Test could not be evaluated")
                 return "FAIL"
 
         logger.info(f"Test evaluated as PASS") if test_result == "PASS" else logger.fail(f"Test evaluated as FAIL")
