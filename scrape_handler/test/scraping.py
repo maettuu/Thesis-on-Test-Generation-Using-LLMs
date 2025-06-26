@@ -97,7 +97,7 @@ def is_test_file(filename) -> bool:
         return True
     return False
 
-def is_code_file(filename) -> bool:
+def is_src_code_file(filename) -> bool:
     is_in_src_folder = False
     parts = filename.split('/')
 
@@ -142,14 +142,23 @@ def process_pr(curr_pr: dict) -> bool:
         return False
 
     files = fetch_pr_files(pr_number)
-    has_js_code = False
-    has_test_code = False
+    file_types = []
     for f in files:
         if "patch" in f:
             if is_test_file(f["filename"]):
-                has_test_code = True
-            elif is_code_file(f["filename"]):
-                has_js_code = True
+                file_types.append("test")
+            elif is_src_code_file(f["filename"]):
+                file_types.append("src")
+            elif f["filename"].endswith(".js"):
+                file_types.append("non-src")
+            else:
+                file_types.append("other")
+        else:
+            file_types.append("unchanged")
+
+    if "non-src" in file_types:
+        print(f"[!] Non-source code files in PR #{pr_number}\n")
+        return False
 
     current_payload = {
         "action": "opened",
@@ -158,8 +167,8 @@ def process_pr(curr_pr: dict) -> bool:
         "repository": {"owner": {"login": OWNER}, "name": REPO}
     }
 
-    if has_js_code:
-        if has_test_code:
+    if "src" in file_types:
+        if "test" in file_types:
             valid_payloads_amp += 1
             save_pr_amp(current_payload)
         else:
