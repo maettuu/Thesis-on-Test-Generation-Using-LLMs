@@ -1,7 +1,6 @@
 import os
 import json
 import pytest
-import traceback
 import docker
 import logging
 
@@ -53,7 +52,7 @@ class RunHelper:
     def record_result(self, number, model, iAttempt, stop):
         with open(Path(self.config.bot_log_dir, 'results.csv'), 'a') as f:
             f.write(
-                "{:<9},{:<30},{:<9},{:<19}\n".format(number, model, iAttempt, stop)
+                "{:<9},{:<30},{:<9},{:<45}\n".format(number, model, iAttempt, stop)
             )
 
     def run_payload(self):
@@ -65,7 +64,7 @@ class RunHelper:
         logger.marker(f"============ Running Payload #{pr_data.number} ============")
         if not Path(self.config.bot_log_dir, 'results.csv').exists():
             Path(self.config.bot_log_dir, 'results.csv').write_text(
-                "{:<9},{:<30},{:<9},{:<19}\n".format("prNumber", "model", "iAttempt", "stop"),
+                "{:<9},{:<30},{:<9},{:<45}\n".format("prNumber", "model", "iAttempt", "stop"),
                 encoding="utf-8"
             )
 
@@ -92,10 +91,8 @@ class RunHelper:
                                          post_comment=False)
                     logger.success(f"Combination %d with model %s finished successfully" % (iAttempt + 1, model))
                     self.record_result(self.payload["number"], model, iAttempt + 1, stop)
-                except ExecutionError:
-                    err = traceback.format_exc()
-                    logger.critical("Failed with error:\n%s" % err)
-                    self.record_result(self.payload["number"], model, iAttempt + 1, "error")
+                except ExecutionError as e:
+                    self.record_result(self.payload["number"], model, iAttempt + 1, e)
                 except Exception as e:
                     logger.critical("Failed with unexpected error:\n%s" % e)
                     self.record_result(self.payload["number"], model, iAttempt + 1, "unexpected error")
@@ -121,10 +118,8 @@ class RunHelper:
                                      post_comment=False)
                 logger.success("o3-mini finished successfully")
                 self.record_result(self.payload["number"], model, 1, stop)
-            except ExecutionError:
-                err = traceback.format_exc()
-                logger.critical("Failed with error:\n%s" % err)
-                self.record_result(self.payload["number"], model, 1, "error")
+            except ExecutionError as e:
+                self.record_result(self.payload["number"], model, 1, e)
             except Exception as e:
                 logger.critical("Failed with unexpected error:\n%s" % e)
                 self.record_result(self.payload["number"], model, 1, "unexpected error")
