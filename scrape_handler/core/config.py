@@ -8,6 +8,9 @@ from pathlib import Path
 
 
 class Config:
+    """
+    Holds all configuration and path variables.
+    """
     def __init__(self):
         ############# Environment Variables #############
         load_dotenv()
@@ -25,43 +28,63 @@ class Config:
 
         ################# General Config ################
         self.parse_language = Language(tree_sitter_javascript.language())
-        # List length must be the same for both PROMPT_COMBINATIONS
-        self.prompt_combinations_gen = {
+        self.prompt_combinations = {
             "include_golden_code"        : [1, 1, 1, 1, 0],
             "include_pr_desc"            : [0, 1, 0, 0, 0],
             "include_predicted_test_file": [1, 0, 1, 0, 0],
-            "sliced"                     : ["LongCorr", "LongCorr", "No", "No", "No"]
-        }
-        self.prompt_combinations_ampl = {
-            "test_code_sliced"           : [1, 0, 1, 1, 1],
-            "include_golden_code"        : [1, 1, 1, 1, 0],
-            "include_pr_desc"            : [0, 1, 1, 0, 0],
-            "sliced"                     : ["LongCorr", "LongCorr", "LongCorr", "No", "No"]
+            "sliced"                     : [1, 1, 0, 0, 0]
         }
 
-        ################## Path Config ##################
+        ################## Log Directories Config ##################
         self.project_root = Path(__file__).resolve().parent.parent.parent
-        self.bot_log_dir = Path(self.project_root, "scrape_handler", "test", "scrape_logs") # for parsed requests
-        Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
-        self.gen_test_dir = Path(self.project_root, "scrape_handler", "test", "generated_tests")
-        Path(self.gen_test_dir).mkdir(parents=True, exist_ok=True)
+        self.bot_log_dir = Path(self.project_root, "scrape_handler", "test", "scrape_logs")
         self.pr_log_dir = None
         self.output_dir = None
+
+        self.gen_test_dir = Path(self.project_root, "scrape_handler", "test", "generated_tests")
         self.cloned_repo_dir = "tmp_repo_dir"
 
-    def setup_pr_log_dir(self, instance_id: str, timestamp: str):
-        self.pr_log_dir = Path(self.bot_log_dir, instance_id + "_%s" % timestamp)
+        Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
+        Path(self.gen_test_dir).mkdir(parents=True, exist_ok=True)
+
+    def setup_pr_log_dir(self, pr_id: str, timestamp: str) -> None:
+        """
+        Sets up directory for logger output file (one directory per PR)
+
+        Parameters:
+            pr_id (str): ID of the PR
+            timestamp (str): Timestamp for PR test generation execution
+
+        Returns:
+            None
+        """
+
+        self.pr_log_dir = Path(self.bot_log_dir, pr_id + "_%s" % timestamp)
         Path(self.pr_log_dir).mkdir(parents=True, exist_ok=True)
 
-    def setup_output_dir(self, iAttempt: int, model: str):
+    def setup_output_dir(self, i_attempt: int, model) -> None:
+        """
+        Sets up directory for generated pipeline files (one directory per run)
+
+        Parameters:
+            i_attempt (int): Attempt number
+            model (LLM): Model name
+
+        Returns:
+            None
+        """
+
         self.output_dir = Path(
             self.pr_log_dir,
-            "i%s" % (iAttempt + 1) + "_%s" % model
+            "i%s" % (i_attempt + 1) + "_%s" % model
         )
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         Path(self.output_dir, "generation").mkdir(parents=True)
         Path(self.output_dir, "amplification").mkdir(parents=True)
 
+
+################## Custom Logger Tags ##################
+# Marker: used to mark a new section (i.e., new PR, new run)
 MARKER_LEVEL_NUM = 21
 logging.addLevelName(MARKER_LEVEL_NUM, "MARKER")
 def marker(self, message, *args, **kws):
@@ -69,6 +92,7 @@ def marker(self, message, *args, **kws):
         self._log(MARKER_LEVEL_NUM, message, args, **kws)
 logging.Logger.marker = marker
 
+# Success: used to mark the successful completion of an action
 SUCCESS_LEVEL_NUM = 25
 logging.addLevelName(SUCCESS_LEVEL_NUM, "SUCCESS")
 def success(self, message, *args, **kws):
@@ -76,6 +100,7 @@ def success(self, message, *args, **kws):
         self._log(SUCCESS_LEVEL_NUM, message, args, **kws)
 logging.Logger.success = success
 
+# Fail: used to mark the failure of an action
 FAIL_LEVEL_NUM = 35
 logging.addLevelName(FAIL_LEVEL_NUM, "FAIL")
 def fail(self, message, *args, **kws):
@@ -85,6 +110,9 @@ logging.Logger.fail = fail
 
 
 class ColoredFormatter(logging.Formatter):
+    """
+    Reformats the console output and applied custom colors
+    """
     RESET  = "\x1b[0m"
     COLORS = {
         logging.DEBUG:     "\x1b[90m",        # grey
@@ -103,10 +131,22 @@ class ColoredFormatter(logging.Formatter):
         return f"{color}{msg}{self.RESET}"
 
 
-def configure_logger(pr_log_dir, run_id: str):
-    logfile = Path(pr_log_dir, f"{run_id}.log")
+################## Logger Initialization ##################
+def configure_logger(pr_log_dir: Path, execution_id: str) -> None:
+    """
+    Sets up the global logger for PR test generation
 
-    # get root logger (or you can pick a named one)
+    Parameters:
+        pr_log_dir (Path): Path to the PR log directory
+        execution_id (str): ID of the PR test generation execution
+
+    Returns:
+        None
+    """
+
+    logfile = Path(pr_log_dir, f"{execution_id}.log")
+
+    # get root logger
     root = logging.getLogger()
     root.setLevel("INFO")
 
@@ -114,7 +154,7 @@ def configure_logger(pr_log_dir, run_id: str):
     for h in list(root.handlers):
         root.removeHandler(h)
 
-    # Console handler
+    # console handler
     ch = logging.StreamHandler()
     ch.setLevel("INFO")
     ch.setFormatter(ColoredFormatter(
@@ -123,7 +163,7 @@ def configure_logger(pr_log_dir, run_id: str):
     ))
     root.addHandler(ch)
 
-    # File handler (overwrite each run)
+    # file handler
     fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
     fh.setLevel("INFO")
     fh.setFormatter(logging.Formatter(

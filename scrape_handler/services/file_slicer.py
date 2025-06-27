@@ -3,7 +3,7 @@ import re
 from tree_sitter import Parser, Tree, Node
 
 from scrape_handler.core.config import Config
-from scrape_handler.core import git_tools
+from scrape_handler.core import git_diff
 from scrape_handler.services.pr_diff_context import PullRequestDiffContext
 
 
@@ -11,9 +11,6 @@ class GoldenFileSlicer:
     def __init__(self, config: Config, pr_diff_ctx: PullRequestDiffContext):
         self.config = config
         self.pr_diff_ctx = pr_diff_ctx
-
-    def slice_all(self):
-        return self.slice_code_file(), self.slice_test_file()
 
     def slice_code_file(self):
         code_before = self.pr_diff_ctx.code_before
@@ -29,27 +26,13 @@ class GoldenFileSlicer:
             code_sliced = code_before.copy()
         return code_sliced
 
-    def slice_test_file(self):
-        test_before = self.pr_diff_ctx.test_before
-        if self.pr_diff_ctx.test_names:
-            test_sliced = self.slice_golden_file(
-                test_before,
-                self.pr_diff_ctx.golden_test_patch,
-                "",
-                return_file="post",
-                append_line_numbers=True
-            )
-        else:
-            test_sliced = test_before.copy()
-        return test_sliced
-
     def slice_golden_file(self,
                           golden_contents_before_arr,
                           patch,
                           issue_description,
                           return_file="pre",
                           append_line_numbers=False):
-        golden_contents_after_arr, stderr = git_tools.apply_patch(golden_contents_before_arr, patch)
+        golden_contents_after_arr, stderr = git_diff.apply_patch(golden_contents_before_arr, patch)
         # Create an array where element i is the relevant patch for file i
         # Assumption: file arrays contain the files in the order they appear in the patch
         #  => true by construction, we assert this in a different place

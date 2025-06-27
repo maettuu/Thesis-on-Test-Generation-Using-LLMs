@@ -3,7 +3,9 @@ from dataclasses import dataclass, field
 
 @dataclass
 class PullRequestData:
-    """Holds all data about a PR and creates a corresponding ID and tag."""
+    """
+    Holds all data about a PR and creates a corresponding ID and tag.
+    """
     number: str
     title: str
     description: str
@@ -27,6 +29,16 @@ class PullRequestData:
 
     @classmethod
     def from_payload(cls, payload: dict) -> "PullRequestData":
+        """
+        Extracts data from a pull request payload.
+
+        Parameters:
+            payload (dict): A pull request payload
+
+        Returns:
+            PullRequestData: The data extracted from the payload
+        """
+
         pr   = payload["pull_request"]
         repo = payload["repository"]
         return cls(

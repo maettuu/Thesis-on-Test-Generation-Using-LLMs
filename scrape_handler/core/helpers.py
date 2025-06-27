@@ -10,280 +10,13 @@ import time
 import json
 import logging
 
-from tree_sitter import Parser, Tree, Node
+from tree_sitter import Parser
 from io import BytesIO
 from pathlib import Path
 from collections import Counter, defaultdict
 
 
 logger = logging.getLogger(__name__)
-
-
-def is_test_file(filepath, test_folder=''):
-    is_in_test_folder = False
-    parts = filepath.split('/')
-
-    # If a predefined test folder is given, we check if the filepath contains it
-    if test_folder:
-        is_in_test_folder = (test_folder in filepath)
-    else:
-        # Otherwise, we want the file to be in a dir where at least one folder in the dir path starts with test
-        for part in parts[:-1]:
-            if part.startswith('test'):
-                is_in_test_folder = True
-                break
-
-    if is_in_test_folder and 'spec' in parts[-1] and parts[-1].endswith("js"):
-        return True
-    else:
-        return False
-
-
-def extract_offsets_from_stderr(stderr: str):
-    """
-    Parses stderr messages from patch application and returns an offset array.
-    Each element i in the array corresponds to the offset of the i-th file,
-    with an assumption that all hunks of a file have the same offset.
-
-    Args:
-        stderr (str): The stderr message from the patch application.
-
-    Returns:
-        list: A list of offsets, where each offset corresponds to a file.
-              If no offset is mentioned for a file, the value is 0.
-
-    Raises:
-        AssertionError: If multiple hunks in the same file have different offsets.
-        AssertionError: If Hunk #1 is missing from a file but later hunks exist.
-
-    Example:
-        Input:
-            stderr_text = \"\"\"
-            Checking patch a_lib_matplotlib_axes__base.py...
-            Hunk #1 succeeded at 3264 (offset 2 lines).
-            Hunk #2 succeeded at 3647 (offset 2 lines).
-            Checking patch a_lib_matplotlib_ticker.py...
-            Checking patch a_lib_mpl_toolkits_mplot3d_axes3d.py...
-            Applied patch a_lib_matplotlib_axes__base.py cleanly.
-            Applied patch a_lib_matplotlib_ticker.py cleanly.
-            Applied patch a_lib_mpl_toolkits_mplot3d_axes3d.py cleanly.
-            \"\"\"
-
-        Output:
-            [2, 0, 0]
-    """
-    file_pattern = re.compile(r'Checking patch (.*?)\.\.\.')
-    hunk_pattern = re.compile(r'Hunk #(\d+) succeeded at \d+ \(offset ([+-]?\d+) line(?:s?)\)')
-
-    current_file = None
-    file_offsets = {}
-    first_hunk_seen = {}
-
-    for line in stderr.splitlines():
-        file_match = file_pattern.match(line)
-        if file_match:
-            current_file = file_match.group(1)
-            file_offsets[current_file] = None  # Default to None to detect first offset
-            first_hunk_seen[current_file] = False
-
-        hunk_match = hunk_pattern.search(line)
-        if hunk_match and current_file:
-            hunk_number = int(hunk_match.group(1))
-            offset = int(hunk_match.group(2))
-
-            if hunk_number == 1:
-                first_hunk_seen[current_file] = True
-            else:
-                assert first_hunk_seen[current_file], \
-                    f"OffsetHunk #1 missing for {current_file}, but later hunks exist."
-
-            if file_offsets[current_file] is None:
-                file_offsets[current_file] = offset  # Set initial offset
-            else:
-                assert file_offsets[current_file] == offset, \
-                    f"Mismatched offsets for {current_file}: {file_offsets[current_file]} vs {offset}"
-
-    return [offset if offset is not None else 0 for offset in file_offsets.values()]
-
-
-def extract_test_descriptions(parse_language, pr_file_diff) -> list:
-    # Extract string of the type "fname scope test"
-    _, contributing_tests_old = build_call_expression_scope_map(
-        Parser(parse_language).parse(bytes(pr_file_diff.before, 'utf-8'))
-    )
-    test2scope, contributing_tests_new = build_call_expression_scope_map(
-        Parser(parse_language).parse(bytes(pr_file_diff.after, 'utf-8'))
-    )
-
-    contributing_tests = find_changed_tests(contributing_tests_old, contributing_tests_new)
-    test2test_content = []
-    if contributing_tests:
-        for test in contributing_tests:
-            scope = test2scope.get(test, "")
-            if scope == "":
-                pass
-            elif scope == "global":
-                test2test_content.append(test)
-            else: # describe scope
-                test2test_content.append(f"{scope} {test}")
-
-    return test2test_content
-
-
-def build_call_expression_scope_map(tree: Tree) -> tuple:
-    expression_map = {}
-    test_cases = {}
-
-    def visit_body(node: Node, scope_name: str) -> None:
-        # Visit the describe body if available
-        for child in get_call_expression_content(node):
-            visit_node(child, scope_name)
-
-    def visit_node(node: Node, scope_name: str = "global") -> None:
-        expression_type = get_call_expression_type(node)
-        if expression_type == "it":
-            new_scope = get_call_expression_description(node, "<it>")
-            expression_map[new_scope] = scope_name
-            test_cases[new_scope] = node.text.decode("utf-8")
-
-        elif expression_type == "describe":
-            new_scope = get_call_expression_description(node, "<describe>")
-            if scope_name != "global":
-                new_scope = f"{scope_name} {new_scope}"
-
-            visit_body(node, new_scope)
-
-    for root_child in tree.root_node.children:
-        visit_node(root_child)
-    return expression_map, test_cases
-
-
-def find_changed_tests(old_tests: dict, new_tests: dict) -> list[str]:
-    """Find tests that have changed between two versions of a Javascript file."""
-    changed_tests = []
-
-    for name, body in new_tests.items():
-        old_body = old_tests.get(name)
-        if old_body is None:
-            # Function is new
-            changed_tests.append(name)
-        elif old_body and old_body != body:
-            # Function exists but has changed
-            diff = list(difflib.unified_diff(old_body.splitlines(), body.splitlines()))
-            if diff:
-                changed_tests.append(name)
-
-    return changed_tests
-
-
-def get_call_expression_content(node: Node) -> list:
-    """Returns the content of a call expression"""
-    call_expression = get_call_expression(node)
-    if not call_expression:
-        return []
-    args = call_expression.child_by_field_name("arguments")
-    content = next((
-        child for child in args.named_children
-        if child.type in {"function_expression", "arrow_function"}
-    ), None)
-    body = content.child_by_field_name("body")
-    return body.named_children if body else []
-
-
-def get_call_expression(node: Node) -> Node:
-    """Returns the call expression of an expression statement."""
-    call_expression = next((
-        child for child in node.named_children
-        if child.type == "call_expression"
-    ), None)
-    return call_expression
-
-
-def get_call_expression_type(node: Node, fallback="") -> str:
-    """Returns the type of a call expression (i.e., 'describe', 'it')"""
-    call_expression = get_call_expression(node)
-    if not call_expression:
-        return fallback
-    callee = call_expression.child_by_field_name("function")
-    return callee.text.decode("utf-8") if callee.type == "identifier" else fallback
-
-
-def get_call_expression_description(node: Node, fallback="") -> str:
-    """Returns the description (i.e., name) of a call expression"""
-    call_expression = get_call_expression(node)
-    if not call_expression:
-        return fallback
-    args = call_expression.child_by_field_name("arguments")
-    identifier = next((
-            child for child in args.named_children
-            if child.type in {"string", "binary_expression"}
-        ), None)
-    raw_name = identifier.text.decode("utf-8") if identifier else fallback
-    # 1) Remove the quotes and pluses
-    clean_name = (
-        raw_name.replace('"', '')
-        .replace('+', '')
-        .replace("'", '')
-        .replace("`", '')
-    )
-    # 2) Turn any literal \n or \t (or others) into a space
-    clean_name = (
-        clean_name.replace('\n', ' ')
-        .replace('\t', ' ')
-        .replace('\r', ' ')
-    )
-    # 3) Collapse any runs of whitespace into one space
-    return ' '.join(clean_name.split())
-
-
-def adjust_function_indentation(function_code: str) -> str:
-    """
-    Adjusts the indentation of a Javascript function so that the function definition
-    has no leading spaces, and the internal code indentation is adjusted accordingly.
-
-    :param function_code: A string representing the Javascript function.
-    :return: The adjusted function code as a string.
-
-    # Example Usage
-    function_code = \"\"\"
-        function exampleFunction(param) {
-            if (param) {
-                console.log("Hello, world!");
-            } else {
-                console.log("Goodbye, world!");
-            }
-        }
-    \"\"\"
-
-    adjusted_code = adjust_function_indentation(function_code)
-    logger.info(adjusted_code)
-    """
-    lines = function_code.splitlines()
-
-    if not lines:
-        return ""
-
-    # Find the leading spaces of the first non-empty line
-    first_non_empty_line = next(line for line in lines if line.strip())
-    leading_spaces = len(first_non_empty_line) - len(first_non_empty_line.lstrip())
-
-    # Adjust the indentation by removing the leading spaces
-    adjusted_lines = []
-    for line in lines:
-        if line.strip():  # Non-empty line
-            adjusted_lines.append(line[leading_spaces:])
-        else:  # Empty line
-            adjusted_lines.append("")
-
-    return "\n".join(adjusted_lines)
-
-
-def postprocess_response(raw: str) -> str:
-    cleaned_test = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
-    cleaned_test = cleaned_test.replace('```javascript', '')
-    cleaned_test = cleaned_test.replace('```', '')
-    cleaned_test = cleaned_test.lstrip('\n')
-    return adjust_function_indentation(cleaned_test)
 
 
 def get_best_file_to_inject_golden(pr_diff_ctx, new_test):
@@ -412,105 +145,10 @@ def extract_tokens_from_code(code):
     return tokens
 
 
-def append_function(parse_language, file_content: str, new_function: str, insert_in_block: str = "NOBLOCK") -> str:
-    """
-    Append the function new_function to file_content. If insert_in_class is a 'describe' block name,
-    insert new_function as a method of that block. Otherwise, insert new_function at the bottom
-    of the file_content.
-
-    This handles the indentation.
-    """
-    # Parse the content using tree-sitter
-    tree = Parser(parse_language).parse(bytes(file_content, 'utf-8'))
-
-    if insert_in_block != "NOBLOCK":
-        # Search for the specified class
-        target_class = None
-        for root_child in tree.root_node.children:
-            if (root_child.type == "expression_statement"
-                    and get_call_expression_description(root_child) == insert_in_block):
-                target_class = root_child
-                break
-
-        if target_class is None:
-            raise ValueError(f"Describe block '{insert_in_block}' not found in the file content!")
-
-        # Find the indentation level of the class
-        lines = file_content.splitlines()
-        class_start_line = target_class.start_point[0]
-        class_indentation = len(lines[class_start_line]) - len(lines[class_start_line].lstrip())
-
-        # Locate the last method in the class
-        last_method = None
-        for child in get_call_expression_content(target_class):
-            if child.type == "expression_statement":
-                last_method = child
-
-        if last_method:
-            # Insert after the last nested block
-            last_code_line = last_method.end_point[0] + 1  # Use end_point for accurate insertion
-        else:
-            # If no nested block, insert at the end of the root block
-            last_code_line = target_class.end_point[0] + 1
-
-        last_line_content = lines[last_code_line - 1]
-        indentation = len(last_line_content) - len(last_line_content.lstrip())
-
-    else:
-        # Default behavior: Append to the bottom of the file
-        top_level_items = []
-
-        for root_child in tree.root_node.children:
-            if root_child.type == "expression_statement":
-                top_level_items.append(root_child)
-
-        if not top_level_items:
-            raise ValueError("No top-level blocks found in the file content!")
-
-        # Find the last top-level item
-        last_item = top_level_items[-1]
-
-        if get_call_expression_type(last_item) == "describe":  # last block was 'describe'
-            # Handle blocks by finding the nested block
-            last_method = None
-            for child in get_call_expression_content(last_item):
-                if child.type == "expression_statement":
-                    last_method = child
-
-            if not last_method:
-                raise ValueError(
-                    f"No nested blocks found in the describe block '{get_call_expression_description(last_item)}'!"
-                )
-
-            # Determine indentation
-            last_func_line = last_method.start_point[0]  # line before the last block
-            last_code_line = last_method.end_point[0] + 1  # last code line of the above block
-
-        else:  # last function was a function in the top-level, not inside a class
-            # For top-level functions
-            last_func_line = last_item.start_point[0]  # line before the last block
-            last_code_line = last_item.end_point[0] + 1  # last code line of the above block
-
-        # Extract indentation
-        lines = file_content.splitlines()
-        last_func_line_content = lines[last_func_line]
-        indentation = len(last_func_line_content) - len(last_func_line_content.lstrip())
-
-    # Add the new function
-    indented_new_function = "\n".join(
-        " " * indentation + line if line.strip() else "" for line in new_function.splitlines()
-    )
-
-    # updated_content = file_content.rstrip() + "\n\n" + indented_new_function + "\n"
-    updated_lines = lines[:last_code_line] + ["\n" + indented_new_function] + lines[last_code_line:]
-    return "\n".join(updated_lines)
-
-
 def get_contents_of_test_file_to_inject(
         parse_language,
         base_commit,
         golden_code_patch,
-        pr_id,
         repo_dir
 ):
     logger.info("Fetching test file for injection...")
@@ -690,7 +328,7 @@ def extract_relative_imports(base_commit:str, repo_dir):
                     if original_sym:
                         import_map[import_path].add(original_sym)
 
-        output_lines = ["Relative Imports Used in Unit Tests"]
+        output_lines = ["Available Relative Imports:"]
         for path in sorted(import_map):
             symbols = sorted(import_map[path])
             output_lines.append(f"- `{path}`: {', '.join(symbols)}")
@@ -787,7 +425,7 @@ def find_coedited_files(file_list, repo_dir, n_last_commits=10, n_files=3):
         coedited_files = [f for f in coedited_files if f != file]
 
         # Filter files starting with "test*"
-        coedited_files = [f for f in coedited_files if is_test_file(f)]
+        coedited_files = [f for f in coedited_files if _is_test_file(f)]
 
         # Find the most common coedited file and its count
         if coedited_files:
@@ -795,6 +433,37 @@ def find_coedited_files(file_list, repo_dir, n_last_commits=10, n_files=3):
             common_files.extend(most_common_files)
 
     return common_files
+
+
+def _is_test_file(filepath: str, test_folder: str = '') -> bool:
+    """
+    Determines whether a file is a test file
+
+    Parameters:
+        filepath (str): The path to the file
+        test_folder (str, optional): The path to the folder where the test file is located
+
+    Returns:
+        bool: Whether the file is a test file
+    """
+
+    is_in_test_folder = False
+    parts = filepath.split('/')
+
+    # if a predefined test folder is given, we check if the filepath contains it
+    if test_folder:
+        is_in_test_folder = (test_folder in filepath)
+    else:
+        # otherwise, we want the file to be in a dir where at least one folder in the dir path starts with test
+        for part in parts[:-1]:
+            if part.startswith('test'):
+                is_in_test_folder = True
+                break
+
+    if is_in_test_folder and 'spec' in parts[-1] and parts[-1].endswith("js"):
+        return True
+    else:
+        return False
 
 
 def get_first_test_file(root_dir: str) -> str | None:

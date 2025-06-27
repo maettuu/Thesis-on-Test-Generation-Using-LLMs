@@ -1,3 +1,5 @@
 class ExecutionError(Exception):
-    """Custom exception for webhook execution failures."""
+    """
+    Custom exception for pipeline execution failures.
+    """
     pass

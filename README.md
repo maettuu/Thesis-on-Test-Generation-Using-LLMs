@@ -138,7 +138,7 @@ Specific commit
   1. Parse PR metadata.  
   2. Fetch or clone the repo.  
   3. Slice golden code around diffs.  
-  4. Call `TestGenerator` / `TestAmplifier` → LLM.  
+  4. Call `TestGenerator` → LLM.  
   5. Post review comments containing test code.
 
 ---
@@ -157,7 +157,7 @@ Specific commit
 ### core/
 
 - **`Config`**: Centralizes configuration (prompt templates, thresholds, environment settings).
-- **`git_tools`**: Encapsulates Git operations: cloning, checking out PR branch, applying diffs.
+- **`git_diff`**: Encapsulates Git operations: cloning, checking out PR branch, applying diffs.
 - **`helpers`**: Extracts helpers methods to minimize duplicated code.
 - **`templates`**: Contains templates for posting comments on the PR.
 
@@ -174,7 +174,7 @@ Specific commit
 - **`GitHubApi`**: Fetches PR data and posts back comments.  
 - **`LLMHandler`**: Manages prompt templates and API calls.  
 - **`PullRequestDiffContext`**:  Models the extracted code snippets (golden files + diffs) sent to the LLM.
-- **`TestGenerator`** & **`TestAmplifier`**: Generate new tests or expand existing ones.
+- **`TestGenerator`**: Generate new tests.
 
 ---
 
