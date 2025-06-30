@@ -10,8 +10,8 @@ from scrape_handler.data_models import (
     PullRequestPipelineData
 )
 from scrape_handler.services import (
+    CSTBuilder,
     DockerService,
-    GoldenFileSlicer,
     GitHubApi,
     LLMHandler,
     PullRequestDiffContext,
@@ -45,9 +45,9 @@ def run(
         logger.warning("No modified source code files")
         return {'status': 'success', 'message': 'Pull request opened, linked issue found, but no modified source code files'}, True
 
-    # 4. Slice golden code + tests
-    file_slicer = GoldenFileSlicer(config, pr_diff_ctx)
-    code_sliced = file_slicer.slice_code_file()
+    # 4. Slice golden code
+    cst_builder = CSTBuilder(config.parse_language, pr_diff_ctx)
+    code_sliced = cst_builder.slice_code_file()
 
     # 5. Build Docker image
     docker_service = DockerService(config.project_root.as_posix(), pr_data)
@@ -68,6 +68,7 @@ def run(
     generator = TestGenerator(
         config,
         pr_pipeline_data,
+        cst_builder,
         gh_api,
         llm_handler,
         docker_service,

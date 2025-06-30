@@ -6,7 +6,8 @@ from scrape_handler.core.config import Config
 from scrape_handler.core import (
     ExecutionError,
     git_diff,
-    helpers
+    helpers,
+    test_injection
 )
 from scrape_handler.data_models.llm_enum import LLM
 from scrape_handler.data_models.pr_file_diff import PullRequestFileDiff
@@ -28,6 +29,7 @@ class TestGenerator:
         self,
         config: Config,
         data: PullRequestPipelineData,
+        cst_builder: CSTBuilder,
         gh_api: GitHubApi,
         llm_handler: LLMHandler,
         docker_service: DockerService,
@@ -41,6 +43,7 @@ class TestGenerator:
         self._config                = config
         self._pr_data               = data.pr_data
         self._pr_diff_ctx           = data.pr_diff_ctx
+        self._cst_builder           = cst_builder
         self._gh_api                = gh_api
         self._llm_handler           = llm_handler
         self._docker_service        = docker_service
@@ -63,7 +66,7 @@ class TestGenerator:
         else:
             logger.info(f"Temporary repository '{self._pr_data.repo}' already cloned – skipped")
         try:
-            test_filename, test_file_content, test_file_content_sliced = helpers.get_contents_of_test_file_to_inject(
+            test_filename, test_file_content, test_file_content_sliced = test_injection.get_candidate_test_file(
                 self._config.parse_language,
                 self._pr_data.base_commit,
                 self._pr_diff_ctx.golden_code_patch,
@@ -122,10 +125,8 @@ class TestGenerator:
         (generation_dir / "generated_test.txt").write_text(new_test, encoding="utf-8")
         new_test = new_test.replace('src/', '')  # temporary replacement to run in lib-legacy
 
-        cts_builder = CSTBuilder(self._config.parse_language)
-
         if test_file_content:
-            new_test_file_content = cts_builder.append_function(
+            new_test_file_content = self._cst_builder.append_function(
                 test_file_content,
                 new_test
             )
@@ -141,7 +142,7 @@ class TestGenerator:
 
         test_file_diff = PullRequestFileDiff(test_filename, test_file_content, new_test_file_content)
 
-        test_to_run = cts_builder.extract_changed_tests(test_file_diff)
+        test_to_run = self._cst_builder.extract_changed_tests(test_file_diff)
 
         ################### Run test in pre-PR codebase ##################
         test_passed_before, stdout_before = self._docker_service.run_test_in_container(

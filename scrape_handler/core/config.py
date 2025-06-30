@@ -80,7 +80,6 @@ class Config:
         )
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         Path(self.output_dir, "generation").mkdir(parents=True)
-        Path(self.output_dir, "amplification").mkdir(parents=True)
 
 
 ################## Custom Logger Tags ##################

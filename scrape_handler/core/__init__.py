@@ -4,6 +4,7 @@ from .execution_error import ExecutionError
 from .                import git_diff
 from .                import helpers
 from .                import templates
+from .                import test_injection
 
 __all__ = [
     "Config",
@@ -12,4 +13,5 @@ __all__ = [
     "git_diff",
     "helpers",
     "templates",
+    "test_injection"
 ]

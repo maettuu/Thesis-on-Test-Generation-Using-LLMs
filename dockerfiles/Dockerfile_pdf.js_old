@@ -1,0 +1,62 @@
+FROM --platform=linux/amd64 ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Europe/Zurich
+WORKDIR /app
+
+# 1. System dependencies
+RUN apt-get update \
+    && apt-get install -y \
+        software-properties-common \
+        tzdata \
+        git \
+        build-essential \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Node.js + latest npm
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g npm@^10
+
+# 3. Clone & Checkout
+ARG commit_hash
+RUN echo "Cloning commit: ${commit_hash}" \
+    && git clone https://github.com/mozilla/pdf.js.git /app/testbed
+WORKDIR /app/testbed
+RUN git checkout ${commit_hash}
+
+# 4. Install dependecies
+RUN npm install --save-exact canvas@^2.11.0
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci --legacy-peer-deps  # necessary to skip outdated downloads (for old commits)
+
+# 5. Append `unittest-single` task to gulpfile.js
+RUN printf '\ngulp.task(\n' >> gulpfile.js \
+ && printf '  "unittest-single",\n' >> gulpfile.js \
+ && printf '  gulp.series(\n' >> gulpfile.js \
+ && printf '    setTestEnv,\n' >> gulpfile.js \
+ && printf '    "generic-legacy",\n' >> gulpfile.js \
+ && printf '    "lib-legacy",\n' >> gulpfile.js \
+ && printf '    function runSingleUnitTest(done) {\n' >> gulpfile.js \
+ && printf '      const args = [\n' >> gulpfile.js \
+ && printf '        "node_modules/jasmine/bin/jasmine",\n' >> gulpfile.js \
+ && printf '        "JASMINE_CONFIG_PATH=test/unit/clitests.json",\n' >> gulpfile.js \
+ && printf '      ];\n' >> gulpfile.js \
+ && printf '      const filter = process.env.TEST_FILTER;\n' >> gulpfile.js \
+ && printf '      if (filter) {\n' >> gulpfile.js \
+ && printf '        args.push(`--filter=${filter}`);\n' >> gulpfile.js \
+ && printf '      }\n' >> gulpfile.js \
+ && printf '      const jasmineProcess = startNode(args, { stdio: "inherit" });\n' >> gulpfile.js \
+ && printf '      jasmineProcess.on("close", function (code) {\n' >> gulpfile.js \
+ && printf '        if (code !== 0) {\n' >> gulpfile.js \
+ && printf '          done(new Error("Unit test failed."));\n' >> gulpfile.js \
+ && printf '          return;\n' >> gulpfile.js \
+ && printf '        }\n' >> gulpfile.js \
+ && printf '        done();\n' >> gulpfile.js \
+ && printf '      });\n' >> gulpfile.js \
+ && printf '    }\n' >> gulpfile.js \
+ && printf '  )\n' >> gulpfile.js \
+ && printf ');\n' >> gulpfile.js
+
+# 6. Success notification
+CMD ["node", "-e", "console.log('environment is ready')"]

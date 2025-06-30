@@ -157,20 +157,23 @@ Specific commit
 ### core/
 
 - **`Config`**: Centralizes configuration (prompt templates, thresholds, environment settings).
+- **`ExecutionError`**: Custom error to report interruptions in pipeline.
 - **`git_diff`**: Encapsulates Git operations: cloning, checking out PR branch, applying diffs.
 - **`helpers`**: Extracts helpers methods to minimize duplicated code.
 - **`templates`**: Contains templates for posting comments on the PR.
+- **`test_injection`**: Deals with finding candidate test file for injecting the newly generated test.
 
 ### data_models/
 
+- **`LLM`**: Enum to define available LLMs
 - **`PullRequestData`**: Defines the schema for incoming GitHub Pull Request webhook payloads.
 - **`PullRequestFileDiff`**: Defines the schema for files pre- and post-PR.
 - **`PullRequestPipelineData`**: Defines compact schema for all data used in the pipeline.
 
 ### services/
  
+- **`CSTBuilder`**: In charge of all operations which rely on concrete syntax trees.  
 - **`DockerService`**: Runs a target code environment (e.g., PDF.js container) for context extraction.  
-- **`GoldenFileSlicer`**: Extracts minimal “golden” code around the changed lines.  
 - **`GitHubApi`**: Fetches PR data and posts back comments.  
 - **`LLMHandler`**: Manages prompt templates and API calls.  
 - **`PullRequestDiffContext`**:  Models the extracted code snippets (golden files + diffs) sent to the LLM.
@@ -210,7 +213,6 @@ Specific commit
 ## Models Used
 
 - **OpenAI from openai:** GPT-4o, o1, o3-mini
-- **InferenceClient from huggingface_hub:** meta-llama/Llama-3.3-70B-Instruct
-- **Groq from groq:** llama-3.3-70b-versatile, qwen-qwq-32b
+- **Groq from groq:** llama-3.3-70b-versatile, deepseek-r1-distill-llama-70b
 
 _With this setup, every Pull Request triggers automated, AI-driven regression tests—helping catch regressions early and reducing manual QA overhead._

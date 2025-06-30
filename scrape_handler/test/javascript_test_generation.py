@@ -126,7 +126,7 @@ class RunHelper:
         return response
 
     def cleanup(self):
-        helpers.remove_dir(Path(self.config.cloned_repo_dir), temp_repo=True)
+        helpers.remove_dir(Path(self.config.cloned_repo_dir), log_success=True)
         image_tag = f"image_{self.payload["repository"]["owner"]["login"]}__{self.payload["repository"]["name"]}-{self.payload["number"]}:latest"
         try:
             client = docker.from_env()
