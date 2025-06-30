@@ -46,7 +46,7 @@ class DockerService:
             self._client.images.build(
                 path=self._project_root,
                 tag=f"{self._pr_data.image_tag}:latest",
-                dockerfile=Path("dockerfiles", f"Dockerfile_{self._pr_data.repo}").as_posix(),
+                dockerfile=Path("dockerfiles", f"Dockerfile_{self._pr_data.repo}_old").as_posix(),
                 buildargs={"commit_hash": self._pr_data.base_commit},
                 network_mode="host",
                 rm=True
