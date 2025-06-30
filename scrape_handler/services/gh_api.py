@@ -12,14 +12,17 @@ logger = logging.getLogger(__name__)
 
 
 class GitHubApi:
+    """
+    Used to interact with GitHub API.
+    """
     def __init__(self, config: Config, pr_data: PullRequestData):
-        self.config = config
-        self.pr_data = pr_data
-        self.api_url = "https://api.github.com/repos"
+        self._config = config
+        self._pr_data = pr_data
+        self._api_url = "https://api.github.com/repos"
 
     def fetch_pr_files(self) -> dict:
-        url = f"{self.api_url}/{self.pr_data.owner}/{self.pr_data.repo}/pulls/{self.pr_data.number}/files"
-        response = requests.get(url, headers=self.config.headers)
+        url = f"{self._api_url}/{self._pr_data.owner}/{self._pr_data.repo}/pulls/{self._pr_data.number}/files"
+        response = requests.get(url, headers=self._config.headers)
         if response.status_code == 403 and "X-RateLimit-Reset" in response.headers:
             reset_time = int(response.headers["X-RateLimit-Reset"])
             wait_time = reset_time - int(time.time()) + 1
@@ -31,70 +34,17 @@ class GitHubApi:
         return response.json()
 
     def fetch_file_version(self, commit: str, file_name: str) -> str:
-        url = f"https://raw.githubusercontent.com/{self.pr_data.owner}/{self.pr_data.repo}/{commit}/{file_name}"
-        response_after = requests.get(url, headers=self.config.headers)
+        url = f"https://raw.githubusercontent.com/{self._pr_data.owner}/{self._pr_data.repo}/{commit}/{file_name}"
+        response_after = requests.get(url, headers=self._config.headers)
         if response_after.status_code == 200:
             return response_after.text
         return ""
 
-    def get_full_statement(self) -> str:
-        has_linked, issue, title, description = self.check_if_has_linked_issue()
-        return "\n".join(value for value in (title, description) if value)  # concatenate title and description
-
-    def check_if_has_linked_issue(self):
-        # Seach for "Closes #2" etc
-        issue_pattern = r'\b(?:Closes|Fixes|Resolves)\s+#(\d+)\b|\(?\b(?:bug|issue)\b\s+(\d+)\)?'
-        matches = re.findall(issue_pattern, f"{self.pr_data.title} {self.pr_data.description}", re.IGNORECASE)
-
-        # Since PRs and Issues are treated the same by the GH API, we need to check if the
-        # referenced entity is PR or GH Issue
-        for match in matches:
-            match_str = match[0] or match[1]
-            if not match_str:
-                continue
-            match_int = int(match_str)  # match was originally string
-            issue_or_pr, title, description = self.is_issue_or_pr(match_int)
-            if issue_or_pr == "Issue":
-                logger.success("Linked with issue #%d" % match_int)
-                return True, match_int, title, description  # we don't support linking of >1 issues yet
-
-        logger.fail("No linked issue")
-        return False, None, None, None
-
-    def is_issue_or_pr(self, number):
-        url = f"{self.api_url}/{self.pr_data.owner}/{self.pr_data.repo}/issues/{number}"
-        response = requests.get(url, headers=self.config.headers)
-        if response.status_code == 200:
-            issue_data = response.json()
-            if "pull_request" in issue_data:
-                return "PR", None, None
-            else:
-                return "Issue", issue_data["title"], issue_data["body"]
-        else:
-            logger.warning("No GitHub issue found. Checking Bugzilla...")
-            return self.is_bugzilla_issue(number)
-
-    @staticmethod
-    def is_bugzilla_issue(number: int):
-        bugzilla_url = f"https://bugzilla.mozilla.org/rest/bug/{number}"
-        response = requests.get(bugzilla_url)
-        if response.status_code == 200:
-            bug_data = response.json()
-            if "bugs" in bug_data and bug_data["bugs"]:
-                bug = bug_data["bugs"][0]
-                return "Issue", bug.get("summary"), bug.get("description", "")
-            else:
-                logger.warning(f"No bug found in Bugzilla with ID {number}")
-                return None, None, None
-        else:
-            logger.fail(f"Failed to fetch data for #{number}: {response.status_code}")
-            return None, None, None
-
     def add_comment_to_pr(self, comment):
         """Add a comment to the PR"""
-        url = f"{self.api_url}/{self.pr_data.owner}/{self.pr_data.repo}/issues/{self.pr_data.number}/comments"
+        url = f"{self._api_url}/{self._pr_data.owner}/{self._pr_data.repo}/issues/{self._pr_data.number}/comments"
         headers = {
-            "Authorization": f"Bearer {self.config.github_token}",
+            "Authorization": f"Bearer {self._config.github_token}",
             "Accept": "application/vnd.github.v3+json"
         }
         data = {"body": comment}
@@ -102,9 +52,54 @@ class GitHubApi:
         return response.status_code, response.json()
 
     def clone_repo(self, tmp_repo_dir: str):
-        logger.info(f"Cloning repository https://github.com/{self.pr_data.owner}/{self.pr_data.repo}.git")
-        res = subprocess.run(
-            ["git", "clone", f"https://github.com/{self.pr_data.owner}/{self.pr_data.repo}.git",
+        logger.info(f"Cloning repository https://github.com/{self._pr_data.owner}/{self._pr_data.repo}.git")
+        _ = subprocess.run(
+            ["git", "clone", f"https://github.com/{self._pr_data.owner}/{self._pr_data.repo}.git",
              tmp_repo_dir],
             capture_output=True, check=True)
         logger.success(f"Cloning successful")
+
+    def get_linked_issue(self) -> str:
+        issue_pattern = r'\b(?:Closes|Fixes|Resolves)\s+#(\d+)\b|\(?\b(?:bug|issue)\b\s+(\d+)\)?'
+        issue_description = f"{self._pr_data.title} {self._pr_data.description}"
+        matches = re.findall(issue_pattern, issue_description, re.IGNORECASE)
+
+        for match in matches:
+            issue_nr_str = match[0] or match[1]
+            if not issue_nr_str: continue
+
+            issue_nr = int(issue_nr_str)
+            linked_issue_description = self._get_github_issue(issue_nr)
+            if linked_issue_description:
+                return linked_issue_description
+
+            linked_issue_description = self._get_bugzilla_issue(issue_nr)
+            if linked_issue_description:
+                return linked_issue_description
+
+        return ""
+
+    def _get_github_issue(self, number: int) -> str | None:
+        url = f"{self._api_url}/{self._pr_data.owner}/{self._pr_data.repo}/issues/{number}"
+        response = requests.get(url, headers=self._config.headers)
+        if response.status_code == 200:
+            issue_data = response.json()
+            if not "pull_request" in issue_data:
+                logger.success(f"Linked GitHub issue #{number} fetched successfully")
+                return "\n".join(value for value in (issue_data["title"], issue_data["body"]) if value)
+
+        logger.warning("No GitHub issue found")
+        return None
+
+    @staticmethod
+    def _get_bugzilla_issue(number: int) -> str | None:
+        response = requests.get(f"https://bugzilla.mozilla.org/rest/bug/{number}")
+        if response.status_code == 200:
+            bug_data = response.json()
+            if "bugs" in bug_data and bug_data["bugs"]:
+                bug = bug_data["bugs"][0]
+                logger.success(f"Linked Bugzilla issue #{number} fetched successfully")
+                return "\n".join(value for value in (bug.get("summary", ""), bug.get("description", "")) if value)
+
+        logger.warning(f"No Bugzilla issue found")
+        return None
