@@ -147,7 +147,7 @@ all_mock_files = sorted(
     key=lambda p: int(p.stem.rsplit("_", 1)[-1]),
     reverse=True
 )
-mock_files = [mf for mf in all_mock_files if int(mf.stem.rsplit("_", 1)[-1])<16668]
+mock_files = [mf for mf in all_mock_files if mf.stem not in completed and int(mf.stem.rsplit("_", 1)[-1]) < 16668]
 
 @pytest.mark.parametrize("mock_file", mock_files, ids=[mf.stem for mf in mock_files])
 def test_pr_payload(mock_file):
