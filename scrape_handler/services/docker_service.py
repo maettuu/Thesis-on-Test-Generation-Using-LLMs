@@ -21,8 +21,9 @@ class DockerService:
     """
     Used for Docker operations.
     """
-    def __init__(self, project_root: str, pr_data: PullRequestData):
+    def __init__(self, project_root: str, old_repo_state: bool, pr_data: PullRequestData):
         self._project_root = project_root
+        self._old_repo_state = old_repo_state
         self._pr_data = pr_data
         self._client = docker.from_env()
 
@@ -32,6 +33,8 @@ class DockerService:
         """
 
         image_tag = self._pr_data.image_tag
+        build_succeeded = False
+
         try:
             self._client.images.get(f"{image_tag}:latest")
             logger.info(f"Docker image '{image_tag}' already exists – skipped")
@@ -42,25 +45,52 @@ class DockerService:
             logger.error(f"Docker API error when checking for existing image: {e}")
 
         logger.info(f"Building from scratch based on commit {self._pr_data.base_commit}")
+        dockerfile_path = Path("dockerfiles", f"Dockerfile_{self._pr_data.repo}_old").as_posix() \
+            if self._old_repo_state \
+            else Path("dockerfiles", f"Dockerfile_{self._pr_data.repo}").as_posix()
         try:
             self._client.images.build(
                 path=self._project_root,
                 tag=f"{self._pr_data.image_tag}:latest",
-                dockerfile=Path("dockerfiles", f"Dockerfile_{self._pr_data.repo}_old").as_posix(),
+                dockerfile=dockerfile_path,
                 buildargs={"commit_hash": self._pr_data.base_commit},
                 network_mode="host",
                 rm=True
             )
+            build_succeeded = True
             logger.success(f"Docker image '{self._pr_data.image_tag}' built successfully")
         except BuildError as e:
+            log_lines = []
             for chunk in e.build_log:
                 if 'stream' in chunk:
-                    print(chunk['stream'].rstrip())
-            logger.critical(f"Build failed: {e}")
+                    log_lines.append(chunk['stream'].rstrip())
+            full_build_log = "\n".join(log_lines)
+            logger.critical(f"Build failed for image '{image_tag}':\n{full_build_log}")
             raise ExecutionError(f'Docker build failed')
         except APIError as e:
             logger.critical(f"Docker API error: {e}")
             raise ExecutionError('Docker API error')
+        finally:
+            if not build_succeeded:
+                logger.info("Cleaning up leftover containers and dangling images...")
+                for container in self._client.containers.list(all=True):
+                    img = container.image.tags or container.image.id
+                    if img == '<none>:<none>' or not container.image.tags:
+                        try:
+                            if container.status == 'running':
+                                container.stop()
+                            container.remove()
+                        except APIError as stop_err:
+                            logger.error(f"Failed to remove container {container.id[:12]}: {stop_err}")
+                try:
+                    dangling = self._client.images.list(filters={'dangling': True})
+                    for img in dangling:
+                        try:
+                            self._client.images.remove(image=img.id, force=True)
+                        except APIError as img_err:
+                            logger.error(f"Failed to remove image {img.id[:12]}: {img_err}")
+                except APIError as list_err:
+                    logger.error(f"Error listing dangling images: {list_err}")
 
     def run_test_in_container(
             self,

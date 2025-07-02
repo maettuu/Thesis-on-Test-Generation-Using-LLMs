@@ -50,7 +50,7 @@ def run(
     code_sliced = cst_builder.slice_code_file()
 
     # 5. Build Docker image
-    docker_service = DockerService(config.project_root.as_posix(), pr_data)
+    docker_service = DockerService(config.project_root.as_posix(), config.old_repo_state, pr_data)
     docker_service.build()
 
     # 6. Gather pipeline data

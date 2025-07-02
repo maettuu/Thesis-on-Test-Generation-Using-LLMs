@@ -34,6 +34,7 @@ class Config:
             "include_predicted_test_file": [1, 0, 1, 0, 0],
             "sliced"                     : [1, 1, 0, 0, 0]
         }
+        self.old_repo_state = False
 
         ################## Log Directories Config ##################
         self.project_root = Path(__file__).resolve().parent.parent.parent
