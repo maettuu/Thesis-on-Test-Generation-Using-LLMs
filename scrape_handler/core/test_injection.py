@@ -80,7 +80,7 @@ def _find_file_to_inject(base_commit: str, patch: str, tmp_repo_dir: str) -> [st
             desired_file = f"{stem}_spec{suffix}"
 
             for filepath in repo_path.rglob(desired_file):
-                if "test/unit/" in filepath:
+                if "test/unit/" in filepath.as_posix():
                     candidate_files.append(filepath.as_posix())
 
             i += 1
