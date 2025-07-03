@@ -67,6 +67,7 @@ def _find_file_to_inject(base_commit: str, patch: str, tmp_repo_dir: str) -> [st
         candidate_files = []
         edited_file = ""
         desired_file = ""
+        repo_path = Path(tmp_repo_dir)
         i = 0
 
         while i < len(edited_files) and not candidate_files:
@@ -78,9 +79,8 @@ def _find_file_to_inject(base_commit: str, patch: str, tmp_repo_dir: str) -> [st
             suffix = edited_path.suffix
             desired_file = f"{stem}_spec{suffix}"
 
-            repo_path = Path(tmp_repo_dir)
             for filepath in repo_path.rglob(desired_file):
-                if any(part.startswith("test") for part in filepath.parts):
+                if "test/unit/" in filepath:
                     candidate_files.append(filepath.as_posix())
 
             i += 1
@@ -235,13 +235,12 @@ def _find_co_edited_files(file_list: list, tmp_repo_dir: str, n_last_commits: in
     return common_files
 
 
-def _is_test_file(filepath: str, test_folder: str = '') -> bool:
+def _is_test_file(filepath: str) -> bool:
     """
     Determines whether a file is a test file
 
     Parameters:
         filepath (str): The path to the file
-        test_folder (str, optional): The path to the folder where the test file is located
 
     Returns:
         bool: Whether the file is a test file
@@ -250,13 +249,8 @@ def _is_test_file(filepath: str, test_folder: str = '') -> bool:
     is_in_test_folder = False
     parts = filepath.split('/')
 
-    if test_folder:
-        is_in_test_folder = (test_folder in filepath)
-    else:
-        for part in parts[:-1]:
-            if part.startswith('test'):
-                is_in_test_folder = True
-                break
+    if "test/unit/" in filepath:
+        is_in_test_folder = True
 
     if is_in_test_folder and 'spec' in parts[-1] and parts[-1].endswith("js"):
         return True
