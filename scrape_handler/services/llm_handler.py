@@ -82,13 +82,12 @@ class LLMHandler:
         instructions = ("Your task:\n"
                         f"You are a software tester at {self._pr_data.repo}.\n"
                         "1. Write exactly one javascript test `it(\"...\", () => {...})` block.\n"
-                        "2. Only use letters in the test description, no special characters or numbers.\n"
-                        "3. Your test must fail on the code before the patch, and pass after, hence "
+                        "2. Your test must fail on the code before the patch, and pass after, hence "
                         "the test will verify that the patch resolves the issue.\n"
-                        "4. The test must be self-contained and to-the-point.\n"
-                        "5. Use only the provided imports (respect the paths exactly how they are given) by importing"
+                        "3. The test must be self-contained and to-the-point.\n"
+                        "4. Use only the provided imports (respect the paths exactly how they are given) by importing"
                         "dynamically for compatibility with Node.js — no new dependencies.\n"
-                        "6. Return only the javascript code (no comments or explanations).\n\n")
+                        "5. Return only the javascript code (no comments or explanations).\n\n")
 
         example = ("Example structure:\n"
                    "it(\"should <describe behavior>\", () => {\n"
@@ -107,14 +106,13 @@ class LLMHandler:
                                 f"You are a software tester at {self._pr_data.repo}.\n"
                                 "1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.\n"
                                 "2. Write exactly one javascript test `it(\"...\", () => {...})` block.\n"
-                                "3. Only use letters in the test description, no special characters or numbers.\n"
-                                "4. Your test must fail on the pre-patch code and pass on the post-patch code, hence "
+                                "3. Your test must fail on the pre-patch code and pass on the post-patch code, hence "
                                 "the test will verify that the patch resolves the issue.\n"
-                                "5. The test must be self-contained and to-the-point.\n"
-                                "6. If you need something new use only the provided imports (respect the paths "
+                                "4. The test must be self-contained and to-the-point.\n"
+                                "5. If you need something new use only the provided imports (respect the paths "
                                 "exactly how they are given) by importing dynamically for compatibility with Node.js"
                                 " — no new dependencies.\n"
-                                "7. Return only the javascript code for the new `it(...)` block (no comments or explanations).\n\n")
+                                "6. Return only the javascript code for the new `it(...)` block (no comments or explanations).\n\n")
             else:
                 instructions = ("Your task:\n"
                                 f"You are a software tester at {self._pr_data.repo}.\n"
@@ -123,7 +121,6 @@ class LLMHandler:
                                 "paths exactly how they are given) — no new dependencies.).\n"
                                 "   - A top-level `describe(\"<brief suite name>\", () => {{ ... }})`.\n"
                                 "   - Exactly one `it(\"...\", () => {{ ... }})` inside that block.\n"
-                                "   - Only use letters in the describe and it description, no special characters or numbers.\n"
                                 "2. The `it` test must fail on the pre-patch code and pass on the post-patch code, hence "
                                 "the test will verify that the patch resolves the issue.\n"
                                 "3. Keep the file self-contained — no external dependencies beyond those you import here.\n"
@@ -221,6 +218,7 @@ class LLMHandler:
         cleaned_test = cleaned_test.replace('```javascript', '')
         cleaned_test = cleaned_test.replace('```', '')
         cleaned_test = cleaned_test.lstrip('\n')
+        cleaned_test = self._clean_descriptions(cleaned_test)
         return self._adjust_function_indentation(cleaned_test)
 
     @staticmethod
@@ -240,6 +238,36 @@ class LLMHandler:
         for (i,line) in enumerate(code_lines):
             code_with_line_nums.append(f"{i+1} {line}")
         return "\n".join(code_with_line_nums)
+
+    @staticmethod
+    def _clean_descriptions(function_code: str) -> str:
+        """
+        Cleans the call expression descriptions used in the generated test by removing every non-letter character.
+
+        Parameters:
+            function_code (str): Function code to clean
+
+        Returns:
+            str: Cleaned function code
+        """
+
+        pattern = re.compile(
+            r'\b(?P<ttype>describe|it)\(\s*'  # match describe( or it(
+            r'(?P<quote>[\'"])\s*'  # capture opening quote
+            r'(?P<name>.*?)'  # capture the raw name
+            r'(?P=quote)\s*',  # match the same closing quote, then comma
+        flags = re.DOTALL
+        )
+
+        def clean_test_name(match):
+            test_type = match.group('ttype')
+            q = match.group('quote')
+            name = match.group('name')
+            # strip out anything but A–Z or a–z
+            cleaned = re.sub(r'[^A-Za-z ]', '', name)
+            return f"{test_type}({q}{cleaned}{q},"
+
+        return pattern.sub(clean_test_name, function_code)
 
     @staticmethod
     def _adjust_function_indentation(function_code: str) -> str:
