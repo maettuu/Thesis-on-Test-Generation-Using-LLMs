@@ -255,7 +255,7 @@ class LLMHandler:
             r'\b(?P<ttype>describe|it)\(\s*'  # match describe( or it(
             r'(?P<quote>[\'"])\s*'  # capture opening quote
             r'(?P<name>.*?)'  # capture the raw name
-            r'(?P=quote)\s*',  # match the same closing quote, then comma
+            r'(?P=quote)\s*,',  # match the same closing quote, then comma
         flags = re.DOTALL
         )
 
