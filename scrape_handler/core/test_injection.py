@@ -39,7 +39,7 @@ def get_candidate_test_file(
         logger.warning(f"No suitable test file {test_filename} found. New file created.")
         return test_filename, "", ""
     else:
-        logger.success("Test file found")
+        logger.success(f"Test file {test_filename} found")
         test_file_content_sliced = _keep_first_n_defs(parse_language, test_file_content)
 
     return test_filename, test_file_content, test_file_content_sliced
@@ -271,7 +271,7 @@ def _get_last_n_commits(filepath: str, tmp_repo_dir: str, n: int = 10) -> list:
         list: A list of commits
     """
 
-    command = f"git log -n {n} --pretty=format:'%H' -- {filepath}"
+    command = f"git log -n {n} --pretty=format:%H -- {filepath}"
     commits = helpers.run_command(command, cwd=tmp_repo_dir)
     return commits.splitlines() if commits else []
 
