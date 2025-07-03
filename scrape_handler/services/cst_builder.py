@@ -89,8 +89,11 @@ class CSTBuilder:
         tests_old = self._build_test_scope_map(self._parse(pr_file_diff.before))
         tests_new = self._build_test_scope_map(self._parse(pr_file_diff.after))
 
-        if tests_old and tests_new:
-            contributing_tests = self._find_changed_tests(tests_old, tests_new)
+        if tests_new:
+            if tests_old:
+                contributing_tests = self._find_changed_tests(tests_old, tests_new)
+            else:
+                contributing_tests = list(tests_new.keys())
 
             return [
                 desc if tests_new[desc]['scope'] == "global"
