@@ -72,7 +72,6 @@ class TestGenerator:
                 self._pr_diff_ctx.golden_code_patch,
                 tmp_repo_dir
             )
-            test_filename = test_filename.replace(tmp_repo_dir + '/', '')
         except:
             logger.critical(f'Failed to determine test file for injection')
             raise ExecutionError(f'Failed to determine test file for injection')
