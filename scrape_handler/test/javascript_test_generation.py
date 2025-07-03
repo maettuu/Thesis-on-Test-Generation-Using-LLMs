@@ -84,7 +84,7 @@ class RunHelper:
                     logger.success(f"Combination %d with model %s finished successfully" % (i_attempt + 1, model))
                     self.record_result(self.payload["number"], model, i_attempt + 1, stop)
                 except ExecutionError as e:
-                    self.record_result(self.payload["number"], model, i_attempt + 1, e)
+                    self.record_result(self.payload["number"], model, i_attempt + 1, str(e))
                 except Exception as e:
                     logger.critical("Failed with unexpected error:\n%s" % e)
                     self.record_result(self.payload["number"], model, i_attempt + 1, "unexpected error")
@@ -111,7 +111,7 @@ class RunHelper:
                 logger.success("o3-mini finished successfully")
                 self.record_result(self.payload["number"], model, 1, stop)
             except ExecutionError as e:
-                self.record_result(self.payload["number"], model, 1, e)
+                self.record_result(self.payload["number"], model, 1, str(e))
             except Exception as e:
                 logger.critical("Failed with unexpected error:\n%s" % e)
                 self.record_result(self.payload["number"], model, 1, "unexpected error")
