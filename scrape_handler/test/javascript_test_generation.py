@@ -98,29 +98,29 @@ class RunHelper:
 
                 i_attempt += 1
 
-        if not stop:
-            model = LLM.GPTo3
-            self.config.setup_output_dir(0, model)
-            logger.marker("Starting with model o3-mini")
-            try:
-                response, stop = run(pr_data,
-                                     self.config,
-                                     model=model,
-                                     i_attempt=0,
-                                     post_comment=False)
-                logger.success("o3-mini finished successfully")
-                self.record_result(self.payload["number"], model, 1, stop)
-            except ExecutionError as e:
-                self.record_result(self.payload["number"], model, 1, str(e))
-            except Exception as e:
-                logger.critical("Failed with unexpected error:\n%s" % e)
-                self.record_result(self.payload["number"], model, 1, "unexpected error")
-
-            if stop:
-                gen_test = Path(self.config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
-                new_filename = f"{self.execution_id}_{self.config.output_dir.name}.txt"
-                Path(self.config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
-                logger.success(f"Test file copied to {self.config.gen_test_dir}/{new_filename}")
+        # if not stop:
+        #     model = LLM.GPTo4_MINI
+        #     self.config.setup_output_dir(0, model)
+        #     logger.marker("Starting with model o4-mini")
+        #     try:
+        #         response, stop = run(pr_data,
+        #                              self.config,
+        #                              model=model,
+        #                              i_attempt=0,
+        #                              post_comment=False)
+        #         logger.success("o4-mini finished successfully")
+        #         self.record_result(self.payload["number"], model, 1, stop)
+        #     except ExecutionError as e:
+        #         self.record_result(self.payload["number"], model, 1, str(e))
+        #     except Exception as e:
+        #         logger.critical("Failed with unexpected error:\n%s" % e)
+        #         self.record_result(self.payload["number"], model, 1, "unexpected error")
+        #
+        #     if stop:
+        #         gen_test = Path(self.config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
+        #         new_filename = f"{self.execution_id}_{self.config.output_dir.name}.txt"
+        #         Path(self.config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
+        #         logger.success(f"Test file copied to {self.config.gen_test_dir}/{new_filename}")
 
         logger.marker(f"=============== Finished Payload #{pr_data.number} ===============")
         return response
