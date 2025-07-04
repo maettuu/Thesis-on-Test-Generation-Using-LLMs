@@ -125,10 +125,19 @@ class DockerService:
             logger.success(f"Container {container.short_id} started")
 
             # check if the test file is already in the container, add stub otherwise
-            exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{added_test_file}'")
-            if exists.exit_code != 0:
+            added_file_exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{added_test_file}'")
+            if added_file_exists.exit_code != 0:
                 self._add_file_to_container(container, added_test_file)
                 self._whitelist_stub(container, added_test_file.split("/")[-1])
+
+            gulpfile_pointer = "gulpfile.mjs"
+            gulpfile_exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{gulpfile_pointer}'")
+            if gulpfile_exists.exit_code != 0:
+                gulpfile_pointer = "gulpfile.js"
+                old_gulpfile_exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{gulpfile_pointer}'")
+                if old_gulpfile_exists.exit_code != 0:
+                    logger.critical("No gulpfile found")
+                    raise ExecutionError("No gulpfile found")
 
             self._copy_and_apply_patch(
                 container,
@@ -141,7 +150,7 @@ class DockerService:
                     patch_content=golden_code_patch,
                     patch_name="golden_code_patch.diff"
                 )
-            stdout = self._run_test(container, tests_to_run)
+            stdout = self._run_test(container, gulpfile_pointer, tests_to_run)
             test_passed = self._evaluate_test(stdout)
             return test_passed, stdout
         finally:
@@ -225,12 +234,13 @@ class DockerService:
         logger.success("Patch applied successfully")
 
     @staticmethod
-    def _run_test(container: Container, tests_to_run: list) -> str:
+    def _run_test(container: Container, gulpfile_pointer: str, tests_to_run: list) -> str:
         """
         Runs tests in container.
 
         Parameters:
             container (Container): Container to run test
+            gulpfile_pointer (str): Determines whether to use gulpfile.mjs or gulpfile.js
             tests_to_run (list): List of tests to run
 
         Returns:
@@ -239,7 +249,7 @@ class DockerService:
 
         test_commands = []
         for desc in tests_to_run:
-            inner = f"TEST_FILTER='{desc}' npx gulp unittest-single"
+            inner = f"TEST_FILTER='{desc}' npx gulp --gulpfile {gulpfile_pointer} unittest-single"
             test_single = shlex.quote(inner)
             cmd = f"timeout 300 /bin/sh -c {test_single}"
             test_commands.append(cmd)
