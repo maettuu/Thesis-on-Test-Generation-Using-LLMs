@@ -39,9 +39,8 @@ class TestGenerationPdfJs19849(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19849(self):
-        response = self.pipeline.execute_pipeline()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)
 
 
 class TestGenerationPdfJs19880(TestCase):
@@ -57,9 +56,8 @@ class TestGenerationPdfJs19880(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19880(self):
-        response = self.pipeline.execute_pipeline()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)
 
 
 class TestGenerationPdfJs19918(TestCase):
@@ -75,9 +73,8 @@ class TestGenerationPdfJs19918(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19918(self):
-        response = self.pipeline.execute_pipeline()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)
 
 
 class TestGenerationPdfJs19955(TestCase):
@@ -93,9 +90,8 @@ class TestGenerationPdfJs19955(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19955(self):
-        response = self.pipeline.execute_pipeline()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)
 
 
 class TestGenerationPdfJs19972(TestCase):
@@ -111,6 +107,5 @@ class TestGenerationPdfJs19972(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19972(self):
-        response = self.pipeline.execute_pipeline()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)

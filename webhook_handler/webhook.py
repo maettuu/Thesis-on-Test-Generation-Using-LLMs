@@ -66,8 +66,7 @@ def github_webhook(request):
     # 9) Check for PR validity
     pipeline = Pipeline(payload, config, post_comment=True)
     response, valid = pipeline.is_valid_pr()
-    if not valid:
-        return response
+    if not valid: return response
 
     def _execute_pipeline_in_background():
         try:
@@ -81,7 +80,6 @@ def github_webhook(request):
     thread = threading.Thread(target=_execute_pipeline_in_background, daemon=True)
     thread.start()
 
-    # return immediately
     return response
 
 
