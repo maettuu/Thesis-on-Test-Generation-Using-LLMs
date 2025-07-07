@@ -17,32 +17,42 @@ class PullRequestDiffContext:
                 self.pr_file_diffs.append(PullRequestFileDiff(file_name, before, after))
 
     @property
-    def code_file_diffs(self) -> list[PullRequestFileDiff]:
-        return [pr_file_diff for pr_file_diff in self.pr_file_diffs if pr_file_diff.is_code_file]
+    def source_code_file_diffs(self) -> list[PullRequestFileDiff]:
+        return [pr_file_diff for pr_file_diff in self.pr_file_diffs if pr_file_diff.is_source_code_file]
+
+    @property
+    def non_source_code_file_diffs(self) -> list[PullRequestFileDiff]:
+        return [pr_file_diff for pr_file_diff in self.pr_file_diffs if pr_file_diff.is_non_source_code_file]
 
     @property
     def test_file_diffs(self) -> list[PullRequestFileDiff]:
         return [pr_file_diff for pr_file_diff in self.pr_file_diffs if pr_file_diff.is_test_file]
 
     @property
-    def has_at_least_one_code_file(self) -> bool:
-        return len(self.code_file_diffs) > 0
+    def has_at_least_one_source_code_file(self) -> bool:
+        return len(self.source_code_file_diffs) > 0
 
     @property
     def has_at_least_one_test_file(self) -> bool:
         return len(self.test_file_diffs) > 0
 
     @property
+    def fulfills_requirements(self) -> bool:
+        return (self.has_at_least_one_source_code_file
+                and not self.has_at_least_one_test_file
+                and len(self.non_source_code_file_diffs) == 0)
+
+    @property
     def code_names(self) -> list[str]:
-        return [code_file_diff.name for code_file_diff in self.code_file_diffs]
+        return [code_file_diff.name for code_file_diff in self.source_code_file_diffs]
 
     @property
     def code_before(self) -> list[str]:
-        return [code_file_diff.before for code_file_diff in self.code_file_diffs]
+        return [code_file_diff.before for code_file_diff in self.source_code_file_diffs]
 
     @property
     def code_after(self) -> list[str]:
-        return [code_file_diff.after for code_file_diff in self.code_file_diffs]
+        return [code_file_diff.after for code_file_diff in self.source_code_file_diffs]
 
     @property
     def test_names(self) -> list[str]:
@@ -58,7 +68,7 @@ class PullRequestDiffContext:
 
     @property
     def golden_code_patch(self) -> str:
-        return "\n\n".join(pr_file_diff.unified_code_diff() for pr_file_diff in self.code_file_diffs) + "\n\n"
+        return "\n\n".join(pr_file_diff.unified_code_diff() for pr_file_diff in self.source_code_file_diffs) + "\n\n"
 
     @property
     def golden_test_patch(self) -> str:

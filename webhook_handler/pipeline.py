@@ -89,9 +89,9 @@ class Pipeline:
             return JsonResponse({'status': 'success', 'message': 'No linked issue found'}, status=200), False
 
         pr_diff_ctx = PullRequestDiffContext(self._pr_data.base_commit, self._pr_data.head_commit, gh_api)
-        if not pr_diff_ctx.has_at_least_one_code_file:
-            self.logger.warning("No modified source code files")
-            return JsonResponse({'status': 'success', 'message': 'No modified source code files found'}, status=200), False
+        if not pr_diff_ctx.fulfills_requirements:
+            self.logger.warning("Must modify source code files only")
+            return JsonResponse({'status': 'success', 'message': 'Must modify source code files only'}, status=200), False
 
         return JsonResponse({'status': 'accepted', 'message': 'Payload is being processed...'}, status=202), True
 
