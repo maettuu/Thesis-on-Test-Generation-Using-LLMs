@@ -73,7 +73,7 @@ def github_webhook(request):
         try:
             bootstrap.info("Starting pipeline execution...")
             pipeline.execute_pipeline()
-            bootstrap.info("Pipeline execution completed.")
+            bootstrap.info("Pipeline execution completed")
         except:
             bootstrap.critical("Failed to execute pipeline")
 
@@ -81,7 +81,7 @@ def github_webhook(request):
     payload_path = Path(config.webhook_raw_log_dir, f"pdf_js_{payload["number"]}_{config.execution_timestamp}.json")
     with open(payload_path, "w") as f:
         json.dump(payload, f, indent=4)
-    bootstrap.info(f"Payload save to {payload_path}")
+    bootstrap.info(f"Payload saved to {payload_path}")
 
     # 11) Execute pipeline
     thread = threading.Thread(target=_execute_pipeline_in_background, daemon=True)
