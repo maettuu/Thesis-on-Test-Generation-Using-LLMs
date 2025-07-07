@@ -175,11 +175,11 @@ class TestGenerator:
                 test_filename
             )
             if self._post_comment:
-                # status_code, response_data = self.gh_api.add_comment_to_pr(comment)
-                # if status_code == 201:
-                #     logger.success("Comment added successfully")
-                # else:
-                #     logger.fail(f"Failed to add comment: {status_code}", response_data)
+                status_code, response_data = self._gh_api.add_comment_to_pr(comment)
+                if status_code == 201:
+                    logger.success("Comment added successfully")
+                else:
+                    logger.fail(f"Failed to add comment: {status_code}", response_data)
                 pass
             else:
                 logger.success("Suggested test for PR:\n\n%s" % comment)

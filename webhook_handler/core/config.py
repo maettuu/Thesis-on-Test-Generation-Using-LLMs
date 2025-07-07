@@ -50,9 +50,9 @@ class Config:
             self.bot_log_dir         = Path(self.project_root, "bot_logs")  # for parsed requests
         self.pr_log_dir = None
         self.output_dir = None
+        self.cloned_repo_dir = None
 
         self.gen_test_dir = Path(self.project_root, "generated_tests")
-        self.cloned_repo_dir = "tmp_repo_dir"
 
         Path(self.webhook_raw_log_dir).mkdir(parents=True, exist_ok=True)
         Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
@@ -70,6 +70,7 @@ class Config:
         """
 
         self.pr_log_dir = Path(self.bot_log_dir, pr_id + "_%s" % self.execution_timestamp)
+        self.cloned_repo_dir = f"tmp_repo_dir_{pr_id}"
         Path(self.pr_log_dir).mkdir(parents=True, exist_ok=True)
 
     def setup_output_dir(self, i_attempt: int, model) -> None:
