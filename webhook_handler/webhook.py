@@ -6,6 +6,7 @@ import threading
 
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse, HttpResponseForbidden, HttpResponse, HttpResponseNotAllowed
+from pathlib import Path
 
 from webhook_handler.core import Config
 from .pipeline import Pipeline
@@ -70,13 +71,19 @@ def github_webhook(request):
 
     def _execute_pipeline_in_background():
         try:
-            # 10) Execute pipeline
             bootstrap.info("Starting pipeline execution...")
             pipeline.execute_pipeline()
             bootstrap.info("Pipeline execution completed.")
         except:
             bootstrap.critical("Failed to execute pipeline")
 
+    # 10) Save payload
+    payload_path = Path(config.webhook_raw_log_dir, f"pdf_js_{payload["number"]}_{config.execution_timestamp}.json")
+    with open(payload_path, "w") as f:
+        json.dump(payload, f, indent=4)
+    bootstrap.info(f"Payload save to {payload_path}")
+
+    # 11) Execute pipeline
     thread = threading.Thread(target=_execute_pipeline_in_background, daemon=True)
     thread.start()
 
