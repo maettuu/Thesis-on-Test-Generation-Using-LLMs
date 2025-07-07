@@ -38,6 +38,7 @@ def github_webhook(request):
 
     # 2) Fetch bootstrap logger
     bootstrap = logging.getLogger("bootstrap")
+    bootstrap.info("Received GitHub webhook event")
 
     # 3) Allow HEAD for health checks
     if request.method == 'HEAD':
@@ -72,6 +73,7 @@ def github_webhook(request):
         return JsonResponse({'status': 'success', 'message': 'Pull request action is not opened'}, status=200)
 
     # 9) All checks passed, cleanup & prepare
+    bootstrap.info("Starting pipeline execution...")
     helpers.remove_dir(Path(config.cloned_repo_dir))
     executed_tests = Path(config.bot_log_dir, "executed_tests.txt")
     executed_tests.touch(exist_ok=True)
@@ -81,6 +83,7 @@ def github_webhook(request):
             encoding="utf-8"
         )
     stop = False
+    response = JsonResponse({'status': 'success', 'message': 'No tests generated'}, status=200)
     post_comment = True
     models = [LLM.GPT4o, LLM.LLAMA, LLM.DEEPSEEK]
     pr_data = PullRequestData.from_payload(payload)
@@ -157,6 +160,8 @@ def github_webhook(request):
         logger.error(f"Failed to remove Docker image '{image_tag}': {e}")
     with executed_tests.open("a", encoding='utf-8') as f:
         f.write(f"{execution_id}\n")
+
+    bootstrap.info("Pipeline execution completed.")
     return response
 
 

@@ -1,5 +1,7 @@
 import logging
 
+from django.http import JsonResponse
+
 from webhook_handler.core import (
     Config,
     templates
@@ -37,13 +39,13 @@ def run(
     issue_statement = gh_api.get_linked_issue()
     if not issue_statement:
         logger.warning("No linked issue found")
-        return {'status': 'success', 'message': 'Pull request opened, but no linked issue found'}, True
+        return JsonResponse({'status': 'success', 'message': 'Pull request opened, but no linked issue found'}, status=200), True
 
     # 3. Compute diffs & file contexts
     pr_diff_ctx = PullRequestDiffContext(pr_data.base_commit, pr_data.head_commit, gh_api)
     if not pr_diff_ctx.has_at_least_one_code_file:
         logger.warning("No modified source code files")
-        return {'status': 'success', 'message': 'Pull request opened, linked issue found, but no modified source code files'}, True
+        return JsonResponse({'status': 'success', 'message': 'Pull request opened, linked issue found, but no modified source code files'}, status=200), True
 
     # 4. Slice golden code
     cst_builder = CSTBuilder(config.parse_language, pr_diff_ctx)
@@ -64,7 +66,7 @@ def run(
     # 7. Setup Model Handler
     llm_handler = LLMHandler(config, pr_pipeline_data)
 
-    # 8. Generation
+    # 8. Setup Generator
     generator = TestGenerator(
         config,
         pr_pipeline_data,
@@ -80,4 +82,7 @@ def run(
         mock_response
     )
 
-    return {'status': 'success', 'message': 'Execution completed successfully'}, generator.generate()
+    # 9. Execute
+    generation_completed = generator.generate()
+
+    return JsonResponse({'status': 'success', 'message': 'Generated test has been posted'}, status=200), generation_completed
