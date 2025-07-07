@@ -130,15 +130,23 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {
+            "format": "[%(asctime)s] %(levelname)-8s: %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
     "handlers": {
         "file": {
-            "level": "DEBUG",
+            "level": "INFO",
             "class": "logging.FileHandler",
-            "filename": "mylog.log",
+            "filename": "bootstrap.log",
+            "formatter": "simple",
         },
         "console": {
-            "level": "DEBUG",
+            "level": "INFO",
             "class": "logging.StreamHandler",
+            "formatter": "simple",
         },
     },
     "loggers": {
@@ -147,9 +155,9 @@ LOGGING = {
             "level": "DEBUG",
             "propagate": True,
         },
-        "myapp": {
+        "bootstrap": {
             "handlers": ["file", "console"],
-            "level": "DEBUG",
+            "level": "INFO",
             "propagate": False,
         },
     },

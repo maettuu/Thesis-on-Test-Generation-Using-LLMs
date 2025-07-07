@@ -2,395 +2,110 @@ import os
 import json
 
 from django.test import TestCase
-from datetime import datetime
 from pathlib import Path
 
-
-from webhook_handler.core import helpers
-from webhook_handler.pipeline import run
-from webhook_handler.webhook import logger, config
+from webhook_handler.core import Config
+from webhook_handler.pipeline import Pipeline
 
 
-class TestHelper():
-    def __init__(
-            self,
-            payload_path: str,
-            mock_response_generation_path: str = None,
-            mock_response_amplification_path: str = None,
-            run_all_models: bool = False
-    ):
-        self.payload = self._get_payload(payload_path)
-        self.mock_response_generation = self._get_file_content(mock_response_generation_path)
-        self.mock_response_amplification = self._get_file_content(mock_response_amplification_path)
-        self.run_all_models = run_all_models
+def _get_payload(rel_path: str) -> dict:
+    abs_path = os.path.join(os.path.dirname(__file__), rel_path)
+    with open(abs_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return payload
 
-    @staticmethod
-    def _get_payload(rel_path: str) -> str:
-        abs_path = os.path.join(os.path.dirname(__file__), rel_path)
-        with open(abs_path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        return payload
 
-    @staticmethod
-    def _get_file_content(rel_path: str) -> str | None:
-        if not rel_path:
-            return None
-        abs_path = os.path.join(os.path.dirname(__file__), rel_path)
-        with open(abs_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return content
-
-    def run_payload(self):
-        stop = False  # we stop when successful
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        post_comment = True
-        models = [
-            "gpt-4o",
-            # "meta-llama/Llama-3.3-70B-Instruct",
-            "llama-3.3-70b-versatile",
-            "deepseek-r1-distill-llama-70b",
-            # "qwen-qwq-32b"
-        ]
-        for model in models:
-            iAttempt = 0
-            while iAttempt < len(config.prompt_combinations_gen["include_golden_code"]) and (not stop or self.run_all_models):
-                logger.info("[*] Starting combination %d with model %s" % (iAttempt + 1, model))
-                response, stop = run(self.payload,
-                                     config,
-                                     logger,
-                                     model=model,
-                                     model_test_generation=self.mock_response_generation,
-                                     model_test_amplification=self.mock_response_amplification,
-                                     iAttempt=iAttempt,
-                                     timestamp=timestamp,
-                                     post_comment=False)
-                if stop:
-                    post_comment = False
-                if not Path(config.run_log_dir, 'results.csv').exists():
-                    Path(config.run_log_dir, 'results.csv').write_text("prNumber,model,iAttempt,stop\n", encoding="utf-8")
-                with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
-                    f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, iAttempt + 1, stop))
-
-                iAttempt += 1
-
-        if not stop:
-            model = "o3-mini"
-            logger.info("[*] Starting o3-mini...")
-            response, stop = run(self.payload,
-                                 config,
-                                 logger,
-                                 model=model,
-                                 iAttempt=0,
-                                 timestamp=timestamp,
-                                 post_comment=post_comment)
-            if stop:
-                post_comment = False
-            with open(Path(config.run_log_dir, 'results.csv'), 'a') as f:
-                f.write("%s,%s,%s,%s\n" % (self.payload["number"], model, 1, stop))
-
-        return response
-
-    @staticmethod
-    def cleanup():
-        helpers.remove_dir(Path(config.cloned_repo_dir))
+def _get_file_content(rel_path: str) -> str | None:
+    if not rel_path:
+        return None
+    abs_path = os.path.join(os.path.dirname(__file__), rel_path)
+    with open(abs_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return content
 
 #
 # RUN With: python manage.py test webhook_handler.test.<filename>.<testname>
 #
-class TestGenerationPdfJs16275(TestCase):
+class TestGenerationPdfJs19849(TestCase):
     def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_16275.json", run_all_models=True)
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
+        payload_path = Path("test_mocks", "pdf_js_19849.json")
+        self.payload = _get_payload(str(payload_path))
+        self.config = Config()
+        self.pipeline = Pipeline(self.payload, self.config)
 
     def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
+        del self.payload
+        del self.config
+        del self.pipeline
 
-    def test_generation_pdf_js_16275(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+    def test_generation_pdf_js_19849(self):
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)
 
 
-class TestGenerationPdfJs16318(TestCase):
+class TestGenerationPdfJs19880(TestCase):
     def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_16318.json", run_all_models=True)
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
+        payload_path = Path("test_mocks", "pdf_js_19880.json")
+        self.payload = _get_payload(str(payload_path))
+        self.config = Config()
+        self.pipeline = Pipeline(self.payload, self.config)
 
     def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
+        del self.payload
+        del self.config
+        del self.pipeline
 
-    def test_generation_pdf_js_16318(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+    def test_generation_pdf_js_19880(self):
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)
 
 
-class TestGenerationPdfJs16798(TestCase):
+class TestGenerationPdfJs19918(TestCase):
     def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_16798.json", run_all_models=True)
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
+        payload_path = Path("test_mocks", "pdf_js_19918.json")
+        self.payload = _get_payload(str(payload_path))
+        self.config = Config()
+        self.pipeline = Pipeline(self.payload, self.config)
 
     def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
+        del self.payload
+        del self.config
+        del self.pipeline
 
-    def test_generation_pdf_js_16798(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs17602(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_17602.json", run_all_models=True)
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_17602(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs17905(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(
-            payload_path="test_mocks/pdf_js_17905.json",
-            mock_response_generation_path="test_mocks/pdf_js_17905_response.txt"
-        )
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_17905(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs18430(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_18430.json", run_all_models=True)
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_18430(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19010(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19010.json", run_all_models=True)
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19010(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19232(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19232.json", run_all_models=True)
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19232(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19470(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19470.json", run_all_models=True)
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19470(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19504(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19504.json", run_all_models=True)
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19504(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19935(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19935.json")
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19935(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19949(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19949.json")
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19949(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19952(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19952.json")
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19952(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+    def test_generation_pdf_js_19918(self):
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)
 
 
 class TestGenerationPdfJs19955(TestCase):
     def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19955.json")
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
+        payload_path = Path("test_mocks", "pdf_js_19955.json")
+        self.payload = _get_payload(str(payload_path))
+        self.config = Config()
+        self.pipeline = Pipeline(self.payload, self.config)
 
     def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
+        del self.payload
+        del self.config
+        del self.pipeline
 
     def test_generation_pdf_js_19955(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19962(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(
-            payload_path="test_mocks/pdf_js_19962.json",
-            mock_response_generation_path="test_mocks/pdf_js_19962_response.txt"
-        )
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19962(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19967(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19967.json")
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19967(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)
 
 
 class TestGenerationPdfJs19972(TestCase):
     def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/pdf_js_19972.json")
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
+        payload_path = Path("test_mocks", "pdf_js_19972.json")
+        self.payload = _get_payload(str(payload_path))
+        self.config = Config()
+        self.pipeline = Pipeline(self.payload, self.config)
 
     def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
+        del self.payload
+        del self.config
+        del self.pipeline
 
     def test_generation_pdf_js_19972(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
-class TestGenerationPdfJs19992(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(
-            payload_path="test_mocks/pdf_js_19992.json",
-            mock_response_generation_path = "test_mocks/pdf_js_19992_response.txt"
-        )
-        if (Path(config.cloned_repo_dir)).exists():
-            helpers.remove_dir(Path(config.cloned_repo_dir))
-
-    def tearDown(self):
-        self.test_helper.cleanup()
-        del self.test_helper
-
-    def test_generation_pdf_js_19992(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-
-
+        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        self.assertTrue(generation_completed)

@@ -14,10 +14,10 @@ RUN apt-get update \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Node.js + latest npm & NYC
+# 2. Node.js + latest npm
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
-    && npm install -g npm@latest nyc
+    && npm install -g npm@latest
 
 # 3. Clone & Checkout
 ARG commit_hash
@@ -26,9 +26,8 @@ RUN echo "Cloning commit: ${commit_hash}" \
 WORKDIR /app/testbed
 RUN git checkout ${commit_hash}
 
-# 4. Install & build generic
+# 4. Install dependecies
 RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci  # necessary to skip outdated downloads (for old commits)
-RUN npx gulp generic
 
 # 5. Append `unittest-single` task to gulpfile.mjs
 RUN printf '\ngulp.task(\n' >> gulpfile.mjs \

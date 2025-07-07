@@ -1,254 +1,197 @@
+import re
+
 from huggingface_hub import InferenceClient
 from openai import OpenAI
 from groq import Groq
 
 from webhook_handler.core.config import Config
+from webhook_handler.data_models.llm_enum import LLM
 from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
 
 
 class LLMHandler:
+    """
+    Used to interact with LLMs.
+    """
     def __init__(self, config: Config, data: PullRequestPipelineData):
-        self.config = config
-        self.data = data
-        self.openai_client = OpenAI(api_key=config.openai_api_key)
-        self.hug_client = InferenceClient(api_key=config.hug_api_key)
-        self.groq_client = Groq(api_key=config.groq_api_key)
+        self._pr_pipeline_data = data
+        self._pr_data = data.pr_data
+        self._pr_diff_ctx = data.pr_diff_ctx
+        self._openai_client = OpenAI(api_key=config.openai_api_key)
+        self._hug_client = InferenceClient(api_key=config.hug_api_key)
+        self._groq_client = Groq(api_key=config.groq_api_key)
 
     def build_prompt(
             self,
-            include_issue_description=False,
-            include_golden_code=False,
-            sliced="No",
-            include_issue_comments=False,
-            include_pr_desc=False,
-            include_golden_test_code=False,
-            test_code_sliced=False,
-            include_uncovered_lines_by_dvlpr_test=False,
-            isCoT_amplification=False,
-            include_predicted_test_file=False,
-            patch_labeled="",
-            test_file_content="",
-            available_packages="",
-            available_relative_imports=""
-    ):
-        golden_patch = self.data.pr_diff_ctx.golden_code_patch
-        cot_text = ""
-        predicted_test_file_text = ""
-        predicted_test_file_contents = ""
-        task3 = ". The test should be self-contained and to-the-point, containing only the necessary assertions to verify that the issue is resolved."
-
-        if include_golden_test_code:
-            # If we include the golden_test_code, we are talking about Test Amplification, where we give the
-            # developer (golden) test to the model and ask for a test that increases coverage
-            test_names_with_code = ""
-            test_filenames = self.data.pr_diff_ctx.test_names
-            if test_code_sliced:
-                test_code = self.data.test_sliced
-            else:
-                test_code = self.data.pr_diff_ctx.test_after
-                print("Warning, using Test Amplification without slicing the test code, performance may be bad")
-
-            for (fname, fcode) in zip(test_filenames, test_code):
-                test_names_with_code += "File %s\n%s\n\n" % (fname, fcode)
-
-            if include_uncovered_lines_by_dvlpr_test:
-                golden_patch = patch_labeled
-                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code; specifically, the <patch> lines that are not covered end with the comment ###NOT COVERED###. Your task is to **write an additional fail-to-pass test that covers at least some ###NOT COVERED### lines**. If a test from the <developer_tests> can be modified to cover ###NOT COVERED### lines, feel free to do it, otherwise (e.g., not covered lines are in a different file) you can ignore the <developer_tests>. Import anything you need from the available packages and imports in the <imports> brackets dynamically for compatibility with Node.js. "
-                task2 = "<developer_tests>\n%s\n</developer_tests>\n\nGenerate another fail-to-pass test that covers lines of the new code (<patch>) that were not covered by the <developer_tests>. " % test_names_with_code
-            else:
-                task = "The developer has also submitted some tests in the PR that fail before the <patch> is applied and pass after the <patch> is applied, hence validating that the <patch> resolves the <issue>. The these fail-to-pass tests are shown in the <developer_tests> brackets (only parts relevant to the PR are shown with their respective line numbers; lines added in the PR start with '+'). However, these tests do not cover all the added code. Your task is to **write an additional fail-to-pass test that covers at least some of the lines missed by the <developer_tests>. You must only use the provided imports in the <imports> brackets for the test. "
-                task2 = "<developer_tests>\n%s\n</developer_tests>\n\nGenerate another fail-to-pass test that covers lines of the new code (<patch>) that were not covered by the <developer_tests>. " % test_names_with_code
-
-            if isCoT_amplification:
-                cot_text = "Think step-by-step to generate the test:\n1. Select one or more ###NOT COVERED### line(s) from <code>.\n2. If the line(s) you selected belongs to a file already tested by one of the <developer_tests>, modify the developer test to cover the ###NOT COVERED### line(s) \n3. If, on the other hand, the line(s) you selected 1. are not covered by any developer test, write a new test to cover them.\n"
-                task3 = ", without any explanation or any natural language in general."
-        else:
-            task = "Your task is to write one javascript test 'it' that fails before the changes in the <patch> and passes after the changes in the <patch>, hence verifying that the <patch> resolves the <issue>. "
-            task2 = "Generate one test that checks whether the <patch> resolves the <issue>.\n"
-            if include_predicted_test_file:
-                if test_file_content:
-                    predicted_test_file_text = "Your generated test will then be manually inserted by us in the test file shown in the <test_file> brackets; you can use the contents in these brackets for motivation if needed. You must only return a raw test and you must only use the provided imports in the <imports> brackets for the test. "
-                    predicted_test_file_contents = "<test_file>\n%s\n</test_file>\n\n" % test_file_content
-
-                    task3 = ", or at most you can include a decorator to parameterize the test inputs, if one is used by the a test in <test_file> from which you drew motivation (if any). The test should be self-contained (e.g., no parameters unless a decorator is used to parameterize inputs) and to-the-point. Import anything you need from the available packages and imports in the <imports> brackets dynamically for compatibility with Node.js."
-                else:
-                    predicted_test_file_text = "Since there is no given test file, your generated test will then be manually inserted by us in a new file. Therefore, include any imports first, add an outer describe block in which you then put your test 'it'. Import anything you need from the available packages and imports in the <imports> brackets. Do not use anything you cannot import. "
-                    task3 = ". The test should be self-contained (e.g., no parameters unless a decorator is used to parameterize inputs) and to-the-point."
-
-        if include_issue_description:
-            issue_text = self.data.problem_statement
-        else:
-            issue_text = self.data.problem_statement.split('\n')[0]
-
-        if include_golden_code:
-            # Add golden code contents
-            # - whole file
-            # - random part of file
-            # - targeted part of file (through AST)
-            # filenames of the files changed by the golden patch
-            code_filenames = self.data.pr_diff_ctx.code_names
-            if sliced == "Short":
-                # code = row['golden_code_contents_sliced']
-                sliced_text = " (only parts relevant to the patch are shown with their respective line numbers)"
-            elif sliced == "Long" or sliced == "LongCorr":
-                code = self.data.code_sliced
-                sliced_text = " (only parts relevant to the patch are shown with their respective line numbers)"
-            elif sliced == "No":
-                code = self.data.pr_diff_ctx.code_before  # whole code
-                code = [self.add_line_numbers(x) for x in code]
-                sliced_text = ""
-            else:
-                raise ValueError("Unrecongnized value for 'sliced': %s" % sliced)
-
-            code_string = "This patch will be applied to the file(s) shown within the <code> brackets%s. " % sliced_text
-
-            fnames_with_code = ""
-            for (fname, fcode) in zip(code_filenames, code):
-                fnames_with_code += "File %s\n%s\n\n" % (fname, fcode)
-            code_string2 = "<code>\n%s\n</code>\n\n" % fnames_with_code
-        else:
-            code_string = ""
-            code_string2 = ""
-
-        if include_issue_comments:
-            comments_string = "\nIssue comments (discussion):\n %s" % self.data.hints_text
-        else:
-            comments_string = ""
-
-        if include_pr_desc:
-            pr_desc_string = ". The description of this Pull Request is shown in the <pr_description> brackets"
-            pr_desc_string2 = "<pr_description>\nPR Title: %s\n%s\n</pr_description>\n\n" % (self.data.pr_data.title, self.data.pr_data.description)
-        else:
-            pr_desc_string = ""
-            pr_desc_string2 = ""
-
-        if test_file_content:
-            integration_consideration = "Return only one test WITHOUT considering the integration to the test file, because your raw test will then be inserted in a file by us, either as a standalone test or as a method of an existing describe block, depending on the file conventions; Return only one test and nothing else. You must only use the provided imports in your test."
-        else:
-            integration_consideration = "Return the full file content: imports, describe block and 'it' test. Only import and use what is listed in the <imports> brackets. Only return code"
-
-        _, repo_name, _ = self.parse_instanceID_string()
-        prompt = f"""The following text contains a user issue (in <issue> brackets) posted at the {repo_name} repository. A developer has submitted a Pull Request (PR) that resolves this issue{pr_desc_string}. Their modification is provided in the form of a unified diff format inside the <patch> brackets. {code_string}{task}{predicted_test_file_text}More details at the end of this text.
-    
-<issue>
-{issue_text}{comments_string}
-</issue>
-        
-<patch>
-{golden_patch}
-</patch>
-        
-<imports>
-{available_packages}\n
-{available_relative_imports}
-</imports>
-        
-{code_string2}{predicted_test_file_contents}{pr_desc_string2}{task2}{cot_text}{integration_consideration}{task3}"""
-
-        #     if include_predicted_test_file:
-        #         x1 = "in the <test_file>"
-        #     else:
-        #         x1 = "in a file"
-
-        #     prompt = f"""You are an experienced software tester working at the {repo_name} repository, where your main responsibility is writing regression tests.
-        # The <issue> brackets contain an issue posted by a user in your repository.
-        # The <pr> brackets contain the changes introduced in a recent Pull Request (PR) that resolves the <issue>.
-        # Your task as an experienced software tester is to write a REGRESSION TEST for this <issue>.
-        # A regression test is a test that:
-        # A) FAILS on the current version of the code (shown in the <code> brackets).
-        # B) PASSES after the <pr> is applied to the <code>.
-
-        # <issue>
-        # {issue_text}
-        # </issue>
-
-        # <pr>
-        # {golden_patch}
-        # </pr>
-
-        # {code_string2}
-
-        # {predicted_test_file_contents}
-
-        # Think step-by-step to generate a REGRESSION test, i.e., a test function that:
-        # A) FAILS when we run it in the current version of the <code>.
-        # B) PASSES when we run it after applying the <pr> to the <code>.
-        # Note that the changes will be applied by us externally, you only have to provide one raw test function that satisfies A) and B).
-
-        # Return only one test function at the default indentation level WITHOUT considering the integration to
-        # the test file, e.g., in a unittest.TestCase class because your raw test function will then be inserted
-        # in a file by us, either as a standalone function or as a method of an existing unittest.TestCase
-        # class, depending on the file conventions; you must provide only one raw test function and must import
-        # any needed module inside your test function. The test function should be self-contained and to-the-point, containing only the necessary assertions to verify that the test is a regression test.
-        # """
-
-        return prompt
-
-    @staticmethod
-    def add_line_numbers(code):
-        """Input (String):
-                x = 1
-                print(x)
-            Output (String):
-                1 x = 1
-                2 print(x)
+            include_golden_code: bool,
+            sliced: bool,
+            include_pr_desc: bool,
+            include_predicted_test_file: bool,
+            test_filename: str,
+            test_file_content_sliced: str,
+            available_packages: str,
+            available_relative_imports: str
+    ) -> str:
         """
-        code_lines = code.splitlines()
-        code_with_line_nums = []
-        for (i,line) in enumerate(code_lines):
-            code_with_line_nums.append(f"{i+1} {line}")
-        return "\n".join(code_with_line_nums)
+        Builds prompt with available data.
 
-    def parse_instanceID_string(self):
-        # instanceIDs are of the form "<owner>__<repo>-<pr_number>"
-        owner = self.data.pr_data.id.split('__')[0]
-        tmp = self.data.pr_data.id.split('__')[1].split('-')
-        if len(tmp) == 2: # "django-1111"
-            repo, pr_number = tmp
-        else: # "scikit-learn-1111"
-            repo = '-'.join(tmp[0:-1])
-            pr_number = tmp[-1]
-        return owner, repo, pr_number
+        Parameters:
+            include_golden_code (bool): Whether to include golden code
+            sliced (bool): Whether to slice source code or not
+            include_pr_desc (bool): Whether to include pull request description
+            include_predicted_test_file (bool): Whether to include test file
+            test_filename (str): The filename of the test file
+            test_file_content_sliced (str): The content of the test file
+            available_packages (str): The available packages
+            available_relative_imports (str): The relative imports of all unit test files
 
-    def query_model(self, prompt, model="gpt-4o", T=0.0):
+        Returns:
+            str: Prompt
+        """
+
+        guidelines = ("Before you begin:\n"
+                      "- Keep going until the job is completely solved — don’t stop halfway.\n"
+                      "- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.\n"
+                      "- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.\n\n")
+
+        linked_issue = f"Issue:\n<issue>\n{self._pr_pipeline_data.problem_statement}\n</issue>\n\n"
+        patch = f"Patch:\n<patch>\n{self._pr_diff_ctx.golden_code_patch}\n</patch>\n\n"
+        available_imports = f"Imports:\n<imports>\n{available_packages}\n\n\n{available_relative_imports}\n</imports>\n\n"
+
+        golden_code = ""
+        if include_golden_code:
+            code_filenames = self._pr_diff_ctx.code_names
+            if sliced:
+                code = self._pr_pipeline_data.code_sliced
+                golden_code += "Code:\n<code>\n"
+                for (f_name, f_code) in zip(code_filenames, code):
+                    golden_code += ("File:\n"
+                                    f"{f_name}\n"
+                                    f"{f_code}\n")
+                golden_code += "</code>\n\n"
+            else:
+                code = self._pr_diff_ctx.code_before  # whole code
+                code = [self._add_line_numbers(x) for x in code]
+                golden_code += "Code:\n<code>\n"
+                for (f_name, f_code) in zip(code_filenames, code):
+                    golden_code += ("File:\n"
+                                    f"{f_name}\n"
+                                    f"{f_code}\n")
+                golden_code += "</code>\n\n"
+
+        instructions = ("Your task:\n"
+                        f"You are a software tester at {self._pr_data.repo}.\n"
+                        "1. Write exactly one javascript test `it(\"...\", () => {...})` block.\n"
+                        "2. Your test must fail on the code before the patch, and pass after, hence "
+                        "the test will verify that the patch resolves the issue.\n"
+                        "3. The test must be self-contained and to-the-point.\n"
+                        "4. Use only the provided imports (respect the paths exactly how they are given) by importing"
+                        "dynamically for compatibility with Node.js — no new dependencies.\n"
+                        "5. Return only the javascript code (no comments or explanations).\n\n")
+
+        example = ("Example structure:\n"
+                   "it(\"should <describe behavior>\", () => {\n"
+                   "  const { example } = await import(\"../../src/core/example.js\");\n"
+                   "  <initialize required variables>;\n"
+                   "  <define expected variable>;\n"
+                   "  <generate actual variables>;\n"
+                   "  <compare expected with actual>;\n"
+                   "});\n\n")
+
+        test_code = ""
+        if include_predicted_test_file:
+            if test_file_content_sliced:
+                test_code += f"Test file:\n<test_file>\nFile:\n{test_filename}\n{test_file_content_sliced}\n</test_file>\n\n"
+                instructions = ("Your task:\n"
+                                f"You are a software tester at {self._pr_data.repo}.\n"
+                                "1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.\n"
+                                "2. Write exactly one javascript test `it(\"...\", () => {...})` block.\n"
+                                "3. Your test must fail on the pre-patch code and pass on the post-patch code, hence "
+                                "the test will verify that the patch resolves the issue.\n"
+                                "4. The test must be self-contained and to-the-point.\n"
+                                "5. If you need something new use only the provided imports (respect the paths "
+                                "exactly how they are given) by importing dynamically for compatibility with Node.js"
+                                " — no new dependencies.\n"
+                                "6. Return only the javascript code for the new `it(...)` block (no comments or explanations).\n\n")
+            else:
+                instructions = ("Your task:\n"
+                                f"You are a software tester at {self._pr_data.repo}.\n"
+                                "1. Create a new test file that includes:\n"
+                                "   - All necessary imports (use only the provided imports and respect the "
+                                "paths exactly how they are given) — no new dependencies.).\n"
+                                "   - A top-level `describe(\"<brief suite name>\", () => {{ ... }})`.\n"
+                                "   - Exactly one `it(\"...\", () => {{ ... }})` inside that block.\n"
+                                "2. The `it` test must fail on the pre-patch code and pass on the post-patch code, hence "
+                                "the test will verify that the patch resolves the issue.\n"
+                                "3. Keep the file self-contained — no external dependencies beyond those you import here.\n"
+                                "4. Return only the full JavaScript file contents (no comments explanations).\n\n")
+
+                example = ("Example structure:\n"
+                           "import { example } from \"../../src/core/example.js\";\n\n"
+                           "describe(\"<describe purpose>\", () => {\n"
+                           "  it(\"<describe behavior>\", () => {\n"
+                           "    <initialize required variables>;\n"
+                           "    <define expected variable>;\n"
+                           "    <generate actual variables>;\n"
+                           "    <compare expected with actual>;\n"
+                           "  });\n"
+                           "});\n\n")
+
+        pr_description = ""
+        if include_pr_desc:
+            pr_description += f"PR description:\n<pr_description>\n{
+                self._pr_data.title
+            }\n{
+                self._pr_data.description
+            }\n</pr_description>\n\n"
+
+        return (f"{guidelines}"
+                  f"{linked_issue}"
+                  f"{patch}"
+                  f"{available_imports}"
+                  f"{golden_code}"
+                  f"{test_code}"
+                  f"{pr_description}"
+                  f"{instructions}"
+                  f"{example}")
+
+    def query_model(self, prompt: str, model: LLM, temperature: float = 0.0) -> str:
+        """
+        Query a model and return its results.
+
+        Parameters:
+            prompt (str): Prompt to ask for
+            model (LLM): Model to use
+            temperature (float, optional): Temperature to use. Defaults to 0.0
+
+        Returns:
+            str: Response from model
+        """
+
         try:
-            if model.startswith("gpt"):
-                response = self.openai_client.chat.completions.create(
+            if model == LLM.GPT4o:
+                response = self._openai_client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=T
+                    temperature=temperature
                 )
                 return response.choices[0].message.content.strip()
-            elif model.startswith("o3"):  # does not accept temperature
-                response = self.openai_client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return response.choices[0].message.content.strip()
-            elif model.startswith("o1"):  # temperature does not apply in o1 series
-                response = self.openai_client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return response.choices[0].message.content.strip()
-            # elif model.startswith("meta") or model.startswith('microsoft'):
-            #     response = self.hug_client.chat.completions.create(
+            # elif model == LLM.GPTo4_MINI:  # does not accept temperature
+            #     response = self._openai_client.chat.completions.create(
             #         model=model,
             #         messages=[{"role": "user", "content": prompt}],
-            #         max_tokens=500,
-            #         temperature=T
             #     )
-            #     return response.choices[0].message['content']
-            elif model.startswith("llama"):
-                completion = self.groq_client.chat.completions.create(
+            #     return response.choices[0].message.content.strip()
+            elif model == LLM.LLAMA:
+                completion = self._groq_client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=700,
-                    temperature=T
+                    temperature=temperature
                 )
                 return completion.choices[0].message.content
-            elif model.startswith("qwen") or model.startswith("deepseek"):
-                response = self.groq_client.chat.completions.create(
+            elif model == LLM.DEEPSEEK:
+                response = self._groq_client.chat.completions.create(
                     model=model,
                     messages=[
                         {"role": "system",
@@ -257,5 +200,99 @@ class LLMHandler:
                     ]
                 )
                 return response.choices[0].message.content
-        except Exception as e:
+        except:
             return ""
+
+    def postprocess_response(self, raw: str) -> str:
+        """
+        Cleans LLM response by removing any non-code elements
+
+        Parameters:
+            raw (str): The raw LLM response
+
+        Returns:
+            str: The cleaned LLM response
+        """
+
+        cleaned_test = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
+        cleaned_test = cleaned_test.replace('```javascript', '')
+        cleaned_test = cleaned_test.replace('```', '')
+        cleaned_test = cleaned_test.lstrip('\n')
+        cleaned_test = self._clean_descriptions(cleaned_test)
+        return self._adjust_function_indentation(cleaned_test)
+
+    @staticmethod
+    def _add_line_numbers(code: str) -> str:
+        """
+        Adds line numbers to code.
+
+        Parameters:
+            code (str): Code to add line numbers to
+
+        Returns:
+            str: code with added line numbers
+        """
+
+        code_lines = code.splitlines()
+        code_with_line_nums = []
+        for (i,line) in enumerate(code_lines):
+            code_with_line_nums.append(f"{i+1} {line}")
+        return "\n".join(code_with_line_nums)
+
+    @staticmethod
+    def _clean_descriptions(function_code: str) -> str:
+        """
+        Cleans the call expression descriptions used in the generated test by removing every non-letter character.
+
+        Parameters:
+            function_code (str): Function code to clean
+
+        Returns:
+            str: Cleaned function code
+        """
+
+        pattern = re.compile(
+            r'\b(?P<ttype>describe|it)\(\s*'  # match describe( or it(
+            r'(?P<quote>[\'"])\s*'  # capture opening quote
+            r'(?P<name>.*?)'  # capture the raw name
+            r'(?P=quote)\s*,',  # match the same closing quote, then comma
+        flags = re.DOTALL
+        )
+
+        def clean_test_name(match):
+            test_type = match.group('ttype')
+            q = match.group('quote')
+            name = match.group('name')
+            # strip out anything but A–Z or a–z
+            cleaned = re.sub(r'[^A-Za-z ]', '', name)
+            return f"{test_type}({q}{cleaned}{q},"
+
+        return pattern.sub(clean_test_name, function_code)
+
+    @staticmethod
+    def _adjust_function_indentation(function_code: str) -> str:
+        """
+        Adjusts the indentation of a Javascript function so that the function definition
+        has no leading spaces, and the internal code indentation is adjusted accordingly.
+
+        Parameters:
+            function_code (str): The Javascript function
+
+        Returns:
+            str: The adjusted function code
+        """
+
+        lines = function_code.splitlines()
+
+        if not lines:
+            return ""
+
+        # find the leading spaces of the first non-empty line
+        first_non_empty_line = next(line for line in lines if line.strip())
+        leading_spaces = len(first_non_empty_line) - len(first_non_empty_line.lstrip())
+
+        return "\n".join([
+            line[leading_spaces:] if line.strip()
+            else ""
+            for line in lines
+        ])
