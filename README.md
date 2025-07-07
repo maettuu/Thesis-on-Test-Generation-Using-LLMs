@@ -198,14 +198,14 @@ Specific commit
         self.test_helper = TestHelper(payload_path="test_mocks/<repo>_<pr_id>.json", run_all_models=True)
 
     def test_generation_<repo>_<pr_id>(self):
-        response = self.test_helper.run_payload()
+        response = self.helper.run_payload()
         self.assertIsNotNone(response)  # Ensure response is not None
         self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
    ```
 
 3. **Run**  
    ```bash
-   python manage.py test scrape_handler.test.javascript_test_generation:YourTestClass
+   python manage.py test webhook_handler.test.javascript_test_generation:YourTestClass
    ```
 
 ---
