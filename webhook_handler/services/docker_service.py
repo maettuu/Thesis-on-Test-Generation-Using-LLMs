@@ -27,7 +27,7 @@ class DockerService:
             old_repo_state: bool,
             pr_data: PullRequestData,
             pdf_name: str,
-            pdf_content: str
+            pdf_content: bytes
     ):
         self._project_root = project_root
         self._old_repo_state = old_repo_state
@@ -177,26 +177,32 @@ class DockerService:
             logger.success("Container stopped and removed")
 
     @staticmethod
-    def _add_file_to_container(container: Container, file_path: str, file_content: str = "") -> None:
+    def _add_file_to_container(container: Container, file_path: str, file_content: str | bytes = "") -> None:
         """
         Adds file to Docker container.
 
         Parameters:
             container (Container): Container to add file to
             file_path (str): Path to the file to add to the container
-            file_content (str): Content to add to the file
+            file_content (str | bytes, optional): Content to add to the file
 
         Returns:
             None
         """
 
+        if isinstance(file_content, str):
+            content = file_content.encode("utf-8")
+        else:
+            content = file_content
+
         tar_stream = io.BytesIO()
         with tarfile.open(fileobj=tar_stream, mode="w") as tar:
             ti = tarfile.TarInfo(name=file_path)
             ti.size = len(file_content)
-            tar.addfile(ti, io.BytesIO(file_content.encode("utf-8")))
+            tar.addfile(ti, io.BytesIO(content))
+        tar_stream.seek(0)
         try:
-            container.put_archive("/app/testbed", tar_stream.getvalue())
+            container.put_archive("/app/testbed", tar_stream.read())
         except APIError as e:
             logger.critical(f"Docker API error: {e}")
             raise ExecutionError('Docker API error')

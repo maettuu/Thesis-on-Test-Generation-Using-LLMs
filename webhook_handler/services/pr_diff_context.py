@@ -9,8 +9,9 @@ class PullRequestDiffContext:
     Holds all the PullRequestFileDiffs for one PR and provides common operations.
     """
     def __init__(self, base_commit: str, head_commit: str, gh_api: GitHubApi):
-        raw_files = gh_api.fetch_pr_files()
+        self._gh_api = gh_api
         self._pr_file_diffs = []
+        raw_files = gh_api.fetch_pr_files()
         for raw_file in raw_files:
             file_name = raw_file["filename"]
             before = gh_api.fetch_file_version(base_commit, file_name)
@@ -85,27 +86,28 @@ class PullRequestDiffContext:
 
         return ""
 
-    def get_issue_pdf(self, candidate: str) -> [str, str]:
+    def get_issue_pdf(self, candidate: str, head_commit: str) -> [str, bytes]:
         """
         Returns the name and content of the linked pdf if available.
 
         Parameters:
             candidate (str): The name of the candidate file
+            head_commit (str): The commit hash of the head
 
         Returns:
             str: The name of the pdf file, or empty if not available
-            str: The content of the pdf file, or empty if not available
+            bytes: The content of the pdf file, or empty if not available
         """
 
         for pr_file_diff in self._pr_file_diffs:
             filename = pr_file_diff.name.split("/")[-1]
             if candidate in filename:
                 if filename.endswith(".pdf"):
-                    return filename, pr_file_diff.after
+                    return filename, self._gh_api.fetch_file_version(head_commit, pr_file_diff.name, get_bytes=True)
                 elif filename.endswith(".link"):
                     url = pr_file_diff.after
                     response = requests.get(url, stream=True)
                     if response.status_code == 200:
                         return filename.replace(".link", ""), response.content
 
-        return "", ""
+        return "", b""

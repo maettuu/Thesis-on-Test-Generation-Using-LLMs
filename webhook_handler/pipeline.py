@@ -195,7 +195,7 @@ class Pipeline:
         )
 
         # 4. Retrieve Mock PDF
-        self._pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_name)
+        self._pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_name, self._pr_data.head_commit)
 
         # 5. Slice golden code
         cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)

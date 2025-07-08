@@ -42,22 +42,23 @@ class GitHubApi:
         response.raise_for_status()
         return response.json()
 
-    def fetch_file_version(self, commit: str, file_name: str) -> str:
+    def fetch_file_version(self, commit: str, file_name: str, get_bytes: bool = False) -> str | bytes:
         """
         Fetches the version of a file at a specific commit.
 
         Parameters:
             commit (str): Commit hash
             file_name (str): File name
+            get_bytes (bool, optional): Get bytes instead of text
 
         Returns:
-            str: File contents
+            str | bytes: File contents
         """
 
         url = f"https://raw.githubusercontent.com/{self._pr_data.owner}/{self._pr_data.repo}/{commit}/{file_name}"
         response = requests.get(url, headers=self._config.headers)
         if response.status_code == 200:
-            return response.text
+            return response.content if get_bytes else response.text
         return ""
 
     def add_comment_to_pr(self, comment) -> [int, dict]:
