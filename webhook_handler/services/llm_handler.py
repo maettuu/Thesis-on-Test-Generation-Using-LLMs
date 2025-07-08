@@ -90,7 +90,7 @@ class LLMHandler:
                         "5. Return only the javascript code (no comments or explanations).\n\n")
 
         example = ("Example structure:\n"
-                   "it(\"should <describe behavior>\", () => {\n"
+                   "it(\"should <describe behavior>\", async () => {\n"
                    "  const { example } = await import(\"../../src/core/example.js\");\n"
                    "  <initialize required variables>;\n"
                    "  <define expected variable>;\n"
@@ -129,7 +129,7 @@ class LLMHandler:
                 example = ("Example structure:\n"
                            "import { example } from \"../../src/core/example.js\";\n\n"
                            "describe(\"<describe purpose>\", () => {\n"
-                           "  it(\"<describe behavior>\", () => {\n"
+                           "  it(\"<describe behavior>\", async () => {\n"
                            "    <initialize required variables>;\n"
                            "    <define expected variable>;\n"
                            "    <generate actual variables>;\n"
