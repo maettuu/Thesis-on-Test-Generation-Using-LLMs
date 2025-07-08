@@ -46,24 +46,24 @@ def github_webhook(request):
 
     # 5) GitHub signature check
     if not _verify_signature(request, config.github_webhook_secret):
-        bootstrap.warning("Signature verification failed")
+        bootstrap.warning("Invalid signature")
         return HttpResponseForbidden("Invalid signature")
 
     # 6) Empty payload check
     payload = json.loads(request.body)
     if not payload:
-        bootstrap.warning("Payload is empty")
+        bootstrap.warning("Empty payload")
         return HttpResponseForbidden("Empty payload")
 
     # 7) Pull request event check
     event = request.headers.get('X-GitHub-Event')
     if event != "pull_request":
-        bootstrap.info("Webhook event is not a pull request")
+        bootstrap.info("Webhook event must be pull request")
         return JsonResponse({'status': 'success', 'message': 'Webhook event must be pull request'}, status=200)
 
     # 8) Pull request action check
     if payload.get('action') != 'opened':
-        bootstrap.info("Pull request action is not opened")
+        bootstrap.info("Pull request action must be OPENED")
         return JsonResponse({'status': 'success', 'message': 'Pull request action must be OPENED'}, status=200)
 
     # 9) Check for PR validity
