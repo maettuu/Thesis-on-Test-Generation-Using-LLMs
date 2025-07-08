@@ -1,7 +1,6 @@
 import logging
 import docker
 
-from django.http import JsonResponse
 from pathlib import Path
 from docker.errors import ImageNotFound
 
@@ -38,11 +37,16 @@ class Pipeline:
         self._post_comment = post_comment
         self._mock_response = mock_response
         self._generation_completed = False
-        self._setup()
+        self._setup_log_paths()
 
-    def _setup(self):
+        # lazy init
+        self._gh_api = None
+        self._issue_statement = None
+        self._pr_diff_ctx = None
+
+    def _setup_log_paths(self):
         """
-        Sets up class variables and logger.
+        Sets up log directories, files and the logger itself.
         """
 
         self.executed_tests = Path(self._config.bot_log_dir, "executed_tests.txt")
@@ -82,14 +86,15 @@ class Pipeline:
             str: Message to deliver to client
             bool: True if PR is valid, False otherwise
         """
-        gh_api = GitHubApi(self._config, self._pr_data)
-        issue_statement = gh_api.get_linked_issue()
-        if not issue_statement:
+
+        self._gh_api = GitHubApi(self._config, self._pr_data)
+        self._issue_statement = self._gh_api.get_linked_issue()
+        if not self._issue_statement:
             helpers.remove_dir(self._config.pr_log_dir)
             return 'No linked issue found', False
 
-        pr_diff_ctx = PullRequestDiffContext(self._pr_data.base_commit, self._pr_data.head_commit, gh_api)
-        if not pr_diff_ctx.fulfills_requirements:
+        self._pr_diff_ctx = PullRequestDiffContext(self._pr_data.base_commit, self._pr_data.head_commit, self._gh_api)
+        if not self._pr_diff_ctx.fulfills_requirements:
             helpers.remove_dir(self._config.pr_log_dir)
             return 'Must modify source code files only', False
 
@@ -178,16 +183,20 @@ class Pipeline:
         """
 
         # 1. Setup GitHub Api
-        gh_api = GitHubApi(self._config, self._pr_data)
+        if self._gh_api is None: self._gh_api = GitHubApi(self._config, self._pr_data)
 
         # 2. Fetch linked Issue
-        issue_statement = gh_api.get_linked_issue()
+        if self._issue_statement is None: self._issue_statement = self._gh_api.get_linked_issue()
 
         # 3. Compute diffs & file contexts
-        pr_diff_ctx = PullRequestDiffContext(self._pr_data.base_commit, self._pr_data.head_commit, gh_api)
+        if self._pr_diff_ctx is None: self._pr_diff_ctx = PullRequestDiffContext(
+            self._pr_data.base_commit,
+            self._pr_data.head_commit,
+            self._gh_api
+        )
 
         # 4. Slice golden code
-        cst_builder = CSTBuilder(self._config.parse_language, pr_diff_ctx)
+        cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
         code_sliced = cst_builder.slice_code_file()
 
         # 5. Build Docker image
@@ -197,9 +206,9 @@ class Pipeline:
         # 6. Gather pipeline data
         pr_pipeline_data = PullRequestPipelineData(
             pr_data=self._pr_data,
-            pr_diff_ctx=pr_diff_ctx,
+            pr_diff_ctx=self._pr_diff_ctx,
             code_sliced=code_sliced,
-            problem_statement=issue_statement
+            problem_statement=self._issue_statement
         )
 
         # 7. Setup Model Handler
@@ -210,7 +219,7 @@ class Pipeline:
             self._config,
             pr_pipeline_data,
             cst_builder,
-            gh_api,
+            self._gh_api,
             llm_handler,
             docker_service,
             self._post_comment,
