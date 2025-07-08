@@ -147,7 +147,8 @@ class TestGenerator:
         test_passed_before, stdout_before = self._docker_service.run_test_in_container(
             model_test_patch,
             test_to_run,
-            test_file_diff.name
+            test_file_diff.name,
+            golden_pdf_patch=self._pr_diff_ctx.golden_pdf_patch
         )
         (generation_dir / "before.txt").write_text(stdout_before, encoding="utf-8")
         new_test_file = f"#{test_filename}\n{new_test_file_content}" if test_file_content else f"#{test_filename}\n{new_test}"
@@ -159,12 +160,12 @@ class TestGenerator:
             return False
 
         ########## Run test in post-PR codebase #########
-        golden_code_patch = self._pr_diff_ctx.golden_code_patch
         test_passed_after, stdout_after = self._docker_service.run_test_in_container(
             model_test_patch,
             test_to_run,
             test_file_diff.name,
-            golden_code_patch=golden_code_patch
+            golden_code_patch=self._pr_diff_ctx.golden_code_patch,
+            golden_pdf_patch=self._pr_diff_ctx.golden_pdf_patch
         )
         (generation_dir / "after.txt").write_text(stdout_after, encoding="utf-8")
 

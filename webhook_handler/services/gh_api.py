@@ -4,6 +4,8 @@ import re
 import subprocess
 import logging
 
+from pathlib import Path
+
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.pr_data import PullRequestData
 
@@ -97,12 +99,13 @@ class GitHubApi:
             capture_output=True, check=True)
         logger.success(f"Cloning successful")
 
-    def get_linked_issue(self) -> str:
+    def get_linked_data(self) -> [str, str]:
         """
         Checks and fetches a linked issue.
 
         Returns:
             str: The linked issue title and description
+            str: The candidate PDF filename
         """
 
         issue_pattern = r'\b(?:Closes|Fixes|Resolves)\s+#(\d+)\b|\(?\b(?:bug|issue)\b\s+(\d+)\)?'
@@ -116,13 +119,13 @@ class GitHubApi:
             issue_nr = int(issue_nr_str)
             linked_issue_description = self._get_github_issue(issue_nr)
             if linked_issue_description:
-                return linked_issue_description
+                return linked_issue_description, f"issue{issue_nr_str}"
 
             linked_issue_description = self._get_bugzilla_issue(issue_nr)
             if linked_issue_description:
-                return linked_issue_description
+                return linked_issue_description, f"bug{issue_nr_str}"
 
-        return ""
+        return "", ""
 
     def _get_github_issue(self, number: int) -> str | None:
         """

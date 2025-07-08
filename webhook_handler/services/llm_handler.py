@@ -55,8 +55,15 @@ class LLMHandler:
                       "- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.\n\n")
 
         linked_issue = f"Issue:\n<issue>\n{self._pr_pipeline_data.problem_statement}\n</issue>\n\n"
+
+        pdf_file = ""
+        use_pdf = "\n"
+        if self._pr_pipeline_data.pdf_name:
+            pdf_file = f"PDF File:\n<pdf>\n{self._pr_pipeline_data.pdf_name}\n</pdf>\n\n"
+            use_pdf = f"You can use the PDF file for testing as follows: getDocument(buildGetDocumentParams('{self._pr_pipeline_data.pdf_name}'))\n"
+
         patch = f"Patch:\n<patch>\n{self._pr_diff_ctx.golden_code_patch}\n</patch>\n\n"
-        available_imports = f"Imports:\n<imports>\n{available_packages}\n\n\n{available_relative_imports}\n</imports>\n\n"
+        available_imports = f"Imports:\n<imports>\n{available_packages}\n{available_relative_imports}\n</imports>\n\n"
 
         golden_code = ""
         if include_golden_code:
@@ -81,12 +88,13 @@ class LLMHandler:
 
         instructions = ("Your task:\n"
                         f"You are a software tester at {self._pr_data.repo}.\n"
-                        "1. Write exactly one javascript test `it(\"...\", () => {...})` block.\n"
+                        "1. Write exactly one javascript test `it(\"...\", async () => {...})` block.\n"
                         "2. Your test must fail on the code before the patch, and pass after, hence "
                         "the test will verify that the patch resolves the issue.\n"
                         "3. The test must be self-contained and to-the-point.\n"
-                        "4. Use only the provided imports (respect the paths exactly how they are given) by importing"
-                        "dynamically for compatibility with Node.js — no new dependencies.\n"
+                        "4. Use only the provided imports (respect the paths exactly how they are given) by importing "
+                        "dynamically for compatibility with Node.js — no new dependencies. "
+                        f"{use_pdf}"
                         "5. Return only the javascript code (no comments or explanations).\n\n")
 
         example = ("Example structure:\n"
@@ -105,23 +113,25 @@ class LLMHandler:
                 instructions = ("Your task:\n"
                                 f"You are a software tester at {self._pr_data.repo}.\n"
                                 "1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.\n"
-                                "2. Write exactly one javascript test `it(\"...\", () => {...})` block.\n"
-                                "3. Your test must fail on the pre-patch code and pass on the post-patch code, hence "
+                                "2. Write exactly one javascript test `it(\"...\", async () => {...})` block.\n"
+                                "3. Your test must fail on the code before the patch, and pass after, hence "
                                 "the test will verify that the patch resolves the issue.\n"
                                 "4. The test must be self-contained and to-the-point.\n"
                                 "5. If you need something new use only the provided imports (respect the paths "
-                                "exactly how they are given) by importing dynamically for compatibility with Node.js"
-                                " — no new dependencies.\n"
+                                "exactly how they are given) by importing dynamically for compatibility with Node.js "
+                                "— no new dependencies. "
+                                f"{use_pdf}"
                                 "6. Return only the javascript code for the new `it(...)` block (no comments or explanations).\n\n")
             else:
                 instructions = ("Your task:\n"
                                 f"You are a software tester at {self._pr_data.repo}.\n"
                                 "1. Create a new test file that includes:\n"
                                 "   - All necessary imports (use only the provided imports and respect the "
-                                "paths exactly how they are given) — no new dependencies.).\n"
+                                "paths exactly how they are given) — no new dependencies. "
+                                f"{use_pdf}"
                                 "   - A top-level `describe(\"<brief suite name>\", () => {{ ... }})`.\n"
-                                "   - Exactly one `it(\"...\", () => {{ ... }})` inside that block.\n"
-                                "2. The `it` test must fail on the pre-patch code and pass on the post-patch code, hence "
+                                "   - Exactly one `it(\"...\", async () => {{ ... }})` inside that block.\n"
+                                "2. The `it` test must fail on the code before the patch, and pass after, hence "
                                 "the test will verify that the patch resolves the issue.\n"
                                 "3. Keep the file self-contained — no external dependencies beyond those you import here.\n"
                                 "4. Return only the full JavaScript file contents (no comments explanations).\n\n")
@@ -146,14 +156,15 @@ class LLMHandler:
             }\n</pr_description>\n\n"
 
         return (f"{guidelines}"
-                  f"{linked_issue}"
-                  f"{patch}"
-                  f"{available_imports}"
-                  f"{golden_code}"
-                  f"{test_code}"
-                  f"{pr_description}"
-                  f"{instructions}"
-                  f"{example}")
+                f"{linked_issue}"
+                f"{pdf_file}"
+                f"{patch}"
+                f"{available_imports}"
+                f"{golden_code}"
+                f"{test_code}"
+                f"{pr_description}"
+                f"{instructions}"
+                f"{example}")
 
     def query_model(self, prompt: str, model: LLM, temperature: float = 0.0) -> str:
         """

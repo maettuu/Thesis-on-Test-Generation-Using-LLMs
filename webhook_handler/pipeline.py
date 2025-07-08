@@ -42,6 +42,7 @@ class Pipeline:
         # lazy init
         self._gh_api = None
         self._issue_statement = None
+        self._pdf_name = None
         self._pr_diff_ctx = None
 
     def _setup_log_paths(self):
@@ -88,7 +89,7 @@ class Pipeline:
         """
 
         self._gh_api = GitHubApi(self._config, self._pr_data)
-        self._issue_statement = self._gh_api.get_linked_issue()
+        self._issue_statement, self._pdf_name = self._gh_api.get_linked_data()
         if not self._issue_statement:
             helpers.remove_dir(self._config.pr_log_dir)
             return 'No linked issue found', False
@@ -99,7 +100,6 @@ class Pipeline:
             return 'Must modify source code files only', False
 
         return 'Payload is being processed...', True
-
 
     def execute_pipeline(self, execute_mini: bool = False) -> bool:
         """
@@ -166,9 +166,8 @@ class Pipeline:
 
     def _execute_attempt(
             self,
-            mock_response: str = None,
-            i_attempt: int = 0,
-            model: LLM = LLM.GPT4o
+            model: LLM,
+            i_attempt: int
     ) -> bool:
         """
         Executes a single attempt.
@@ -186,7 +185,7 @@ class Pipeline:
         if self._gh_api is None: self._gh_api = GitHubApi(self._config, self._pr_data)
 
         # 2. Fetch linked Issue
-        if self._issue_statement is None: self._issue_statement = self._gh_api.get_linked_issue()
+        if self._issue_statement is None: self._issue_statement, self._pdf_name = self._gh_api.get_linked_data()
 
         # 3. Compute diffs & file contexts
         if self._pr_diff_ctx is None: self._pr_diff_ctx = PullRequestDiffContext(
@@ -195,26 +194,36 @@ class Pipeline:
             self._gh_api
         )
 
-        # 4. Slice golden code
+        # 4. Retrieve Mock PDF
+        self._pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_name)
+
+        # 5. Slice golden code
         cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
         code_sliced = cst_builder.slice_code_file()
 
-        # 5. Build Docker image
-        docker_service = DockerService(self._config.project_root.as_posix(), self._config.old_repo_state, self._pr_data)
+        # 6. Build Docker image
+        docker_service = DockerService(
+            self._config.project_root.as_posix(),
+            self._config.old_repo_state,
+            self._pr_data,
+            self._pdf_name,
+            pdf_content
+        )
         docker_service.build()
 
-        # 6. Gather pipeline data
+        # 7. Gather pipeline data
         pr_pipeline_data = PullRequestPipelineData(
             pr_data=self._pr_data,
             pr_diff_ctx=self._pr_diff_ctx,
             code_sliced=code_sliced,
-            problem_statement=self._issue_statement
+            problem_statement=self._issue_statement,
+            pdf_name=self._pdf_name
         )
 
-        # 7. Setup Model Handler
+        # 8. Setup Model Handler
         llm_handler = LLMHandler(self._config, pr_pipeline_data)
 
-        # 8. Setup Generator
+        # 9. Setup Generator
         generator = TestGenerator(
             self._config,
             pr_pipeline_data,
@@ -227,10 +236,10 @@ class Pipeline:
             self._config.prompt_combinations,
             templates.COMMENT_TEMPLATE_GENERATION,
             model,
-            mock_response
+            self._mock_response
         )
 
-        # 9. Execute
+        # 10. Execute
         return generator.generate()
 
     def _record_result(self, number: str, model: LLM, i_attempt: int, stop: bool | str):

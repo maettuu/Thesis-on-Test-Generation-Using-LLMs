@@ -10,6 +10,7 @@ class PullRequestPipelineData:
     pr_diff_ctx: any
     code_sliced: list[str]
     problem_statement: str
+    pdf_name: str
 
     def __post_init__(self):
         # ensure instance types

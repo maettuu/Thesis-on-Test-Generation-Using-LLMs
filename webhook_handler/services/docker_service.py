@@ -21,10 +21,19 @@ class DockerService:
     """
     Used for Docker operations.
     """
-    def __init__(self, project_root: str, old_repo_state: bool, pr_data: PullRequestData):
+    def __init__(
+            self,
+            project_root: str,
+            old_repo_state: bool,
+            pr_data: PullRequestData,
+            pdf_name: str,
+            pdf_content: str
+    ):
         self._project_root = project_root
         self._old_repo_state = old_repo_state
         self._pr_data = pr_data
+        self._pdf_name = pdf_name
+        self._pdf_content = pdf_content
         self._client = docker.from_env()
 
     def build(self):
@@ -97,16 +106,18 @@ class DockerService:
             test_patch: str,
             tests_to_run: list,
             added_test_file: str,
-            golden_code_patch: str = None
+            golden_code_patch: str = None,
+            golden_pdf_patch: str = None
     ) -> [bool, str]:
         """
         Creates a container, applies the patch, runs the test, and returns the result.
 
         Parameters:
-            test_patch: Patch to apply to the model test
-            tests_to_run: List of tests to run
-            added_test_file: Path to the file to add to the added tests
-            golden_code_patch: Path to the file to add to the golden code
+            test_patch (str): Patch to apply to the model test
+            tests_to_run (list): List of tests to run
+            added_test_file (str): Path to the file to add to the added tests
+            golden_code_patch (str): Patch content for source code
+            golden_pdf_patch (str): Patch content for test_manifest.json
 
         Returns:
             bool: True if the test has passed, False otherwise
@@ -124,12 +135,13 @@ class DockerService:
             container.start()
             logger.success(f"Container {container.short_id} started")
 
-            # check if the test file is already in the container, add stub otherwise
+            # check if the test file is already in the container, add stub otherwise (new file)
             added_file_exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{added_test_file}'")
             if added_file_exists.exit_code != 0:
                 self._add_file_to_container(container, added_test_file)
                 self._whitelist_stub(container, added_test_file.split("/")[-1])
 
+            # check for gulpfile version (mjs or js)
             gulpfile_pointer = "gulpfile.mjs"
             gulpfile_exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{gulpfile_pointer}'")
             if gulpfile_exists.exit_code != 0:
@@ -138,6 +150,11 @@ class DockerService:
                 if old_gulpfile_exists.exit_code != 0:
                     logger.critical("No gulpfile found")
                     raise ExecutionError("No gulpfile found")
+
+            # add mock PDF if available
+            if self._pdf_name and golden_pdf_patch is not None:
+                self._add_file_to_container(container, f"test/pdfs/{self._pdf_name}", self._pdf_content)
+                self._copy_and_apply_patch(container, patch_content=golden_pdf_patch, patch_name="golden_pdf_patch.diff")
 
             self._copy_and_apply_patch(
                 container,

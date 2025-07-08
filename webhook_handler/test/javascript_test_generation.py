@@ -15,9 +15,7 @@ def _get_payload(rel_path: str) -> dict:
     return payload
 
 
-def _get_file_content(rel_path: str) -> str | None:
-    if not rel_path:
-        return None
+def _get_file_content(rel_path: str) -> str:
     abs_path = os.path.join(os.path.dirname(__file__), rel_path)
     with open(abs_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -39,7 +37,7 @@ class TestGenerationPdfJs19849(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19849(self):
-        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        generation_completed = self.pipeline.execute_pipeline()
         self.assertTrue(generation_completed)
 
 
@@ -56,7 +54,7 @@ class TestGenerationPdfJs19880(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19880(self):
-        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        generation_completed = self.pipeline.execute_pipeline()
         self.assertTrue(generation_completed)
 
 
@@ -73,7 +71,7 @@ class TestGenerationPdfJs19918(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19918(self):
-        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        generation_completed = self.pipeline.execute_pipeline()
         self.assertTrue(generation_completed)
 
 
@@ -90,7 +88,7 @@ class TestGenerationPdfJs19955(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19955(self):
-        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        generation_completed = self.pipeline.execute_pipeline()
         self.assertTrue(generation_completed)
 
 
@@ -107,16 +105,16 @@ class TestGenerationPdfJs19972(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_19972(self):
-        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        generation_completed = self.pipeline.execute_pipeline()
         self.assertTrue(generation_completed)
 
 
 class TestGenerationPdfJs20063(TestCase):
     def setUp(self):
-        payload_path = Path("test_mocks", "pdf_js_20063.json")
-        self.payload = _get_payload(str(payload_path))
+        self.payload = _get_payload("test_mocks/pdf_js_20063.json")
+        mock_response = _get_file_content("test_mocks/pdf_js_20063_response.txt")
         self.config = Config()
-        self.pipeline = Pipeline(self.payload, self.config)
+        self.pipeline = Pipeline(self.payload, self.config, mock_response=mock_response)
 
     def tearDown(self):
         del self.payload
@@ -124,5 +122,5 @@ class TestGenerationPdfJs20063(TestCase):
         del self.pipeline
 
     def test_generation_pdf_js_20063(self):
-        generation_completed = self.pipeline.execute_pipeline(return_result=True)
+        generation_completed = self.pipeline.execute_pipeline()
         self.assertTrue(generation_completed)
