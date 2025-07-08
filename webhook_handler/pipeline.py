@@ -85,12 +85,12 @@ class Pipeline:
         gh_api = GitHubApi(self._config, self._pr_data)
         issue_statement = gh_api.get_linked_issue()
         if not issue_statement:
-            self.logger.warning("No linked issue found")
+            helpers.remove_dir(self._config.pr_log_dir)
             return 'No linked issue found', False
 
         pr_diff_ctx = PullRequestDiffContext(self._pr_data.base_commit, self._pr_data.head_commit, gh_api)
         if not pr_diff_ctx.fulfills_requirements:
-            self.logger.warning("Must modify source code files only")
+            helpers.remove_dir(self._config.pr_log_dir)
             return 'Must modify source code files only', False
 
         return 'Payload is being processed...', True
