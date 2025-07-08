@@ -74,26 +74,26 @@ class Pipeline:
         with self.executed_tests.open("a", encoding='utf-8') as f:
             f.write(f"{self._execution_id}\n")
 
-    def is_valid_pr(self) -> [JsonResponse, bool]:
+    def is_valid_pr(self) -> [str, bool]:
         """
         PR must have linked issue and source code changes.
 
         Returns:
-            JsonResponse: Message to deliver to client
+            str: Message to deliver to client
             bool: True if PR is valid, False otherwise
         """
         gh_api = GitHubApi(self._config, self._pr_data)
         issue_statement = gh_api.get_linked_issue()
         if not issue_statement:
             self.logger.warning("No linked issue found")
-            return JsonResponse({'status': 'success', 'message': 'No linked issue found'}, status=200), False
+            return 'No linked issue found', False
 
         pr_diff_ctx = PullRequestDiffContext(self._pr_data.base_commit, self._pr_data.head_commit, gh_api)
         if not pr_diff_ctx.fulfills_requirements:
             self.logger.warning("Must modify source code files only")
-            return JsonResponse({'status': 'success', 'message': 'Must modify source code files only'}, status=200), False
+            return 'Must modify source code files only', False
 
-        return JsonResponse({'status': 'accepted', 'message': 'Payload is being processed...'}, status=202), True
+        return 'Payload is being processed...', True
 
 
     def execute_pipeline(self, execute_mini: bool = False, return_result: bool = False) -> bool | None:

@@ -68,10 +68,10 @@ def github_webhook(request):
 
     # 9) Check for PR validity
     pipeline = Pipeline(payload, config, post_comment=True)
-    response, valid = pipeline.is_valid_pr()
+    message, valid = pipeline.is_valid_pr()
     if not valid:
-        bootstrap.info(response['message'])
-        return response
+        bootstrap.info(message)
+        return JsonResponse({'status': 'success', 'message': message}, status=200)
 
     def _execute_pipeline_in_background():
         try:
@@ -91,7 +91,7 @@ def github_webhook(request):
     thread = threading.Thread(target=_execute_pipeline_in_background, daemon=True)
     thread.start()
 
-    return response
+    return JsonResponse({'status': 'accepted', 'message': message}, status=202)
 
 
 def _verify_signature(request, github_webhook_secret) -> bool:
