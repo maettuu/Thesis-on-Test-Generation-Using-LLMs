@@ -100,7 +100,6 @@ class Pipeline:
 
         return 'Payload is being processed...', True
 
-
     def execute_pipeline(self, execute_mini: bool = False) -> bool:
         """
         Execute whole pipeline with 5 attempts per model (optional o4-mini execution).
@@ -166,9 +165,8 @@ class Pipeline:
 
     def _execute_attempt(
             self,
-            mock_response: str = None,
-            i_attempt: int = 0,
-            model: LLM = LLM.GPT4o
+            model: LLM,
+            i_attempt: int
     ) -> bool:
         """
         Executes a single attempt.
@@ -227,7 +225,7 @@ class Pipeline:
             self._config.prompt_combinations,
             templates.COMMENT_TEMPLATE_GENERATION,
             model,
-            mock_response
+            self._mock_response
         )
 
         # 9. Execute

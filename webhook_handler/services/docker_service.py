@@ -103,10 +103,10 @@ class DockerService:
         Creates a container, applies the patch, runs the test, and returns the result.
 
         Parameters:
-            test_patch: Patch to apply to the model test
-            tests_to_run: List of tests to run
-            added_test_file: Path to the file to add to the added tests
-            golden_code_patch: Path to the file to add to the golden code
+            test_patch (str): Patch to apply to the model test
+            tests_to_run (list): List of tests to run
+            added_test_file (str): Path to the file to add to the added tests
+            golden_code_patch (str): Path to the file to add to the golden code
 
         Returns:
             bool: True if the test has passed, False otherwise
@@ -124,12 +124,13 @@ class DockerService:
             container.start()
             logger.success(f"Container {container.short_id} started")
 
-            # check if the test file is already in the container, add stub otherwise
+            # check if the test file is already in the container, add stub otherwise (new file)
             added_file_exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{added_test_file}'")
             if added_file_exists.exit_code != 0:
                 self._add_file_to_container(container, added_test_file)
                 self._whitelist_stub(container, added_test_file.split("/")[-1])
 
+            # check for gulpfile version (mjs or js)
             gulpfile_pointer = "gulpfile.mjs"
             gulpfile_exists = container.exec_run(f"/bin/sh -c 'test -f /app/testbed/{gulpfile_pointer}'")
             if gulpfile_exists.exit_code != 0:

@@ -8,25 +8,25 @@ class PullRequestDiffContext:
     """
     def __init__(self, base_commit: str, head_commit: str, gh_api: GitHubApi):
         raw_files = gh_api.fetch_pr_files()
-        self.pr_file_diffs = []
+        self._pr_file_diffs = []
         for raw_file in raw_files:
             file_name = raw_file["filename"]
             before = gh_api.fetch_file_version(base_commit, file_name)
             after  = gh_api.fetch_file_version(head_commit, file_name)
             if before != after:
-                self.pr_file_diffs.append(PullRequestFileDiff(file_name, before, after))
+                self._pr_file_diffs.append(PullRequestFileDiff(file_name, before, after))
 
     @property
     def source_code_file_diffs(self) -> list[PullRequestFileDiff]:
-        return [pr_file_diff for pr_file_diff in self.pr_file_diffs if pr_file_diff.is_source_code_file]
+        return [pr_file_diff for pr_file_diff in self._pr_file_diffs if pr_file_diff.is_source_code_file]
 
     @property
     def non_source_code_file_diffs(self) -> list[PullRequestFileDiff]:
-        return [pr_file_diff for pr_file_diff in self.pr_file_diffs if pr_file_diff.is_non_source_code_file]
+        return [pr_file_diff for pr_file_diff in self._pr_file_diffs if pr_file_diff.is_non_source_code_file]
 
     @property
     def test_file_diffs(self) -> list[PullRequestFileDiff]:
-        return [pr_file_diff for pr_file_diff in self.pr_file_diffs if pr_file_diff.is_test_file]
+        return [pr_file_diff for pr_file_diff in self._pr_file_diffs if pr_file_diff.is_test_file]
 
     @property
     def has_at_least_one_source_code_file(self) -> bool:
