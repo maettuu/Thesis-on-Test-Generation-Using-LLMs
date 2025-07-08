@@ -12,6 +12,9 @@ from webhook_handler.core import Config
 from .pipeline import Pipeline
 
 
+bootstrap = logging.getLogger("bootstrap")
+
+
 #################### Webhook ####################
 @csrf_exempt
 def github_webhook(request):
@@ -29,7 +32,6 @@ def github_webhook(request):
     config = Config()
 
     # 2) Fetch bootstrap logger
-    bootstrap = logging.getLogger("bootstrap")
     bootstrap.info("Received GitHub webhook event")
 
     # 3) Allow HEAD for health checks
@@ -78,7 +80,7 @@ def github_webhook(request):
             bootstrap.critical("Failed to execute pipeline")
 
     # 10) Save payload
-    payload_path = Path(config.webhook_raw_log_dir, f"pdf_js_{payload["number"]}_{config.execution_timestamp}.json")
+    payload_path = Path(config.webhook_raw_log_dir, f"pdf_js_{payload['number']}_{config.execution_timestamp}.json")
     with open(payload_path, "w") as f:
         json.dump(payload, f, indent=4)
     bootstrap.info(f"Payload saved to {payload_path}")
