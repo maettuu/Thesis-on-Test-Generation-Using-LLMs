@@ -69,7 +69,9 @@ def github_webhook(request):
     # 9) Check for PR validity
     pipeline = Pipeline(payload, config, post_comment=True)
     response, valid = pipeline.is_valid_pr()
-    if not valid: return response
+    if not valid:
+        bootstrap.info(response['message'])
+        return response
 
     def _execute_pipeline_in_background():
         try:
