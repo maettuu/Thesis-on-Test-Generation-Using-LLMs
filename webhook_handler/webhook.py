@@ -39,47 +39,49 @@ def github_webhook(request):
 
     # 3) Enforce POST only
     if request.method != 'POST':
-        bootstrap.info("Not a POST request")
+        bootstrap.critical("Not a POST request")
         return HttpResponseNotAllowed(['POST'], 'Request method must be POST')
 
     # 4) GitHub signature check
     if not _verify_signature(request, config.github_webhook_secret):
-        bootstrap.warning("Invalid signature")
+        bootstrap.critical("Invalid signature")
         return HttpResponseForbidden("Invalid signature")
 
     # 5) Empty payload check
     payload = json.loads(request.body)
     if not payload:
-        bootstrap.warning("Empty payload")
+        bootstrap.critical("Empty payload")
         return HttpResponseForbidden("Empty payload")
 
     # 6) Pull request event check
     event = request.headers.get('X-GitHub-Event')
     if event != "pull_request":
-        bootstrap.info("Webhook event must be pull request")
+        bootstrap.critical("Webhook event must be pull request")
         return JsonResponse({'status': 'success', 'message': 'Webhook event must be pull request'}, status=200)
 
     # 7) Pull request action check
     if payload.get('action') != 'opened':
-        bootstrap.info("Pull request action must be OPENED")
+        bootstrap.critical("Pull request action must be OPENED")
         return JsonResponse({'status': 'success', 'message': 'Pull request action must be OPENED'}, status=200)
 
     # 8) Check for PR validity
     pr_number = payload['number']
-    bootstrap.info(f"[#{pr_number}] Validating PR")
+    bootstrap.info(f"[#{pr_number}] Validating PR...")
     pipeline = Pipeline(payload, config, post_comment=True)
     message, valid = pipeline.is_valid_pr()
     if not valid:
-        bootstrap.info(f'[#{pr_number}] {message}')
+        bootstrap.critical(f'[#{pr_number}] {message}')
         return JsonResponse({'status': 'success', 'message': message}, status=200)
 
     def _execute_pipeline_in_background():
         try:
             bootstrap.info(f"[#{pr_number}] Starting pipeline execution...")
-            pipeline.execute_pipeline()
+            generation_completed = pipeline.execute_pipeline()
+            completed_message = "Test generated successfully" if generation_completed else "No test generated"
             bootstrap.info(f"[#{pr_number}] Pipeline execution completed")
+            bootstrap.info(f"[#{pr_number}] {completed_message}")
         except:
-            bootstrap.critical(f"[#{pr_number}] Failed to execute pipeline")
+            bootstrap.critical(f"[#{pr_number}] Pipeline execution failed")
 
     # 9) Save payload
     payload_path = Path(config.webhook_raw_log_dir, f"pdf_js_{pr_number}_{config.execution_timestamp}.json")

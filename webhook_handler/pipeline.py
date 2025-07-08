@@ -96,16 +96,15 @@ class Pipeline:
         return 'Payload is being processed...', True
 
 
-    def execute_pipeline(self, execute_mini: bool = False, return_result: bool = False) -> bool | None:
+    def execute_pipeline(self, execute_mini: bool = False) -> bool:
         """
         Execute whole pipeline with 5 attempts per model (optional o4-mini execution).
 
         Parameters:
             execute_mini (bool, optional): If True, executes additional attempt with mini model
-            return_result (bool, optional): If True, returns result
 
         Returns:
-            bool (optional): True if the generation was successful, False otherwise
+            bool: True if the generation was successful, False otherwise
         """
 
         self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
@@ -158,7 +157,7 @@ class Pipeline:
 
         self.logger.marker(f"=============== Finished Payload #{self._pr_data.number} ===============")
         self._teardown()
-        if return_result: return self._generation_completed
+        return self._generation_completed
 
     def _execute_attempt(
             self,
