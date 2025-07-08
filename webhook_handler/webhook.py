@@ -30,64 +30,64 @@ def github_webhook(request):
 
     # 1) Initialize config
     config = Config()
-
-    # 2) Fetch bootstrap logger
     bootstrap.info("Received GitHub webhook event")
 
-    # 3) Allow HEAD for health checks
+    # 2) Allow HEAD for health checks
     if request.method == 'HEAD':
         bootstrap.info("HEAD request")
         return HttpResponse(status=200)
 
-    # 4) Enforce POST only
+    # 3) Enforce POST only
     if request.method != 'POST':
         bootstrap.info("Not a POST request")
         return HttpResponseNotAllowed(['POST'], 'Request method must be POST')
 
-    # 5) GitHub signature check
+    # 4) GitHub signature check
     if not _verify_signature(request, config.github_webhook_secret):
         bootstrap.warning("Invalid signature")
         return HttpResponseForbidden("Invalid signature")
 
-    # 6) Empty payload check
+    # 5) Empty payload check
     payload = json.loads(request.body)
     if not payload:
         bootstrap.warning("Empty payload")
         return HttpResponseForbidden("Empty payload")
 
-    # 7) Pull request event check
+    # 6) Pull request event check
     event = request.headers.get('X-GitHub-Event')
     if event != "pull_request":
         bootstrap.info("Webhook event must be pull request")
         return JsonResponse({'status': 'success', 'message': 'Webhook event must be pull request'}, status=200)
 
-    # 8) Pull request action check
+    # 7) Pull request action check
     if payload.get('action') != 'opened':
         bootstrap.info("Pull request action must be OPENED")
         return JsonResponse({'status': 'success', 'message': 'Pull request action must be OPENED'}, status=200)
 
-    # 9) Check for PR validity
+    # 8) Check for PR validity
+    pr_number = payload['number']
+    bootstrap.info(f"[#{pr_number}] Validating PR")
     pipeline = Pipeline(payload, config, post_comment=True)
     message, valid = pipeline.is_valid_pr()
     if not valid:
-        bootstrap.info(message)
+        bootstrap.info(f'[#{pr_number}] {message}')
         return JsonResponse({'status': 'success', 'message': message}, status=200)
 
     def _execute_pipeline_in_background():
         try:
-            bootstrap.info("Starting pipeline execution...")
+            bootstrap.info(f"[#{pr_number}] Starting pipeline execution...")
             pipeline.execute_pipeline()
-            bootstrap.info("Pipeline execution completed")
+            bootstrap.info(f"[#{pr_number}] Pipeline execution completed")
         except:
-            bootstrap.critical("Failed to execute pipeline")
+            bootstrap.critical(f"[#{pr_number}] Failed to execute pipeline")
 
-    # 10) Save payload
-    payload_path = Path(config.webhook_raw_log_dir, f"pdf_js_{payload['number']}_{config.execution_timestamp}.json")
+    # 9) Save payload
+    payload_path = Path(config.webhook_raw_log_dir, f"pdf_js_{pr_number}_{config.execution_timestamp}.json")
     with open(payload_path, "w") as f:
         json.dump(payload, f, indent=4)
-    bootstrap.info(f"Payload saved to {payload_path}")
+    bootstrap.info(f"[#{pr_number}] Payload saved to {payload_path}")
 
-    # 11) Execute pipeline
+    # 10) Execute pipeline
     thread = threading.Thread(target=_execute_pipeline_in_background, daemon=True)
     thread.start()
 
