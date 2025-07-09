@@ -131,9 +131,6 @@ def remove_dir(path: Path, max_retries: int = 3, delay: float = 0.1, log_success
         max_retries (int, optional): The maximum number of times to retry the command
         delay (float, optional): The delay between retries
         log_success (bool, optional): Whether to log the success message
-
-    Returns:
-        None
     """
 
     if not path.exists():

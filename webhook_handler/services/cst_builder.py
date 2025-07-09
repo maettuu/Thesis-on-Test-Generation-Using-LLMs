@@ -17,7 +17,7 @@ class CSTBuilder:
     """
     def __init__(self, parse_language: Language, pr_diff_ctx: PullRequestDiffContext):
         self._parser = Parser(parse_language)
-        self.pr_diff_ctx = pr_diff_ctx
+        self._pr_diff_ctx = pr_diff_ctx
 
     def _parse(self, source: str) -> Tree | None:
         try:
@@ -33,18 +33,18 @@ class CSTBuilder:
             list: Sliced code for modified code, unsliced for untouched code.
         """
 
-        if not self.pr_diff_ctx.code_names:
-            return self.pr_diff_ctx.code_before
+        if not self._pr_diff_ctx.code_names:
+            return self._pr_diff_ctx.code_before
 
         code_after, stderr = git_diff.apply_patch(
-            self.pr_diff_ctx.code_before,
-            self.pr_diff_ctx.golden_code_patch
+            self._pr_diff_ctx.code_before,
+            self._pr_diff_ctx.golden_code_patch
         )
 
-        patches = ["diff --git" + x for x in self.pr_diff_ctx.golden_code_patch.split("diff --git")[1:]]
+        patches = ["diff --git" + x for x in self._pr_diff_ctx.golden_code_patch.split("diff --git")[1:]]
         result = []
 
-        for before, after, diff in zip(self.pr_diff_ctx.code_before, code_after, patches):
+        for before, after, diff in zip(self._pr_diff_ctx.code_before, code_after, patches):
             before_map, after_map = self._build_changed_lines_scope_map(
                 before,
                 after,

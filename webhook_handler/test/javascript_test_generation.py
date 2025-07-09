@@ -106,8 +106,9 @@ class TestGenerationPdfJs19972(TestCase):
 class TestGenerationPdfJs20063(TestCase):
     def setUp(self):
         self.payload = _get_payload("test_mocks/pdf_js_20063.json")
+        mock_response = _get_file_content("test_mocks/pdf_js_20063_response.txt")
         self.config = Config()
-        self.pipeline = Pipeline(self.payload, self.config)
+        self.pipeline = Pipeline(self.payload, self.config, mock_response=mock_response)
 
     def tearDown(self):
         del self.payload

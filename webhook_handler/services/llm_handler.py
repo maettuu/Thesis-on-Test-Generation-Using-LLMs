@@ -6,15 +6,15 @@ from groq import Groq
 
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.llm_enum import LLM
-from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
+from webhook_handler.data_models.pipeline_inputs import PipelineInputs
 
 
 class LLMHandler:
     """
     Used to interact with LLMs.
     """
-    def __init__(self, config: Config, data: PullRequestPipelineData):
-        self._pr_pipeline_data = data
+    def __init__(self, config: Config, data: PipelineInputs):
+        self._pipeline_inputs = data
         self._pr_data = data.pr_data
         self._pr_diff_ctx = data.pr_diff_ctx
         self._openai_client = OpenAI(api_key=config.openai_api_key)
@@ -54,7 +54,17 @@ class LLMHandler:
                       "- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.\n"
                       "- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.\n\n")
 
-        linked_issue = f"Issue:\n<issue>\n{self._pr_pipeline_data.problem_statement}\n</issue>\n\n"
+        linked_issue = f"Issue:\n<issue>\n{self._pipeline_inputs.problem_statement}\n</issue>\n\n"
+
+        pdf_file = ""
+        use_pdf = "\n"
+        if self._pipeline_inputs.pdf_name:
+            pdf_file = f"PDF File:\n<pdf>\n{self._pipeline_inputs.pdf_name}\n</pdf>\n\n"
+            use_pdf = ("You can use the PDF file for testing as follows:\n"
+                       "const { getDocument } = await import('../../src/display/api.js');\n"
+                       "const { buildGetDocumentParams } = await import('./test_utils.js');\n"
+                       f"const loadingTask = getDocument(buildGetDocumentParams('{self._pipeline_inputs.pdf_name}'))\n")
+
         patch = f"Patch:\n<patch>\n{self._pr_diff_ctx.golden_code_patch}\n</patch>\n\n"
         available_imports = f"Imports:\n<imports>\n{available_packages}\n{available_relative_imports}\n</imports>\n\n"
 
@@ -62,7 +72,7 @@ class LLMHandler:
         if include_golden_code:
             code_filenames = self._pr_diff_ctx.code_names
             if sliced:
-                code = self._pr_pipeline_data.code_sliced
+                code = self._pipeline_inputs.code_sliced
                 golden_code += "Code:\n<code>\n"
                 for (f_name, f_code) in zip(code_filenames, code):
                     golden_code += ("File:\n"
@@ -86,7 +96,8 @@ class LLMHandler:
                         "the test will verify that the patch resolves the issue.\n"
                         "3. The test must be self-contained and to-the-point.\n"
                         "4. Use only the provided imports (respect the paths exactly how they are given) by importing "
-                        "dynamically for compatibility with Node.js — no new dependencies.\n"
+                        "dynamically for compatibility with Node.js — no new dependencies. "
+                        f"{use_pdf}"
                         "5. Return only the javascript code (no comments or explanations).\n\n")
 
         example = ("Example structure:\n"
@@ -111,14 +122,16 @@ class LLMHandler:
                                 "4. The test must be self-contained and to-the-point.\n"
                                 "5. If you need something new use only the provided imports (respect the paths "
                                 "exactly how they are given) by importing dynamically for compatibility with Node.js "
-                                "— no new dependencies.\n"
+                                "— no new dependencies. "
+                                f"{use_pdf}"
                                 "6. Return only the javascript code for the new `it(...)` block (no comments or explanations).\n\n")
             else:
                 instructions = ("Your task:\n"
                                 f"You are a software tester at {self._pr_data.repo}.\n"
                                 "1. Create a new test file that includes:\n"
                                 "   - All necessary imports (use only the provided imports and respect the "
-                                "paths exactly how they are given) — no new dependencies.).\n"
+                                "paths exactly how they are given) — no new dependencies. "
+                                f"{use_pdf}"
                                 "   - A top-level `describe(\"<brief suite name>\", () => {{ ... }})`.\n"
                                 "   - Exactly one `it(\"...\", async () => {{ ... }})` inside that block.\n"
                                 "2. The `it` test must fail on the code before the patch, and pass after, hence "
@@ -147,6 +160,7 @@ class LLMHandler:
 
         return (f"{guidelines}"
                 f"{linked_issue}"
+                f"{pdf_file}"
                 f"{patch}"
                 f"{available_imports}"
                 f"{golden_code}"
