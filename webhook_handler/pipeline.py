@@ -283,7 +283,7 @@ class Pipeline:
             self.logger.warning("Failed to determine available relative imports")
             available_relative_imports = ""
 
-        # 7. Build docker image
+        # 9. Build docker image
         self._docker_service = DockerService(
             self._config.project_root.as_posix(),
             self._config.old_repo_state,
@@ -293,7 +293,7 @@ class Pipeline:
         )
         self._docker_service.build()
 
-        # 8. Gather pipeline data
+        # 10. Gather pipeline data
         self._pipeline_inputs = PipelineInputs(
             pr_data=self._pr_data,
             pr_diff_ctx=self._pr_diff_ctx,
@@ -307,7 +307,7 @@ class Pipeline:
             available_relative_imports=available_relative_imports
         )
 
-        # 9. Setup model handler
+        # 11. Setup model handler
         self._llm_handler = LLMHandler(self._config, self._pipeline_inputs)
 
         self.logger.marker("================ Preparation Complete ================")
