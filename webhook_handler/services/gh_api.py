@@ -170,5 +170,5 @@ class GitHubApi:
                 logger.success(f"Linked Bugzilla issue #{number} fetched successfully")
                 return "\n".join(value for value in (bug.get("summary", ""), bug.get("description", "")) if value)
 
-        logger.warning(f"No Bugzilla issue found")
+        logger.warning("No Bugzilla issue found")
         return None

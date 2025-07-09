@@ -106,8 +106,7 @@ class DockerService:
             test_patch: str,
             tests_to_run: list,
             added_test_file: str,
-            golden_code_patch: str = None,
-            golden_pdf_patch: str = None
+            golden_code_patch: str = None
     ) -> [bool, str]:
         """
         Creates a container, applies the patch, runs the test, and returns the result.
@@ -117,7 +116,6 @@ class DockerService:
             tests_to_run (list): List of tests to run
             added_test_file (str): Path to the file to add to the added tests
             golden_code_patch (str): Patch content for source code
-            golden_pdf_patch (str): Patch content for test_manifest.json
 
         Returns:
             bool: True if the test has passed, False otherwise
@@ -152,9 +150,8 @@ class DockerService:
                     raise ExecutionError("No gulpfile found")
 
             # add mock PDF if available
-            if self._pdf_name and golden_pdf_patch is not None:
+            if self._pdf_name and self._pdf_content:
                 self._add_file_to_container(container, f"test/pdfs/{self._pdf_name}", self._pdf_content)
-                self._copy_and_apply_patch(container, patch_content=golden_pdf_patch, patch_name="golden_pdf_patch.diff")
 
             self._copy_and_apply_patch(
                 container,
@@ -288,12 +285,18 @@ class DockerService:
 
         logger.info("Running test command...")
         exec_result = container.exec_run(full_test_command, stdout=True, stderr=True)
-        if exec_result.exit_code == 0:
-            logger.success("Test command executed")
-        elif exec_result.exit_code == 124:
+        output = exec_result.output.decode()
+        if exec_result.exit_code == 124:
             logger.warning("Test command killed by timeout")
         else:
-            logger.error("Test command failed")
+            pattern = re.compile(
+                r'^Ran\s+\d+\s+of\s+\d+\s+specs?\r?\n\d+\s+specs?,\s+\d+\s+failures?$',
+                re.MULTILINE
+            )
+            if pattern.search(output):
+                logger.success("Test command executed")
+            else:
+                logger.error("Test command failed")
 
         return exec_result.output.decode()
 
@@ -308,7 +311,9 @@ class DockerService:
         Returns:
             bool: True if the test has passed, False otherwise
         """
+
         if re.search(r'\b0\s+specs\b', stdout):  # no tests were executed
+            logger.warning("No tests were executed")
             test_passed = False
         else:
             match = re.search(r'\b(\d+)\s+failures?\b', stdout)  # extract the number of failures

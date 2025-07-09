@@ -1,7 +1,11 @@
+import logging
 import requests
 
 from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
 from webhook_handler.services.gh_api import GitHubApi
+
+
+logger = logging.getLogger(__name__)
 
 
 class PullRequestDiffContext:
@@ -77,15 +81,6 @@ class PullRequestDiffContext:
     def golden_test_patch(self) -> str:
         return "\n\n".join(pr_file_diff.unified_test_diff() for pr_file_diff in self.test_file_diffs) + "\n\n"
 
-    @property
-    def golden_pdf_patch(self) -> str:
-        for pr_file_diff in self._pr_file_diffs:
-            filename = pr_file_diff.name.split("/")[-1]
-            if filename == "test_manifest.json":
-                return pr_file_diff.unified_code_diff() + "\n\n"
-
-        return ""
-
     def get_issue_pdf(self, candidate: str, head_commit: str) -> [str, bytes]:
         """
         Returns the name and content of the linked pdf if available.
@@ -103,11 +98,17 @@ class PullRequestDiffContext:
             filename = pr_file_diff.name.split("/")[-1]
             if candidate in filename:
                 if filename.endswith(".pdf"):
+                    logger.info("Found PDF file %s", filename)
                     return filename, self._gh_api.fetch_file_version(head_commit, pr_file_diff.name, get_bytes=True)
                 elif filename.endswith(".link"):
                     url = pr_file_diff.after
+                    pdf_filename = filename.replace(".link", "")
+                    logger.info("Fetching PDF file at %s", url)
                     response = requests.get(url, stream=True)
                     if response.status_code == 200:
-                        return filename.replace(".link", ""), response.content
+                        logger.success("PDF file %s fetched successfully", pdf_filename)
+                        return pdf_filename, response.content
+                    logger.warning("Failed to fetch PDF file %s", pdf_filename)
 
+        logger.info("No PDF file available")
         return "", b""

@@ -42,7 +42,7 @@ class Pipeline:
         # lazy init
         self._gh_api = None
         self._issue_statement = None
-        self._pdf_name = None
+        self._pdf_candidate = None
         self._pr_diff_ctx = None
 
     def _setup_log_paths(self):
@@ -89,7 +89,7 @@ class Pipeline:
         """
 
         self._gh_api = GitHubApi(self._config, self._pr_data)
-        self._issue_statement, self._pdf_name = self._gh_api.get_linked_data()
+        self._issue_statement, self._pdf_candidate = self._gh_api.get_linked_data()
         if not self._issue_statement:
             helpers.remove_dir(self._config.pr_log_dir)
             return 'No linked issue found', False
@@ -185,7 +185,7 @@ class Pipeline:
         if self._gh_api is None: self._gh_api = GitHubApi(self._config, self._pr_data)
 
         # 2. Fetch linked Issue
-        if self._issue_statement is None: self._issue_statement, self._pdf_name = self._gh_api.get_linked_data()
+        if self._issue_statement is None: self._issue_statement, self._pdf_candidate = self._gh_api.get_linked_data()
 
         # 3. Compute diffs & file contexts
         if self._pr_diff_ctx is None: self._pr_diff_ctx = PullRequestDiffContext(
@@ -195,7 +195,7 @@ class Pipeline:
         )
 
         # 4. Retrieve Mock PDF
-        self._pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_name, self._pr_data.head_commit)
+        pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_candidate, self._pr_data.head_commit)
 
         # 5. Slice golden code
         cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
@@ -206,7 +206,7 @@ class Pipeline:
             self._config.project_root.as_posix(),
             self._config.old_repo_state,
             self._pr_data,
-            self._pdf_name,
+            pdf_name,
             pdf_content
         )
         docker_service.build()
@@ -217,7 +217,7 @@ class Pipeline:
             pr_diff_ctx=self._pr_diff_ctx,
             code_sliced=code_sliced,
             problem_statement=self._issue_statement,
-            pdf_name=self._pdf_name
+            pdf_name=pdf_name
         )
 
         # 8. Setup Model Handler

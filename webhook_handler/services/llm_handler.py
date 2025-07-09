@@ -60,7 +60,7 @@ class LLMHandler:
         use_pdf = "\n"
         if self._pr_pipeline_data.pdf_name:
             pdf_file = f"PDF File:\n<pdf>\n{self._pr_pipeline_data.pdf_name}\n</pdf>\n\n"
-            use_pdf = f"You can use the PDF file for testing as follows: getDocument(buildGetDocumentParams('{self._pr_pipeline_data.pdf_name}'))\n"
+            use_pdf = f"You can use the PDF file for testing as follows (include the corresponding imports): getDocument(buildGetDocumentParams('{self._pr_pipeline_data.pdf_name}'))\n"
 
         patch = f"Patch:\n<patch>\n{self._pr_diff_ctx.golden_code_patch}\n</patch>\n\n"
         available_imports = f"Imports:\n<imports>\n{available_packages}\n{available_relative_imports}\n</imports>\n\n"
