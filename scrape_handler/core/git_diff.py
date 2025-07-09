@@ -12,15 +12,15 @@ from .execution_error import ExecutionError
 logger = logging.getLogger(__name__)
 
 
-def unified_diff_with_function_context(string1: str, string2: str, f_name: str = "tempfile.py", context_lines: int = 3) -> str:
+def unified_diff_with_function_context(original: str, modified: str, f_name: str = "tempfile.py", context_lines: int = 3) -> str:
     """
     Writes two input strings to temporary files and uses `git diff --no-index`
     to compute the diff, including function context. This is important when you feed a diff
     to a model.
 
     Parameters:
-        string1 (str): Original file content
-        string2 (str): Modified file content
+        original (str): Original file content
+        modified (str): Modified file content
         f_name (str): The filename to simulate in the diff output
         context_lines (int): The number of context lines to show in the diff
 
@@ -35,18 +35,18 @@ def unified_diff_with_function_context(string1: str, string2: str, f_name: str =
         file_dir = "/".join(f_name.split('/')[:-1])
         Path(temp_dir, file_dir).mkdir(parents=True)
 
-        file1 = os.path.join(temp_dir, f"{f_name}.oldfordiffonly")
-        file2 = os.path.join(temp_dir, f"{f_name}.newfordiffonly")
+        original_file = os.path.join(temp_dir, f"{f_name}.oldfordiffonly")
+        modified_file = os.path.join(temp_dir, f"{f_name}.newfordiffonly")
 
-        with open(file1, "w", encoding="utf-8", newline="\n") as f:
-            f.write(string1)
+        with open(original_file, "w", encoding="utf-8", newline="\n") as f:
+            f.write(original)
 
-        with open(file2, "w", encoding="utf-8", newline="\n") as f:
-            f.write(string2)
+        with open(modified_file, "w", encoding="utf-8", newline="\n") as f:
+            f.write(modified)
 
         # Run `git diff --no-index`
         result = subprocess.run(
-            ["git", "diff", "-p", f"-U{context_lines}", "--no-index", file1, file2],
+            ["git", "diff", "-p", f"-U{context_lines}", "--no-index", original_file, modified_file],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
 
@@ -104,7 +104,7 @@ def apply_patch(file_content_arr: list, patch: str) -> [list, str]:
         str: Any warnings which come up during the subprocess
     """
 
-    ################## Setup ##################
+    ##################### Setup #####################
     temp_dir = './tmp/'
     Path(temp_dir).mkdir(parents=True, exist_ok=True)
 
@@ -118,9 +118,9 @@ def apply_patch(file_content_arr: list, patch: str) -> [list, str]:
         stderr=subprocess.DEVNULL
     )
 
-    ################## Collect ##################
-    # Extract all the names of the changed files and save them in a list.
-    # Each element of the list is of the form "a/<file_path>"
+    #################### Collect ####################
+    # extract all the names of the changed files and save them in a list.
+    # each element of the list is of the form "a/<file_path>"
     patch_lines = patch.splitlines()
     original_file_aprefix_arr = []
     for line in patch_lines:
@@ -128,7 +128,7 @@ def apply_patch(file_content_arr: list, patch: str) -> [list, str]:
             original_file_aprefix = line.split(" ")[1]
             original_file_aprefix_arr.append(original_file_aprefix)
 
-    # Files mentioned in the patch should be the same number as the ones
+    # files mentioned in the patch should be the same number as the ones
     # whose content is provided. We also assume that the i-th file in the
     # first content corresponds to the i-th file in the second.
     assert len(original_file_aprefix_arr) == len(file_content_arr), patch
@@ -145,7 +145,6 @@ def apply_patch(file_content_arr: list, patch: str) -> [list, str]:
         original_file_bprefix = 'b/' + '/'.join(original_file_aprefix.split('/')[1:])
         patch = patch.replace(original_file_bprefix, file_path_bprefix)
 
-        # Write the file content and patch content to their respective files
         with open(Path(temp_dir, file_path), "w", encoding="utf-8", newline="\n") as file:
             file.write(file_content)
 
@@ -153,7 +152,7 @@ def apply_patch(file_content_arr: list, patch: str) -> [list, str]:
     with open(Path(temp_dir, patch_path), "w", encoding="utf-8", newline="\n") as patch_file:
         patch_file.write(patch)
 
-    ################## Apply ##################
+    ##################### Apply #####################
     try:
         res = subprocess.run(
             ["git", "apply", "--reject", patch_path],
@@ -175,12 +174,11 @@ def apply_patch(file_content_arr: list, patch: str) -> [list, str]:
 
     updated_content_arr = []
     for file_path in file_path_arr:
-        # Read the updated file content
         updated_content = Path(temp_dir, file_path).read_text(encoding="utf-8")
         os.remove(temp_dir + file_path)
         updated_content_arr.append(updated_content)
 
-    ################## Cleanup ##################
+    #################### Cleanup ####################
     os.remove(temp_dir + patch_path)
     helpers.remove_dir(Path(temp_dir, ".git"))
     helpers.remove_dir(Path(temp_dir))

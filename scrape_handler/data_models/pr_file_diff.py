@@ -30,17 +30,15 @@ class PullRequestFileDiff:
                 is_in_test_folder = True
                 break
 
-        if is_in_test_folder and 'spec' in parts[-1] and parts[-1].endswith("js"):
-            return True
-        return False
+        return is_in_test_folder and 'spec' in parts[-1] and parts[-1].endswith("js")
 
     @property
-    def is_code_file(self) -> bool:
+    def is_source_code_file(self) -> bool:
         """
-        Determines whether this PR changed code file or not
+        Determines whether this PR changed source code file or not
 
         Returns:
-            bool: True if this PR changed code file is code file, False otherwise
+            bool: True if this PR changed source code file is code file, False otherwise
         """
 
         is_in_src_folder = False
@@ -52,9 +50,18 @@ class PullRequestFileDiff:
                 is_in_src_folder = True
                 break
 
-        if is_in_src_folder and parts[-1].endswith(".js"):
-            return True
-        return False
+        return is_in_src_folder and parts[-1].endswith(".js")
+
+    @property
+    def is_non_source_code_file(self) -> bool:
+        """
+        Determines whether this PR changed non-source code file or not
+
+        Returns:
+            bool: True if this PR changed non-source code file is code file, False otherwise
+        """
+
+        return not self.is_source_code_file and not self.is_test_file and self.name.endswith(".js")
 
     def unified_code_diff(self) -> str:
         """

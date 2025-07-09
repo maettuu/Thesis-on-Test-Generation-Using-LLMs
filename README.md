@@ -168,7 +168,7 @@ Specific commit
 - **`LLM`**: Enum to define available LLMs
 - **`PullRequestData`**: Defines the schema for incoming GitHub Pull Request webhook payloads.
 - **`PullRequestFileDiff`**: Defines the schema for files pre- and post-PR.
-- **`PullRequestPipelineData`**: Defines compact schema for all data used in the pipeline.
+- **`PipelineInputs`**: Defines compact schema for all data used in the pipeline.
 
 ### services/
  
@@ -183,36 +183,18 @@ Specific commit
 
 ## Adding a New Test Payload
 
-1. **Mock Payload**  
-   Place your PR JSON under:  
-   ```
-   webhook_handler/test/test_mocks/<repo>_<pr_id>.json
-   ```
+Place your PR JSON under:  
+```
+scrape_handler/test/scrape_mocks/code_only/<repo>_<pr_id>.json
+```
 
-2. **Test Case**  
-   In `webhook_handler/test/javascript_test_generation.py`:
-
-   ```python
-   class TestGeneration<Repo><PR_ID>(TestCase):
-    def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/<repo>_<pr_id>.json", run_all_models=True)
-
-    def test_generation_<repo>_<pr_id>(self):
-        response = self.test_helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
-   ```
-
-3. **Run**  
-   ```bash
-   python manage.py test scrape_handler.test.javascript_test_generation:YourTestClass
-   ```
+The PR will now be included in the execution.
 
 ---
 
 ## Models Used
 
-- **OpenAI from openai:** GPT-4o, o1, o3-mini
+- **OpenAI from openai:** GPT-4o, o4-mini
 - **Groq from groq:** llama-3.3-70b-versatile, deepseek-r1-distill-llama-70b
 
 _With this setup, every Pull Request triggers automated, AI-driven regression tests—helping catch regressions early and reducing manual QA overhead._

@@ -21,6 +21,13 @@ class GitHubApi:
         self._api_url = "https://api.github.com/repos"
 
     def fetch_pr_files(self) -> dict:
+        """
+        Fetches all files of a pull request.
+
+        Returns:
+            dict: All raw files
+        """
+
         url = f"{self._api_url}/{self._pr_data.owner}/{self._pr_data.repo}/pulls/{self._pr_data.number}/files"
         response = requests.get(url, headers=self._config.headers)
         if response.status_code == 403 and "X-RateLimit-Reset" in response.headers:
@@ -33,15 +40,37 @@ class GitHubApi:
         response.raise_for_status()
         return response.json()
 
-    def fetch_file_version(self, commit: str, file_name: str) -> str:
+    def fetch_file_version(self, commit: str, file_name: str, get_bytes: bool = False) -> str | bytes:
+        """
+        Fetches the version of a file at a specific commit.
+
+        Parameters:
+            commit (str): Commit hash
+            file_name (str): File name
+            get_bytes (bool, optional): Get bytes instead of text
+
+        Returns:
+            str | bytes: File contents
+        """
+
         url = f"https://raw.githubusercontent.com/{self._pr_data.owner}/{self._pr_data.repo}/{commit}/{file_name}"
-        response_after = requests.get(url, headers=self._config.headers)
-        if response_after.status_code == 200:
-            return response_after.text
+        response = requests.get(url, headers=self._config.headers)
+        if response.status_code == 200:
+            return response.content if get_bytes else response.text
         return ""
 
-    def add_comment_to_pr(self, comment):
-        """Add a comment to the PR"""
+    def add_comment_to_pr(self, comment) -> [int, dict]:
+        """
+        Adds a comment to the pull request.
+
+        Parameters:
+            comment (str): Comment to add
+
+        Returns:
+            int: Status code
+            dict: The response data
+        """
+
         url = f"{self._api_url}/{self._pr_data.owner}/{self._pr_data.repo}/issues/{self._pr_data.number}/comments"
         headers = {
             "Authorization": f"Bearer {self._config.github_token}",
@@ -51,15 +80,27 @@ class GitHubApi:
         response = requests.post(url, json=data, headers=headers)
         return response.status_code, response.json()
 
-    def clone_repo(self, tmp_repo_dir: str):
+    def clone_repo(self) -> None:
+        """
+        Clones a GitHub repository.
+        """
+
         logger.info(f"Cloning repository https://github.com/{self._pr_data.owner}/{self._pr_data.repo}.git")
         _ = subprocess.run(
             ["git", "clone", f"https://github.com/{self._pr_data.owner}/{self._pr_data.repo}.git",
-             tmp_repo_dir],
+             self._config.cloned_repo_dir],
             capture_output=True, check=True)
         logger.success(f"Cloning successful")
 
-    def get_linked_issue(self) -> str:
+    def get_linked_data(self) -> [str, str]:
+        """
+        Checks and fetches a linked issue.
+
+        Returns:
+            str: The linked issue title and description
+            str: The candidate PDF filename
+        """
+
         issue_pattern = r'\b(?:Closes|Fixes|Resolves)\s+#(\d+)\b|\(?\b(?:bug|issue)\b\s+(\d+)\)?'
         issue_description = f"{self._pr_data.title} {self._pr_data.description}"
         matches = re.findall(issue_pattern, issue_description, re.IGNORECASE)
@@ -71,15 +112,25 @@ class GitHubApi:
             issue_nr = int(issue_nr_str)
             linked_issue_description = self._get_github_issue(issue_nr)
             if linked_issue_description:
-                return linked_issue_description
+                return linked_issue_description, f"issue{issue_nr_str}"
 
             linked_issue_description = self._get_bugzilla_issue(issue_nr)
             if linked_issue_description:
-                return linked_issue_description
+                return linked_issue_description, f"bug{issue_nr_str}"
 
-        return ""
+        return "", ""
 
     def _get_github_issue(self, number: int) -> str | None:
+        """
+        Fetches a GitHub issue.
+
+        Parameters:
+            number (int): The number of the issue
+
+        Returns:
+            str (optional): The GitHub issue title and description
+        """
+
         url = f"{self._api_url}/{self._pr_data.owner}/{self._pr_data.repo}/issues/{number}"
         response = requests.get(url, headers=self._config.headers)
         if response.status_code == 200:
@@ -93,6 +144,16 @@ class GitHubApi:
 
     @staticmethod
     def _get_bugzilla_issue(number: int) -> str | None:
+        """
+        Fetches a Bugzilla issue.
+
+        Parameters:
+            number (int): The number of the issue
+
+        Returns:
+            str (optional): The Bugzilla issue title and description
+        """
+
         response = requests.get(f"https://bugzilla.mozilla.org/rest/bug/{number}")
         if response.status_code == 200:
             bug_data = response.json()
@@ -101,5 +162,5 @@ class GitHubApi:
                 logger.success(f"Linked Bugzilla issue #{number} fetched successfully")
                 return "\n".join(value for value in (bug.get("summary", ""), bug.get("description", "")) if value)
 
-        logger.warning(f"No Bugzilla issue found")
+        logger.warning("No Bugzilla issue found")
         return None

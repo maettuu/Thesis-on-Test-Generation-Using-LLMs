@@ -3,6 +3,7 @@ import tree_sitter_javascript
 import logging
 
 from dotenv import load_dotenv
+from datetime import datetime
 from tree_sitter import Language
 from pathlib import Path
 
@@ -27,6 +28,7 @@ class Config:
         }
 
         ################# General Config ################
+        self.execution_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.parse_language = Language(tree_sitter_javascript.language())
         self.prompt_combinations = {
             "include_golden_code"        : [1, 1, 1, 1, 0],
@@ -36,31 +38,28 @@ class Config:
         }
         self.old_repo_state = False
 
-        ################## Log Directories Config ##################
+        ############# Log Directories Config ############
         self.project_root = Path(__file__).resolve().parent.parent.parent
         self.bot_log_dir = Path(self.project_root, "scrape_handler", "test", "scrape_logs")
         self.pr_log_dir = None
         self.output_dir = None
+        self.cloned_repo_dir = None
 
         self.gen_test_dir = Path(self.project_root, "scrape_handler", "test", "generated_tests")
-        self.cloned_repo_dir = "tmp_repo_dir"
 
         Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
         Path(self.gen_test_dir).mkdir(parents=True, exist_ok=True)
 
-    def setup_pr_log_dir(self, pr_id: str, timestamp: str) -> None:
+    def setup_pr_log_dir(self, pr_id: str) -> None:
         """
         Sets up directory for logger output file (one directory per PR)
 
         Parameters:
             pr_id (str): ID of the PR
-            timestamp (str): Timestamp for PR test generation execution
-
-        Returns:
-            None
         """
 
-        self.pr_log_dir = Path(self.bot_log_dir, pr_id + "_%s" % timestamp)
+        self.pr_log_dir = Path(self.bot_log_dir, pr_id + "_%s" % self.execution_timestamp)
+        self.cloned_repo_dir = f"tmp_repo_dir_{pr_id}"
         Path(self.pr_log_dir).mkdir(parents=True, exist_ok=True)
 
     def setup_output_dir(self, i_attempt: int, model) -> None:
@@ -70,9 +69,6 @@ class Config:
         Parameters:
             i_attempt (int): Attempt number
             model (LLM): Model name
-
-        Returns:
-            None
         """
 
         self.output_dir = Path(
@@ -83,7 +79,7 @@ class Config:
         Path(self.output_dir, "generation").mkdir(parents=True)
 
 
-################## Custom Logger Tags ##################
+############### Custom Logger Tags ##############
 # Marker: used to mark a new section (i.e., new PR, new run)
 MARKER_LEVEL_NUM = 21
 logging.addLevelName(MARKER_LEVEL_NUM, "MARKER")
@@ -131,7 +127,7 @@ class ColoredFormatter(logging.Formatter):
         return f"{color}{msg}{self.RESET}"
 
 
-################## Logger Initialization ##################
+############ Logger Initialization #############
 def configure_logger(pr_log_dir: Path, execution_id: str) -> None:
     """
     Sets up the global logger for PR test generation
@@ -139,9 +135,6 @@ def configure_logger(pr_log_dir: Path, execution_id: str) -> None:
     Parameters:
         pr_log_dir (Path): Path to the PR log directory
         execution_id (str): ID of the PR test generation execution
-
-    Returns:
-        None
     """
 
     logfile = Path(pr_log_dir, f"{execution_id}.log")

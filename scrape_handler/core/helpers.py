@@ -44,16 +44,17 @@ def extract_packages(base_commit: str, repo_dir: str) -> str:
             output_lines.append("Dependencies:")
             for pkg, version in dependencies.items():
                 output_lines.append(f"- {pkg}: {version}")
-            output_lines.append("\n")
+            output_lines[-1] += "\n"
         if dev_dependencies:
             output_lines.append("Dev Dependencies:")
             for pkg, version in dev_dependencies.items():
                 output_lines.append(f"- {pkg}: {version}")
-            output_lines.append("\n")
+            output_lines[-1] += "\n"
         if engines:
             output_lines.append("Engines:")
             for engine, version in engines.items():
                 output_lines.append(f"- {engine}: {version}")
+            output_lines[-1] += "\n"
 
         return "\n".join(output_lines)
     finally:
@@ -130,13 +131,16 @@ def remove_dir(path: Path, max_retries: int = 3, delay: float = 0.1, log_success
         max_retries (int, optional): The maximum number of times to retry the command
         delay (float, optional): The delay between retries
         log_success (bool, optional): Whether to log the success message
-
-    Returns:
-        None
     """
+
+    if not path.exists():
+        return
+
+
     def on_error(func, path, _) -> None:
         os.chmod(path, stat.S_IWRITE)
         func(path)
+
     for attempt in range(max_retries):
         try:
             shutil.rmtree(path, onerror=on_error)
