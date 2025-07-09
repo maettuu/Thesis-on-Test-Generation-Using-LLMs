@@ -92,7 +92,7 @@ class TestGenerator:
             response = self._llm_handler.query_model(prompt, model=self._model, temperature=0.0)
             if not response:
                 logger.critical("Failed to query model")
-                raise ExecutionError('Failed to query model')
+                raise ExecutionError("Failed to query model")
 
             logger.success("LLM response received")
             (generation_dir / "raw_model_response.txt").write_text(response, encoding="utf-8")

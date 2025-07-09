@@ -75,10 +75,10 @@ class DockerService:
                     log_lines.append(chunk['stream'].rstrip())
             full_build_log = "\n".join(log_lines)
             logger.critical(f"Build failed for image '{image_tag}':\n{full_build_log}")
-            raise ExecutionError(f'Docker build failed')
+            raise ExecutionError("Docker build failed")
         except APIError as e:
             logger.critical(f"Docker API error: {e}")
-            raise ExecutionError('Docker API error')
+            raise ExecutionError("Docker API error")
         finally:
             if not build_succeeded:
                 logger.info("Cleaning up leftover containers and dangling images...")
@@ -200,7 +200,7 @@ class DockerService:
             logger.success(f"File {file_path} added to container successfully")
         except APIError as e:
             logger.critical(f"Docker API error: {e}")
-            raise ExecutionError('Docker API error')
+            raise ExecutionError("Docker API error")
 
     def _whitelist_stub(self, container: Container, file_name: str) -> None:
         """
@@ -215,7 +215,7 @@ class DockerService:
         read = container.exec_run(f"/bin/sh -c 'cd /app/testbed && cat {whitelist_path}'")
         if read.exit_code != 0:
             logger.critical(f"Could not read clitests.json: {read.output.decode()}")
-            raise ExecutionError('Failed to whitelist stub')
+            raise ExecutionError("Failed to whitelist stub")
 
         whitelist = json.loads(read.output.decode())
         if file_name not in whitelist["spec_files"]:
@@ -240,7 +240,7 @@ class DockerService:
 
         if exec_result.exit_code != 0:
             logger.critical(f"Failed to apply patch: {exec_result.output.decode()}")
-            raise ExecutionError('Failed to apply patch')
+            raise ExecutionError("Failed to apply patch")
 
         logger.success(f"Patch file /app/testbed/{patch_name} applied successfully")
 

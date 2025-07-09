@@ -60,7 +60,7 @@ class LLMHandler:
         use_pdf = "\n"
         if self._pipeline_inputs.pdf_name:
             pdf_file = f"PDF File:\n<pdf>\n{self._pipeline_inputs.pdf_name}\n</pdf>\n\n"
-            use_pdf = (f"You can use the PDF file for testing as follows:\n"
+            use_pdf = ("You can use the PDF file for testing as follows:\n"
                        "const { getDocument } = await import('../../src/display/api.js');\n"
                        "const { buildGetDocumentParams } = await import('./test_utils.js');\n"
                        f"const loadingTask = getDocument(buildGetDocumentParams('{self._pipeline_inputs.pdf_name}'))\n")

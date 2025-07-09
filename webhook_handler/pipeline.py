@@ -267,20 +267,20 @@ class Pipeline:
                 self._config.cloned_repo_dir
             )
         except:
-            self.logger.critical(f'Failed to determine test file for injection')
-            raise ExecutionError(f'Failed to determine test file for injection')
+            self.logger.critical("Failed to determine test file for injection")
+            raise ExecutionError("Failed to determine test file for injection")
 
         # 8. Fetch packages and imports
         try:
             available_packages = helpers.extract_packages(self._pr_data.base_commit, self._config.cloned_repo_dir)
         except:
-            self.logger.warning(f'Failed to determine available packages')
+            self.logger.warning("Failed to determine available packages")
             available_packages = ""
         try:
             available_relative_imports = helpers.extract_relative_imports(self._pr_data.base_commit,
                                                                           self._config.cloned_repo_dir)
         except:
-            self.logger.warning(f'Failed to determine available relative imports')
+            self.logger.warning("Failed to determine available relative imports")
             available_relative_imports = ""
 
         # 7. Build docker image
