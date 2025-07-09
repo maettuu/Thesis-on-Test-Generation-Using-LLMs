@@ -242,7 +242,7 @@ class DockerService:
             logger.critical(f"Failed to apply patch: {exec_result.output.decode()}")
             raise ExecutionError("Failed to apply patch")
 
-        logger.success(f"Patch file /app/testbed/{patch_name} applied successfully")
+        logger.success(f"Patch file {patch_name} applied successfully")
 
     @staticmethod
     def _run_test(container: Container, gulpfile_pointer: str, tests_to_run: list) -> str:

@@ -101,9 +101,9 @@ class PullRequestDiffContext:
                     logger.success("PDF file %s fetched successfully", filename)
                     return filename, self._gh_api.fetch_file_version(head_commit, pr_file_diff.name, get_bytes=True)
                 elif filename.endswith(".link"):
-                    url = pr_file_diff.after
+                    url = pr_file_diff.after.rstrip('\n')
                     pdf_filename = filename.replace(".link", "")
-                    logger.info("Fetching PDF file at %s", url)
+                    logger.info("Fetching PDF file %s", url)
                     response = requests.get(url, stream=True)
                     if response.status_code == 200:
                         logger.success("PDF file %s fetched successfully", pdf_filename)

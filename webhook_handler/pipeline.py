@@ -158,7 +158,7 @@ class Pipeline:
                 gen_test = Path(self._config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
                 new_filename = f"{self._execution_id}_{self._config.output_dir.name}.txt"
                 Path(self._config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
-                self.logger.success(f"Test file copied to {self._config.gen_test_dir}/{new_filename}")
+                self.logger.success(f"Test file copied to generated_tests/{new_filename}")
                 break
 
         if not self._generation_completed and execute_mini:
