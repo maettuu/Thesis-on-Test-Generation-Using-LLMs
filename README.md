@@ -195,12 +195,18 @@ Specific commit
    ```python
    class TestGeneration<Repo><PR_ID>(TestCase):
     def setUp(self):
-        self.test_helper = TestHelper(payload_path="test_mocks/<repo>_<pr_id>.json", run_all_models=True)
+        self.payload = _get_payload("test_mocks/<repo>_<pr_id>.json")
+        self.config = Config()
+        self.pipeline = Pipeline(self.payload, self.config)
+
+    def tearDown(self):
+        del self.payload
+        del self.config
+        del self.pipeline
 
     def test_generation_<repo>_<pr_id>(self):
-        response = self.helper.run_payload()
-        self.assertIsNotNone(response)  # Ensure response is not None
-        self.assertTrue(isinstance(response, dict) or hasattr(response, 'status_code'))  # Ensure response is a dict or HttpResponse
+        generation_completed = self.pipeline.execute_pipeline()
+        self.assertTrue(generation_completed)
    ```
 
 3. **Run**  
@@ -212,7 +218,7 @@ Specific commit
 
 ## Models Used
 
-- **OpenAI from openai:** GPT-4o, o1, o3-mini
+- **OpenAI from openai:** GPT-4o, o4-mini
 - **Groq from groq:** llama-3.3-70b-versatile, deepseek-r1-distill-llama-70b
 
 _With this setup, every Pull Request triggers automated, AI-driven regression tests—helping catch regressions early and reducing manual QA overhead._
