@@ -115,17 +115,23 @@ def save_pr(payload):
     pr_number = payload["pull_request"]["number"]
     filename = f"pdf_js_{pr_number}.json"
     path = OUTPUT_DIR / "code_only" / filename
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=4)
-    print(f"[+] Saved PR #{pr_number} to {path}\n")
+    if not path.exists():
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=4)
+        print(f"[+] Saved PR #{pr_number} to {path}\n")
+    else:
+        print(f"[!] PR #{pr_number} at {path} already exists\n")
 
 def save_pr_amp(payload):
     pr_number = payload["pull_request"]["number"]
     filename = f"pdf_js_{pr_number}.json"
     path = OUTPUT_DIR / "code_test" / filename
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=4)
-    print(f"[+] Saved PR #{pr_number} to {path}\n")
+    if not path.exists():
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=4)
+        print(f"[+] Saved PR #{pr_number} to {path}\n")
+    else:
+        print(f"[!] PR #{pr_number} at {path} already exists\n")
 
 def process_pr(curr_pr: dict) -> bool:
     global valid_payloads, valid_payloads_amp
@@ -199,5 +205,5 @@ while valid_payloads < TARGET:
 
     page += 1
 
-print(f"[*] Found {valid_payloads} valid payloads")
-print(f"[*] Found {valid_payloads_amp} valid payloads with test files\n")
+print(f"[+] Found {valid_payloads} valid payloads")
+print(f"[+] Found {valid_payloads_amp} valid payloads with test files\n")
