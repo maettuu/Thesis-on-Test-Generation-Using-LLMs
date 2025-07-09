@@ -2,7 +2,6 @@ import os
 import json
 
 from django.test import TestCase
-from pathlib import Path
 
 from webhook_handler.core import Config
 from webhook_handler.pipeline import Pipeline
@@ -26,8 +25,7 @@ def _get_file_content(rel_path: str) -> str:
 #
 class TestGenerationPdfJs19849(TestCase):
     def setUp(self):
-        payload_path = Path("test_mocks", "pdf_js_19849.json")
-        self.payload = _get_payload(str(payload_path))
+        self.payload = _get_payload("test_mocks/pdf_js_19849.json")
         self.config = Config()
         self.pipeline = Pipeline(self.payload, self.config)
 
@@ -43,8 +41,7 @@ class TestGenerationPdfJs19849(TestCase):
 
 class TestGenerationPdfJs19880(TestCase):
     def setUp(self):
-        payload_path = Path("test_mocks", "pdf_js_19880.json")
-        self.payload = _get_payload(str(payload_path))
+        self.payload = _get_payload("test_mocks/pdf_js_19880.json")
         self.config = Config()
         self.pipeline = Pipeline(self.payload, self.config)
 
@@ -60,8 +57,7 @@ class TestGenerationPdfJs19880(TestCase):
 
 class TestGenerationPdfJs19918(TestCase):
     def setUp(self):
-        payload_path = Path("test_mocks", "pdf_js_19918.json")
-        self.payload = _get_payload(str(payload_path))
+        self.payload = _get_payload("test_mocks/pdf_js_19918.json")
         self.config = Config()
         self.pipeline = Pipeline(self.payload, self.config)
 
@@ -77,8 +73,7 @@ class TestGenerationPdfJs19918(TestCase):
 
 class TestGenerationPdfJs19955(TestCase):
     def setUp(self):
-        payload_path = Path("test_mocks", "pdf_js_19955.json")
-        self.payload = _get_payload(str(payload_path))
+        self.payload = _get_payload("test_mocks/pdf_js_19955.json")
         self.config = Config()
         self.pipeline = Pipeline(self.payload, self.config)
 
@@ -94,8 +89,7 @@ class TestGenerationPdfJs19955(TestCase):
 
 class TestGenerationPdfJs19972(TestCase):
     def setUp(self):
-        payload_path = Path("test_mocks", "pdf_js_19972.json")
-        self.payload = _get_payload(str(payload_path))
+        self.payload = _get_payload("test_mocks/pdf_js_19972.json")
         self.config = Config()
         self.pipeline = Pipeline(self.payload, self.config)
 
