@@ -98,8 +98,11 @@ class PullRequestDiffContext:
             filename = pr_file_diff.name.split("/")[-1]
             if candidate in filename:
                 if filename.endswith(".pdf"):
-                    logger.success("PDF file %s fetched successfully", filename)
-                    return filename, self._gh_api.fetch_file_version(head_commit, pr_file_diff.name, get_bytes=True)
+                    content = self._gh_api.fetch_file_version(head_commit, pr_file_diff.name, get_bytes=True)
+                    if content:
+                        logger.success("PDF file %s fetched successfully", filename)
+                        return filename, content
+                    logger.warning("Failed to fetch PDF file %s", filename)
                 elif filename.endswith(".link"):
                     url = pr_file_diff.after.rstrip('\n')
                     pdf_filename = filename.replace(".link", "")
