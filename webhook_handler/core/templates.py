@@ -1,4 +1,4 @@
-COMMENT_TEMPLATE_GENERATION = """
+COMMENT_TEMPLATE = """
 Hi! 🤖 The test below is automatically generated and serves as a regression test for this PR because it:
 - passes in the new codebase after the PR, and
 - fails in the old codebase before the PR.

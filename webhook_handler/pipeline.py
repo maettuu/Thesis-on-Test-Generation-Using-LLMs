@@ -10,11 +10,12 @@ from webhook_handler.core import (
     ExecutionError,
     helpers,
     templates,
+    test_injection
 )
 from webhook_handler.data_models import (
     LLM,
     PullRequestData,
-    PullRequestPipelineData
+    PipelineInputs
 )
 from webhook_handler.services import (
     CSTBuilder,
@@ -37,6 +38,7 @@ class Pipeline:
         self._post_comment = post_comment
         self._mock_response = mock_response
         self._generation_completed = False
+        self._environment_prepared = False
         self._setup_log_paths()
 
         # lazy init
@@ -44,8 +46,12 @@ class Pipeline:
         self._issue_statement = None
         self._pdf_candidate = None
         self._pr_diff_ctx = None
+        self._pipeline_inputs = None
+        self._cst_builder = None
+        self._llm_handler = None
+        self._docker_service = None
 
-    def _setup_log_paths(self):
+    def _setup_log_paths(self) -> None:
         """
         Sets up log directories, files and the logger itself.
         """
@@ -61,7 +67,7 @@ class Pipeline:
         configure_logger(self._config.pr_log_dir, self._execution_id)
         self.logger = logging.getLogger()
 
-    def _teardown(self):
+    def _teardown(self) -> None:
         """
         Cleans state of directory after completion.
         """
@@ -79,6 +85,16 @@ class Pipeline:
         with self.executed_tests.open("a", encoding='utf-8') as f:
             f.write(f"{self._execution_id}\n")
 
+        self._gh_api = None
+        self._issue_statement = None
+        self._pdf_candidate = None
+        self._pr_diff_ctx = None
+        self._pipeline_inputs = None
+        self._cst_builder = None
+        self._llm_handler = None
+        self._docker_service = None
+        self._environment_prepared = False
+
     def is_valid_pr(self) -> [str, bool]:
         """
         PR must have linked issue and source code changes.
@@ -88,15 +104,23 @@ class Pipeline:
             bool: True if PR is valid, False otherwise
         """
 
+        self.logger.marker("================ Preparing Environment ===============")
         self._gh_api = GitHubApi(self._config, self._pr_data)
         self._issue_statement, self._pdf_candidate = self._gh_api.get_linked_data()
         if not self._issue_statement:
             helpers.remove_dir(self._config.pr_log_dir)
+            self._gh_api = None
+            self._issue_statement = None
+            self._pdf_candidate = None
             return 'No linked issue found', False
 
         self._pr_diff_ctx = PullRequestDiffContext(self._pr_data.base_commit, self._pr_data.head_commit, self._gh_api)
         if not self._pr_diff_ctx.fulfills_requirements:
             helpers.remove_dir(self._config.pr_log_dir)
+            self._gh_api = None
+            self._issue_statement = None
+            self._pdf_candidate = None
+            self._pr_diff_ctx = None
             return 'Must modify source code files only', False
 
         return 'Payload is being processed...', True
@@ -117,10 +141,9 @@ class Pipeline:
             i_attempt = 0
             while i_attempt < len(self._config.prompt_combinations["include_golden_code"]) and not self._generation_completed:
                 self._config.setup_output_dir(i_attempt, model)
-                self.logger.marker("Starting combination %d with model %s" % (i_attempt + 1, model))
                 try:
                     self._generation_completed = self._execute_attempt(model=model, i_attempt=i_attempt)
-                    self.logger.success(f"Combination %d with model %s finished successfully" % (i_attempt + 1, model))
+                    self.logger.success(f"Attempt %d with model %s finished successfully" % (i_attempt + 1, model))
                     self._record_result(self._pr_data.number, model, i_attempt + 1, self._generation_completed)
                 except ExecutionError as e:
                     self._record_result(self._pr_data.number, model, i_attempt + 1, str(e))
@@ -140,7 +163,6 @@ class Pipeline:
         if not self._generation_completed and execute_mini:
             model = LLM.GPTo4_MINI
             self._config.setup_output_dir(0, model)
-            self.logger.marker("Starting with model o4-mini")
             try:
                 self._generation_completed = self._execute_attempt(
                     model=model,
@@ -173,18 +195,46 @@ class Pipeline:
         Executes a single attempt.
 
         Parameters:
-            mock_response (str): Mock response for LLM to prevent new query
-            i_attempt (int): Number of current attempt
             model (LLM): Model to use
+            i_attempt (int): Number of current attempt
 
         Returns:
             bool: True if generation was successful, False otherwise
         """
 
-        # 1. Setup GitHub Api
-        if self._gh_api is None: self._gh_api = GitHubApi(self._config, self._pr_data)
+        if self._environment_prepared:
+            self.logger.info("Environment ready – Preparation skipped")
+        else:
+            self._prepare_environment()
+            self._environment_prepared = True
 
-        # 2. Fetch linked Issue
+        generator = TestGenerator(
+            self._config,
+            self._pipeline_inputs,
+            self._mock_response,
+            self._post_comment,
+            templates.COMMENT_TEMPLATE,
+            self._gh_api,
+            self._cst_builder,
+            self._docker_service,
+            self._llm_handler,
+            i_attempt,
+            model,
+        )
+
+        return generator.generate()
+
+    def _prepare_environment(self) -> None:
+        """
+        Prepares all services and data used in each attempt. Only has to execute once to cut down on API calls.
+        """
+
+        # 1. Setup GitHub API
+        if self._gh_api is None:
+            self.logger.marker("================ Preparing Environment ===============")
+            self._gh_api = GitHubApi(self._config, self._pr_data)
+
+        # 2. Fetch linked issue
         if self._issue_statement is None: self._issue_statement, self._pdf_candidate = self._gh_api.get_linked_data()
 
         # 3. Compute diffs & file contexts
@@ -194,12 +244,12 @@ class Pipeline:
             self._gh_api
         )
 
-        # 4. Retrieve Mock PDF
+        # 4. Retrieve PDF
         pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_candidate, self._pr_data.head_commit)
 
         # 5. Slice golden code
-        cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
-        code_sliced = cst_builder.slice_code_file()
+        self._cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
+        code_sliced = self._cst_builder.slice_code_file()
 
         # 6. Clone repository locally
         if not Path(self._config.cloned_repo_dir).exists():
@@ -207,46 +257,59 @@ class Pipeline:
         else:
             self.logger.info(f"Temporary repository '{self._pr_data.repo}' already cloned – skipped")
 
-        # 7. Build Docker image
-        docker_service = DockerService(
+        # 7. Fetch test file for injection
+        try:
+            test_filename, test_file_content, test_file_content_sliced = test_injection.get_candidate_test_file(
+                self._config.parse_language,
+                self._pr_data.base_commit,
+                self._pr_diff_ctx.golden_code_patch,
+                self._config.cloned_repo_dir
+            )
+        except:
+            self.logger.critical(f'Failed to determine test file for injection')
+            raise ExecutionError(f'Failed to determine test file for injection')
+
+        # 8. Fetch packages and imports
+        try:
+            available_packages = helpers.extract_packages(self._pr_data.base_commit, self._config.cloned_repo_dir)
+        except:
+            self.logger.warning(f'Failed to determine available packages')
+            available_packages = ""
+        try:
+            available_relative_imports = helpers.extract_relative_imports(self._pr_data.base_commit,
+                                                                          self._config.cloned_repo_dir)
+        except:
+            self.logger.warning(f'Failed to determine available relative imports')
+            available_relative_imports = ""
+
+        # 7. Build docker image
+        self._docker_service = DockerService(
             self._config.project_root.as_posix(),
             self._config.old_repo_state,
             self._pr_data,
             pdf_name,
             pdf_content
         )
-        docker_service.build()
+        self._docker_service.build()
 
         # 8. Gather pipeline data
-        pr_pipeline_data = PullRequestPipelineData(
+        self._pipeline_inputs = PipelineInputs(
             pr_data=self._pr_data,
             pr_diff_ctx=self._pr_diff_ctx,
             code_sliced=code_sliced,
             problem_statement=self._issue_statement,
-            pdf_name=pdf_name
+            pdf_name=pdf_name,
+            test_filename=test_filename,
+            test_file_content=test_file_content,
+            test_file_content_sliced=test_file_content_sliced,
+            available_packages=available_packages,
+            available_relative_imports=available_relative_imports
         )
 
-        # 9. Setup Model Handler
-        llm_handler = LLMHandler(self._config, pr_pipeline_data)
+        # 9. Setup model handler
+        self._llm_handler = LLMHandler(self._config, self._pipeline_inputs)
 
-        # 10. Setup Generator
-        generator = TestGenerator(
-            self._config,
-            pr_pipeline_data,
-            cst_builder,
-            self._gh_api,
-            llm_handler,
-            docker_service,
-            self._post_comment,
-            i_attempt,
-            self._config.prompt_combinations,
-            templates.COMMENT_TEMPLATE_GENERATION,
-            model,
-            self._mock_response
-        )
-
-        # 11. Execute
-        return generator.generate()
+        self.logger.marker("================ Preparation Completed ===============")
 
     def _record_result(self, number: str, model: LLM, i_attempt: int, stop: bool | str):
         """

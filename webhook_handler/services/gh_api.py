@@ -88,9 +88,6 @@ class GitHubApi:
 
         Parameters:
             tmp_repo_dir (str): The directory to clone to
-
-        Returns:
-            None
         """
 
         logger.info(f"Cloning repository https://github.com/{self._pr_data.owner}/{self._pr_data.repo}.git")

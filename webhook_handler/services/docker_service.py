@@ -182,9 +182,6 @@ class DockerService:
             container (Container): Container to add file to
             file_path (str): Path to the file to add to the container
             file_content (str | bytes, optional): Content to add to the file
-
-        Returns:
-            None
         """
 
         if isinstance(file_content, str):
@@ -200,6 +197,7 @@ class DockerService:
         tar_stream.seek(0)
         try:
             container.put_archive("/app/testbed", tar_stream.read())
+            logger.success(f"File {file_path} added to container successfully")
         except APIError as e:
             logger.critical(f"Docker API error: {e}")
             raise ExecutionError('Docker API error')
@@ -211,9 +209,6 @@ class DockerService:
         Parameters:
             container (Container): Container to modify whitelist in
             file_name (str): Name of the file to add to the whitelist
-
-        Returns:
-            None
         """
 
         whitelist_path = "test/unit/clitests.json"
@@ -236,12 +231,8 @@ class DockerService:
             container (Container): Container to apply patch
             patch_content (str): Patch to apply to the container
             patch_name (str): Name of the path file
-
-        Returns:
-            None
         """
         self._add_file_to_container(container, patch_name, patch_content)
-        logger.info(f"Patch file copied to /app/testbed/{patch_name}")
 
         # Apply the patch inside the container
         apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && patch -p1 < {patch_name}'"
@@ -251,7 +242,7 @@ class DockerService:
             logger.critical(f"Failed to apply patch: {exec_result.output.decode()}")
             raise ExecutionError('Failed to apply patch')
 
-        logger.success("Patch applied successfully")
+        logger.success(f"Patch file /app/testbed/{patch_name} copied and applied successfully")
 
     @staticmethod
     def _run_test(container: Container, gulpfile_pointer: str, tests_to_run: list) -> str:

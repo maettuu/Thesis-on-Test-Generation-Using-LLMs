@@ -6,15 +6,15 @@ from groq import Groq
 
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.llm_enum import LLM
-from webhook_handler.data_models.pr_pipeline_data import PullRequestPipelineData
+from webhook_handler.data_models.pipeline_inputs import PipelineInputs
 
 
 class LLMHandler:
     """
     Used to interact with LLMs.
     """
-    def __init__(self, config: Config, data: PullRequestPipelineData):
-        self._pr_pipeline_data = data
+    def __init__(self, config: Config, data: PipelineInputs):
+        self._pipeline_inputs = data
         self._pr_data = data.pr_data
         self._pr_diff_ctx = data.pr_diff_ctx
         self._openai_client = OpenAI(api_key=config.openai_api_key)
@@ -54,16 +54,16 @@ class LLMHandler:
                       "- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.\n"
                       "- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.\n\n")
 
-        linked_issue = f"Issue:\n<issue>\n{self._pr_pipeline_data.problem_statement}\n</issue>\n\n"
+        linked_issue = f"Issue:\n<issue>\n{self._pipeline_inputs.problem_statement}\n</issue>\n\n"
 
         pdf_file = ""
         use_pdf = "\n"
-        if self._pr_pipeline_data.pdf_name:
-            pdf_file = f"PDF File:\n<pdf>\n{self._pr_pipeline_data.pdf_name}\n</pdf>\n\n"
+        if self._pipeline_inputs.pdf_name:
+            pdf_file = f"PDF File:\n<pdf>\n{self._pipeline_inputs.pdf_name}\n</pdf>\n\n"
             use_pdf = (f"You can use the PDF file for testing as follows:\n"
                        "const { getDocument } = await import('../../src/display/api.js');\n"
                        "const { buildGetDocumentParams } = await import('./test_utils.js');\n"
-                       f"const loadingTask = getDocument(buildGetDocumentParams('{self._pr_pipeline_data.pdf_name}'))\n")
+                       f"const loadingTask = getDocument(buildGetDocumentParams('{self._pipeline_inputs.pdf_name}'))\n")
 
         patch = f"Patch:\n<patch>\n{self._pr_diff_ctx.golden_code_patch}\n</patch>\n\n"
         available_imports = f"Imports:\n<imports>\n{available_packages}\n{available_relative_imports}\n</imports>\n\n"
@@ -72,7 +72,7 @@ class LLMHandler:
         if include_golden_code:
             code_filenames = self._pr_diff_ctx.code_names
             if sliced:
-                code = self._pr_pipeline_data.code_sliced
+                code = self._pipeline_inputs.code_sliced
                 golden_code += "Code:\n<code>\n"
                 for (f_name, f_code) in zip(code_filenames, code):
                     golden_code += ("File:\n"

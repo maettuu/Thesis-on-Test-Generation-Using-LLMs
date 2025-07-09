@@ -64,9 +64,6 @@ class Config:
 
         Parameters:
             pr_id (str): ID of the PR
-
-        Returns:
-            None
         """
 
         self.pr_log_dir = Path(self.bot_log_dir, pr_id + "_%s" % self.execution_timestamp)
@@ -80,9 +77,6 @@ class Config:
         Parameters:
             i_attempt (int): Attempt number
             model (LLM): Model name
-
-        Returns:
-            None
         """
 
         self.output_dir = Path(
@@ -149,9 +143,6 @@ def configure_logger(pr_log_dir: Path, execution_id: str) -> None:
     Parameters:
         pr_log_dir (Path): Path to the PR log directory
         execution_id (str): ID of the PR test generation execution
-
-    Returns:
-        None
     """
 
     logfile = Path(pr_log_dir, f"{execution_id}.log")

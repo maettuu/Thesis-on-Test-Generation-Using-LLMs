@@ -168,7 +168,7 @@ Specific commit
 - **`LLM`**: Enum to define available LLMs
 - **`PullRequestData`**: Defines the schema for incoming GitHub Pull Request webhook payloads.
 - **`PullRequestFileDiff`**: Defines the schema for files pre- and post-PR.
-- **`PullRequestPipelineData`**: Defines compact schema for all data used in the pipeline.
+- **`PipelineInputs`**: Defines compact schema for all data used in the pipeline.
 
 ### services/
  

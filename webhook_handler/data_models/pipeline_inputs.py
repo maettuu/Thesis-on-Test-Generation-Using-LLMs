@@ -2,15 +2,20 @@ from dataclasses import dataclass
 
 
 @dataclass
-class PullRequestPipelineData:
+class PipelineInputs:
     """
-    Holds all data about a PR, its diffs together with the sliced code.
+    Holds all data about a PR, its diffs together with the sliced code, test file information and available imports.
     """
     pr_data: any
     pr_diff_ctx: any
     code_sliced: list[str]
     problem_statement: str
     pdf_name: str
+    test_filename: str
+    test_file_content: str
+    test_file_content_sliced: str
+    available_packages: str
+    available_relative_imports: str
 
     def __post_init__(self):
         # ensure instance types
