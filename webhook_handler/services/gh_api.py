@@ -4,8 +4,6 @@ import re
 import subprocess
 import logging
 
-from pathlib import Path
-
 from webhook_handler.core.config import Config
 from webhook_handler.data_models.pr_data import PullRequestData
 
@@ -82,18 +80,15 @@ class GitHubApi:
         response = requests.post(url, json=data, headers=headers)
         return response.status_code, response.json()
 
-    def clone_repo(self, tmp_repo_dir: str) -> None:
+    def clone_repo(self) -> None:
         """
         Clones a GitHub repository.
-
-        Parameters:
-            tmp_repo_dir (str): The directory to clone to
         """
 
         logger.info(f"Cloning repository https://github.com/{self._pr_data.owner}/{self._pr_data.repo}.git")
         _ = subprocess.run(
             ["git", "clone", f"https://github.com/{self._pr_data.owner}/{self._pr_data.repo}.git",
-             tmp_repo_dir],
+             self._config.cloned_repo_dir],
             capture_output=True, check=True)
         logger.success(f"Cloning successful")
 

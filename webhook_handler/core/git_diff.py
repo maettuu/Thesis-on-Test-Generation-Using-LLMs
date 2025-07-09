@@ -12,15 +12,15 @@ from .execution_error import ExecutionError
 logger = logging.getLogger(__name__)
 
 
-def unified_diff_with_function_context(string1: str, string2: str, f_name: str = "tempfile.py", context_lines: int = 3) -> str:
+def unified_diff_with_function_context(original: str, modified: str, f_name: str = "tempfile.py", context_lines: int = 3) -> str:
     """
     Writes two input strings to temporary files and uses `git diff --no-index`
     to compute the diff, including function context. This is important when you feed a diff
     to a model.
 
     Parameters:
-        string1 (str): Original file content
-        string2 (str): Modified file content
+        original (str): Original file content
+        modified (str): Modified file content
         f_name (str): The filename to simulate in the diff output
         context_lines (int): The number of context lines to show in the diff
 
@@ -35,18 +35,18 @@ def unified_diff_with_function_context(string1: str, string2: str, f_name: str =
         file_dir = "/".join(f_name.split('/')[:-1])
         Path(temp_dir, file_dir).mkdir(parents=True)
 
-        file1 = os.path.join(temp_dir, f"{f_name}.oldfordiffonly")
-        file2 = os.path.join(temp_dir, f"{f_name}.newfordiffonly")
+        original_file = os.path.join(temp_dir, f"{f_name}.oldfordiffonly")
+        modified_file = os.path.join(temp_dir, f"{f_name}.newfordiffonly")
 
-        with open(file1, "w", encoding="utf-8", newline="\n") as f:
-            f.write(string1)
+        with open(original_file, "w", encoding="utf-8", newline="\n") as f:
+            f.write(original)
 
-        with open(file2, "w", encoding="utf-8", newline="\n") as f:
-            f.write(string2)
+        with open(modified_file, "w", encoding="utf-8", newline="\n") as f:
+            f.write(modified)
 
         # Run `git diff --no-index`
         result = subprocess.run(
-            ["git", "diff", "-p", f"-U{context_lines}", "--no-index", file1, file2],
+            ["git", "diff", "-p", f"-U{context_lines}", "--no-index", original_file, modified_file],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
 

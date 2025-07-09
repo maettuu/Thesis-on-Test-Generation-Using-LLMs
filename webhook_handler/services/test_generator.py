@@ -5,9 +5,7 @@ from pathlib import Path
 from webhook_handler.core.config import Config
 from webhook_handler.core import (
     ExecutionError,
-    git_diff,
-    helpers,
-    test_injection
+    git_diff
 )
 from webhook_handler.data_models.llm_enum import LLM
 from webhook_handler.data_models.pr_file_diff import PullRequestFileDiff
@@ -62,8 +60,8 @@ class TestGenerator:
             bool: True if a fail-to-pass test has been generated, False otherwise
         """
 
-        logger.marker("Attempt %d with model %s started..." % (self._i_attempt + 1, self._model))
-        logger.marker("=============== Test Generation Started ===============")
+        logger.marker("Attempt %d with model %s" % (self._i_attempt + 1, self._model))
+        logger.marker("=============== Test Generation Started ==============")
 
         include_golden_code = self._prompt_combinations["include_golden_code"][self._i_attempt]
         sliced = self._prompt_combinations["sliced"][self._i_attempt]
@@ -140,7 +138,7 @@ class TestGenerator:
 
         if test_passed_before:
             logger.fail("No Fail-to-Pass test generated")
-            logger.marker("=============== Test Generation Finished ===============")
+            logger.marker("=============== Test Generation Finished =============")
             return False
 
         logger.marker("Running test in post-PR codebase...")
@@ -166,9 +164,9 @@ class TestGenerator:
                     logger.fail(f"Failed to add comment: {status_code}", response_data)
             else:
                 logger.success("Suggested test for PR:\n\n%s" % comment)
-            logger.marker("=============== Test Generation Finished ===============")
+            logger.marker("=============== Test Generation Finished =============")
             return True
         else:
             logger.fail("No Fail-to-Pass test generated")
-            logger.marker("=============== Test Generation Finished ===============")
+            logger.marker("=============== Test Generation Finished =============")
             return False

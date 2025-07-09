@@ -110,5 +110,5 @@ class PullRequestDiffContext:
                         return pdf_filename, response.content
                     logger.warning("Failed to fetch PDF file %s", pdf_filename)
 
-        logger.info("No PDF file available")
+        logger.warning("No PDF file available")
         return "", b""

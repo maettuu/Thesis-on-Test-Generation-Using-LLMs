@@ -183,7 +183,7 @@ class Pipeline:
                 Path(self._config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
                 self.logger.success(f"Test file copied to {self._config.gen_test_dir}/{new_filename}")
 
-        self.logger.marker(f"=============== Finished Payload #{self._pr_data.number} ===============")
+        self.logger.marker(f"=============== Finished Payload #{self._pr_data.number} ==============")
         self._teardown()
         return self._generation_completed
 
@@ -254,7 +254,7 @@ class Pipeline:
 
         # 6. Clone repository locally
         if not Path(self._config.cloned_repo_dir).exists():
-            self._gh_api.clone_repo(self._config.cloned_repo_dir)
+            self._gh_api.clone_repo()
         else:
             self.logger.info(f"Temporary repository '{self._pr_data.repo}' already cloned – skipped")
 
@@ -310,7 +310,7 @@ class Pipeline:
         # 9. Setup model handler
         self._llm_handler = LLMHandler(self._config, self._pipeline_inputs)
 
-        self.logger.marker("================ Preparation Completed ===============")
+        self.logger.marker("================ Preparation Complete ================")
 
     def _record_result(self, number: str, model: LLM, i_attempt: int, stop: bool | str):
         """
