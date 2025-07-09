@@ -38,7 +38,7 @@ class TestGenerator:
         model: LLM
     ):
         self._config              = config
-        self._pipeline_inputs    = data
+        self._pipeline_inputs     = data
         self._pr_data             = data.pr_data
         self._pr_diff_ctx         = data.pr_diff_ctx
         self._prompt_combinations = config.prompt_combinations
