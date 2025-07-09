@@ -60,28 +60,23 @@ class TestGenerator:
         """
 
         logger.marker("=============== Test Generation Started ===============")
-        tmp_repo_dir = self._config.cloned_repo_dir
-        if not Path(tmp_repo_dir).exists():
-            self._gh_api.clone_repo(tmp_repo_dir)
-        else:
-            logger.info(f"Temporary repository '{self._pr_data.repo}' already cloned – skipped")
         try:
             test_filename, test_file_content, test_file_content_sliced = test_injection.get_candidate_test_file(
                 self._config.parse_language,
                 self._pr_data.base_commit,
                 self._pr_diff_ctx.golden_code_patch,
-                tmp_repo_dir
+                self._config.cloned_repo_dir
             )
         except:
             logger.critical(f'Failed to determine test file for injection')
             raise ExecutionError(f'Failed to determine test file for injection')
         try:
-            available_packages = helpers.extract_packages(self._pr_data.base_commit, tmp_repo_dir)
+            available_packages = helpers.extract_packages(self._pr_data.base_commit, self._config.cloned_repo_dir)
         except:
             logger.warning(f'Failed to determine available packages')
             available_packages = ""
         try:
-            available_relative_imports = helpers.extract_relative_imports(self._pr_data.base_commit, tmp_repo_dir)
+            available_relative_imports = helpers.extract_relative_imports(self._pr_data.base_commit, self._config.cloned_repo_dir)
         except:
             logger.warning(f'Failed to determine available relative imports')
             available_relative_imports = ""

@@ -201,7 +201,13 @@ class Pipeline:
         cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
         code_sliced = cst_builder.slice_code_file()
 
-        # 6. Build Docker image
+        # 6. Clone repository locally
+        if not Path(self._config.cloned_repo_dir).exists():
+            self._gh_api.clone_repo(self._config.cloned_repo_dir)
+        else:
+            self.logger.info(f"Temporary repository '{self._pr_data.repo}' already cloned – skipped")
+
+        # 7. Build Docker image
         docker_service = DockerService(
             self._config.project_root.as_posix(),
             self._config.old_repo_state,
@@ -211,7 +217,7 @@ class Pipeline:
         )
         docker_service.build()
 
-        # 7. Gather pipeline data
+        # 8. Gather pipeline data
         pr_pipeline_data = PullRequestPipelineData(
             pr_data=self._pr_data,
             pr_diff_ctx=self._pr_diff_ctx,
@@ -220,10 +226,10 @@ class Pipeline:
             pdf_name=pdf_name
         )
 
-        # 8. Setup Model Handler
+        # 9. Setup Model Handler
         llm_handler = LLMHandler(self._config, pr_pipeline_data)
 
-        # 9. Setup Generator
+        # 10. Setup Generator
         generator = TestGenerator(
             self._config,
             pr_pipeline_data,
@@ -239,7 +245,7 @@ class Pipeline:
             self._mock_response
         )
 
-        # 10. Execute
+        # 11. Execute
         return generator.generate()
 
     def _record_result(self, number: str, model: LLM, i_attempt: int, stop: bool | str):
