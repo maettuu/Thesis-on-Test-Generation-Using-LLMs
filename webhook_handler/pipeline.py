@@ -66,6 +66,7 @@ class Pipeline:
         self._config.setup_pr_log_dir(self._pr_data.id)
         configure_logger(self._config.pr_log_dir, self._execution_id)
         self.logger = logging.getLogger()
+        helpers.remove_dir(Path(self._config.cloned_repo_dir))
 
     def _teardown(self) -> None:
         """
@@ -203,7 +204,7 @@ class Pipeline:
         """
 
         if self._environment_prepared:
-            self.logger.info("Environment ready – Preparation skipped")
+            self.logger.info("Environment ready – preparation skipped")
         else:
             self._prepare_environment()
             self._environment_prepared = True
