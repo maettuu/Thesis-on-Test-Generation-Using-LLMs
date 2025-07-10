@@ -121,7 +121,11 @@ class ColoredFormatter(logging.Formatter):
         logging.CRITICAL:  "\x1b[91;1m"       # bold bright red
     }
 
-    def format(self, record):
+    def format(self, record) -> str:
+        """
+        Applies colors to console output.
+        """
+
         color = self.COLORS.get(record.levelno, self.RESET)
         msg = super().format(record)
         return f"{color}{msg}{self.RESET}"
@@ -147,20 +151,16 @@ def configure_logger(pr_log_dir: Path, execution_id: str) -> None:
     for h in list(root.handlers):
         root.removeHandler(h)
 
+    fmt = "[%(asctime)s] %(levelname)-9s: %(message)s"
+
     # console handler
     ch = logging.StreamHandler()
     ch.setLevel("INFO")
-    ch.setFormatter(ColoredFormatter(
-        "[%(asctime)s] %(levelname)-9s: %(message)s",
-        datefmt="%H:%M:%S"
-    ))
+    ch.setFormatter(ColoredFormatter(fmt, datefmt="%H:%M:%S"))
     root.addHandler(ch)
 
     # file handler
     fh = logging.FileHandler(logfile, mode="w", encoding="utf-8")
     fh.setLevel("INFO")
-    fh.setFormatter(logging.Formatter(
-        "[%(asctime)s] %(levelname)-8s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    ))
+    fh.setFormatter(logging.Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S"))
     root.addHandler(fh)

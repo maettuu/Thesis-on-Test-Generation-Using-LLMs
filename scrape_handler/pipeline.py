@@ -137,51 +137,49 @@ class Pipeline:
             bool: True if the generation was successful, False otherwise
         """
 
-        self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
-        for model in [LLM.GPT4o, LLM.LLAMA, LLM.DEEPSEEK]:
-            i_attempt = 0
-            while i_attempt < len(self._config.prompt_combinations["include_golden_code"]) and not self._generation_completed:
-                self._config.setup_output_dir(i_attempt, model)
-                try:
-                    self._generation_completed = self._execute_attempt(model=model, i_attempt=i_attempt)
-                    self.logger.success(f"Attempt %d with model %s finished successfully" % (i_attempt + 1, model))
-                    self._record_result(self._pr_data.number, model, i_attempt + 1, self._generation_completed)
-                except ExecutionError as e:
-                    self._record_result(self._pr_data.number, model, i_attempt + 1, str(e))
-                except Exception as e:
-                    self.logger.critical("Failed with unexpected error:\n%s" % e)
-                    self._record_result(self._pr_data.number, model, i_attempt + 1, "unexpected error")
-
-                i_attempt += 1
-
-            if self._generation_completed:
-                gen_test = Path(self._config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
-                new_filename = f"{self._execution_id}_{self._config.output_dir.name}.txt"
-                Path(self._config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
-                self.logger.success(f"Test file copied to {self._config.gen_test_dir.name}/{new_filename}")
-                break
-
-        if not self._generation_completed and execute_mini:
-            model = LLM.GPTo4_MINI
-            self._config.setup_output_dir(0, model)
+        def _try_and_execute(curr_model: LLM, curr_i_attempt: int, success_msg: str) -> None:
             try:
-                self._generation_completed = self._execute_attempt(
-                    model=model,
-                    i_attempt=0
-                )
-                self.logger.success("o4-mini finished successfully")
-                self._record_result(self._pr_data.number, model, 1, self._generation_completed)
+                self._config.setup_output_dir(curr_i_attempt, curr_model)
+                self._generation_completed = self._execute_attempt(model=curr_model, i_attempt=curr_i_attempt)
+                self.logger.success(success_msg)
+                self._record_result(self._pr_data.number, curr_model, curr_i_attempt + 1, self._generation_completed)
             except ExecutionError as e:
-                self._record_result(self._pr_data.number, model, 1, str(e))
+                self._record_result(self._pr_data.number, curr_model, curr_i_attempt + 1, str(e))
             except Exception as e:
-                self.logger.critical("Failed with unexpected error:\n%s" % e)
-                self._record_result(self._pr_data.number, model, 1, "unexpected error")
+                self._record_result(self._pr_data.number, curr_model, curr_i_attempt + 1, "unexpected error")
+
+        def _save_generated_test() -> None:
+            gen_test = Path(self._config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
+            new_filename = f"{self._execution_id}_{self._config.output_dir.name}.txt"
+            Path(self._config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
+            self.logger.success(f"Test file copied to {self._config.gen_test_dir.name}/{new_filename}")
+
+        self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
+
+        if self._mock_response is None:
+            for model in [LLM.GPT4o, LLM.LLAMA, LLM.DEEPSEEK]:
+                i_attempt = 0
+                while i_attempt < len(self._config.prompt_combinations["include_golden_code"]) and not self._generation_completed:
+                    _try_and_execute(model, i_attempt, f"Attempt %d with model %s finished successfully" % (i_attempt + 1, model))
+                    i_attempt += 1
+
+                if self._generation_completed:
+                    _save_generated_test()
+                    break
+
+            if not self._generation_completed and execute_mini:
+                model = LLM.GPTo4_MINI
+                _try_and_execute(model, 0, "o4-mini finished successfully")
 
             if self._generation_completed:
-                gen_test = Path(self._config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
-                new_filename = f"{self._execution_id}_{self._config.output_dir.name}.txt"
-                Path(self._config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
-                self.logger.success(f"Test file copied to {self._config.gen_test_dir}/{new_filename}")
+                _save_generated_test()
+        else:
+            self.logger.success("MOCK response fetched successfully")
+            model = LLM.MOCK
+            _try_and_execute(model, 0, "MOCK finished successfully")
+
+            if self._generation_completed:
+                _save_generated_test()
 
         self.logger.marker(f"=============== Finished Payload #{self._pr_data.number} ==============")
         self._teardown()
@@ -320,7 +318,7 @@ class Pipeline:
             number (str): The number of the PR
             model (LLM): The model
             i_attempt (int): The attempt number
-            stop (bool, str): The stop flag or an error string
+            stop (bool | str): The stop flag or an error string
         """
 
         with open(Path(self._config.bot_log_dir, 'results.csv'), 'a') as f:

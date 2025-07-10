@@ -36,7 +36,7 @@ class DockerService:
         self._pdf_content = pdf_content
         self._client = docker.from_env()
 
-    def build(self):
+    def build(self) -> None:
         """
         Builds a Docker image using the Python Docker SDK.
         """
@@ -236,7 +236,7 @@ class DockerService:
         self._add_file_to_container(container, patch_name, patch_content)
         logger.info(f"Patch file copied to /app/testbed/{patch_name}")
 
-        # Apply the patch inside the container
+        # apply the patch inside the container
         apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && patch -p1 < {patch_name}'"
         exec_result = container.exec_run(apply_patch_cmd)
 

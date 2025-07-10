@@ -15,13 +15,6 @@ def _get_payload(rel_path: str) -> dict:
     return payload
 
 
-def _get_file_content(rel_path: str) -> str:
-    abs_path = os.path.join(os.path.dirname(__file__), rel_path)
-    with open(abs_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    return content
-
-
 EXECUTED_TESTS = Path("scrape_logs", "executed_tests.txt")
 EXECUTED_TESTS.touch(exist_ok=True)
 completed = set(EXECUTED_TESTS.read_text(encoding='utf-8').splitlines())
@@ -38,6 +31,11 @@ mock_files = [mf for mf in all_mock_files if mf.stem not in completed and int(mf
 def test_pr_payload(mock_file):
     payload = _get_payload(str(mock_file))
     config = Config()
-    pipeline = Pipeline(payload, config)
+    mock_path = Path("scrape_mocks", "mock_responses", f"{mock_file.stem}_response.txt")
+    if mock_path.exists():
+        mock_response = mock_path.read_text(encoding="utf-8")
+        pipeline = Pipeline(payload, config, mock_response=mock_response)
+    else:
+        pipeline = Pipeline(payload, config)
     generation_completed = pipeline.execute_pipeline()
     assert generation_completed is True
