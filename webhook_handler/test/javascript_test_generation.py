@@ -14,7 +14,7 @@ def _get_payload(rel_path: str) -> dict:
     return payload
 
 
-def _get_file_content(rel_path: str) -> str:
+def _get_mock_content(rel_path: str) -> str:
     abs_path = os.path.join(os.path.dirname(__file__), rel_path)
     with open(abs_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -106,7 +106,7 @@ class TestGenerationPdfJs19972(TestCase):
 class TestGenerationPdfJs20063(TestCase):
     def setUp(self):
         self.payload = _get_payload("test_mocks/pdf_js_20063.json")
-        mock_response = _get_file_content("test_mocks/pdf_js_20063_response.txt")
+        mock_response = _get_mock_content("test_mocks/pdf_js_20063_response.txt")
         self.config = Config()
         self.pipeline = Pipeline(self.payload, self.config, mock_response=mock_response)
 
