@@ -312,7 +312,7 @@ class Pipeline:
 
         self.logger.marker("================ Preparation Complete ================")
 
-    def _record_result(self, number: str, model: LLM, i_attempt: int, stop: bool | str):
+    def _record_result(self, number: str, model: LLM, i_attempt: int, stop: bool | str) -> None:
         """
         Writes result to csv.
 
@@ -320,7 +320,7 @@ class Pipeline:
             number (str): The number of the PR
             model (LLM): The model
             i_attempt (int): The attempt number
-            stop (bool, str): The stop flag or an error string
+            stop (bool | str): The stop flag or an error string
         """
 
         with open(Path(self._config.bot_log_dir, 'results.csv'), 'a') as f:

@@ -20,6 +20,16 @@ class CSTBuilder:
         self._pr_diff_ctx = pr_diff_ctx
 
     def _parse(self, source: str) -> Tree | None:
+        """
+        Parses source code into a concrete syntax tree with the given parse language.
+
+        Parameters:
+            source (str): The source code to parse
+
+        Returns:
+            Tree | None: The concrete syntax tree
+        """
+
         try:
             return self._parser.parse(bytes(source, 'utf-8'))
         except SyntaxError:
@@ -355,7 +365,6 @@ class CSTBuilder:
             str: The sliced source code
         """
 
-
         tree = self._parse(source_code)
         lines_to_skip: set[int] = set()
         source_lines = source_code.splitlines(keepends=True)
@@ -642,6 +651,7 @@ class CSTBuilder:
         Returns:
             int: The index of the last line which still belongs to the decorator
         """
+
         open_brackets = 0
         end_index = start_index
         i = start_index

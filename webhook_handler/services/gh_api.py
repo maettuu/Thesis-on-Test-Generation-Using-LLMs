@@ -128,7 +128,7 @@ class GitHubApi:
             number (int): The number of the issue
 
         Returns:
-            str (optional): The GitHub issue title and description
+            str | None: The GitHub issue title and description
         """
 
         url = f"{self._api_url}/{self._pr_data.owner}/{self._pr_data.repo}/issues/{number}"
@@ -151,7 +151,7 @@ class GitHubApi:
             number (int): The number of the issue
 
         Returns:
-            str (optional): The Bugzilla issue title and description
+            str | None: The Bugzilla issue title and description
         """
 
         response = requests.get(f"https://bugzilla.mozilla.org/rest/bug/{number}")
