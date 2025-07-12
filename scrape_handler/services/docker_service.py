@@ -234,7 +234,6 @@ class DockerService:
         """
 
         self._add_file_to_container(container, patch_name, patch_content)
-        logger.info(f"Patch file copied to /app/testbed/{patch_name}")
 
         # apply the patch inside the container
         apply_patch_cmd = f"/bin/sh -c 'cd /app/testbed && patch -p1 < {patch_name}'"
