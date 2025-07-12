@@ -141,7 +141,7 @@ class TestGenerator:
             logger.marker("=============== Test Generation Finished =============")
             return False
 
-        ################### Run test in post-PR codebase ##################
+        logger.marker("Running test in post-PR codebase...")
         test_passed_after, stdout_after = self._docker_service.run_test_in_container(
             model_test_patch,
             test_to_run,
