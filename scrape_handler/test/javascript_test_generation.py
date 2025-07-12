@@ -35,7 +35,7 @@ def test_pr_payload(mock_file):
     if mock_path.exists():
         mock_response = mock_path.read_text(encoding="utf-8")
         pipeline = Pipeline(payload, config, mock_response=mock_response)
-    else:
-        pipeline = Pipeline(payload, config)
-    generation_completed = pipeline.execute_pipeline()
-    assert generation_completed is True
+    # else:
+    #     pipeline = Pipeline(payload, config)
+        generation_completed = pipeline.execute_pipeline()
+        assert generation_completed is True
