@@ -18,7 +18,6 @@ class Config:
         self.github_webhook_secret = os.getenv('GITHUB_WEBHOOK_SECRET')
         self.github_token = os.getenv('GITHUB_TOKEN')
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
-        self.hug_api_key = os.getenv('HUG_API_KEY')
         self.groq_api_key = os.getenv('GROQ_API_KEY')
 
         ################### API Config ##################

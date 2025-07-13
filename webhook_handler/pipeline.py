@@ -248,15 +248,15 @@ class Pipeline:
         # 4. Retrieve PDF
         pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_candidate, self._pr_data.head_commit)
 
-        # 5. Slice golden code
-        self._cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
-        code_sliced = self._cst_builder.slice_code_file()
-
-        # 6. Clone repository locally
+        # 5. Clone repository locally
         if not Path(self._config.cloned_repo_dir).exists():
             self._gh_api.clone_repo()
         else:
             self.logger.info(f"Temporary repository '{self._pr_data.repo}' already cloned – skipped")
+
+        # 6. Slice golden code
+        self._cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
+        code_sliced = self._cst_builder.slice_code_file()
 
         # 7. Fetch test file for injection
         try:

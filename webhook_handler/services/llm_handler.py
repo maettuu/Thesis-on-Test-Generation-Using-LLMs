@@ -1,6 +1,5 @@
 import re
 
-from huggingface_hub import InferenceClient
 from openai import OpenAI
 from groq import Groq
 
@@ -18,7 +17,6 @@ class LLMHandler:
         self._pr_data = data.pr_data
         self._pr_diff_ctx = data.pr_diff_ctx
         self._openai_client = OpenAI(api_key=config.openai_api_key)
-        self._hug_client = InferenceClient(api_key=config.hug_api_key)
         self._groq_client = Groq(api_key=config.groq_api_key)
 
     def build_prompt(
