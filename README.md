@@ -216,6 +216,10 @@ To set up a GitHub Token follow these steps.
    ```bash
    sudo journalctl -u django_github_bot_js --follow
    ```
+   *Hint:* You can follow the log file `bootstrap.log` as follows:
+   ```bash
+   tail -f bootstrap.log
+   ```
    *Hint:* Test your setup as follows:
    ```bash
    curl -i http://<SERVER_IP>/webhook-js/
