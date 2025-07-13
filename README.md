@@ -156,31 +156,31 @@ To set up a GitHub Token follow these steps.
 
 Head of repository (latest commit)
 ```bash
-   docker build -f dockerfiles/Dockerfile_pdf.js -t gh-bot_pdfjs_img .
+docker build -f dockerfiles/Dockerfile_pdf.js -t gh-bot_pdfjs_img .
 ```
 
 Specific commit
 ```bash
-   docker build -f dockerfiles/Dockerfile_pdf.js --build-arg commit_hash=<commit_hash> -t gh-bot_pdfjs_img .
+docker build -f dockerfiles/Dockerfile_pdf.js --build-arg commit_hash=<commit_hash> -t gh-bot_pdfjs_img .
 ```
 
 ### Run in Detached Mode
 
 ```bash
-   docker run -dit --name gh-bot_pdfjs_ctn gh-bot_pdfjs_img bash
+docker run -dit --name gh-bot_pdfjs_ctn gh-bot_pdfjs_img bash
 ```
 
 ### Connect to Container with Bash
 
 ```bash
-   docker exec -it gh-bot_pdfjs_ctn bash
+docker exec -it gh-bot_pdfjs_ctn bash
 ```
 
 ### Start & Stop the Container
 
 ```bash
-   docker stop gh-bot_pdfjs_ctn
-   docker start -ai gh-bot_pdfjs_ctn
+docker stop gh-bot_pdfjs_ctn
+docker start -ai gh-bot_pdfjs_ctn
 ```
 
 ---
@@ -237,7 +237,7 @@ Specific commit
 ## Adding a New Test Payload
 
 Place your PR JSON under:  
-```
+```text
 scrape_handler/test/scrape_mocks/code_only/<repo>_<pr_id>.json
 ```
 
