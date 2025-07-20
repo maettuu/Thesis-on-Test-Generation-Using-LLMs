@@ -1,5 +1,5 @@
 COMMENT_TEMPLATE = """
-Hi! 🤖 The test below is automatically generated and serves as a regression test for this PR because it:
+Hi! 🤖 The test below is automatically generated and could serve as a regression test for this PR because it:
 - passes in the new codebase after the PR, and
 - fails in the old codebase before the PR.
 
@@ -7,7 +7,7 @@ Hi! 🤖 The test below is automatically generated and serves as a regression te
 %s
 ```
 
-If you find this regression test useful, feel free to insert it to your test suite.
+If you find this regression test useful, feel free to insert it in your test suite.
 Our automated pipeline inserted the test in the `%s` file before running it.
 
 This is part of our research at the [ZEST](https://www.ifi.uzh.ch/en/zest.html) group of University of Zurich in collaboration with [Mozilla](https://www.mozilla.org).
