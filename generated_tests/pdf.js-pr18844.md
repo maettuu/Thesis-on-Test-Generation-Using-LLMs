@@ -1,5 +1,5 @@
 ## GitHub Pull Request 18844
-[[pull request]](https://github.com/mozilla/pdf.js/pull/18844) 
+[[pull request]](https://github.com/mozilla/pdf.js/pull/18844)
 [[linked issue]](https://bugzilla.mozilla.org/show_bug.cgi?id=1922063)
 
 The test below is automatically generated and could serve as a regression test for this PR because it:
@@ -7,11 +7,7 @@ The test below is automatically generated and could serve as a regression test f
 - fails in the pre-PR codebase.
 
 ```javascript
-it("should use Calibri and Lucida Console on Windows with Firefox", async () => {
-  const { TextLayer } = await import("../../src/display/text_layer.js");
-  const { FeatureTest } = await import("../../src/shared/util.js");
-
-  // Mock platform and userAgent
+it("should use Calibri and Lucida Console on Windows with Firefox", async function () {
   Object.defineProperty(FeatureTest, "platform", {
     get: () => ({ isWindows: true, isFirefox: true }),
   });
@@ -28,7 +24,7 @@ it("should use Calibri and Lucida Console on Windows with Firefox", async () => 
 });
 ```
 
-Our automated pipeline inserted the test at the end of the `test/unit/text_layer_spec.js` file before running it. 
+Our automated pipeline inserted the test at the end of the `test/unit/text_layer_spec.js` file before running it.
 The test failed on the pre-PR codebase with the following message.
 
 ```text
@@ -51,19 +47,23 @@ Looking forward to see what you think of the test. If you find it useful, we can
 
 ```diff
 diff --git a/text_layer_spec.js b/text_layer_spec.js
-index 644e742..237348c 100644
+index 644e742..ff28b27 100644
 --- a/text_layer_spec.js
 +++ b/text_layer_spec.js
-@@ -250,4 +250,24 @@ describe("textLayer", function () {
- 
+@@ -17,6 +17,7 @@ import { buildGetDocumentParams } from "./test_utils.js";
+ import { getDocument } from "../../src/display/api.js";
+ import { isNodeJS } from "../../src/shared/util.js";
+ import { TextLayer } from "../../src/display/text_layer.js";
++import { FeatureTest } from "../../src/shared/util.js";
+
+ describe("textLayer", function () {
+   it("creates textLayer from ReadableStream", async function () {
+@@ -250,4 +251,20 @@ describe("textLayer", function () {
+
      await loadingTask.destroy();
    });
 +
-+  it("should use Calibri and Lucida Console on Windows with Firefox", async () => {
-+    const { TextLayer } = await import("../../display/text_layer.js");
-+    const { FeatureTest } = await import("../../shared/util.js");
-+
-+    // Mock platform and userAgent
++  it("should use Calibri and Lucida Console on Windows with Firefox", async function () {  
 +    Object.defineProperty(FeatureTest, "platform", {
 +      get: () => ({ isWindows: true, isFirefox: true }),
 +    });

@@ -23,6 +23,40 @@ def _get_mock_content(rel_path: str) -> str:
 #
 # RUN With: python manage.py test webhook_handler.test.<filename>.<testname>
 #
+class TestGenerationPdfJs19639(TestCase):
+    def setUp(self):
+        self.payload = _get_payload("test_mocks/pdf_js_19639.json")
+        mock_response = _get_mock_content("test_mocks/pdf_js_19639_response.txt")
+        self.config = Config()
+        self.pipeline = Pipeline(self.payload, self.config, mock_response=mock_response)
+
+    def tearDown(self):
+        del self.payload
+        del self.config
+        del self.pipeline
+
+    def test_generation_pdf_js_19639(self):
+        generation_completed = self.pipeline.execute_pipeline()
+        self.assertTrue(generation_completed)
+
+
+class TestGenerationPdfJs19825(TestCase):
+    def setUp(self):
+        self.payload = _get_payload("test_mocks/pdf_js_19825.json")
+        mock_response = _get_mock_content("test_mocks/pdf_js_19825_response.txt")
+        self.config = Config()
+        self.pipeline = Pipeline(self.payload, self.config, mock_response=mock_response)
+
+    def tearDown(self):
+        del self.payload
+        del self.config
+        del self.pipeline
+
+    def test_generation_pdf_js_19825(self):
+        generation_completed = self.pipeline.execute_pipeline()
+        self.assertTrue(generation_completed)
+
+
 class TestGenerationPdfJs19849(TestCase):
     def setUp(self):
         self.payload = _get_payload("test_mocks/pdf_js_19849.json")
@@ -58,8 +92,9 @@ class TestGenerationPdfJs19880(TestCase):
 class TestGenerationPdfJs19918(TestCase):
     def setUp(self):
         self.payload = _get_payload("test_mocks/pdf_js_19918.json")
+        mock_response = _get_mock_content("test_mocks/pdf_js_19918_response.txt")
         self.config = Config()
-        self.pipeline = Pipeline(self.payload, self.config)
+        self.pipeline = Pipeline(self.payload, self.config, mock_response=mock_response)
 
     def tearDown(self):
         del self.payload
