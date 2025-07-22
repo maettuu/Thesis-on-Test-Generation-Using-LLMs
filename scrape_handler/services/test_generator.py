@@ -63,15 +63,11 @@ class TestGenerator:
         logger.marker("Attempt %d with model %s" % (self._i_attempt + 1, self._model))
         logger.marker("=============== Test Generation Started ==============")
 
-        include_golden_code = self._prompt_combinations["include_golden_code"][self._i_attempt]
-        sliced = self._prompt_combinations["sliced"][self._i_attempt]
-        include_pr_desc = self._prompt_combinations["include_pr_desc"][self._i_attempt]
-        include_predicted_test_file = self._prompt_combinations["include_predicted_test_file"][self._i_attempt]
         prompt = self._llm_handler.build_prompt(
-            include_golden_code,
-            sliced,
-            include_pr_desc,
-            include_predicted_test_file,
+            self._prompt_combinations["include_golden_code"][self._i_attempt],
+            self._prompt_combinations["sliced"][self._i_attempt],
+            self._prompt_combinations["include_pr_desc"][self._i_attempt],
+            self._prompt_combinations["include_predicted_test_file"][self._i_attempt],
             self._pipeline_inputs.test_filename,
             self._pipeline_inputs.test_file_content_sliced,
             self._pipeline_inputs.available_packages,
