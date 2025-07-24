@@ -6,6 +6,6 @@ class LLM(StrEnum):
     """
     MOCK       = "MOCK"
     GPT4o      = "gpt-4o"
-    GPTo4_MINI = "gpt-o4-mini"
+    GPTo3_MINI = "o3-mini"
     LLAMA      = "llama-3.3-70b-versatile"
     DEEPSEEK   = "deepseek-r1-distill-llama-70b"

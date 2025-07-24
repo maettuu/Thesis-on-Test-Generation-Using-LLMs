@@ -168,8 +168,8 @@ class Pipeline:
                     break
 
             if not self._generation_completed and execute_mini:
-                model = LLM.GPTo4_MINI
-                _try_and_execute(model, 0, "o4-mini finished successfully")
+                model = LLM.GPTo3_MINI
+                _try_and_execute(model, 0, "o3-mini finished successfully")
 
             if self._generation_completed:
                 _save_generated_test()

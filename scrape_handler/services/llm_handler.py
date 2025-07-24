@@ -188,7 +188,7 @@ class LLMHandler:
                     temperature=temperature
                 )
                 return response.choices[0].message.content.strip()
-            elif model == LLM.GPTo4_MINI:  # does not accept temperature
+            elif model == LLM.GPTo3_MINI:  # does not accept temperature
                 response = self._openai_client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
