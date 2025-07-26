@@ -24,7 +24,7 @@ class LLMHandler:
             self,
             include_golden_code: bool,
             sliced: bool,
-            include_pr_desc: bool,
+            include_pr_summary: bool,
             include_predicted_test_file: bool,
             test_filename: str,
             test_file_content_sliced: str,
@@ -37,7 +37,7 @@ class LLMHandler:
         Parameters:
             include_golden_code (bool): Whether to include golden code
             sliced (bool): Whether to slice source code or not
-            include_pr_desc (bool): Whether to include pull request description
+            include_pr_summary (bool): Whether to include pull request title & description
             include_predicted_test_file (bool): Whether to include test file
             test_filename (str): The filename of the test file
             test_file_content_sliced (str): The content of the test file
@@ -148,13 +148,13 @@ class LLMHandler:
                            "  });\n"
                            "});\n\n")
 
-        pr_description = ""
-        if include_pr_desc:
-            pr_description += f"PR description:\n<pr_description>\n{
+        pr_summary = ""
+        if include_pr_summary:
+            pr_summary += f"PR summary:\n<pr_summary>\n{
                 self._pr_data.title
             }\n{
                 self._pr_data.description
-            }\n</pr_description>\n\n"
+            }\n</pr_summary>\n\n"
 
         return (f"{guidelines}"
                 f"{linked_issue}"
@@ -163,7 +163,7 @@ class LLMHandler:
                 f"{available_imports}"
                 f"{golden_code}"
                 f"{test_code}"
-                f"{pr_description}"
+                f"{pr_summary}"
                 f"{instructions}"
                 f"{example}")
 

@@ -27,7 +27,7 @@ WORKDIR /app/testbed
 RUN git checkout ${commit_hash}
 
 # 4. Install dependecies
-RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci  # necessary to skip outdated downloads (for old commits)
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci  # skips Chrome download (optimized to prevent headless-browser download)
 
 # 5. Append `unittest-single` task to gulpfile.mjs
 RUN printf '\ngulp.task(\n' >> gulpfile.mjs \

@@ -31,7 +31,7 @@ class Config:
         self.parse_language = Language(tree_sitter_javascript.language())
         self.prompt_combinations = {
             "include_golden_code"        : [1, 1, 1, 1, 0],
-            "include_pr_desc"            : [0, 1, 0, 0, 0],
+            "include_pr_summary"         : [0, 1, 0, 0, 0],
             "include_predicted_test_file": [1, 0, 1, 0, 0],
             "sliced"                     : [1, 1, 0, 0, 0]
         }

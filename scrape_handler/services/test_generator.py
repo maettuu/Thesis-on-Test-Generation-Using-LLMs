@@ -66,7 +66,7 @@ class TestGenerator:
         prompt = self._llm_handler.build_prompt(
             self._prompt_combinations["include_golden_code"][self._i_attempt],
             self._prompt_combinations["sliced"][self._i_attempt],
-            self._prompt_combinations["include_pr_desc"][self._i_attempt],
+            self._prompt_combinations["include_pr_summary"][self._i_attempt],
             self._prompt_combinations["include_predicted_test_file"][self._i_attempt],
             self._pipeline_inputs.test_filename,
             self._pipeline_inputs.test_file_content_sliced,
