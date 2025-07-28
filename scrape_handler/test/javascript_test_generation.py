@@ -15,6 +15,7 @@ def _get_payload(rel_path: str) -> dict:
     return payload
 
 
+Path("scrape_logs").mkdir(parents=True, exist_ok=True)
 EXECUTED_TESTS = Path("scrape_logs", "executed_tests.txt")
 EXECUTED_TESTS.touch(exist_ok=True)
 completed = set(EXECUTED_TESTS.read_text(encoding='utf-8').splitlines())
