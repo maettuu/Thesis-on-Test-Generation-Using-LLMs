@@ -105,6 +105,7 @@ class Pipeline:
             bool: True if PR is valid, False otherwise
         """
 
+        self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
         self.logger.marker("================ Preparing Environment ===============")
         self._gh_api = GitHubApi(self._config, self._pr_data)
         self._issue_statement, self._pdf_candidate = self._gh_api.get_linked_data()
@@ -155,9 +156,6 @@ class Pipeline:
             Path(self._config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
             self.logger.success(f"Test file copied to {self._config.gen_test_dir.name}/{new_filename}")
 
-
-        self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
-
         if self._mock_response is None:
             for model in [LLM.GPT4o, LLM.LLAMA, LLM.DEEPSEEK]:
                 i_attempt = 0
@@ -176,6 +174,7 @@ class Pipeline:
                 if self._generation_completed:
                     _save_generated_test()
         else:
+            self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
             self.logger.success("MOCK response fetched successfully")
             model = LLM.MOCK
             _try_and_execute(model, 0, "MOCK finished successfully")
