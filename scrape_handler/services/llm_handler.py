@@ -254,7 +254,7 @@ class LLMHandler:
     @staticmethod
     def _clean_descriptions(function_code: str) -> str:
         """
-        Cleans the call expression descriptions used in the generated test by removing every non-letter character.
+        Cleans the call expression descriptions used in the generated test by removing every non-letter character and multiple whitespaces.
 
         Parameters:
             function_code (str): Function code to clean
