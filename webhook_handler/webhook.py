@@ -60,12 +60,12 @@ def github_webhook(request):
         return JsonResponse({'status': 'success', 'message': 'Webhook event must be pull request'}, status=200)
 
     # 7) Pull request action check
+    pr_number = payload['number']
     if payload.get('action') != 'opened':
-        bootstrap.critical("Pull request action must be OPENED")
+        bootstrap.critical(f"[#{pr_number}] Pull request action must be OPENED")
         return JsonResponse({'status': 'success', 'message': 'Pull request action must be OPENED'}, status=200)
 
     # 8) Check for PR validity
-    pr_number = payload['number']
     bootstrap.info(f"[#{pr_number}] Validating PR...")
     pipeline = Pipeline(payload, config, post_comment=True)
     message, valid = pipeline.is_valid_pr()
