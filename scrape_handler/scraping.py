@@ -13,7 +13,7 @@ load_dotenv()
 
 ############### Global Variables ################
 SCRAPE_TARGET = 500
-OUTPUT_DIR = Path("test", "scrape_mocks")
+OUTPUT_DIR = Path("scrape_mocks")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 (OUTPUT_DIR / "code_only").mkdir(parents=True, exist_ok=True)
 (OUTPUT_DIR / "code_test").mkdir(parents=True, exist_ok=True)
