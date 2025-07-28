@@ -277,6 +277,7 @@ class LLMHandler:
             name = match.group('name')
             # strip out anything but A–Z or a–z
             cleaned = re.sub(r'[^A-Za-z ]', '', name)
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
             return f"{test_type}({q}{cleaned}{q},"
 
         return pattern.sub(clean_test_name, function_code)
