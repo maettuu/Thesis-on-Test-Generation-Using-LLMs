@@ -174,7 +174,6 @@ class Pipeline:
                 if self._generation_completed:
                     _save_generated_test()
         else:
-            self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
             self.logger.success("MOCK response fetched successfully")
             model = LLM.MOCK
             _try_and_execute(model, 0, "MOCK finished successfully")
@@ -231,6 +230,7 @@ class Pipeline:
 
         # 1. Setup GitHub API
         if self._gh_api is None:
+            self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
             self.logger.marker("================ Preparing Environment ===============")
             self._gh_api = GitHubApi(self._config, self._pr_data)
 
