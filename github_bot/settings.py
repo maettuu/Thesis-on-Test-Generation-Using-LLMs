@@ -132,7 +132,7 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "simple": {
-            "format": "[%(asctime)s] %(levelname)-8s: %(message)s",
+            "format": "[%(asctime)s] %(levelname)-9s: %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S",
         },
     },
