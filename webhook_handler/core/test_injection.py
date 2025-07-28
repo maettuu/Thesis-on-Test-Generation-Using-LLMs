@@ -90,9 +90,9 @@ def _find_file_to_inject(base_commit: str, patch: str, tmp_repo_dir: str) -> [st
             file_to_inject = _find_most_similar_matching_test_file(edited_file, candidate_file_relative)
             file_to_inject = tmp_repo_dir + '/' + file_to_inject
         else:
-            co_edited_files = _find_co_edited_files(edited_files, tmp_repo_dir, 100)
+            co_edited_files = _find_co_edited_files(edited_files, tmp_repo_dir, 10)
             if not co_edited_files:
-                co_edited_files = _find_co_edited_files(edited_files, tmp_repo_dir, 1000)
+                co_edited_files = _find_co_edited_files(edited_files, tmp_repo_dir, 100)
                 if not co_edited_files:
                     return Path("test", "unit", desired_file).as_posix(), ""
 
