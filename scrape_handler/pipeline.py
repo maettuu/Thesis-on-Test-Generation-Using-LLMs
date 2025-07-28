@@ -38,6 +38,7 @@ class Pipeline:
         self._post_comment = post_comment
         self._mock_response = mock_response
         self._generation_completed = False
+        self._test_generated = False
         self._environment_prepared = False
         self._setup_log_paths()
 
@@ -155,34 +156,29 @@ class Pipeline:
             Path(self._config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
             self._logger.success(f"Test file copied to {self._config.gen_test_dir.name}/{new_filename}")
 
-        if self._mock_response is None:
-            for model in [LLM.GPT4o, LLM.LLAMA, LLM.DEEPSEEK]:
-                i_attempt = 0
-                while i_attempt < len(self._config.prompt_combinations["include_golden_code"]) and not self._generation_completed:
-                    _try_and_execute(model, i_attempt, f"Attempt %d with model %s finished successfully" % (i_attempt + 1, model))
-                    i_attempt += 1
-
-                if self._generation_completed:
-                    _save_generated_test()
-                    break
-
-            if not self._generation_completed and execute_mini:
-                model = LLM.GPTo3_MINI
-                _try_and_execute(model, 0, "o3-mini finished successfully")
+        for model in [LLM.GPT4o, LLM.LLAMA, LLM.DEEPSEEK]:
+            i_attempt = 0
+            while i_attempt < len(self._config.prompt_combinations["include_golden_code"]) and not self._generation_completed:
+                _try_and_execute(model, i_attempt, f"Attempt %d with model %s finished successfully" % (i_attempt + 1, model))
+                i_attempt += 1
 
             if self._generation_completed:
                 _save_generated_test()
-        else:
+                self._generation_completed = False
+                self._test_generated = True
+
+        if self._mock_response is not None:
             self._logger.success("MOCK response fetched successfully")
             model = LLM.MOCK
             _try_and_execute(model, 0, "MOCK finished successfully")
 
             if self._generation_completed:
                 _save_generated_test()
+                self._test_generated = True
 
         self._logger.marker(f"=============== Finished Payload #{self._pr_data.number} ==============")
         self._teardown()
-        return self._generation_completed
+        return self._test_generated
 
     def _execute_attempt(
             self,
