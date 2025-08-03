@@ -1,0 +1,315 @@
+You are an experienced software tester working at the bugbug repository, where your main responsibility is writing regression tests.
+The <issue> brackets contain an issue posted by a user in your repository.
+The <pr> brackets contain the changes introduced in a recent Pull Request (PR) that resolves the <issue>.
+Your task as an experienced software tester is to write a REGRESSION TEST for this <issue>.
+A regression test is a test that:
+A) FAILS on the current version of the code (shown in the <code> brackets).
+B) PASSES after the <pr> is applied to the <code>.
+
+
+<issue>
+[code_review] Some functions are not found because the LLMs returns their names with whitespaces
+None
+</issue>
+
+<pr>
+diff --git a/bugbug/tools/code_review.py b/bugbug/tools/code_review.py
+--- a/bugbug/tools/code_review.py
++++ b/bugbug/tools/code_review.py
+@@ -1129,9 +1129,12 @@ class CodeReviewTool(GenerativeModelTool):
+                 formatted_patch,
+             )
+ 
+-            function_list = self.further_info_chain.run(
+-                patch=formatted_patch, summarization=output_summarization
+-            ).split("\n")
++            function_list = [
++                function_name.strip()
++                for function_name in self.further_info_chain.run(
++                    patch=formatted_patch, summarization=output_summarization
++                ).split("\n")
++            ]
+ 
+             if self.verbose:
+                 GenerativeModelTool._print_answer(function_list)
+
+</pr>
+
+<code>
+File bugbug/tools/code_review.py
+1 # -*- coding: utf-8 -*-
+2 # This Source Code Form is subject to the terms of the Mozilla Public
+3 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+4 # You can obtain one at http://mozilla.org/MPL/2.0/.
+5 
+6 import enum
+7 import json
+8 import re
+9 from abc import ABC, abstractmethod
+10 from collections import defaultdict
+11 from dataclasses import asdict, dataclass
+12 from datetime import datetime
+13 from functools import cached_property
+14 from logging import INFO, basicConfig, getLogger
+15 from typing import Iterable, Literal, Optional
+16 
+17 import tenacity
+18 from langchain.chains import ConversationChain, LLMChain
+19 from langchain.memory import ConversationBufferMemory
+20 from langchain.prompts import PromptTemplate
+21 from langchain_openai import OpenAIEmbeddings
+22 from tenacity import retry, retry_if_exception_type, stop_after_attempt
+23 from tqdm import tqdm
+24 from unidiff import Hunk, PatchedFile, PatchSet
+25 from unidiff.errors import UnidiffParseError
+26 
+27 from bugbug import db, phabricator, utils
+28 from bugbug.code_search.function_search import FunctionSearch
+29 from bugbug.generative_model_tool import GenerativeModelTool, get_tokenizer
+30 from bugbug.utils import get_secret
+31 from bugbug.vectordb import PayloadScore, QueryFilter, VectorDB, VectorPoint
+32 
+1021 class CodeReviewTool(GenerativeModelTool):
+1022     version = "0.0.1"
+1023 
+1024     def __init__(
+1025         self,
+1026         comment_gen_llms,
+1027         llm=None,
+1028         function_search: Optional[FunctionSearch] = None,
+1029         review_comments_db: Optional["ReviewCommentsDB"] = None,
+1030         show_patch_example: bool = False,
+1031         verbose: bool = True,
+1032         suggestions_feedback_db: Optional["SuggestionsFeedbackDB"] = None,
+1033         target_software: Optional[str] = None,
+1034     ) -> None:
+1035         super().__init__()
+1036 
+1037         self.target_software = target_software or TARGET_SOFTWARE
+1038         self.comment_gen_llms = comment_gen_llms
+1039         self.llm = llm if llm is not None else comment_gen_llms[0]
+1040         self._tokenizer = get_tokenizer(
+1041             comment_gen_llms[0].model_name
+1042             if hasattr(comment_gen_llms[0], "model_name")
+1043             else ""
+1044         )
+1045 
+1046         self.summarization_chain = LLMChain(
+1047             prompt=PromptTemplate.from_template(
+1048                 PROMPT_TEMPLATE_SUMMARIZATION,
+1049                 partial_variables={
+1050                     "experience_scope": (
+1051                         f"the {self.target_software} source code"
+1052                         if self.target_software
+1053                         else "a software project"
+1054                     )
+1055                 },
+1056             ),
+1057             llm=self.llm,
+1058             verbose=verbose,
+1059         )
+1060         self.filtering_chain = LLMChain(
+1061             prompt=PromptTemplate.from_template(
+1062                 PROMPT_TEMPLATE_FILTERING_ANALYSIS,
+1063                 partial_variables={
+1064                     "target_code_consistency": self.target_software or "rest of the"
+1065                 },
+1066             ),
+1067             llm=self.llm,
+1068             verbose=verbose,
+1069         )
+1070         self.deduplicating_chain = LLMChain(
+1071             prompt=PromptTemplate.from_template(PROMPT_TEMPLATE_DEDUPLICATE),
+1072             llm=self.llm,
+1073             verbose=verbose,
+1074         )
+1075         self.further_context_chain = LLMChain(
+1076             prompt=PromptTemplate.from_template(PROMPT_TEMPLATE_FURTHER_CONTEXT_LINES),
+1077             llm=self.llm,
+1078             verbose=verbose,
+1079         )
+1080         self.further_info_chain = LLMChain(
+1081             prompt=PromptTemplate.from_template(PROMPT_TEMPLATE_FURTHER_INFO),
+1082             llm=self.llm,
+1083             verbose=verbose,
+1084         )
+1085 
+1086         self.function_search = function_search
+1087 
+1088         self.review_comments_db = review_comments_db
+1089 
+1090         self.show_patch_example = show_patch_example
+1091 
+1092         self.verbose = verbose
+1093 
+1094         self.suggestions_feedback_db = suggestions_feedback_db
+1095 
+1099     @retry(retry=retry_if_exception_type(ModelResultError), stop=stop_after_attempt(3))
+1100     def run(self, patch: Patch) -> list[InlineComment] | None:
+1101         if self.count_tokens(patch.raw_diff) > 5000:
+1102             raise LargeDiffError("The diff is too large")
+1103 
+1104         patch_set = PatchSet.from_string(patch.raw_diff)
+1105         formatted_patch = format_patch_set(patch_set)
+1106         if formatted_patch == "":
+1107             return None
+1108 
+1109         output_summarization = self.summarization_chain.invoke(
+1110             {"patch": formatted_patch},
+1111             return_only_outputs=True,
+1112         )["text"]
+1113 
+1114         if self.verbose:
+1115             GenerativeModelTool._print_answer(output_summarization)
+1116 
+1117         if self.function_search is not None:
+1118             line_code_list = self.further_context_chain.run(
+1119                 patch=formatted_patch, summarization=output_summarization
+1120             ).split("\n")
+1121 
+1122             if self.verbose:
+1123                 GenerativeModelTool._print_answer(line_code_list)
+1124 
+1125             requested_context_lines = request_for_context_lines(
+1126                 self.function_search,
+1127                 patch.base_commit_hash,
+1128                 line_code_list,
+1129                 formatted_patch,
+1130             )
+1131 
+1132             function_list = self.further_info_chain.run(
+1133                 patch=formatted_patch, summarization=output_summarization
+1134             ).split("\n")
+1135 
+1136             if self.verbose:
+1137                 GenerativeModelTool._print_answer(function_list)
+1138 
+1139             requested_functions = request_for_function_declarations(
+1140                 self.function_search,
+1141                 patch.base_commit_hash,
+1142                 function_list,
+1143                 patch_set,
+1144             )
+1145 
+1146         output = ""
+1147         for comment_gen_llm in self.comment_gen_llms:
+1148             memory = ConversationBufferMemory()
+1149             conversation_chain = ConversationChain(
+1150                 llm=comment_gen_llm,
+1151                 memory=memory,
+1152                 verbose=self.verbose,
+1153             )
+1154 
+1155             experience_scope = (
+1156                 f"the {self.target_software} source code"
+1157                 if self.target_software
+1158                 else "a software project"
+1159             )
+1160             memory.save_context(
+1161                 {
+1162                     "input": f"You are an expert reviewer for {experience_scope}, with experience on source code reviews."
+1163                 },
+1164                 {
+1165                     "output": f"Sure, I'm aware of source code practices in {self.target_software or 'the development community'}."
+1166                 },
+1167             )
+1168             memory.save_context(
+1169                 {
+1170                     "input": 'Please, analyze the code provided and report a summarization about the new changes; for that, focus on the code added represented by lines that start with "+".\n'
+1171                     + patch.raw_diff
+1172                 },
+1173                 {"output": output_summarization},
+1174             )
+1175 
+1176             if self.function_search is not None and len(requested_functions) > 0:
+1177                 function_declaration_text = get_structured_functions(
+1178                     "Function Name", requested_functions
+1179                 )
+1180 
+1181                 memory.save_context(
+1182                     {
+1183                         "input": "Attached, you can find some function definitions that are used in the current patch and might be useful to you to have more context about the code under analysis. These functions already exist in the codebase before the patch, and can't be modified. "
+1184                         + function_declaration_text
+1185                     },
+1186                     {
+1187                         "output": "Okay, I will consider the provided function definitions as additional context to the given patch."
+1188                     },
+1189                 )
+1190 
+1191             if self.function_search is not None and len(requested_context_lines) > 0:
+1192                 context_text = get_structured_functions(
+1193                     "Requested Context for Line", requested_context_lines
+1194                 )
+1195 
+1196                 memory.save_context(
+1197                     {
+1198                         "input": "Attached, you can also have more context of the target code under analysis."
+1199                         + context_text
+1200                     },
+1201                     {
+1202                         "output": "Okay, I will also consider the code as additional context to the given patch."
+1203                     },
+1204                 )
+1205 
+1206             cur_output = conversation_chain.predict(
+1207                 input=PROMPT_TEMPLATE_REVIEW.format(
+1208                     patch=formatted_patch,
+1209                     comment_examples=self._get_comment_examples(patch),
+1210                     target_code_consistency=self.target_software or "rest of the",
+1211                 )
+1212             )
+1213             output += cur_output
+1214 
+1215             if self.verbose:
+1216                 GenerativeModelTool._print_answer(cur_output)
+1217 
+1218             memory.clear()
+1219 
+1220         if len(self.comment_gen_llms) > 1:
+1221             output = self.deduplicating_chain.invoke(
+1222                 {"review": output},
+1223                 return_only_outputs=True,
+1224             )["text"]
+1225 
+1226             if self.verbose:
+1227                 GenerativeModelTool._print_answer(output)
+1228 
+1229         unfiltered_suggestions = parse_model_output(output)
+1230         if not unfiltered_suggestions:
+1231             logger.info("No suggestions were generated")
+1232             return []
+1233 
+1234         rejected_examples = (
+1235             "\n    - ".join(self.get_similar_rejected_comments(unfiltered_suggestions))
+1236             if self.suggestions_feedback_db
+1237             else DEFAULT_REJECTED_EXAMPLES
+1238         )
+1239 
+1240         raw_output = self.filtering_chain.invoke(
+1241             {
+1242                 "review": output,
+1243                 "patch": patch.raw_diff,
+1244                 "rejected_examples": rejected_examples,
+1245             },
+1246             return_only_outputs=True,
+1247         )["text"]
+1248 
+1249         if self.verbose:
+1250             GenerativeModelTool._print_answer(raw_output)
+1251 
+1252         return list(generate_processed_output(raw_output, patch_set))
+1253 
+1406 
+
+
+</code>
+
+
+
+Think step-by-step to generate a REGRESSION test, i.e., a test function that:
+A) FAILS when we run it in the current version of the <code>.
+B) PASSES when we run it after applying the <pr> to the <code>. 
+Note that the changes will be applied by us externally, you only have to provide a raw test function that satisfies A) and B).
+
+
+Return only one test function at the default indentation level WITHOUT considering the integration to the test file, e.g., in a unittest.TestCase class because your raw test function will then be inserted in a file by us, either as a standalone function or as a method of an existing unittest.TestCase class, depending on the file conventions; you only have to provide the raw test function that imports any modules needed. The test function should be self-contained and to-the-point. 

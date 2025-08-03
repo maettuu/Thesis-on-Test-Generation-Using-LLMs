@@ -1,0 +1,83 @@
+def test_geckoview_general_classification(): 
+    import bugbot.rules.component as comp_mod 
+    from bugbot.rules.component import Component 
+    from bugbot.bzcleaner import BzCleaner
+
+    # Save original functions to restore later.
+    original_get_bug_ids_classification = comp_mod.get_bug_ids_classification
+    original_BzCleaner_get_bugs = BzCleaner.get_bugs
+    original_Bugzilla = comp_mod.Bugzilla
+
+    # Define a dummy raw_bugs dict with a GeckoView bug in the General component.
+    raw_bugs = {
+        "12345": {
+            "summary": "Test bug",
+            "product": "GeckoView",
+            "component": "General",
+        }
+    }
+
+    # Monkey-patch BzCleaner.get_bugs to return our dummy raw_bugs.
+    BzCleaner.get_bugs = lambda self, date, bug_ids, chunk_size: raw_bugs
+
+    # Patch get_bug_ids_classification in the bugbot.rules.component namespace,
+    # so that Component.get_bugs() uses our fake function.
+    def fake_get_bug_ids_classification(model, bug_ids):
+        if model == "component":
+            # Initial classification mislabels the bug as Fenix.
+            return {
+                "12345": {
+                    "available": True,
+                    "class": "Fenix",
+                    "prob": [0.9],
+                    "index": 0,
+                    "extra_data": {"conflated_components_mapping": {}},
+                }
+            }
+        elif model == "fenixcomponent":
+            # After reclassification, the component should be "General" which will be fixed.
+            return {
+                "12345": {
+                    "available": True,
+                    "class": "General",
+                    "prob": [0.9],
+                    "index": 0,
+                    "extra_data": {"conflated_components_mapping": {}},
+                }
+            }
+        return {}
+    comp_mod.get_bug_ids_classification = fake_get_bug_ids_classification
+
+    # Patch Bugzilla to prevent external calls.
+    class DummyBugzilla:
+        def __init__(self, bugids, historyhandler):
+            pass
+        def get_data(self):
+            class DummyWait:
+                def wait(self):
+                    pass
+            return DummyWait()
+    comp_mod.Bugzilla = DummyBugzilla
+
+    try:
+        # Instantiate the Component and set confidence thresholds.
+        comp = Component()
+        comp.fenix_confidence_threshold = 0.8
+        comp.general_confidence_threshold = 0.85
+        comp.component_confidence_threshold = 0.5
+        comp.frequency = "daily"
+
+        # Execute get_bugs(). Before the PR, the suggestion would be "Fenix::General"
+        # causing the bug to be skipped (since "GeckoView" != "Fenix").
+        # After the PR, it should be corrected to "GeckoView::General" and included.
+        results = comp.get_bugs(date="today", bug_ids=["12345"])
+
+        assert "12345" in results, "Bug 12345 missing from results."
+        assert results["12345"]["component"] == "GeckoView::General", (
+            f"Expected component 'GeckoView::General', got '{results['12345']['component']}'"
+        )
+    finally:
+        # Restore original functions.
+        comp_mod.get_bug_ids_classification = original_get_bug_ids_classification
+        BzCleaner.get_bugs = original_BzCleaner_get_bugs
+        comp_mod.Bugzilla = original_Bugzilla

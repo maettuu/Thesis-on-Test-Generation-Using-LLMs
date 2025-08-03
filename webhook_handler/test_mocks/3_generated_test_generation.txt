@@ -1,0 +1,70 @@
+def test_function_names_whitespace_trim(): 
+    import bugbug.tools.code_review as code_review 
+    from bugbug.tools.code_review import CodeReviewTool
+    # Dummy chain that mimics LLMChain behavior.
+    class DummyChain:
+        def __init__(self, return_value):
+            self.return_value = return_value
+
+        def run(self, **kwargs):
+            return self.return_value
+
+        def invoke(self, inputs, return_only_outputs=False):
+            if return_only_outputs:
+                return {"text": self.return_value}
+            return self.return_value
+
+        def predict(self, input):
+            return "dummy comment"
+
+    # Container to capture the function list passed to request_for_function_declarations.
+    captured = {}
+
+    def dummy_request_for_function_declarations(function_search, base_commit_hash, function_list, patch_set):
+        captured['function_list'] = function_list
+        # Return an empty list so that run() completes normally.
+        return []
+
+    # Monkey-patch request_for_function_declarations.
+    original_rffd = code_review.request_for_function_declarations
+    code_review.request_for_function_declarations = dummy_request_for_function_declarations
+
+    try:
+        # Prepare a minimal valid diff so that PatchSet.from_string() doesn't error.
+        dummy_diff = (
+            "--- a/file.py\n"
+            "+++ b/file.py\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-old line\n"
+            "+new line\n"
+        )
+
+        # Create a dummy patch object with required attributes.
+        class DummyPatch:
+            raw_diff = dummy_diff
+            base_commit_hash = "dummyhash"
+        dummy_patch = DummyPatch()
+
+        # Instantiate CodeReviewTool with dummy chains.
+        tool = CodeReviewTool(comment_gen_llms=[DummyChain("dummy comment")], llm=DummyChain("dummy comment"), verbose=False)
+        tool.summarization_chain = DummyChain("dummy summarization")
+        tool.further_context_chain = DummyChain("dummy context")
+        # This chain returns function names with extra whitespaces.
+        tool.further_info_chain = DummyChain("   func_one   \n   func_two   ")
+        tool.deduplicating_chain = DummyChain("dummy dedup")
+        tool.filtering_chain = DummyChain("dummy filtering")
+        # Set a non-None function_search to ensure the branch using further_info_chain is executed.
+        tool.function_search = object()
+
+        # Run the tool. In the fixed (post-PR) version the whitespace is stripped,
+        # so dummy_request_for_function_declarations should receive ['func_one', 'func_two'].
+        tool.run(dummy_patch)
+
+        assert 'function_list' in captured, "request_for_function_declarations was not called."
+        assert captured['function_list'] == ["func_one", "func_two"], (
+            "Function names were not trimmed properly. "
+            "They should have no leading/trailing whitespace."
+        )
+    finally:
+        # Restore the original function to avoid side effects.
+        code_review.request_for_function_declarations = original_rffd
