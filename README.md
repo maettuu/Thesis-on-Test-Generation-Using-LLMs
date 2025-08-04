@@ -1,6 +1,6 @@
-# gh-bot-js-scrape
+# feature/scraping
 
-This codebase extends from the [gh-bot-js](https://github.com/kitsiosk/gh-bot/tree/gh-bot-js) branch to enable PR scraping and autonomous execution of the pipeline. 
+This branch extends from the [main](https://github.com/maettuu/Thesis-on-Test-Generation-Using-LLMs/) branch to enable PR scraping and autonomous execution of the pipeline. 
 
 ---
 
@@ -22,8 +22,7 @@ This codebase extends from the [gh-bot-js](https://github.com/kitsiosk/gh-bot/tr
 This codebase automatically scrapes PR data from [pdf.js](https://github.com/mozilla/pdfjs) and generates regression-style “fail-to-pass” tests by:
 
 1. Scraping PR data from GitHub.
-2. Slicing the changed code context on each scrape payload.
-3. Prompting an LLM (via the `LLMHandler`) to generate new tests.
+2. Executing the `Pipeline`
 
 This project lives in its own branch to run in the background and not interrupt the functionality of the actual bot.
 
@@ -35,7 +34,7 @@ This project lives in its own branch to run in the background and not interrupt 
 - **Git**  
 - **Docker & Docker Engine** (for slicing service)  
 - **GitHub Token** with repo read/write permissions  
-- **API Keys** for `openai`, `hugging_face` & `groq`
+- **API Keys** for `openai` & `groq`
 
 To set up a GitHub Token follow these steps.
 1. **Create new Token**
@@ -59,12 +58,12 @@ To set up a GitHub Token follow these steps.
 
 1. **Clone the repo**  
    ```bash
-   git clone --branch gh-bot-js-scrape --single-branch https://github.com/your-org/gh-bot.git ~/gh-bot-js-scrape
-   cd gh-bot-js-scrape
+   git clone --branch feature/scraping --single-branch https://github.com/your-org/gh-bot.git ~/feature/scraping
+   cd feature/scraping
    ```
    *Hint:* To always pull from the same branch, configure git upstream as follows:
     ```bash
-    git branch --set-upstream-to=origin/gh-bot-js gh-bot-js
+    git branch --set-upstream-to=origin/feature/scraping feature/scraping
     ```
    Now you can run `git pull` to simply update the single branch. You can verify this configuration with:
    ```bash
@@ -103,12 +102,12 @@ To set up a GitHub Token follow these steps.
    ```
 4. **Clone the repo**  
    ```bash
-   git clone --branch gh-bot-js-scrape --single-branch https://github.com/your-org/gh-bot.git ~/gh-bot-js-scrape
-   cd gh-bot-js-scrape
+   git clone --branch feature/scraping --single-branch https://github.com/your-org/gh-bot.git ~/feature/scraping
+   cd feature/scraping
    ```
    *Hint:* To always pull from the same branch, configure git upstream as follows:
     ```bash
-    git branch --set-upstream-to=origin/gh-bot-js-scrape gh-bot-js-scrape
+    git branch --set-upstream-to=origin/feature/scraping feature/scraping
     ```
    Now you can run `git pull` to simply update the single branch. You can verify this configuration with:
    ```bash
@@ -123,8 +122,8 @@ To set up a GitHub Token follow these steps.
 
 6. **Install dependencies & migrate**  
    ```bash
-   python3.12 -m venv .gh-bot-js-scrape-venv
-   source .gh-bot-js-scrape-venv/bin/activate
+   python3.12 -m venv .feature/scraping-venv
+   source .feature/scraping-venv/bin/activate
    pip install -r requirements.txt
    ```
 7. **Navigate to the `test/` directory**
@@ -197,7 +196,7 @@ docker start -ai gh-bot_pdfjs_ctn
 - **Pipeline (`pipeline.py`)**  
   - Coordinates every step in the flow:
     1. Parse PR metadata.
-    2. Fetch linked issue.
+    2. Fetch linked issue and avaiable PDF.
     3. Clone the repo.
     4. Slice golden code around diffs.
     5. Fetch file for test injection.
@@ -234,6 +233,30 @@ docker start -ai gh-bot_pdfjs_ctn
 
 ---
 
+## Possible Configuration
+
+- **`self.parse_language`**  
+  The Tree-sitter language to use for parsing source files (e.g. `"javascript"`, `"typescript"`, `"python"`, etc.).
+
+- **`self.prompt_combinations`**  
+  A list of prompt-template combinations that control whether and how context is included in each generated prompt.
+
+- **`self.old_repo_state`**  
+  Boolean flag indicating which codebase state to target:  
+  - `true` → operate on the CommonJS version of PDF.js  
+  - `false` → operate on the ESModules version
+
+- **`self.fetch_pdf`**  
+  Whether PDF fetching is enabled (`true`) or disabled (`false`).
+
+- **`self.bot_log_dir`**  
+  Filesystem path where the bot should write its execution logs.
+
+- **`self.gen_test_dir`**  
+  Filesystem path where generated test files should be saved.
+
+---
+
 ## Adding a New Test Payload
 
 Place your PR JSON under:  
@@ -247,7 +270,7 @@ The PR will now be included in the execution.
 
 ## Models Used
 
-- **OpenAI from openai:** GPT-4o, o4-mini
+- **OpenAI from openai:** GPT-4o, o3-mini
 - **Groq from groq:** llama-3.3-70b-versatile, deepseek-r1-distill-llama-70b
 
-_With this setup, every Pull Request triggers automated, AI-driven regression tests, helping catch regressions early and reducing manual QA overhead._
+_With this setup, AI-driven regression tests can be generated using historic Pull Requests, helping catch missed gaps early and reducing manual QA overhead._

@@ -27,7 +27,10 @@ class Config:
         }
 
         ################# General Config ################
+        self.project_root = Path(__file__).resolve().parent.parent.parent
         self.execution_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        ############### Modifiable Config ###############
         self.parse_language = Language(tree_sitter_javascript.language())
         self.prompt_combinations = {
             "include_golden_code"        : [1, 1, 1, 1, 0],
@@ -37,15 +40,13 @@ class Config:
         }
         self.old_repo_state = False
         self.fetch_pdf = True
+        self.bot_log_dir = Path(self.project_root, "scrape_handler", "test", "scrape_logs")
+        self.gen_test_dir = Path(self.project_root, "scrape_handler", "test", "generated_tests")
 
         ############# Log Directories Config ############
-        self.project_root = Path(__file__).resolve().parent.parent.parent
-        self.bot_log_dir = Path(self.project_root, "scrape_handler", "test", "scrape_logs")
         self.pr_log_dir = None
         self.output_dir = None
         self.cloned_repo_dir = None
-
-        self.gen_test_dir = Path(self.project_root, "scrape_handler", "test", "generated_tests")
 
         Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
         Path(self.gen_test_dir).mkdir(parents=True, exist_ok=True)
