@@ -1,0 +1,40 @@
+```javascript
+it("should render the pattern correctly after applying a transform", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue17065.pdf'));
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+  const viewport = pdfPage.getViewport({ scale: 1 });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext('2d');
+  const renderTask = pdfPage.render({
+    canvasContext: ctx,
+    viewport,
+  });
+  await renderTask.promise;
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const expectedImageData = await new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const expectedCanvas = document.createElement('canvas');
+      expectedCanvas.width = img.width;
+      expectedCanvas.height = img.height;
+      const expectedCtx = expectedCanvas.getContext('2d');
+      expectedCtx.drawImage(img, 0, 0);
+      resolve(expectedCtx.getImageData(0, 0, img.width, img.height));
+    };
+    img.src = 'https://github.com/mozilla/pdf.js/files/12795741/test.pdf';
+  });
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    if (imageData.data[i] !== expectedImageData.data[i] ||
+        imageData.data[i + 1] !== expectedImageData.data[i + 1] ||
+        imageData.data[i + 2] !== expectedImageData.data[i + 2]) {
+      throw new Error('Pattern not rendered correctly');
+    }
+  }
+});
+```

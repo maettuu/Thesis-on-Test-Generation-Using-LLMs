@@ -1,0 +1,44 @@
+<think>
+Okay, I need to write a JavaScript test for the PDF.js project that verifies the fix for issue 19484. The issue is about supporting a rare RC4 encryption where the key length is less than 128 bits. The patch pads the key to 16 bytes, which should allow the PDF to be read correctly.
+
+First, I should understand the problem. The PDFs in question use RC4 with R=4 and V=4, but the key is 40 or 48 bits instead of the usual 128. Before the patch, pdf.js probably couldn't decrypt these files because it didn't handle shorter keys. The patch adds code to extend the key to 16 bytes by appending zeros.
+
+The test needs to check if these specific PDFs can be opened after the patch. The test should fail without the patch and pass with it.
+
+I'll use the provided PDF files, issue19484_1.pdf and issue19484_2.pdf. The test should attempt to load each and check for a specific string in the content. If the decryption works, the string should be found.
+
+I need to import the necessary modules. The test_utils.js provides a function to build parameters for getDocument. The display/api.js has the getDocument function.
+
+The test structure will be an async function using it(). I'll load each PDF, get the first page, and check if the text includes "RC4". If it does, the decryption worked.
+
+I should handle exceptions in case the loading fails, but since the test expects the PDF to be readable, I won't need to catch errors beyond ensuring the test fails if it can't load.
+
+I'll write two assertions, one for each PDF file, to ensure both are handled correctly.
+
+Now, putting it all together, the test imports the required modules, loads each PDF, extracts the text, and checks for the expected string. This should confirm that the patch works as intended.
+</think>
+
+```javascript
+it("should handle RC4 encrypted PDFs with 40-bit and 48-bit keys", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+
+  // Test with 40-bit RC4 PDF
+  const loadingTask40 = getDocument(buildGetDocumentParams('issue19484_1.pdf'));
+  const pdfDoc40 = await loadingTask40;
+  const page40 = await pdfDoc40.getPage(1);
+  const textLayer40 = await page40.createTextLayer();
+  const text40 = await textLayer40.getTextContent();
+  const expectedString40 = "RC4";
+  assert.ok(text40.items.some(item => item.str.includes(expectedString40)), `Expected to find "${expectedString40}" in text`);
+
+  // Test with 48-bit RC4 PDF
+  const loadingTask48 = getDocument(buildGetDocumentParams('issue19484_2.pdf'));
+  const pdfDoc48 = await loadingTask48;
+  const page48 = await pdfDoc48.getPage(1);
+  const textLayer48 = await page48.createTextLayer();
+  const text48 = await textLayer48.getTextContent();
+  const expectedString48 = "RC4";
+  assert.ok(text48.items.some(item => item.str.includes(expectedString48)), `Expected to find "${expectedString48}" in text`);
+});
+```

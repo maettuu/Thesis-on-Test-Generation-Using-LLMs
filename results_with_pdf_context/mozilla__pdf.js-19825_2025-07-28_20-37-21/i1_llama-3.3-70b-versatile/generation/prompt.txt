@@ -1,0 +1,880 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+17.26 - 6.25% pdfpaint bug1245391_reduced.pdf / pdfpaint bug857031.pdf + 11 more (Linux, OSX, Windows) regression on Tue April 8 2025
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/font_renderer.js b/src/core/font_renderer.js
+--- a/src/core/font_renderer.js
++++ b/src/core/font_renderer.js
+@@ -745,12 +745,9 @@ class Commands {
+ 
+   add(cmd, args) {
+     if (args) {
+-      const [a, b, c, d, e, f] = this.currentTransform;
++      const { currentTransform } = this;
+       for (let i = 0, ii = args.length; i < ii; i += 2) {
+-        const x = args[i];
+-        const y = args[i + 1];
+-        args[i] = a * x + c * y + e;
+-        args[i + 1] = b * x + d * y + f;
++        Util.applyTransform(args, currentTransform, i);
+       }
+       this.cmds.push(`${cmd}${args.join(" ")}`);
+     } else {
+
+diff --git a/src/core/operator_list.js b/src/core/operator_list.js
+--- a/src/core/operator_list.js
++++ b/src/core/operator_list.js
+@@ -524,11 +524,11 @@ addState(
+       switch (buffer[k++]) {
+         case DrawOPS.moveTo:
+         case DrawOPS.lineTo:
+-          Util.applyTransform(buffer.subarray(k), transform);
++          Util.applyTransform(buffer, transform, k);
+           k += 2;
+           break;
+         case DrawOPS.curveTo:
+-          Util.applyTransformToBezier(buffer.subarray(k), transform);
++          Util.applyTransformToBezier(buffer, transform, k);
+           k += 6;
+           break;
+       }
+
+diff --git a/src/shared/util.js b/src/shared/util.js
+--- a/src/shared/util.js
++++ b/src/shared/util.js
+@@ -730,15 +730,14 @@ class Util {
+   }
+ 
+   // For 2d affine transforms
+-  static applyTransform(p, m) {
+-    const p0 = p[0];
+-    const p1 = p[1];
+-    p[0] = p0 * m[0] + p1 * m[2] + m[4];
+-    p[1] = p0 * m[1] + p1 * m[3] + m[5];
++  static applyTransform(p, m, pos = 0) {
++    const p0 = p[pos];
++    const p1 = p[pos + 1];
++    p[pos] = p0 * m[0] + p1 * m[2] + m[4];
++    p[pos + 1] = p0 * m[1] + p1 * m[3] + m[5];
+   }
+ 
+-  // For 2d affine transforms
+-  static applyTransformToBezier(p, transform) {
++  static applyTransformToBezier(p, transform, pos = 0) {
+     const m0 = transform[0];
+     const m1 = transform[1];
+     const m2 = transform[2];
+@@ -746,10 +745,10 @@ class Util {
+     const m4 = transform[4];
+     const m5 = transform[5];
+     for (let i = 0; i < 6; i += 2) {
+-      const pI = p[i];
+-      const pI1 = p[i + 1];
+-      p[i] = pI * m0 + pI1 * m2 + m4;
+-      p[i + 1] = pI * m1 + pI1 * m3 + m5;
++      const pI = p[pos + i];
++      const pI1 = p[pos + i + 1];
++      p[pos + i] = pI * m0 + pI1 * m2 + m4;
++      p[pos + i + 1] = pI * m1 + pI1 * m3 + m5;
+     }
+   }
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.10
+- @babel/preset-env: ^7.26.9
+- @babel/runtime: ^7.27.0
+- @fluent/bundle: ^0.19.1
+- @fluent/dom: ^0.10.1
+- @metalsmith/layouts: ^3.0.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.69
+- @types/node: ^22.14.1
+- autoprefixer: ^10.4.21
+- babel-loader: ^10.0.0
+- caniuse-lite: ^1.0.30001713
+- core-js: ^3.41.0
+- eslint: ^9.24.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.11.0
+- eslint-plugin-prettier: ^5.2.6
+- eslint-plugin-unicorn: ^58.0.0
+- globals: ^16.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.6.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.3
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.5.3
+- puppeteer: ^24.6.1
+- stylelint: ^16.18.0
+- stylelint-prettier: ^5.0.3
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.14
+- tsc-alias: ^1.8.15
+- ttest: ^4.0.0
+- typescript: ^5.8.3
+- vinyl: ^3.0.0
+- webpack: ^5.99.5
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20.16.0
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/calculate_md5.js`: calculateMD5
+- `../../src/core/calculate_sha256.js`: calculateSHA256
+- `../../src/core/calculate_sha_other.js`: calculateSHA384, calculateSHA512
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/colorspace_utils.js`: ColorSpaceUtils
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalColorSpaceCache, GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, isValidExplicitDest, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, DrawOPS, FeatureTest, FormatError, ImageKind, InvalidPDFException, MathClamp, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/font_renderer.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   bytesToString,
+19   FONT_IDENTITY_MATRIX,
+20   FormatError,
+21   unreachable,
+22   Util,
+23   warn,
+24 } from "../shared/util.js";
+25 import {
+26   isNumberArray,
+27   readInt16,
+28   readInt8,
+29   readUint16,
+30   readUint32,
+31 } from "./core_utils.js";
+32 import { CFFParser } from "./cff_parser.js";
+33 import { getGlyphsUnicode } from "./glyphlist.js";
+34 import { StandardEncoding } from "./encodings.js";
+35 import { Stream } from "./stream.js";
+36 
+37 // TODO: use DataView and its methods.
+38 
+737 const NOOP = "";
+738 
+739 class Commands {
+740   cmds = [];
+741 
+742   transformStack = [];
+743 
+744   currentTransform = [1, 0, 0, 1, 0, 0];
+745 
+746   add(cmd, args) {
+747     if (args) {
+748       const [a, b, c, d, e, f] = this.currentTransform;
+749       for (let i = 0, ii = args.length; i < ii; i += 2) {
+750         const x = args[i];
+751         const y = args[i + 1];
+752         args[i] = a * x + c * y + e;
+753         args[i + 1] = b * x + d * y + f;
+754       }
+755       this.cmds.push(`${cmd}${args.join(" ")}`);
+756     } else {
+757       this.cmds.push(cmd);
+758     }
+759   }
+760 
+780 }
+781 
+936 
+File:
+src/core/operator_list.js
+1 /* Copyright 2017 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   DrawOPS,
+18   ImageKind,
+19   OPS,
+20   RenderingIntentFlag,
+21   Util,
+22   warn,
+23 } from "../shared/util.js";
+24 
+38 const InitialState = [];
+39 
+40 // This replaces (save, transform, paintInlineImageXObject, restore)+
+41 // sequences with one |paintInlineImageXObjectGroup| operation.
+170 
+171 // This replaces (save, transform, paintImageMaskXObject, restore)+
+172 // sequences with one |paintImageMaskXObjectGroup| or one
+173 // |paintImageMaskXObjectRepeat| operation.
+288 
+289 // This replaces (save, transform, paintImageXObject, restore)+ sequences
+290 // with one paintImageXObjectRepeat operation, if the |transform| and
+291 // |paintImageXObjectRepeat| ops are appropriate.
+387 
+388 // This replaces (beginText, setFont, setTextMatrix, showText, endText)+
+389 // sequences with (beginText, setFont, (setTextMatrix, showText)+, endText)+
+390 // sequences, if the font for each one is the same.
+479 
+480 // This replaces (save, transform, constructPath, restore)
+481 // sequences with |constructPath| operation.
+543 
+822 
+File:
+src/shared/util.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 /* globals process */
+16 
+17 // NW.js / Electron is a browser context, but copies some Node.js objects; see
+18 // http://docs.nwjs.io/en/latest/For%20Users/Advanced/JavaScript%20Contexts%20in%20NW.js/#access-nodejs-and-nwjs-api-in-browser-context
+19 // https://www.electronjs.org/docs/api/process#processversionselectron-readonly
+20 // https://www.electronjs.org/docs/api/process#processtype-readonly
+21 const isNodeJS =
+22   (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+23   typeof process === "object" &&
+24   process + "" === "[object process]" &&
+25   !process.versions.nw &&
+26   !(process.versions.electron && process.type && process.type !== "browser");
+27 
+28 const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
+29 
+30 // Represent the percentage of the height of a single-line field over
+31 // the font size. Acrobat seems to use this value.
+32 const LINE_FACTOR = 1.35;
+33 const LINE_DESCENT_FACTOR = 0.35;
+34 const BASELINE_FACTOR = LINE_DESCENT_FACTOR / LINE_FACTOR;
+35 
+50 const RenderingIntentFlag = {
+51   ANY: 0x01,
+52   DISPLAY: 0x02,
+53   PRINT: 0x04,
+54   SAVE: 0x08,
+55   ANNOTATIONS_FORMS: 0x10,
+56   ANNOTATIONS_STORAGE: 0x20,
+57   ANNOTATIONS_DISABLE: 0x40,
+58   IS_EDITING: 0x80,
+59   OPLIST: 0x100,
+60 };
+61 
+62 const AnnotationMode = {
+63   DISABLE: 0,
+64   ENABLE: 1,
+65   ENABLE_FORMS: 2,
+66   ENABLE_STORAGE: 3,
+67 };
+68 
+69 const AnnotationEditorPrefix = "pdfjs_internal_editor_";
+70 
+71 const AnnotationEditorType = {
+72   DISABLE: -1,
+73   NONE: 0,
+74   FREETEXT: 3,
+75   HIGHLIGHT: 9,
+76   STAMP: 13,
+77   INK: 15,
+78   SIGNATURE: 101,
+79 };
+80 
+81 const AnnotationEditorParamsType = {
+82   RESIZE: 1,
+83   CREATE: 2,
+84   FREETEXT_SIZE: 11,
+85   FREETEXT_COLOR: 12,
+86   FREETEXT_OPACITY: 13,
+87   INK_COLOR: 21,
+88   INK_THICKNESS: 22,
+89   INK_OPACITY: 23,
+90   HIGHLIGHT_COLOR: 31,
+91   HIGHLIGHT_DEFAULT_COLOR: 32,
+92   HIGHLIGHT_THICKNESS: 33,
+93   HIGHLIGHT_FREE: 34,
+94   HIGHLIGHT_SHOW_ALL: 35,
+95   DRAW_STEP: 41,
+96 };
+97 
+98 // Permission flags from Table 22, Section 7.6.3.2 of the PDF specification.
+99 const PermissionFlag = {
+100   PRINT: 0x04,
+101   MODIFY_CONTENTS: 0x08,
+102   COPY: 0x10,
+103   MODIFY_ANNOTATIONS: 0x20,
+104   FILL_INTERACTIVE_FORMS: 0x100,
+105   COPY_FOR_ACCESSIBILITY: 0x200,
+106   ASSEMBLE: 0x400,
+107   PRINT_HIGH_QUALITY: 0x800,
+108 };
+109 
+110 const TextRenderingMode = {
+111   FILL: 0,
+112   STROKE: 1,
+113   FILL_STROKE: 2,
+114   INVISIBLE: 3,
+115   FILL_ADD_TO_PATH: 4,
+116   STROKE_ADD_TO_PATH: 5,
+117   FILL_STROKE_ADD_TO_PATH: 6,
+118   ADD_TO_PATH: 7,
+119   FILL_STROKE_MASK: 3,
+120   ADD_TO_PATH_FLAG: 4,
+121 };
+122 
+123 const ImageKind = {
+124   GRAYSCALE_1BPP: 1,
+125   RGB_24BPP: 2,
+126   RGBA_32BPP: 3,
+127 };
+128 
+129 const AnnotationType = {
+130   TEXT: 1,
+131   LINK: 2,
+132   FREETEXT: 3,
+133   LINE: 4,
+134   SQUARE: 5,
+135   CIRCLE: 6,
+136   POLYGON: 7,
+137   POLYLINE: 8,
+138   HIGHLIGHT: 9,
+139   UNDERLINE: 10,
+140   SQUIGGLY: 11,
+141   STRIKEOUT: 12,
+142   STAMP: 13,
+143   CARET: 14,
+144   INK: 15,
+145   POPUP: 16,
+146   FILEATTACHMENT: 17,
+147   SOUND: 18,
+148   MOVIE: 19,
+149   WIDGET: 20,
+150   SCREEN: 21,
+151   PRINTERMARK: 22,
+152   TRAPNET: 23,
+153   WATERMARK: 24,
+154   THREED: 25,
+155   REDACT: 26,
+156 };
+157 
+158 const AnnotationReplyType = {
+159   GROUP: "Group",
+160   REPLY: "R",
+161 };
+162 
+163 const AnnotationFlag = {
+164   INVISIBLE: 0x01,
+165   HIDDEN: 0x02,
+166   PRINT: 0x04,
+167   NOZOOM: 0x08,
+168   NOROTATE: 0x10,
+169   NOVIEW: 0x20,
+170   READONLY: 0x40,
+171   LOCKED: 0x80,
+172   TOGGLENOVIEW: 0x100,
+173   LOCKEDCONTENTS: 0x200,
+174 };
+175 
+176 const AnnotationFieldFlag = {
+177   READONLY: 0x0000001,
+178   REQUIRED: 0x0000002,
+179   NOEXPORT: 0x0000004,
+180   MULTILINE: 0x0001000,
+181   PASSWORD: 0x0002000,
+182   NOTOGGLETOOFF: 0x0004000,
+183   RADIO: 0x0008000,
+184   PUSHBUTTON: 0x0010000,
+185   COMBO: 0x0020000,
+186   EDIT: 0x0040000,
+187   SORT: 0x0080000,
+188   FILESELECT: 0x0100000,
+189   MULTISELECT: 0x0200000,
+190   DONOTSPELLCHECK: 0x0400000,
+191   DONOTSCROLL: 0x0800000,
+192   COMB: 0x1000000,
+193   RICHTEXT: 0x2000000,
+194   RADIOSINUNISON: 0x2000000,
+195   COMMITONSELCHANGE: 0x4000000,
+196 };
+197 
+198 const AnnotationBorderStyleType = {
+199   SOLID: 1,
+200   DASHED: 2,
+201   BEVELED: 3,
+202   INSET: 4,
+203   UNDERLINE: 5,
+204 };
+205 
+206 const AnnotationActionEventType = {
+207   E: "Mouse Enter",
+208   X: "Mouse Exit",
+209   D: "Mouse Down",
+210   U: "Mouse Up",
+211   Fo: "Focus",
+212   Bl: "Blur",
+213   PO: "PageOpen",
+214   PC: "PageClose",
+215   PV: "PageVisible",
+216   PI: "PageInvisible",
+217   K: "Keystroke",
+218   F: "Format",
+219   V: "Validate",
+220   C: "Calculate",
+221 };
+222 
+223 const DocumentActionEventType = {
+224   WC: "WillClose",
+225   WS: "WillSave",
+226   DS: "DidSave",
+227   WP: "WillPrint",
+228   DP: "DidPrint",
+229 };
+230 
+231 const PageActionEventType = {
+232   O: "PageOpen",
+233   C: "PageClose",
+234 };
+235 
+236 const VerbosityLevel = {
+237   ERRORS: 0,
+238   WARNINGS: 1,
+239   INFOS: 5,
+240 };
+241 
+242 // All the possible operations for an operator list.
+243 const OPS = {
+244   // Intentionally start from 1 so it is easy to spot bad operators that will be
+245   // 0's.
+246   // PLEASE NOTE: We purposely keep any removed operators commented out, since
+247   //              re-numbering the list would risk breaking third-party users.
+248   dependency: 1,
+249   setLineWidth: 2,
+250   setLineCap: 3,
+251   setLineJoin: 4,
+252   setMiterLimit: 5,
+253   setDash: 6,
+254   setRenderingIntent: 7,
+255   setFlatness: 8,
+256   setGState: 9,
+257   save: 10,
+258   restore: 11,
+259   transform: 12,
+260   moveTo: 13,
+261   lineTo: 14,
+262   curveTo: 15,
+263   curveTo2: 16,
+264   curveTo3: 17,
+265   closePath: 18,
+266   rectangle: 19,
+267   stroke: 20,
+268   closeStroke: 21,
+269   fill: 22,
+270   eoFill: 23,
+271   fillStroke: 24,
+272   eoFillStroke: 25,
+273   closeFillStroke: 26,
+274   closeEOFillStroke: 27,
+275   endPath: 28,
+276   clip: 29,
+277   eoClip: 30,
+278   beginText: 31,
+279   endText: 32,
+280   setCharSpacing: 33,
+281   setWordSpacing: 34,
+282   setHScale: 35,
+283   setLeading: 36,
+284   setFont: 37,
+285   setTextRenderingMode: 38,
+286   setTextRise: 39,
+287   moveText: 40,
+288   setLeadingMoveText: 41,
+289   setTextMatrix: 42,
+290   nextLine: 43,
+291   showText: 44,
+292   showSpacedText: 45,
+293   nextLineShowText: 46,
+294   nextLineSetSpacingShowText: 47,
+295   setCharWidth: 48,
+296   setCharWidthAndBounds: 49,
+297   setStrokeColorSpace: 50,
+298   setFillColorSpace: 51,
+299   setStrokeColor: 52,
+300   setStrokeColorN: 53,
+301   setFillColor: 54,
+302   setFillColorN: 55,
+303   setStrokeGray: 56,
+304   setFillGray: 57,
+305   setStrokeRGBColor: 58,
+306   setFillRGBColor: 59,
+307   setStrokeCMYKColor: 60,
+308   setFillCMYKColor: 61,
+309   shadingFill: 62,
+310   beginInlineImage: 63,
+311   beginImageData: 64,
+312   endInlineImage: 65,
+313   paintXObject: 66,
+314   markPoint: 67,
+315   markPointProps: 68,
+316   beginMarkedContent: 69,
+317   beginMarkedContentProps: 70,
+318   endMarkedContent: 71,
+319   beginCompat: 72,
+320   endCompat: 73,
+321   paintFormXObjectBegin: 74,
+322   paintFormXObjectEnd: 75,
+323   beginGroup: 76,
+324   endGroup: 77,
+325   // beginAnnotations: 78,
+326   // endAnnotations: 79,
+327   beginAnnotation: 80,
+328   endAnnotation: 81,
+329   // paintJpegXObject: 82,
+330   paintImageMaskXObject: 83,
+331   paintImageMaskXObjectGroup: 84,
+332   paintImageXObject: 85,
+333   paintInlineImageXObject: 86,
+334   paintInlineImageXObjectGroup: 87,
+335   paintImageXObjectRepeat: 88,
+336   paintImageMaskXObjectRepeat: 89,
+337   paintSolidColorImageMask: 90,
+338   constructPath: 91,
+339   setStrokeTransparent: 92,
+340   setFillTransparent: 93,
+341   rawFillPath: 94,
+342 };
+343 
+344 // In order to have a switch statement that is fast (i.e. which use a jump
+345 // table), we need to have the OPS in a contiguous range.
+346 const DrawOPS = {
+347   moveTo: 0,
+348   lineTo: 1,
+349   curveTo: 2,
+350   closePath: 3,
+351 };
+352 
+353 const PasswordResponses = {
+354   NEED_PASSWORD: 1,
+355   INCORRECT_PASSWORD: 2,
+356 };
+357 
+358 let verbosity = VerbosityLevel.WARNINGS;
+359 
+370 // A notice for devs. These are good for things that are helpful to devs, such
+371 // as warning that Workers were disabled, which is important to devs but not
+372 // end users.
+379 
+380 // Non-fatal warnings.
+387 
+398 // Checks if URLs use one of the allowed protocols, e.g. to avoid XSS.
+411 
+467 const BaseException = (function BaseExceptionClosure() {
+468   // eslint-disable-next-line no-shadow
+469   function BaseException(message, name) {
+470     if (
+471       (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) &&
+472       this.constructor === BaseException
+473     ) {
+474       unreachable("Cannot initialize BaseException.");
+475     }
+476     this.message = message;
+477     this.name = name;
+478   }
+479   BaseException.prototype = new Error();
+480   BaseException.constructor = BaseException;
+481 
+482   return BaseException;
+483 })();
+484 
+580 // Checks the endianness of the platform.
+587 
+588 // Checks if it's possible to eval JS expressions.
+597 
+660 const hexNumbers = Array.from(Array(256).keys(), n =>
+661   n.toString(16).padStart(2, "0")
+662 );
+663 
+664 class Util {
+668 
+669   // Apply a scaling matrix to some min/max values.
+670   // If a scaling factor is negative then min and max must be
+671   // swapped.
+719 
+720   // Concatenates two transformation matrices together and returns the result.
+731 
+732   // For 2d affine transforms
+733   static applyTransform(p, m) {
+734     const p0 = p[0];
+735     const p1 = p[1];
+736     p[0] = p0 * m[0] + p1 * m[2] + m[4];
+737     p[1] = p0 * m[1] + p1 * m[3] + m[5];
+738   }
+739 
+740   // For 2d affine transforms
+741   static applyTransformToBezier(p, transform) {
+742     const m0 = transform[0];
+743     const m1 = transform[1];
+744     const m2 = transform[2];
+745     const m3 = transform[3];
+746     const m4 = transform[4];
+747     const m5 = transform[5];
+748     for (let i = 0; i < 6; i += 2) {
+749       const pI = p[i];
+750       const pI1 = p[i + 1];
+751       p[i] = pI * m0 + pI1 * m2 + m4;
+752       p[i + 1] = pI * m1 + pI1 * m3 + m5;
+753     }
+754   }
+755 
+764   // Applies the transform to the rectangle and finds the minimum axially
+765   // aligned bounding box.
+808 
+821   // This calculation uses Singular Value Decomposition.
+822   // The SVD can be represented with formula A = USV. We are interested in the
+823   // matrix S here because it represents the scale values.
+840 
+841   // Normalize rectangle rect=[x1, y1, x2, y2] so that (x1,y1) < (x2,y2)
+842   // For coordinate systems whose origin lies in the bottom-left, this
+843   // means normalization to (BL,TR) ordering. For systems with origin in the
+844   // top-left, this means (TL,BR) ordering.
+857 
+858   // Returns a rectangle [x1, y1, x2, y2] corresponding to the
+859   // intersection of rect1 and rect2. If no intersection, returns 'null'
+860   // The rectangle coordinates of rect1, rect2 should be [x1, y1, x2, y2]
+887 
+968   // From https://github.com/adobe-webplatform/Snap.svg/blob/b365287722a72526000ac4bfcf0ce4cac2faa015/src/path.js#L852
+1004 }
+1005 
+1006 const PDFStringTranslateTable = [
+1007   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x2d8,
+1008   0x2c7, 0x2c6, 0x2d9, 0x2dd, 0x2db, 0x2da, 0x2dc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+1009   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+1010   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+1011   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+1012   0, 0, 0, 0, 0, 0, 0, 0, 0x2022, 0x2020, 0x2021, 0x2026, 0x2014, 0x2013, 0x192,
+1013   0x2044, 0x2039, 0x203a, 0x2212, 0x2030, 0x201e, 0x201c, 0x201d, 0x2018,
+1014   0x2019, 0x201a, 0x2122, 0xfb01, 0xfb02, 0x141, 0x152, 0x160, 0x178, 0x17d,
+1015   0x131, 0x142, 0x153, 0x161, 0x17e, 0, 0x20ac,
+1016 ];
+1017 
+1100 let NormalizeRegex = null;
+1101 let NormalizationMap = null;
+1118 
+1131 const AnnotationPrefix = "pdfjs_internal_id_";
+1132 
+1181 // TOOD: Replace all occurrences of this function with `Math.clamp` once
+1182 //       https://github.com/tc39/proposal-math-clamp/ is generally available.
+1186 
+1187 // TODO: Remove this once `Uint8Array.prototype.toHex` is generally available.
+1194 
+1195 // TODO: Remove this once `Uint8Array.prototype.toBase64` is generally
+1196 //       available.
+1203 
+1204 // TODO: Remove this once `Uint8Array.fromBase64` is generally available.
+1211 
+1212 // TODO: Remove this once https://bugzilla.mozilla.org/show_bug.cgi?id=1928493
+1213 //       is fixed.
+1224 
+1225 // TODO: Remove this once the `javascript.options.experimental.math_sumprecise`
+1226 //       preference is removed from Firefox.
+1234 
+1265 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/util_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  BaseException,
+  bytesToString,
+  createValidAbsoluteUrl,
+  getModificationDate,
+  getUuid,
+  string32,
+  stringToBytes,
+  stringToPDFString,
+} from "../../src/shared/util.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

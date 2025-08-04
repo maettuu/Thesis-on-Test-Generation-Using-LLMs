@@ -1,0 +1,59 @@
+<think>
+Okay, I need to write a regression test for the issue where some inlined images aren't rendering correctly in pdf.js. The user provided a patch that adds a try-catch block around the image processing code. So, the test should fail before the patch and pass after.
+
+First, I'll structure the test using Jest. The test should be self-contained and only use the provided imports. I'll start by importing the necessary modules: getDocument from the display API and buildGetDocumentParams from test_utils.js.
+
+Next, I'll load the PDF document using getDocument with the correct parameters. Since the issue occurs in Firefox on Mac, I'll set the isFirefox and isMac properties in the options.
+
+I'll create a function to check if all images are rendered. This function will take the operatorList from the PartialEvaluator and count how many paintInlineImageXObject operators there are, which correspond to the images.
+
+I'll set up the PDFDocument and get the first page. Then, I'll create a PartialEvaluator with the appropriate options, including ignoring errors if needed. Evaluating the page will trigger the rendering of images.
+
+In the test, I'll check if the number of images rendered matches the expected count. Since the example has two images, I'll expect 2. If the actual count doesn't match, the test will fail, indicating the bug is present.
+
+After applying the patch, the test should pass because the try-catch will handle any decoding errors, allowing all images to render correctly.
+
+I need to make sure the test is concise and only uses the provided imports without adding new dependencies. The code should be clean and directly address the issue.
+</think>
+
+```javascript
+it("should render all inlined images", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  
+  const loadingTask = getDocument(buildGetDocumentParams('issue17794.pdf'));
+  const { pdfDocument } = await loadingTask;
+  const pdfPage = await pdfDocument.getPage(1);
+  
+  const checkImagesRendered = (operatorList) => {
+    let imageCount = 0;
+    const operators = operatorList.getOperators();
+    for (const op of operators) {
+      if (op.name === OPS.paintInlineImageXObject) {
+        imageCount++;
+      }
+    }
+    return imageCount;
+  };
+  
+  const evaluatorOptions = {
+    ignoreErrors: false,
+    isFirefox: true,
+    isMac: true,
+  };
+  
+  const operatorList = new (await import('../../src/core/evaluator.js')).PartialEvaluator/pdfOperatorList;
+  const evaluator = new (await import('../../src/core/evaluator.js')).PartialEvaluator({
+    ...evaluatorOptions,
+    xref: pdfDocument.xref,
+    pdfDocument: pdfDocument,
+  });
+  
+  await evaluator.evaluate(pdfPage);
+  
+  const expectedImageCount = 2;
+  const actualImageCount = checkImagesRendered(operatorList);
+  
+  expect(actualImageCount).toBe(expectedImageCount);
+});
+```

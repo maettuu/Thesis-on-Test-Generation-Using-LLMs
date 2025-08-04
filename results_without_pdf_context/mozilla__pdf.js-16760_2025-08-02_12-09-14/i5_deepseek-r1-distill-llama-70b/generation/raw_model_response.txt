@@ -1,0 +1,30 @@
+<think>
+Alright, I need to write a regression test for the issue where a certain PDF/MP3 file doesn't render in Firefox 115.0.2 but does in older versions and other browsers. The user provided a patch that modifies the xref.js file, specifically updating a regular expression. 
+
+First, I should understand the problem. The PDF is a polyglot file, which means it's valid as both PDF and MP3. The error message indicates an invalid PDF structure, so the parser is failing to recognize the end of objects correctly. The patch changes the gEndobjRegExp to include 'trailer <<', which probably helps in correctly identifying the end of objects.
+
+To write the test, I'll use the provided test_utils.js to create a mock XRef. I'll set up a scenario where the PDF data has a trailer followed by the MP3 data. The test will check if the XRef correctly parses the objects without throwing an error.
+
+I'll import the necessary modules, create a mock XRef with the sample data, and then attempt to parse it. If the parsing is successful, the test passes. Otherwise, it fails. This test should fail before the patch because the old regex doesn't account for 'trailer <<', causing the parser to miss the end of the object, but after the patch, it should correctly parse.
+
+I need to ensure the test is self-contained and uses only the provided imports. I'll structure it as an async test block using Jest syntax, importing modules dynamically for compatibility.
+</think>
+
+```javascript
+it("should correctly parse polyglot PDF with MP3 content", async () => {
+  const { XRefMock, buildGetDocumentParams } = await import("./test_utils.js");
+  const { InvalidPDFException } = await import("../../src/shared/util.js");
+
+  // Create a mock XRef with the sample data that caused the issue
+  const xrefMock = new XRefMock();
+  xrefMock.addTrailer();
+  xrefMock.addMP3Data();
+
+  // Attempt to parse the XRef
+  const params = buildGetDocumentParams(xrefMock);
+  const xref = new XRef(params);
+
+  // The test passes if no exception is thrown
+  await expect(xref.load()).resolves.not.toThrow(InvalidPDFException);
+});
+```

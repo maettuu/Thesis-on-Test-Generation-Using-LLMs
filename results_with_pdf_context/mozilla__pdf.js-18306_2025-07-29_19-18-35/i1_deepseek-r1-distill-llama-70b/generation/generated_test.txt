@@ -1,0 +1,47 @@
+it("should correctly render PDF with noninteger DW", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1903731.pdf'));
+
+  try {
+    const { doc, cleanup } = await loadingTask;
+    const page = await doc.getPage(0);
+    const operatorList = await page.getOperatorList();
+
+    const evaluatorOptions = {
+      disableFontFace: true,
+    };
+
+    const evaluator = new PartialEvaluator({
+      xref: page.xref,
+      handler: null,
+      pageIndex: page.index,
+      idFactory: createIdFactory(),
+      fontCache: null,
+      builtInCMapCache: null,
+      standardFontDataCache: null,
+      globalImageCache: null,
+      systemFontCache: null,
+      options: evaluatorOptions,
+    });
+
+    const properties = {
+      composite: true,
+    };
+
+    const dict = new Dict();
+    dict.set("Type", "/Font");
+    dict.set("Subtype", "/Type1");
+    dict.set("BaseFont", "Helvetica");
+
+    evaluator.extractWidths(dict, {}, properties);
+
+    const glyphsWidths = properties.widths;
+
+    expect(glyphsWidths.length).toBeGreaterThan(0);
+
+    await cleanup();
+  } catch (error) {
+    throw new Error("Failed to load or process PDF");
+  }
+});

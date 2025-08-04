@@ -1,0 +1,47 @@
+<think>
+Okay, so I need to write a regression test for this bug where a TypeError occurs when using annotations on a PDF in Safari on iOS. The error is "TypeError: null is not an object (evaluating 'this.#touchMoveAC.abort')". 
+
+First, I should understand the issue. From the user's description, the error happens when they try to draw annotations, especially after zooming and moving around. The error occurs in the TouchManager class when it tries to call abort() on #touchMoveAC, which is null. 
+
+Looking at the patch provided, the fix is in touch_manager.js. The code was aborting #touchMoveAC without checking if it's null. The patch adds a check to ensure #touchMoveAC exists before calling abort(). 
+
+So, the test needs to simulate the scenario where #touchMoveAC could be null when onTouchEnd is called. 
+
+I'll start by setting up a test case using the existing test file. I'll import the necessary classes like TouchManager and others as needed. 
+
+In the test, I'll create a container element, perhaps a div, to simulate the touch events. Then, I'll instantiate TouchManager with this container. 
+
+Next, I'll simulate touch events. Since the error occurs on touch end, I'll trigger a touchend event. But before that, I'll set #touchMoveAC to null to mimic the scenario where it wasn't properly initialized or was already aborted. 
+
+I'll use Jest to spy on the abort method of #touchMoveAC, but since it's null, I need to ensure that the code doesn't attempt to call abort on a null object. 
+
+The test should check that no error is thrown when the touchend event is handled. If the patch is correct, the code should handle the null case gracefully.
+
+I'll structure the test with try-catch to see if any error is thrown. If the test passes without errors, it means the patch works as intended.
+
+So, putting it all together, the test will simulate the conditions under which the error occurs and verify that the fix prevents the error.
+</think>
+
+```javascript
+it("should handle null touchMoveAC in TouchManager", async () => {
+  const { TouchManager } = await import("../../src/display/touch_manager.js");
+  const container = document.createElement("div");
+  
+  const touchManager = new TouchManager({
+    container,
+    signal: new AbortController().signal,
+  });
+
+  // Simulate touch end with touchMoveAC set to null
+  const originalTouchMoveAC = touchManager.#touchMoveAC;
+  touchManager.#touchMoveAC = null;
+
+  try {
+    const evt = { touches: [] };
+    touchManager.#onTouchEnd(evt);
+    expect(() => evt).not.toThrow();
+  } finally {
+    touchManager.#touchMoveAC = originalTouchMoveAC;
+  }
+});
+```

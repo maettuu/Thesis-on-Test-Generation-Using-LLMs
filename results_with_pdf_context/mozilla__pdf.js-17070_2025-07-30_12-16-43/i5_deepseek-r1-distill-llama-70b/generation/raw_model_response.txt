@@ -1,0 +1,42 @@
+<think>
+Okay, I need to write a regression test for the issue where comments and sticky notes aren't displayed in the PDF.js viewer. The user provided a patch that modifies several files, particularly annotation.js. My test should fail before the patch and pass after.
+
+First, I'll start by understanding the problem. The user mentioned that in versions 4.0.10 and 3.11.174, the annotations aren't rendered, but they worked in 2.5.207. The patch seems to adjust the 'noHTML' property for various annotation types, ensuring they render correctly.
+
+I need to create a test that checks if these annotations are displayed. So, the test will load the provided PDF, which has comments and sticky notes, and verify that they exist in the DOM after rendering.
+
+I'll structure the test using Jest. I'll import the necessary modules: getDocument from api.js and buildGetDocumentParams from test_utils.js. Then, I'll load the PDF using getDocument with the test file path.
+
+Once the document is loaded, I'll get the first page and render it. I'll wait for the rendering to complete to ensure all elements are in place.
+
+Next, I'll query the DOM for elements with data-annotation-id attributes. These represent the annotations. If the length of this collection is greater than zero, the test passes.
+
+I should make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll use dynamic imports to keep it compatible with Node.js.
+
+I also need to ensure that the test correctly simulates the scenario where the annotations were not rendering before the patch. By checking the DOM elements, I can confirm that the patch fixes the issue.
+
+So, putting it all together, the test will load the PDF, render the page, and check for the presence of annotation elements. If they're present, the test passes, indicating the regression is fixed.
+</think>
+
+```javascript
+it("should render annotations in the viewer", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue17069.pdf'));
+  
+  const { numPages } = await loadingTask.promise;
+  const page = await loadingTask.document.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  
+  const div = document.createElement('div');
+  await page.render({
+    canvasContext: null,
+    viewport,
+    annotationMode: true,
+    renderInteractiveForms: true,
+  });
+  
+  const annotations = div.querySelectorAll('[data-annotation-id]');
+  expect(annotations.length).toBeGreaterThan(0);
+});
+```

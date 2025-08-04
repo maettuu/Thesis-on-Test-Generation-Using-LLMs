@@ -1,0 +1,62 @@
+<think>
+Okay, I need to create a test that checks if the patch resolves the issue where Firefox is slow to render poster PDFs. The patch modifies the way the filter is set in the canvas context. 
+
+First, I should understand what the patch does. The original code sets ctx.filter to "none" unconditionally. The patch adds a check to see if the filter is already "none" or empty before setting it. This should prevent unnecessary changes that might cause performance issues.
+
+Now, I need to write a test that fails before the patch and passes after. The test should measure the rendering time of a PDF with a poster image. 
+
+I'll use the test file provided. I'll import the necessary modules, like getDocument to load the PDF. I'll set up a PDFDocument and a viewer with a canvas. 
+
+I'll create a function to measure the render time. Before the patch, this should take longer because the filter is being set unnecessarily. After the patch, the time should be shorter because the filter isn't reset when it's already correct.
+
+I'll use a sample poster PDF from the TEST_PDFS_PATH. I'll get the first page, set up the viewer, and measure the time it takes to render the page. 
+
+I'll set a threshold, say 1000ms, but adjust it based on the actual performance. The test will fail if the render time exceeds this threshold.
+
+After the patch, the render time should be within the threshold, so the test will pass.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll structure the test with async/await for proper handling of the PDF loading and rendering.
+
+Finally, I'll write the test block, making sure it's concise and directly measures the effect of the patch.
+</think>
+
+```javascript
+it("should improve poster PDF rendering performance", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const pdfPath = `${TEST_PDFS_PATH}/poster.pdf`;
+  const loadPDF = async (pdfPath) => {
+    const params = buildGetDocumentParams(pdfPath, DefaultFileReaderFactory);
+    const pdf = await getDocument(params);
+    return pdf;
+  };
+
+  const pdf = await loadPDF(pdfPath);
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  const measureRenderTime = async () => {
+    const startTime = performance.now();
+    await page.render({
+      canvasContext: ctx,
+      viewport,
+      renderInteractive: false,
+    });
+    return performance.now() - startTime;
+  };
+
+  // Before patch, filter is set to "none" unconditionally
+  const slowRenderTime = await measureRenderTime();
+  console.log("Slow render time:", slowRenderTime);
+
+  // After patch, filter is only set if necessary
+  const fastRenderTime = await measureRenderTime();
+  console.log("Fast render time:", fastRenderTime);
+
+  // Verify that the patch reduces rendering time
+  expect(fastRenderTime).toBeLessThan(slowRenderTime);
+});
+```

@@ -1,0 +1,33 @@
+it("should properly fall back to standard fonts when HelveticaLTStd is missing", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue19234.pdf'));
+
+  const { numPages } = await loadingTask;
+  const document = await loadingTask.promise;
+  const page = await document.getPage(1);
+
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  const viewport = page.getViewport({ scale: 1 });
+
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport,
+    renderingOptions: {
+      useFallbackFonts: true,
+    },
+  });
+
+  await renderTask.promise;
+
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const arePixelsNonEmpty = () => {
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i + 3] > 0) return true;
+    }
+    return false;
+  };
+
+  expect(arePixelsNonEmpty()).toBe(true);
+});

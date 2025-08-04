@@ -1,0 +1,1702 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Added SVG images cannot be resized horizontally/vertically in pdf.js
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/tools.js b/src/display/editor/tools.js
+--- a/src/display/editor/tools.js
++++ b/src/display/editor/tools.js
+@@ -75,6 +75,25 @@ class ImageManager {
+ 
+   #cache = null;
+ 
++  static _checkIfSVGFitsInCanvas() {
++    // By default, Firefox doesn't rescale without preserving the aspect ratio
++    // when drawing an SVG image on a canvas, see https://bugzilla.mozilla.org/1547776.
++    // The "workaround" is to append "svgView(preserveAspectRatio(none))" to the
++    // url, but according to comment #15, it seems that it leads to unexpected
++    // behavior in Safari.
++    const svg = `data:image/svg+xml;charset=UTF-8,<svg viewBox="0 0 1 1" width="1" height="1" xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1" style="fill:red;"/></svg>`;
++    const canvas = new OffscreenCanvas(1, 3);
++    const ctx = canvas.getContext("2d");
++    const image = new Image();
++    image.src = svg;
++    const promise = image.decode().then(() => {
++      ctx.drawImage(image, 0, 0, 1, 1, 0, 0, 1, 3);
++      return new Uint32Array(ctx.getImageData(0, 0, 1, 1).data.buffer)[0] === 0;
++    });
++
++    return shadow(this, "_checkIfSVGFitsInCanvas", promise);
++  }
++
+   async #get(key, rawData) {
+     this.#cache ||= new Map();
+     let data = this.#cache.get(key);
+@@ -109,6 +128,8 @@ class ImageManager {
+       if (image.type === "image/svg+xml") {
+         // Unfortunately, createImageBitmap doesn't work with SVG images.
+         // (see https://bugzilla.mozilla.org/1841972).
++        const mustRemoveAspectRatioPromise =
++          ImageManager._checkIfSVGFitsInCanvas();
+         const fileReader = new FileReader();
+         const imageElement = new Image();
+         const imagePromise = new Promise((resolve, reject) => {
+@@ -117,8 +138,13 @@ class ImageManager {
+             data.isSvg = true;
+             resolve();
+           };
+-          fileReader.onload = () => {
+-            imageElement.src = data.svgUrl = fileReader.result;
++          fileReader.onload = async () => {
++            const url = (data.svgUrl = fileReader.result);
++            // We need to set the preserveAspectRatio to none in order to let
++            // the image fits the canvas when resizing.
++            imageElement.src = (await mustRemoveAspectRatioPromise)
++              ? `${url}#svgView(preserveAspectRatio(none))`
++              : url;
+           };
+           imageElement.onerror = fileReader.onerror = reject;
+         });
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.9
+- @babel/plugin-transform-modules-commonjs: ^7.22.5
+- @babel/preset-env: ^7.22.9
+- @babel/runtime: ^7.22.6
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.14
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001517
+- canvas: ^2.11.2
+- core-js: ^3.31.1
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.45.0
+- eslint-config-prettier: ^8.8.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.27.5
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.0
+- globals: ^13.20.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.27
+- postcss-dir-pseudo-class: ^8.0.0
+- prettier: ^3.0.0
+- puppeteer: ^20.9.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.2
+- stylelint-prettier: ^4.0.0
+- terser: ^5.19.2
+- through2: ^4.0.2
+- ttest: ^4.0.0
+- typescript: ^5.1.6
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/tools.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 /** @typedef {import("./editor.js").AnnotationEditor} AnnotationEditor */
+17 // eslint-disable-next-line max-len
+18 /** @typedef {import("./annotation_editor_layer.js").AnnotationEditorLayer} AnnotationEditorLayer */
+19 
+20 import {
+21   AnnotationEditorPrefix,
+22   AnnotationEditorType,
+23   FeatureTest,
+24   getUuid,
+25   shadow,
+26   Util,
+27   warn,
+28 } from "../../shared/util.js";
+29 import { getColorValues, getRGB, PixelsPerInch } from "../display_utils.js";
+30 
+31 function bindEvents(obj, element, names) {
+32   for (const name of names) {
+33     element.addEventListener(name, obj[name].bind(obj));
+34   }
+35 }
+36 
+37 /**
+38  * Convert a number between 0 and 100 into an hex number between 0 and 255.
+39  * @param {number} opacity
+40  * @return {string}
+41  */
+42 function opacityToHex(opacity) {
+43   return Math.round(Math.min(255, Math.max(1, 255 * opacity)))
+44     .toString(16)
+45     .padStart(2, "0");
+46 }
+47 
+48 /**
+49  * Class to create some unique ids for the different editors.
+50  */
+51 class IdManager {
+52   #id = 0;
+53 
+54   /**
+55    * Get a unique id.
+56    * @returns {string}
+57    */
+58   getId() {
+59     return `${AnnotationEditorPrefix}${this.#id++}`;
+60   }
+61 }
+62 
+63 /**
+64  * Class to manage the images used by the editors.
+65  * The main idea is to try to minimize the memory used by the images.
+66  * The images are cached and reused when possible
+67  * We use a refCounter to know when an image is not used anymore but we need to
+68  * be able to restore an image after a remove+undo, so we keep a file reference
+69  * or an url one.
+70  */
+71 class ImageManager {
+72   #baseId = getUuid();
+73 
+74   #id = 0;
+75 
+76   #cache = null;
+77 
+78   async #get(key, rawData) {
+79     this.#cache ||= new Map();
+80     let data = this.#cache.get(key);
+81     if (data === null) {
+82       // We already tried to load the image but it failed.
+83       return null;
+84     }
+85     if (data?.bitmap) {
+86       data.refCounter += 1;
+87       return data;
+88     }
+89     try {
+90       data ||= {
+91         bitmap: null,
+92         id: `image_${this.#baseId}_${this.#id++}`,
+93         refCounter: 0,
+94         isSvg: false,
+95       };
+96       let image;
+97       if (typeof rawData === "string") {
+98         data.url = rawData;
+99 
+100         const response = await fetch(rawData);
+101         if (!response.ok) {
+102           throw new Error(response.statusText);
+103         }
+104         image = await response.blob();
+105       } else {
+106         image = data.file = rawData;
+107       }
+108 
+109       if (image.type === "image/svg+xml") {
+110         // Unfortunately, createImageBitmap doesn't work with SVG images.
+111         // (see https://bugzilla.mozilla.org/1841972).
+112         const fileReader = new FileReader();
+113         const imageElement = new Image();
+114         const imagePromise = new Promise((resolve, reject) => {
+115           imageElement.onload = () => {
+116             data.bitmap = imageElement;
+117             data.isSvg = true;
+118             resolve();
+119           };
+120           fileReader.onload = () => {
+121             imageElement.src = data.svgUrl = fileReader.result;
+122           };
+123           imageElement.onerror = fileReader.onerror = reject;
+124         });
+125         fileReader.readAsDataURL(image);
+126         await imagePromise;
+127       } else {
+128         data.bitmap = await createImageBitmap(image);
+129       }
+130       data.refCounter = 1;
+131     } catch (e) {
+132       console.error(e);
+133       data = null;
+134     }
+135     this.#cache.set(key, data);
+136     if (data) {
+137       this.#cache.set(data.id, data);
+138     }
+139     return data;
+140   }
+141 
+142   async getFromFile(file) {
+143     const { lastModified, name, size, type } = file;
+144     return this.#get(`${lastModified}_${name}_${size}_${type}`, file);
+145   }
+146 
+147   async getFromUrl(url) {
+148     return this.#get(url, url);
+149   }
+150 
+151   async getFromId(id) {
+152     this.#cache ||= new Map();
+153     const data = this.#cache.get(id);
+154     if (!data) {
+155       return null;
+156     }
+157     if (data.bitmap) {
+158       data.refCounter += 1;
+159       return data;
+160     }
+161 
+162     if (data.file) {
+163       return this.getFromFile(data.file);
+164     }
+165     return this.getFromUrl(data.url);
+166   }
+167 
+168   getSvgUrl(id) {
+169     const data = this.#cache.get(id);
+170     if (!data?.isSvg) {
+171       return null;
+172     }
+173     return data.svgUrl;
+174   }
+175 
+176   deleteId(id) {
+177     this.#cache ||= new Map();
+178     const data = this.#cache.get(id);
+179     if (!data) {
+180       return;
+181     }
+182     data.refCounter -= 1;
+183     if (data.refCounter !== 0) {
+184       return;
+185     }
+186     data.bitmap = null;
+187   }
+188 
+189   // We can use the id only if it belongs this manager.
+190   // We must take care of having the right manager because we can copy/paste
+191   // some images from other documents, hence it'd be a pity to use an id from an
+192   // other manager.
+193   isValidId(id) {
+194     return id.startsWith(`image_${this.#baseId}_`);
+195   }
+196 }
+197 
+198 /**
+199  * Class to handle undo/redo.
+200  * Commands are just saved in a buffer.
+201  * If we hit some memory issues we could likely use a circular buffer.
+202  * It has to be used as a singleton.
+203  */
+204 class CommandManager {
+205   #commands = [];
+206 
+207   #locked = false;
+208 
+209   #maxSize;
+210 
+211   #position = -1;
+212 
+213   constructor(maxSize = 128) {
+214     this.#maxSize = maxSize;
+215   }
+216 
+217   /**
+218    * @typedef {Object} addOptions
+219    * @property {function} cmd
+220    * @property {function} undo
+221    * @property {boolean} mustExec
+222    * @property {number} type
+223    * @property {boolean} overwriteIfSameType
+224    * @property {boolean} keepUndo
+225    */
+226 
+227   /**
+228    * Add a new couple of commands to be used in case of redo/undo.
+229    * @param {addOptions} options
+230    */
+231   add({
+232     cmd,
+233     undo,
+234     mustExec,
+235     type = NaN,
+236     overwriteIfSameType = false,
+237     keepUndo = false,
+238   }) {
+239     if (mustExec) {
+240       cmd();
+241     }
+242 
+243     if (this.#locked) {
+244       return;
+245     }
+246 
+247     const save = { cmd, undo, type };
+248     if (this.#position === -1) {
+249       if (this.#commands.length > 0) {
+250         // All the commands have been undone and then a new one is added
+251         // hence we clear the queue.
+252         this.#commands.length = 0;
+253       }
+254       this.#position = 0;
+255       this.#commands.push(save);
+256       return;
+257     }
+258 
+259     if (overwriteIfSameType && this.#commands[this.#position].type === type) {
+260       // For example when we change a color we don't want to
+261       // be able to undo all the steps, hence we only want to
+262       // keep the last undoable action in this sequence of actions.
+263       if (keepUndo) {
+264         save.undo = this.#commands[this.#position].undo;
+265       }
+266       this.#commands[this.#position] = save;
+267       return;
+268     }
+269 
+270     const next = this.#position + 1;
+271     if (next === this.#maxSize) {
+272       this.#commands.splice(0, 1);
+273     } else {
+274       this.#position = next;
+275       if (next < this.#commands.length) {
+276         this.#commands.splice(next);
+277       }
+278     }
+279 
+280     this.#commands.push(save);
+281   }
+282 
+283   stopUndoAccumulation() {
+284     if (this.#position !== -1) {
+285       this.#commands[this.#position].type = NaN;
+286     }
+287   }
+288 
+289   /**
+290    * Undo the last command.
+291    */
+292   undo() {
+293     if (this.#position === -1) {
+294       // Nothing to undo.
+295       return;
+296     }
+297 
+298     // Avoid to insert something during the undo execution.
+299     this.#locked = true;
+300     this.#commands[this.#position].undo();
+301     this.#locked = false;
+302 
+303     this.#position -= 1;
+304   }
+305 
+306   /**
+307    * Redo the last command.
+308    */
+309   redo() {
+310     if (this.#position < this.#commands.length - 1) {
+311       this.#position += 1;
+312 
+313       // Avoid to insert something during the redo execution.
+314       this.#locked = true;
+315       this.#commands[this.#position].cmd();
+316       this.#locked = false;
+317     }
+318   }
+319 
+320   /**
+321    * Check if there is something to undo.
+322    * @returns {boolean}
+323    */
+324   hasSomethingToUndo() {
+325     return this.#position !== -1;
+326   }
+327 
+328   /**
+329    * Check if there is something to redo.
+330    * @returns {boolean}
+331    */
+332   hasSomethingToRedo() {
+333     return this.#position < this.#commands.length - 1;
+334   }
+335 
+336   destroy() {
+337     this.#commands = null;
+338   }
+339 }
+340 
+341 /**
+342  * Class to handle the different keyboards shortcuts we can have on mac or
+343  * non-mac OSes.
+344  */
+345 class KeyboardManager {
+346   /**
+347    * Create a new keyboard manager class.
+348    * @param {Array<Array>} callbacks - an array containing an array of shortcuts
+349    * and a callback to call.
+350    * A shortcut is a string like `ctrl+c` or `mac+ctrl+c` for mac OS.
+351    */
+352   constructor(callbacks) {
+353     this.buffer = [];
+354     this.callbacks = new Map();
+355     this.allKeys = new Set();
+356 
+357     const { isMac } = FeatureTest.platform;
+358     for (const [keys, callback, options = {}] of callbacks) {
+359       for (const key of keys) {
+360         const isMacKey = key.startsWith("mac+");
+361         if (isMac && isMacKey) {
+362           this.callbacks.set(key.slice(4), { callback, options });
+363           this.allKeys.add(key.split("+").at(-1));
+364         } else if (!isMac && !isMacKey) {
+365           this.callbacks.set(key, { callback, options });
+366           this.allKeys.add(key.split("+").at(-1));
+367         }
+368       }
+369     }
+370   }
+371 
+372   /**
+373    * Serialize an event into a string in order to match a
+374    * potential key for a callback.
+375    * @param {KeyboardEvent} event
+376    * @returns {string}
+377    */
+378   #serialize(event) {
+379     if (event.altKey) {
+380       this.buffer.push("alt");
+381     }
+382     if (event.ctrlKey) {
+383       this.buffer.push("ctrl");
+384     }
+385     if (event.metaKey) {
+386       this.buffer.push("meta");
+387     }
+388     if (event.shiftKey) {
+389       this.buffer.push("shift");
+390     }
+391     this.buffer.push(event.key);
+392     const str = this.buffer.join("+");
+393     this.buffer.length = 0;
+394 
+395     return str;
+396   }
+397 
+398   /**
+399    * Execute a callback, if any, for a given keyboard event.
+400    * The self is used as `this` in the callback.
+401    * @param {Object} self.
+402    * @param {KeyboardEvent} event
+403    * @returns
+404    */
+405   exec(self, event) {
+406     if (!this.allKeys.has(event.key)) {
+407       return;
+408     }
+409     const info = this.callbacks.get(this.#serialize(event));
+410     if (!info) {
+411       return;
+412     }
+413     const {
+414       callback,
+415       options: { bubbles = false, args = [], checker = null },
+416     } = info;
+417 
+418     if (checker && !checker(self, event)) {
+419       return;
+420     }
+421     callback.bind(self, ...args)();
+422 
+423     // For example, ctrl+s in a FreeText must be handled by the viewer, hence
+424     // the event must bubble.
+425     if (!bubbles) {
+426       event.stopPropagation();
+427       event.preventDefault();
+428     }
+429   }
+430 }
+431 
+432 class ColorManager {
+433   static _colorsMapping = new Map([
+434     ["CanvasText", [0, 0, 0]],
+435     ["Canvas", [255, 255, 255]],
+436   ]);
+437 
+438   get _colors() {
+439     if (
+440       typeof PDFJSDev !== "undefined" &&
+441       PDFJSDev.test("LIB") &&
+442       typeof document === "undefined"
+443     ) {
+444       return shadow(this, "_colors", ColorManager._colorsMapping);
+445     }
+446 
+447     const colors = new Map([
+448       ["CanvasText", null],
+449       ["Canvas", null],
+450     ]);
+451     getColorValues(colors);
+452     return shadow(this, "_colors", colors);
+453   }
+454 
+455   /**
+456    * In High Contrast Mode, the color on the screen is not always the
+457    * real color used in the pdf.
+458    * For example in some cases white can appear to be black but when saving
+459    * we want to have white.
+460    * @param {string} color
+461    * @returns {Array<number>}
+462    */
+463   convert(color) {
+464     const rgb = getRGB(color);
+465     if (!window.matchMedia("(forced-colors: active)").matches) {
+466       return rgb;
+467     }
+468 
+469     for (const [name, RGB] of this._colors) {
+470       if (RGB.every((x, i) => x === rgb[i])) {
+471         return ColorManager._colorsMapping.get(name);
+472       }
+473     }
+474     return rgb;
+475   }
+476 
+477   /**
+478    * An input element must have its color value as a hex string
+479    * and not as color name.
+480    * So this function converts a name into an hex string.
+481    * @param {string} name
+482    * @returns {string}
+483    */
+484   getHexCode(name) {
+485     const rgb = this._colors.get(name);
+486     if (!rgb) {
+487       return name;
+488     }
+489     return Util.makeHexColor(...rgb);
+490   }
+491 }
+492 
+493 /**
+494  * A pdf has several pages and each of them when it will rendered
+495  * will have an AnnotationEditorLayer which will contain the some
+496  * new Annotations associated to an editor in order to modify them.
+497  *
+498  * This class is used to manage all the different layers, editors and
+499  * some action like copy/paste, undo/redo, ...
+500  */
+501 class AnnotationEditorUIManager {
+502   #activeEditor = null;
+503 
+504   #allEditors = new Map();
+505 
+506   #allLayers = new Map();
+507 
+508   #annotationStorage = null;
+509 
+510   #commandManager = new CommandManager();
+511 
+512   #currentPageIndex = 0;
+513 
+514   #deletedAnnotationsElementIds = new Set();
+515 
+516   #editorTypes = null;
+517 
+518   #editorsToRescale = new Set();
+519 
+520   #eventBus = null;
+521 
+522   #filterFactory = null;
+523 
+524   #idManager = new IdManager();
+525 
+526   #isEnabled = false;
+527 
+528   #mode = AnnotationEditorType.NONE;
+529 
+530   #selectedEditors = new Set();
+531 
+532   #pageColors = null;
+533 
+534   #boundCopy = this.copy.bind(this);
+535 
+536   #boundCut = this.cut.bind(this);
+537 
+538   #boundPaste = this.paste.bind(this);
+539 
+540   #boundKeydown = this.keydown.bind(this);
+541 
+542   #boundOnEditingAction = this.onEditingAction.bind(this);
+543 
+544   #boundOnPageChanging = this.onPageChanging.bind(this);
+545 
+546   #boundOnScaleChanging = this.onScaleChanging.bind(this);
+547 
+548   #boundOnRotationChanging = this.onRotationChanging.bind(this);
+549 
+550   #previousStates = {
+551     isEditing: false,
+552     isEmpty: true,
+553     hasSomethingToUndo: false,
+554     hasSomethingToRedo: false,
+555     hasSelectedEditor: false,
+556   };
+557 
+558   #translation = [0, 0];
+559 
+560   #translationTimeoutId = null;
+561 
+562   #container = null;
+563 
+564   static TRANSLATE_SMALL = 1; // page units.
+565 
+566   static TRANSLATE_BIG = 10; // page units.
+567 
+568   static get _keyboardManager() {
+569     const proto = AnnotationEditorUIManager.prototype;
+570 
+571     const arrowChecker = self => {
+572       // If the focused element is an input, we don't want to handle the arrow.
+573       // For example, sliders can be controlled with the arrow keys.
+574       const { activeElement } = document;
+575       return (
+576         activeElement &&
+577         self.#container.contains(activeElement) &&
+578         self.hasSomethingToControl()
+579       );
+580     };
+581 
+582     const small = this.TRANSLATE_SMALL;
+583     const big = this.TRANSLATE_BIG;
+584 
+585     return shadow(
+586       this,
+587       "_keyboardManager",
+588       new KeyboardManager([
+589         [["ctrl+a", "mac+meta+a"], proto.selectAll],
+590         [["ctrl+z", "mac+meta+z"], proto.undo],
+591         [
+592           // On mac, depending of the OS version, the event.key is either "z" or
+593           // "Z" when the user presses "meta+shift+z".
+594           [
+595             "ctrl+y",
+596             "ctrl+shift+z",
+597             "mac+meta+shift+z",
+598             "ctrl+shift+Z",
+599             "mac+meta+shift+Z",
+600           ],
+601           proto.redo,
+602         ],
+603         [
+604           [
+605             "Backspace",
+606             "alt+Backspace",
+607             "ctrl+Backspace",
+608             "shift+Backspace",
+609             "mac+Backspace",
+610             "mac+alt+Backspace",
+611             "mac+ctrl+Backspace",
+612             "Delete",
+613             "ctrl+Delete",
+614             "shift+Delete",
+615             "mac+Delete",
+616           ],
+617           proto.delete,
+618         ],
+619         [["Escape", "mac+Escape"], proto.unselectAll],
+620         [
+621           ["ArrowLeft", "mac+ArrowLeft"],
+622           proto.translateSelectedEditors,
+623           { args: [-small, 0], checker: arrowChecker },
+624         ],
+625         [
+626           ["ctrl+ArrowLeft", "mac+shift+ArrowLeft"],
+627           proto.translateSelectedEditors,
+628           { args: [-big, 0], checker: arrowChecker },
+629         ],
+630         [
+631           ["ArrowRight", "mac+ArrowRight"],
+632           proto.translateSelectedEditors,
+633           { args: [small, 0], checker: arrowChecker },
+634         ],
+635         [
+636           ["ctrl+ArrowRight", "mac+shift+ArrowRight"],
+637           proto.translateSelectedEditors,
+638           { args: [big, 0], checker: arrowChecker },
+639         ],
+640         [
+641           ["ArrowUp", "mac+ArrowUp"],
+642           proto.translateSelectedEditors,
+643           { args: [0, -small], checker: arrowChecker },
+644         ],
+645         [
+646           ["ctrl+ArrowUp", "mac+shift+ArrowUp"],
+647           proto.translateSelectedEditors,
+648           { args: [0, -big], checker: arrowChecker },
+649         ],
+650         [
+651           ["ArrowDown", "mac+ArrowDown"],
+652           proto.translateSelectedEditors,
+653           { args: [0, small], checker: arrowChecker },
+654         ],
+655         [
+656           ["ctrl+ArrowDown", "mac+shift+ArrowDown"],
+657           proto.translateSelectedEditors,
+658           { args: [0, big], checker: arrowChecker },
+659         ],
+660       ])
+661     );
+662   }
+663 
+664   constructor(container, eventBus, pdfDocument, pageColors) {
+665     this.#container = container;
+666     this.#eventBus = eventBus;
+667     this.#eventBus._on("editingaction", this.#boundOnEditingAction);
+668     this.#eventBus._on("pagechanging", this.#boundOnPageChanging);
+669     this.#eventBus._on("scalechanging", this.#boundOnScaleChanging);
+670     this.#eventBus._on("rotationchanging", this.#boundOnRotationChanging);
+671     this.#annotationStorage = pdfDocument.annotationStorage;
+672     this.#filterFactory = pdfDocument.filterFactory;
+673     this.#pageColors = pageColors;
+674     this.viewParameters = {
+675       realScale: PixelsPerInch.PDF_TO_CSS_UNITS,
+676       rotation: 0,
+677     };
+678   }
+679 
+680   destroy() {
+681     this.#removeKeyboardManager();
+682     this.#eventBus._off("editingaction", this.#boundOnEditingAction);
+683     this.#eventBus._off("pagechanging", this.#boundOnPageChanging);
+684     this.#eventBus._off("scalechanging", this.#boundOnScaleChanging);
+685     this.#eventBus._off("rotationchanging", this.#boundOnRotationChanging);
+686     for (const layer of this.#allLayers.values()) {
+687       layer.destroy();
+688     }
+689     this.#allLayers.clear();
+690     this.#allEditors.clear();
+691     this.#editorsToRescale.clear();
+692     this.#activeEditor = null;
+693     this.#selectedEditors.clear();
+694     this.#commandManager.destroy();
+695   }
+696 
+697   get hcmFilter() {
+698     return shadow(
+699       this,
+700       "hcmFilter",
+701       this.#pageColors
+702         ? this.#filterFactory.addHCMFilter(
+703             this.#pageColors.foreground,
+704             this.#pageColors.background
+705           )
+706         : "none"
+707     );
+708   }
+709 
+710   onPageChanging({ pageNumber }) {
+711     this.#currentPageIndex = pageNumber - 1;
+712   }
+713 
+714   focusMainContainer() {
+715     this.#container.focus();
+716   }
+717 
+718   addShouldRescale(editor) {
+719     this.#editorsToRescale.add(editor);
+720   }
+721 
+722   removeShouldRescale(editor) {
+723     this.#editorsToRescale.delete(editor);
+724   }
+725 
+726   onScaleChanging({ scale }) {
+727     this.commitOrRemove();
+728     this.viewParameters.realScale = scale * PixelsPerInch.PDF_TO_CSS_UNITS;
+729     for (const editor of this.#editorsToRescale) {
+730       editor.onScaleChanging();
+731     }
+732   }
+733 
+734   onRotationChanging({ pagesRotation }) {
+735     this.commitOrRemove();
+736     this.viewParameters.rotation = pagesRotation;
+737   }
+738 
+739   /**
+740    * Add an editor in the annotation storage.
+741    * @param {AnnotationEditor} editor
+742    */
+743   addToAnnotationStorage(editor) {
+744     if (
+745       !editor.isEmpty() &&
+746       this.#annotationStorage &&
+747       !this.#annotationStorage.has(editor.id)
+748     ) {
+749       this.#annotationStorage.setValue(editor.id, editor);
+750     }
+751   }
+752 
+753   #addKeyboardManager() {
+754     // The keyboard events are caught at the container level in order to be able
+755     // to execute some callbacks even if the current page doesn't have focus.
+756     window.addEventListener("keydown", this.#boundKeydown, { capture: true });
+757   }
+758 
+759   #removeKeyboardManager() {
+760     window.removeEventListener("keydown", this.#boundKeydown, {
+761       capture: true,
+762     });
+763   }
+764 
+765   #addCopyPasteListeners() {
+766     document.addEventListener("copy", this.#boundCopy);
+767     document.addEventListener("cut", this.#boundCut);
+768     document.addEventListener("paste", this.#boundPaste);
+769   }
+770 
+771   #removeCopyPasteListeners() {
+772     document.removeEventListener("copy", this.#boundCopy);
+773     document.removeEventListener("cut", this.#boundCut);
+774     document.removeEventListener("paste", this.#boundPaste);
+775   }
+776 
+777   /**
+778    * Copy callback.
+779    * @param {ClipboardEvent} event
+780    */
+781   copy(event) {
+782     event.preventDefault();
+783 
+784     if (this.#activeEditor) {
+785       // An editor is being edited so just commit it.
+786       this.#activeEditor.commitOrRemove();
+787     }
+788 
+789     if (!this.hasSelection) {
+790       return;
+791     }
+792 
+793     const editors = [];
+794     for (const editor of this.#selectedEditors) {
+795       const serialized = editor.serialize(/* isForCopying = */ true);
+796       if (serialized) {
+797         editors.push(serialized);
+798       }
+799     }
+800     if (editors.length === 0) {
+801       return;
+802     }
+803 
+804     event.clipboardData.setData("application/pdfjs", JSON.stringify(editors));
+805   }
+806 
+807   /**
+808    * Cut callback.
+809    * @param {ClipboardEvent} event
+810    */
+811   cut(event) {
+812     this.copy(event);
+813     this.delete();
+814   }
+815 
+816   /**
+817    * Paste callback.
+818    * @param {ClipboardEvent} event
+819    */
+820   paste(event) {
+821     event.preventDefault();
+822 
+823     let data = event.clipboardData.getData("application/pdfjs");
+824     if (!data) {
+825       return;
+826     }
+827 
+828     try {
+829       data = JSON.parse(data);
+830     } catch (ex) {
+831       warn(`paste: "${ex.message}".`);
+832       return;
+833     }
+834 
+835     if (!Array.isArray(data)) {
+836       return;
+837     }
+838 
+839     this.unselectAll();
+840     const layer = this.currentLayer;
+841 
+842     try {
+843       const newEditors = [];
+844       for (const editor of data) {
+845         const deserializedEditor = layer.deserialize(editor);
+846         if (!deserializedEditor) {
+847           return;
+848         }
+849         newEditors.push(deserializedEditor);
+850       }
+851 
+852       const cmd = () => {
+853         for (const editor of newEditors) {
+854           this.#addEditorToLayer(editor);
+855         }
+856         this.#selectEditors(newEditors);
+857       };
+858       const undo = () => {
+859         for (const editor of newEditors) {
+860           editor.remove();
+861         }
+862       };
+863       this.addCommands({ cmd, undo, mustExec: true });
+864     } catch (ex) {
+865       warn(`paste: "${ex.message}".`);
+866     }
+867   }
+868 
+869   /**
+870    * Keydown callback.
+871    * @param {KeyboardEvent} event
+872    */
+873   keydown(event) {
+874     if (!this.getActive()?.shouldGetKeyboardEvents()) {
+875       AnnotationEditorUIManager._keyboardManager.exec(this, event);
+876     }
+877   }
+878 
+879   /**
+880    * Execute an action for a given name.
+881    * For example, the user can click on the "Undo" entry in the context menu
+882    * and it'll trigger the undo action.
+883    * @param {Object} details
+884    */
+885   onEditingAction(details) {
+886     if (["undo", "redo", "delete", "selectAll"].includes(details.name)) {
+887       this[details.name]();
+888     }
+889   }
+890 
+891   /**
+892    * Update the different possible states of this manager, e.g. is there
+893    * something to undo, redo, ...
+894    * @param {Object} details
+895    */
+896   #dispatchUpdateStates(details) {
+897     const hasChanged = Object.entries(details).some(
+898       ([key, value]) => this.#previousStates[key] !== value
+899     );
+900 
+901     if (hasChanged) {
+902       this.#eventBus.dispatch("annotationeditorstateschanged", {
+903         source: this,
+904         details: Object.assign(this.#previousStates, details),
+905       });
+906     }
+907   }
+908 
+909   #dispatchUpdateUI(details) {
+910     this.#eventBus.dispatch("annotationeditorparamschanged", {
+911       source: this,
+912       details,
+913     });
+914   }
+915 
+916   /**
+917    * Set the editing state.
+918    * It can be useful to temporarily disable it when the user is editing a
+919    * FreeText annotation.
+920    * @param {boolean} isEditing
+921    */
+922   setEditingState(isEditing) {
+923     if (isEditing) {
+924       this.#addKeyboardManager();
+925       this.#addCopyPasteListeners();
+926       this.#dispatchUpdateStates({
+927         isEditing: this.#mode !== AnnotationEditorType.NONE,
+928         isEmpty: this.#isEmpty(),
+929         hasSomethingToUndo: this.#commandManager.hasSomethingToUndo(),
+930         hasSomethingToRedo: this.#commandManager.hasSomethingToRedo(),
+931         hasSelectedEditor: false,
+932       });
+933     } else {
+934       this.#removeKeyboardManager();
+935       this.#removeCopyPasteListeners();
+936       this.#dispatchUpdateStates({
+937         isEditing: false,
+938       });
+939     }
+940   }
+941 
+942   registerEditorTypes(types) {
+943     if (this.#editorTypes) {
+944       return;
+945     }
+946     this.#editorTypes = types;
+947     for (const editorType of this.#editorTypes) {
+948       this.#dispatchUpdateUI(editorType.defaultPropertiesToUpdate);
+949     }
+950   }
+951 
+952   /**
+953    * Get an id.
+954    * @returns {string}
+955    */
+956   getId() {
+957     return this.#idManager.getId();
+958   }
+959 
+960   get currentLayer() {
+961     return this.#allLayers.get(this.#currentPageIndex);
+962   }
+963 
+964   get currentPageIndex() {
+965     return this.#currentPageIndex;
+966   }
+967 
+968   /**
+969    * Add a new layer for a page which will contains the editors.
+970    * @param {AnnotationEditorLayer} layer
+971    */
+972   addLayer(layer) {
+973     this.#allLayers.set(layer.pageIndex, layer);
+974     if (this.#isEnabled) {
+975       layer.enable();
+976     } else {
+977       layer.disable();
+978     }
+979   }
+980 
+981   /**
+982    * Remove a layer.
+983    * @param {AnnotationEditorLayer} layer
+984    */
+985   removeLayer(layer) {
+986     this.#allLayers.delete(layer.pageIndex);
+987   }
+988 
+989   /**
+990    * Change the editor mode (None, FreeText, Ink, ...)
+991    * @param {number} mode
+992    * @param {string|null} editId
+993    */
+994   updateMode(mode, editId = null) {
+995     this.#mode = mode;
+996     if (mode === AnnotationEditorType.NONE) {
+997       this.setEditingState(false);
+998       this.#disableAll();
+999       return;
+1000     }
+1001     this.setEditingState(true);
+1002     this.#enableAll();
+1003     for (const layer of this.#allLayers.values()) {
+1004       layer.updateMode(mode);
+1005     }
+1006     if (!editId) {
+1007       return;
+1008     }
+1009     for (const editor of this.#allEditors.values()) {
+1010       if (editor.annotationElementId === editId) {
+1011         this.setSelected(editor);
+1012         editor.enterInEditMode();
+1013         break;
+1014       }
+1015     }
+1016   }
+1017 
+1018   /**
+1019    * Update the toolbar if it's required to reflect the tool currently used.
+1020    * @param {number} mode
+1021    * @returns {undefined}
+1022    */
+1023   updateToolbar(mode) {
+1024     if (mode === this.#mode) {
+1025       return;
+1026     }
+1027     this.#eventBus.dispatch("switchannotationeditormode", {
+1028       source: this,
+1029       mode,
+1030     });
+1031   }
+1032 
+1033   /**
+1034    * Update a parameter in the current editor or globally.
+1035    * @param {number} type
+1036    * @param {*} value
+1037    */
+1038   updateParams(type, value) {
+1039     if (!this.#editorTypes) {
+1040       return;
+1041     }
+1042 
+1043     for (const editor of this.#selectedEditors) {
+1044       editor.updateParams(type, value);
+1045     }
+1046 
+1047     for (const editorType of this.#editorTypes) {
+1048       editorType.updateDefaultParams(type, value);
+1049     }
+1050   }
+1051 
+1052   /**
+1053    * Enable all the layers.
+1054    */
+1055   #enableAll() {
+1056     if (!this.#isEnabled) {
+1057       this.#isEnabled = true;
+1058       for (const layer of this.#allLayers.values()) {
+1059         layer.enable();
+1060       }
+1061     }
+1062   }
+1063 
+1064   /**
+1065    * Disable all the layers.
+1066    */
+1067   #disableAll() {
+1068     this.unselectAll();
+1069     if (this.#isEnabled) {
+1070       this.#isEnabled = false;
+1071       for (const layer of this.#allLayers.values()) {
+1072         layer.disable();
+1073       }
+1074     }
+1075   }
+1076 
+1077   /**
+1078    * Get all the editors belonging to a give page.
+1079    * @param {number} pageIndex
+1080    * @returns {Array<AnnotationEditor>}
+1081    */
+1082   getEditors(pageIndex) {
+1083     const editors = [];
+1084     for (const editor of this.#allEditors.values()) {
+1085       if (editor.pageIndex === pageIndex) {
+1086         editors.push(editor);
+1087       }
+1088     }
+1089     return editors;
+1090   }
+1091 
+1092   /**
+1093    * Get an editor with the given id.
+1094    * @param {string} id
+1095    * @returns {AnnotationEditor}
+1096    */
+1097   getEditor(id) {
+1098     return this.#allEditors.get(id);
+1099   }
+1100 
+1101   /**
+1102    * Add a new editor.
+1103    * @param {AnnotationEditor} editor
+1104    */
+1105   addEditor(editor) {
+1106     this.#allEditors.set(editor.id, editor);
+1107   }
+1108 
+1109   /**
+1110    * Remove an editor.
+1111    * @param {AnnotationEditor} editor
+1112    */
+1113   removeEditor(editor) {
+1114     this.#allEditors.delete(editor.id);
+1115     this.unselect(editor);
+1116     if (
+1117       !editor.annotationElementId ||
+1118       !this.#deletedAnnotationsElementIds.has(editor.annotationElementId)
+1119     ) {
+1120       this.#annotationStorage?.remove(editor.id);
+1121     }
+1122   }
+1123 
+1124   /**
+1125    * The annotation element with the given id has been deleted.
+1126    * @param {AnnotationEditor} editor
+1127    */
+1128   addDeletedAnnotationElement(editor) {
+1129     this.#deletedAnnotationsElementIds.add(editor.annotationElementId);
+1130     editor.deleted = true;
+1131   }
+1132 
+1133   /**
+1134    * Check if the annotation element with the given id has been deleted.
+1135    * @param {string} annotationElementId
+1136    * @returns {boolean}
+1137    */
+1138   isDeletedAnnotationElement(annotationElementId) {
+1139     return this.#deletedAnnotationsElementIds.has(annotationElementId);
+1140   }
+1141 
+1142   /**
+1143    * The annotation element with the given id have been restored.
+1144    * @param {AnnotationEditor} editor
+1145    */
+1146   removeDeletedAnnotationElement(editor) {
+1147     this.#deletedAnnotationsElementIds.delete(editor.annotationElementId);
+1148     editor.deleted = false;
+1149   }
+1150 
+1151   /**
+1152    * Add an editor to the layer it belongs to or add it to the global map.
+1153    * @param {AnnotationEditor} editor
+1154    */
+1155   #addEditorToLayer(editor) {
+1156     const layer = this.#allLayers.get(editor.pageIndex);
+1157     if (layer) {
+1158       layer.addOrRebuild(editor);
+1159     } else {
+1160       this.addEditor(editor);
+1161     }
+1162   }
+1163 
+1164   /**
+1165    * Set the given editor as the active one.
+1166    * @param {AnnotationEditor} editor
+1167    */
+1168   setActiveEditor(editor) {
+1169     if (this.#activeEditor === editor) {
+1170       return;
+1171     }
+1172 
+1173     this.#activeEditor = editor;
+1174     if (editor) {
+1175       this.#dispatchUpdateUI(editor.propertiesToUpdate);
+1176     }
+1177   }
+1178 
+1179   /**
+1180    * Add or remove an editor the current selection.
+1181    * @param {AnnotationEditor} editor
+1182    */
+1183   toggleSelected(editor) {
+1184     if (this.#selectedEditors.has(editor)) {
+1185       this.#selectedEditors.delete(editor);
+1186       editor.unselect();
+1187       this.#dispatchUpdateStates({
+1188         hasSelectedEditor: this.hasSelection,
+1189       });
+1190       return;
+1191     }
+1192     this.#selectedEditors.add(editor);
+1193     editor.select();
+1194     this.#dispatchUpdateUI(editor.propertiesToUpdate);
+1195     this.#dispatchUpdateStates({
+1196       hasSelectedEditor: true,
+1197     });
+1198   }
+1199 
+1200   /**
+1201    * Set the last selected editor.
+1202    * @param {AnnotationEditor} editor
+1203    */
+1204   setSelected(editor) {
+1205     for (const ed of this.#selectedEditors) {
+1206       if (ed !== editor) {
+1207         ed.unselect();
+1208       }
+1209     }
+1210     this.#selectedEditors.clear();
+1211 
+1212     this.#selectedEditors.add(editor);
+1213     editor.select();
+1214     this.#dispatchUpdateUI(editor.propertiesToUpdate);
+1215     this.#dispatchUpdateStates({
+1216       hasSelectedEditor: true,
+1217     });
+1218   }
+1219 
+1220   /**
+1221    * Check if the editor is selected.
+1222    * @param {AnnotationEditor} editor
+1223    */
+1224   isSelected(editor) {
+1225     return this.#selectedEditors.has(editor);
+1226   }
+1227 
+1228   /**
+1229    * Unselect an editor.
+1230    * @param {AnnotationEditor} editor
+1231    */
+1232   unselect(editor) {
+1233     editor.unselect();
+1234     this.#selectedEditors.delete(editor);
+1235     this.#dispatchUpdateStates({
+1236       hasSelectedEditor: this.hasSelection,
+1237     });
+1238   }
+1239 
+1240   get hasSelection() {
+1241     return this.#selectedEditors.size !== 0;
+1242   }
+1243 
+1244   stopUndoAccumulation() {
+1245     this.#commandManager.stopUndoAccumulation();
+1246   }
+1247 
+1248   /**
+1249    * Undo the last command.
+1250    */
+1251   undo() {
+1252     this.#commandManager.undo();
+1253     this.#dispatchUpdateStates({
+1254       hasSomethingToUndo: this.#commandManager.hasSomethingToUndo(),
+1255       hasSomethingToRedo: true,
+1256       isEmpty: this.#isEmpty(),
+1257     });
+1258   }
+1259 
+1260   /**
+1261    * Redo the last undoed command.
+1262    */
+1263   redo() {
+1264     this.#commandManager.redo();
+1265     this.#dispatchUpdateStates({
+1266       hasSomethingToUndo: true,
+1267       hasSomethingToRedo: this.#commandManager.hasSomethingToRedo(),
+1268       isEmpty: this.#isEmpty(),
+1269     });
+1270   }
+1271 
+1272   /**
+1273    * Add a command to execute (cmd) and another one to undo it.
+1274    * @param {Object} params
+1275    */
+1276   addCommands(params) {
+1277     this.#commandManager.add(params);
+1278     this.#dispatchUpdateStates({
+1279       hasSomethingToUndo: true,
+1280       hasSomethingToRedo: false,
+1281       isEmpty: this.#isEmpty(),
+1282     });
+1283   }
+1284 
+1285   #isEmpty() {
+1286     if (this.#allEditors.size === 0) {
+1287       return true;
+1288     }
+1289 
+1290     if (this.#allEditors.size === 1) {
+1291       for (const editor of this.#allEditors.values()) {
+1292         return editor.isEmpty();
+1293       }
+1294     }
+1295 
+1296     return false;
+1297   }
+1298 
+1299   /**
+1300    * Delete the current editor or all.
+1301    */
+1302   delete() {
+1303     this.commitOrRemove();
+1304     if (!this.hasSelection) {
+1305       return;
+1306     }
+1307 
+1308     const editors = [...this.#selectedEditors];
+1309     const cmd = () => {
+1310       for (const editor of editors) {
+1311         editor.remove();
+1312       }
+1313     };
+1314     const undo = () => {
+1315       for (const editor of editors) {
+1316         this.#addEditorToLayer(editor);
+1317       }
+1318     };
+1319 
+1320     this.addCommands({ cmd, undo, mustExec: true });
+1321   }
+1322 
+1323   commitOrRemove() {
+1324     // An editor is being edited so just commit it.
+1325     this.#activeEditor?.commitOrRemove();
+1326   }
+1327 
+1328   hasSomethingToControl() {
+1329     return this.#activeEditor || this.hasSelection;
+1330   }
+1331 
+1332   /**
+1333    * Select the editors.
+1334    * @param {Array<AnnotationEditor>} editors
+1335    */
+1336   #selectEditors(editors) {
+1337     this.#selectedEditors.clear();
+1338     for (const editor of editors) {
+1339       if (editor.isEmpty()) {
+1340         continue;
+1341       }
+1342       this.#selectedEditors.add(editor);
+1343       editor.select();
+1344     }
+1345     this.#dispatchUpdateStates({ hasSelectedEditor: true });
+1346   }
+1347 
+1348   /**
+1349    * Select all the editors.
+1350    */
+1351   selectAll() {
+1352     for (const editor of this.#selectedEditors) {
+1353       editor.commit();
+1354     }
+1355     this.#selectEditors(this.#allEditors.values());
+1356   }
+1357 
+1358   /**
+1359    * Unselect all the selected editors.
+1360    */
+1361   unselectAll() {
+1362     if (this.#activeEditor) {
+1363       // An editor is being edited so just commit it.
+1364       this.#activeEditor.commitOrRemove();
+1365       return;
+1366     }
+1367 
+1368     if (!this.hasSelection) {
+1369       return;
+1370     }
+1371     for (const editor of this.#selectedEditors) {
+1372       editor.unselect();
+1373     }
+1374     this.#selectedEditors.clear();
+1375     this.#dispatchUpdateStates({
+1376       hasSelectedEditor: false,
+1377     });
+1378   }
+1379 
+1380   translateSelectedEditors(x, y, noCommit = false) {
+1381     if (!noCommit) {
+1382       this.commitOrRemove();
+1383     }
+1384     if (!this.hasSelection) {
+1385       return;
+1386     }
+1387 
+1388     this.#translation[0] += x;
+1389     this.#translation[1] += y;
+1390     const [totalX, totalY] = this.#translation;
+1391     const editors = [...this.#selectedEditors];
+1392 
+1393     // We don't want to have an undo/redo for each translation so we wait a bit
+1394     // before adding the command to the command manager.
+1395     const TIME_TO_WAIT = 1000;
+1396 
+1397     if (this.#translationTimeoutId) {
+1398       clearTimeout(this.#translationTimeoutId);
+1399     }
+1400 
+1401     this.#translationTimeoutId = setTimeout(() => {
+1402       this.#translationTimeoutId = null;
+1403       this.#translation[0] = this.#translation[1] = 0;
+1404 
+1405       this.addCommands({
+1406         cmd: () => {
+1407           for (const editor of editors) {
+1408             if (this.#allEditors.has(editor.id)) {
+1409               editor.translateInPage(totalX, totalY);
+1410             }
+1411           }
+1412         },
+1413         undo: () => {
+1414           for (const editor of editors) {
+1415             if (this.#allEditors.has(editor.id)) {
+1416               editor.translateInPage(-totalX, -totalY);
+1417             }
+1418           }
+1419         },
+1420         mustExec: false,
+1421       });
+1422     }, TIME_TO_WAIT);
+1423 
+1424     for (const editor of editors) {
+1425       editor.translateInPage(x, y);
+1426     }
+1427   }
+1428 
+1429   /**
+1430    * Is the current editor the one passed as argument?
+1431    * @param {AnnotationEditor} editor
+1432    * @returns
+1433    */
+1434   isActive(editor) {
+1435     return this.#activeEditor === editor;
+1436   }
+1437 
+1438   /**
+1439    * Get the current active editor.
+1440    * @returns {AnnotationEditor|null}
+1441    */
+1442   getActive() {
+1443     return this.#activeEditor;
+1444   }
+1445 
+1446   /**
+1447    * Get the current editor mode.
+1448    * @returns {number}
+1449    */
+1450   getMode() {
+1451     return this.#mode;
+1452   }
+1453 
+1454   get imageManager() {
+1455     return shadow(this, "imageManager", new ImageManager());
+1456   }
+1457 }
+1458 
+1459 export {
+1460   AnnotationEditorUIManager,
+1461   bindEvents,
+1462   ColorManager,
+1463   CommandManager,
+1464   KeyboardManager,
+1465   opacityToHex,
+1466 };
+</code>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

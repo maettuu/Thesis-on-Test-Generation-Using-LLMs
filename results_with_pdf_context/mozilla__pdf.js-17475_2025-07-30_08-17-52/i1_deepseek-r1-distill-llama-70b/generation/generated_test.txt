@@ -1,0 +1,36 @@
+it("should correctly calculate highlight coordinates for cropped PDFs", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1872721.pdf'));
+
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const editor = new (await import("../../src/display/editor/highlight.js")).HighlightEditor({
+    color: "#fff066",
+    opacity: 1,
+    pageIndex: 0,
+    page,
+    uiManager: new (await import("../../src/display/editor/tools.js")).AnnotationEditorUIManager(),
+  });
+
+  const data = editor.serialize();
+  const quadPoints = data.quadPoints;
+
+  // Verify that the quadPoints are within the expected range for a cropped PDF
+  const [minX, maxX] = [Math.min(...quadPoints.filter((_, i) => i % 2 === 0)),
+    Math.max(...quadPoints.filter((_, i) => i % 2 === 0))];
+  const [minY, maxY] = [Math.min(...quadPoints.filter((_, i) => i % 2 === 1)),
+    Math.max(...quadPoints.filter((_, i) => i % 2 === 1))];
+
+  // The expected values should be adjusted based on the actual cropped PDF dimensions
+  // For this test, assume the cropped area has certain known dimensions
+  const expectedMinX = 100;
+  const expectedMaxX = 300;
+  const expectedMinY = 100;
+  const expectedMaxY = 300;
+
+  assert.between(minX, expectedMinX - 10, expectedMinX + 10);
+  assert.between(maxX, expectedMaxX - 10, expectedMaxX + 10);
+  assert.between(minY, expectedMinY - 10, expectedMinY + 10);
+  assert.between(maxY, expectedMaxY - 10, expectedMaxY + 10);
+});

@@ -1,0 +1,52 @@
+<think>
+Okay, I need to write a test that checks if the patch fixes the issue where large images in a PDF aren't rendered by pdf.js. The user provided the example.pdf file, so I'll use that.
+
+First, I'll set up the test using Jest. I'll create an async test block because I need to load the PDF and handle it asynchronously.
+
+I'll import the necessary modules. Since the test runs in Node.js, I'll use dynamic imports for the PDF.js modules. I'll need 'pdfjs-lib' for the PDFDocument and 'pdfjs-worker' for the worker.
+
+Next, I'll set up the worker and load the example PDF. I'll use fetch to get the file, but since it's a local file, I'll use a URL pointing to it. I'll create a blob and a URL for it.
+
+Once the PDF is loaded, I'll get the first page and render it. I'll create a canvas element to render the page.
+
+After rendering, I'll check if the image is drawn correctly. I'll extract the pixel data from the canvas and check if it's not transparent everywhere, which would indicate the image was rendered.
+
+I'll also handle any errors that might occur during loading or rendering.
+
+So, the test will load the PDF, render the page, and verify that the image is present by checking the canvas pixels.
+</think>
+
+```javascript
+it("should render large scanned images in PDF", async () => {
+  const { PDFDocument } = await import("../../web/pdf_document.js");
+  const { Worker } = await import("../../build/pdfjs-worker.js");
+  
+  const examplePdfUrl = "../../src/core/example.pdf";
+  const exampleFile = new File([new Blob()], "example.pdf");
+  const exampleFileUrl = URL.createObjectURL(exampleFile);
+  
+  const worker = new Worker("pdfjs-worker.js");
+  const pdf = await PDFDocument.load(exampleFileUrl, { worker });
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  
+  const renderTask = page.render({
+    canvasContext: canvas.getContext('2d'),
+    viewport,
+  });
+  
+  await renderTask.promise;
+  
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pixels = imgData.data;
+  
+  const expectedNonTransparent = true;
+  const actualNonTransparent = pixels.some((value) => value !== 0);
+  
+  expect(actualNonTransparent).toBe(expectedNonTransparent);
+});
+```

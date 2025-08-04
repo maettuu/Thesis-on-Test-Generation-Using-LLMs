@@ -1,0 +1,57 @@
+<think>
+Okay, I need to write a regression test for the issue where memory usage balloons when scrolling through a PDF. The patch provided adds a check to release ImageBitmap data if cleanup has run successfully. 
+
+First, I should understand what the patch does. It looks like in the WorkerTransport class, after a certain condition, it closes the ImageBitmap to free memory. So, the test needs to verify that memory usage is under control after applying the patch.
+
+I'll start by creating a test that opens a PDF and scrolls through multiple pages. Before the patch, this should cause high memory usage, but after the patch, it should be manageable. 
+
+I'll use PDFDocumentProxy and PDFPageProxy to simulate loading pages. I'll load a few pages, keep references to cause a memory leak, and then release them to see if the memory is freed.
+
+I need to track the JS heap size. Using performance.memory in Node.js can give me the used heap size. I'll take a baseline, then load pages, and check if the memory increases but then decreases after cleanup.
+
+I'll set up the test to create multiple pages, store them in an array, and then clear the array to simulate garbage collection. I'll measure the heap size before and after to ensure it's within an acceptable range.
+
+I should also handle any potential errors and use async/await for the test. I'll make sure to use the correct imports and structure the test as a self-contained function.
+
+Finally, I'll write the test using the provided imports and structure it to fail before the patch and pass after. The test will be concise and focus on memory usage when scrolling through pages.
+</think>
+
+```javascript
+it("should prevent memory ballooning when scrolling through PDF", async () => {
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { performance } = require("perf_hooks");
+
+  // Create a new PDF document proxy
+  const pdfProxy = new PDFDocumentProxy({
+    fetch: () => {
+      // Mock fetch to return a 1x1 PDF
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100))
+      });
+    }
+  });
+
+  // Load multiple pages to simulate scrolling
+  const pages = [];
+  for (let i = 0; i < 10; i++) {
+    const page = await pdfProxy.getPage(i);
+    pages.push(page);
+  }
+
+  // Measure memory usage
+  const usedHeap = performance.memory.usedHeapSize;
+
+  // Release references to pages
+  pages.length = 0;
+
+  // Force garbage collection (Node.js specific)
+  if (global.gc) {
+    global.gc();
+  }
+
+  // Verify memory has been freed
+  const finalHeap = performance.memory.usedHeapSize;
+  expect(finalHeap).toBeLessThan(usedHeap * 0.75);
+});
+```

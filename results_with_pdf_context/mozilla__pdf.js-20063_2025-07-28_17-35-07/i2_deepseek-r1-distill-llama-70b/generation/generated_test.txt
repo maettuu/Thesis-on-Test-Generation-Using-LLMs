@@ -1,0 +1,43 @@
+it("should render polygon annotation with fill color", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue20062.pdf'));
+
+  const doc = await loadingTask.promise;
+  const page = await doc.getPage(1);
+
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+
+  let annotation;
+
+  page.on('annotationloaded', (annotationArgs) => {
+    if (annotationArgs.annotation instanceof PolygonAnnotation) {
+      annotation = annotationArgs.annotation;
+    }
+  });
+
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport: page.getViewport({ scale: 1 })
+  });
+
+  const expectedFillColor = [0, 255, 0]; // Green fill color
+
+  const fillResolve = new Promise(resolve => {
+    renderTask.on('finish', () => {
+      const pixelData = context.getImageData(
+        canvas.width/2,
+        canvas.height/2,
+        1,
+        1
+      ).data;
+
+      resolve(pixelData);
+    });
+  });
+
+  const actualPixelData = await fillResolve;
+
+  expect(actualPixelData).toEqual(expectedFillColor.concat([255]));
+});

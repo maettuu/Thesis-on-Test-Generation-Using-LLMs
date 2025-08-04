@@ -1,0 +1,65 @@
+it("should create a straight line when Shift key is held during drawing", async () => {
+  const originalRAF = window.requestAnimationFrame;
+  window.requestAnimationFrame = (cb) => {
+    cb();
+    return 0;
+  };
+
+  const { InkEditor } = await import("../../src/display/editor/ink.js");
+  const dummyUiManager = {
+    rebuild: () => {},
+    _signal: new AbortController().signal,
+  };
+  const dummyParent = {
+    setEditingState: () => {},
+  };
+  const div = document.createElement("div");
+  // Create a canvas with defined dimensions.
+  const canvas = document.createElement("canvas");
+  canvas.width = 500;
+  canvas.height = 500;
+
+  const editor = new InkEditor({
+    uiManager: dummyUiManager,
+    parent: dummyParent,
+    div,
+    canvas,
+  });
+  // Ensure the editor is in edit mode.
+  editor.isInEditMode = () => true;
+  // Simulate a pointerdown event with the Shift key pressed.
+  const pointerDownEvent = {
+    button: 0,
+    offsetX: 10,
+    offsetY: 20,
+    shiftKey: true,
+    preventDefault: () => {},
+  };
+  editor.canvasPointerdown(pointerDownEvent);
+  // Simulate a pointerup event at a different location.
+  const pointerUpEvent = {
+    offsetX: 100,
+    offsetY: 200,
+    preventDefault: () => {},
+  };
+  editor.canvasPointerup(pointerUpEvent);
+
+  // The patch should have created a straight line, resulting in a bezier path of one segment:
+  // [[start, start, end, end]].
+  if (!editor.paths || editor.paths.length !== 1) {
+    throw new Error("Expected a single path to be recorded.");
+  }
+  const bezierPoints = editor.paths[0];
+  if (bezierPoints.length !== 1) {
+    throw new Error("Expected exactly one bezier segment for a straight line.");
+  }
+  const segment = bezierPoints[0];
+  const expected = [[10, 20], [10, 20], [100, 200], [100, 200]];
+  for (let i = 0; i < 4; i++) {
+    if (Math.abs(segment[i][0] - expected[i][0]) > 0.001 ||
+        Math.abs(segment[i][1] - expected[i][1]) > 0.001) {
+      throw new Error("The bezier segment does not match the expected straight line.");
+    }
+  }
+  window.requestAnimationFrame = originalRAF;
+});

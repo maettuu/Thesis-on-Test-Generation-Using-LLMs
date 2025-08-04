@@ -1,0 +1,4400 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Unable to decode image: InvalidStateError
+**Attach (recommended) or Link to PDF file here:**
+[org_AVA89V01U0$ (Black).pdf](https://github.com/mozilla/pdf.js/files/13180762/org_AVA89V01U0.Black.pdf)
+
+**Configuration:**
+- Web browser and its version: Chrome Version 118.0.5993.89 (Official Build) (64-bit)
+- Firefox Version 119.0 (64-bit)
+- Edge Version 118.0.2088.69 (Official build) (64-bit)
+- Operating system and its version: Windows 11 Enterprise Version 10.0.22621 Build 22621
+- PDF.js version: 4.0.132 [34781121c] (test viewer)
+- Is a browser extension: No
+
+**Steps to reproduce the problem:**
+1. Open the file in Acrobat. Main area is blacked out but you can see the edges of a CAD drawing along the borders that includes various characters.
+2. Open the file in PDF.js. Only the black rectangle in the center and the blue box in the upper right corner are rendered.
+
+**What is the expected behavior? (add screenshot)**
+This is the upper left corner at 200% zoom in Acrobat:
+![image](https://github.com/mozilla/pdf.js/assets/70534142/729c7d8c-890f-459a-84a0-fba1febc2fa0)
+
+**What went wrong? (add screenshot)**
+The console on Chrome:
+PDF a8c52134c310cca513061a5a2ce6ca91 [1.3 - / -] (PDF.js: 4.0.132 [34781121c])
+util.js:367 Warning: Unable to decode image "img_p0_1": "InvalidStateError: The source image could not be decoded.".
+util.js:367 Warning: Dependent image isn't ready yet
+
+The console on Firefox:
+PDF a8c52134c310cca513061a5a2ce6ca91 [1.3 - / -] (PDF.js: 4.0.132 [34781121c]) [app.js:1561:12](webpack://pdf.js/web/app.js)
+Warning: Unable to decode image "img_p0_1": "InvalidStateError: An attempt was made to use an object that is not, or is no longer, usable". [pdf.worker.mjs:339:13](https://mozilla.github.io/pdf.js/build/pdf.worker.mjs)
+Warning: Dependent image isn't ready yet 3 [util.js:367:12](webpack://pdf.js/src/shared/util.js)
+
+The console on Edge:
+PDF a8c52134c310cca513061a5a2ce6ca91 [1.3 - / -] (PDF.js: 4.0.132 [34781121c])
+util.js:367 Warning: Unable to decode image "img_p0_1": "InvalidStateError: The source image could not be decoded.".
+2util.js:367 Warning: Dependent image isn't ready yet
+util.js:367 Warning: Dependent image isn't ready yet
+
+This is the upper left corner at 200% zoom in Chrome:
+![image](https://github.com/mozilla/pdf.js/assets/70534142/f120f196-a634-4e58-8f3e-a937ef04d89a)
+
+**Link to a viewer (if hosted on a site other than mozilla.github.io/pdf.js or as Firefox/Chrome extension):**
+https://mozilla.github.io/pdf.js/web/viewer.html
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/core_utils.js b/src/core/core_utils.js
+--- a/src/core/core_utils.js
++++ b/src/core/core_utils.js
+@@ -27,6 +27,8 @@ import { Dict, isName, Ref, RefSet } from "./primitives.js";
+ import { BaseStream } from "./base_stream.js";
+ 
+ const PDF_VERSION_REGEXP = /^[1-9]\.\d$/;
++const MAX_INT_32 = 2 ** 31 - 1;
++const MIN_INT_32 = -(2 ** 31);
+ 
+ function getLookupTableFactory(initializer) {
+   let lookup;
+@@ -713,6 +715,8 @@ export {
+   lookupMatrix,
+   lookupNormalRect,
+   lookupRect,
++  MAX_INT_32,
++  MIN_INT_32,
+   MissingDataException,
+   numberToString,
+   ParserEOFException,
+
+diff --git a/src/core/image_resizer.js b/src/core/image_resizer.js
+--- a/src/core/image_resizer.js
++++ b/src/core/image_resizer.js
+@@ -14,6 +14,8 @@
+  */
+ 
+ import { FeatureTest, ImageKind, shadow, warn } from "../shared/util.js";
++import { convertToRGBA } from "../shared/image_utils.js";
++import { MAX_INT_32 } from "./core_utils.js";
+ 
+ const MIN_IMAGE_DIM = 2048;
+ 
+@@ -172,6 +174,18 @@ class ImageResizer {
+   }
+ 
+   async _createImage() {
++    const { _imgData: imgData } = this;
++    const { width, height } = imgData;
++
++    if (width * height * 4 > MAX_INT_32) {
++      // The resulting RGBA image is too large.
++      // We just rescale the data.
++      const result = this.#rescaleImageData();
++      if (result) {
++        return result;
++      }
++    }
++
+     const data = this._encodeBMP();
+     let decoder, imagePromise;
+ 
+@@ -206,8 +220,6 @@ class ImageResizer {
+     }
+ 
+     const { MAX_AREA, MAX_DIM } = ImageResizer;
+-    const { _imgData: imgData } = this;
+-    const { width, height } = imgData;
+     const minFactor = Math.max(
+       width / MAX_DIM,
+       height / MAX_DIM,
+@@ -268,6 +280,91 @@ class ImageResizer {
+     return imgData;
+   }
+ 
++  #rescaleImageData() {
++    const { _imgData: imgData } = this;
++    const { data, width, height, kind } = imgData;
++    const rgbaSize = width * height * 4;
++    // K is such as width * height * 4 / 2 ** K <= 2 ** 31 - 1
++    const K = Math.ceil(Math.log2(rgbaSize / MAX_INT_32));
++    const newWidth = width >> K;
++    const newHeight = height >> K;
++    let rgbaData;
++    let maxHeight = height;
++
++    // We try to allocate the buffer with the maximum size but it can fail.
++    try {
++      rgbaData = new Uint8Array(rgbaSize);
++    } catch {
++      // n is such as 2 ** n - 1 > width * height * 4
++      let n = Math.floor(Math.log2(rgbaSize + 1));
++
++      while (true) {
++        try {
++          rgbaData = new Uint8Array(2 ** n - 1);
++          break;
++        } catch {
++          n -= 1;
++        }
++      }
++
++      maxHeight = Math.floor((2 ** n - 1) / (width * 4));
++      const newSize = width * maxHeight * 4;
++      if (newSize < rgbaData.length) {
++        rgbaData = new Uint8Array(newSize);
++      }
++    }
++
++    const src32 = new Uint32Array(rgbaData.buffer);
++    const dest32 = new Uint32Array(newWidth * newHeight);
++
++    let srcPos = 0;
++    let newIndex = 0;
++    const step = Math.ceil(height / maxHeight);
++    const remainder = height % maxHeight === 0 ? height : height % maxHeight;
++    for (let k = 0; k < step; k++) {
++      const h = k < step - 1 ? maxHeight : remainder;
++      ({ srcPos } = convertToRGBA({
++        kind,
++        src: data,
++        dest: src32,
++        width,
++        height: h,
++        inverseDecode: this._isMask,
++        srcPos,
++      }));
++
++      for (let i = 0, ii = h >> K; i < ii; i++) {
++        const buf = src32.subarray((i << K) * width);
++        for (let j = 0; j < newWidth; j++) {
++          dest32[newIndex++] = buf[j << K];
++        }
++      }
++    }
++
++    if (ImageResizer.needsToBeResized(newWidth, newHeight)) {
++      imgData.data = dest32;
++      imgData.width = newWidth;
++      imgData.height = newHeight;
++      imgData.kind = ImageKind.RGBA_32BPP;
++
++      return null;
++    }
++
++    const canvas = new OffscreenCanvas(newWidth, newHeight);
++    const ctx = canvas.getContext("2d", { willReadFrequently: true });
++    ctx.putImageData(
++      new ImageData(new Uint8ClampedArray(dest32.buffer), newWidth, newHeight),
++      0,
++      0
++    );
++    imgData.data = null;
++    imgData.bitmap = canvas.transferToImageBitmap();
++    imgData.width = newWidth;
++    imgData.height = newHeight;
++
++    return imgData;
++  }
++
+   _encodeBMP() {
+     const { width, height, kind } = this._imgData;
+     let data = this._imgData.data;
+
+diff --git a/src/core/jbig2.js b/src/core/jbig2.js
+--- a/src/core/jbig2.js
++++ b/src/core/jbig2.js
+@@ -14,7 +14,14 @@
+  */
+ 
+ import { BaseException, shadow } from "../shared/util.js";
+-import { log2, readInt8, readUint16, readUint32 } from "./core_utils.js";
++import {
++  log2,
++  MAX_INT_32,
++  MIN_INT_32,
++  readInt8,
++  readUint16,
++  readUint32,
++} from "./core_utils.js";
+ import { ArithmeticDecoder } from "./arithmetic_decoder.js";
+ import { CCITTFaxDecoder } from "./ccitt.js";
+ 
+@@ -52,9 +59,6 @@ class DecodingContext {
+   }
+ }
+ 
+-const MAX_INT_32 = 2 ** 31 - 1;
+-const MIN_INT_32 = -(2 ** 31);
+-
+ // Annex A. Arithmetic Integer Decoding Procedure
+ // A.2 Procedure for decoding values
+ function decodeInteger(contextCache, procedure, decoder) {
+
+diff --git a/src/shared/image_utils.js b/src/shared/image_utils.js
+--- a/src/shared/image_utils.js
++++ b/src/shared/image_utils.js
+@@ -77,7 +77,8 @@ function convertRGBToRGBA({
+   height,
+ }) {
+   let i = 0;
+-  const len32 = src.length >> 2;
++  const len = width * height * 3;
++  const len32 = len >> 2;
+   const src32 = new Uint32Array(src.buffer, srcPos, len32);
+ 
+   if (FeatureTest.isLittleEndian) {
+@@ -94,7 +95,7 @@ function convertRGBToRGBA({
+       dest[destPos + 3] = (s3 >>> 8) | 0xff000000;
+     }
+ 
+-    for (let j = i * 4, jj = src.length; j < jj; j += 3) {
++    for (let j = i * 4, jj = srcPos + len; j < jj; j += 3) {
+       dest[destPos++] =
+         src[j] | (src[j + 1] << 8) | (src[j + 2] << 16) | 0xff000000;
+     }
+@@ -110,13 +111,13 @@ function convertRGBToRGBA({
+       dest[destPos + 3] = (s3 << 8) | 0xff;
+     }
+ 
+-    for (let j = i * 4, jj = src.length; j < jj; j += 3) {
++    for (let j = i * 4, jj = srcPos + len; j < jj; j += 3) {
+       dest[destPos++] =
+         (src[j] << 24) | (src[j + 1] << 16) | (src[j + 2] << 8) | 0xff;
+     }
+   }
+ 
+-  return { srcPos, destPos };
++  return { srcPos: srcPos + len, destPos };
+ }
+ 
+ function grayToRGBA(src, dest) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.0
+- @babel/preset-env: ^7.26.0
+- @babel/runtime: ^7.26.0
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.62
+- @types/node: ^22.9.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001680
+- core-js: ^3.39.0
+- eslint: ^9.15.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^3.9.1
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-unicorn: ^56.0.0
+- globals: ^15.12.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.4.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.4.49
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.10.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.3
+- vinyl: ^3.0.0
+- webpack: ^5.96.1
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: fetchData
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/core_utils.js
+1 /* Copyright 2019 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorPrefix,
+18   assert,
+19   BaseException,
+20   hexNumbers,
+21   objectSize,
+22   stringToPDFString,
+23   Util,
+24   warn,
+25 } from "../shared/util.js";
+26 import { Dict, isName, Ref, RefSet } from "./primitives.js";
+27 import { BaseStream } from "./base_stream.js";
+28 
+29 const PDF_VERSION_REGEXP = /^[1-9]\.\d$/;
+30 
+31 function getLookupTableFactory(initializer) {
+32   let lookup;
+33   return function () {
+34     if (initializer) {
+35       lookup = Object.create(null);
+36       initializer(lookup);
+37       initializer = null;
+38     }
+39     return lookup;
+40   };
+41 }
+42 
+43 class MissingDataException extends BaseException {
+44   constructor(begin, end) {
+45     super(`Missing data [${begin}, ${end})`, "MissingDataException");
+46     this.begin = begin;
+47     this.end = end;
+48   }
+49 }
+50 
+51 class ParserEOFException extends BaseException {
+52   constructor(msg) {
+53     super(msg, "ParserEOFException");
+54   }
+55 }
+56 
+57 class XRefEntryException extends BaseException {
+58   constructor(msg) {
+59     super(msg, "XRefEntryException");
+60   }
+61 }
+62 
+63 class XRefParseException extends BaseException {
+64   constructor(msg) {
+65     super(msg, "XRefParseException");
+66   }
+67 }
+68 
+69 /**
+70  * Combines multiple ArrayBuffers into a single Uint8Array.
+71  * @param {Array<ArrayBuffer>} arr - An array of ArrayBuffers.
+72  * @returns {Uint8Array}
+73  */
+74 function arrayBuffersToBytes(arr) {
+75   if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+76     for (const item of arr) {
+77       assert(
+78         item instanceof ArrayBuffer,
+79         "arrayBuffersToBytes - expected an ArrayBuffer."
+80       );
+81     }
+82   }
+83   const length = arr.length;
+84   if (length === 0) {
+85     return new Uint8Array(0);
+86   }
+87   if (length === 1) {
+88     return new Uint8Array(arr[0]);
+89   }
+90   let dataLength = 0;
+91   for (let i = 0; i < length; i++) {
+92     dataLength += arr[i].byteLength;
+93   }
+94   const data = new Uint8Array(dataLength);
+95   let pos = 0;
+96   for (let i = 0; i < length; i++) {
+97     const item = new Uint8Array(arr[i]);
+98     data.set(item, pos);
+99     pos += item.byteLength;
+100   }
+101   return data;
+102 }
+103 
+104 /**
+105  * Get the value of an inheritable property.
+106  *
+107  * If the PDF specification explicitly lists a property in a dictionary as
+108  * inheritable, then the value of the property may be present in the dictionary
+109  * itself or in one or more parents of the dictionary.
+110  *
+111  * If the key is not found in the tree, `undefined` is returned. Otherwise,
+112  * the value for the key is returned or, if `stopWhenFound` is `false`, a list
+113  * of values is returned.
+114  *
+115  * @param {Dict} dict - Dictionary from where to start the traversal.
+116  * @param {string} key - The key of the property to find the value for.
+117  * @param {boolean} getArray - Whether or not the value should be fetched as an
+118  *   array. The default value is `false`.
+119  * @param {boolean} stopWhenFound - Whether or not to stop the traversal when
+120  *   the key is found. If set to `false`, we always walk up the entire parent
+121  *   chain, for example to be able to find `\Resources` placed on multiple
+122  *   levels of the tree. The default value is `true`.
+123  */
+124 function getInheritableProperty({
+125   dict,
+126   key,
+127   getArray = false,
+128   stopWhenFound = true,
+129 }) {
+130   let values;
+131   const visited = new RefSet();
+132 
+133   while (dict instanceof Dict && !(dict.objId && visited.has(dict.objId))) {
+134     if (dict.objId) {
+135       visited.put(dict.objId);
+136     }
+137     const value = getArray ? dict.getArray(key) : dict.get(key);
+138     if (value !== undefined) {
+139       if (stopWhenFound) {
+140         return value;
+141       }
+142       (values ||= []).push(value);
+143     }
+144     dict = dict.get("Parent");
+145   }
+146   return values;
+147 }
+148 
+149 /**
+150  * Get the parent dictionary to update when a property is set.
+151  *
+152  * @param {Dict} dict - Dictionary from where to start the traversal.
+153  * @param {Ref} ref - The reference to the dictionary.
+154  * @param {XRef} xref - The `XRef` instance.
+155  */
+156 function getParentToUpdate(dict, ref, xref) {
+157   const visited = new RefSet();
+158   const firstDict = dict;
+159   const result = { dict: null, ref: null };
+160 
+161   while (dict instanceof Dict && !visited.has(ref)) {
+162     visited.put(ref);
+163     if (dict.has("T")) {
+164       break;
+165     }
+166     ref = dict.getRaw("Parent");
+167     if (!(ref instanceof Ref)) {
+168       return result;
+169     }
+170     dict = xref.fetch(ref);
+171   }
+172   if (dict instanceof Dict && dict !== firstDict) {
+173     result.dict = dict;
+174     result.ref = ref;
+175   }
+176   return result;
+177 }
+178 
+179 // prettier-ignore
+180 const ROMAN_NUMBER_MAP = [
+181   "", "C", "CC", "CCC", "CD", "D", "DC", "DCC", "DCCC", "CM",
+182   "", "X", "XX", "XXX", "XL", "L", "LX", "LXX", "LXXX", "XC",
+183   "", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"
+184 ];
+185 
+186 /**
+187  * Converts positive integers to (upper case) Roman numerals.
+188  * @param {number} number - The number that should be converted.
+189  * @param {boolean} lowerCase - Indicates if the result should be converted
+190  *   to lower case letters. The default value is `false`.
+191  * @returns {string} The resulting Roman number.
+192  */
+193 function toRomanNumerals(number, lowerCase = false) {
+194   assert(
+195     Number.isInteger(number) && number > 0,
+196     "The number should be a positive integer."
+197   );
+198 
+199   const roman =
+200     "M".repeat((number / 1000) | 0) +
+201     ROMAN_NUMBER_MAP[((number % 1000) / 100) | 0] +
+202     ROMAN_NUMBER_MAP[10 + (((number % 100) / 10) | 0)] +
+203     ROMAN_NUMBER_MAP[20 + (number % 10)];
+204   return lowerCase ? roman.toLowerCase() : roman;
+205 }
+206 
+207 // Calculate the base 2 logarithm of the number `x`. This differs from the
+208 // native function in the sense that it returns the ceiling value and that it
+209 // returns 0 instead of `Infinity`/`NaN` for `x` values smaller than/equal to 0.
+210 function log2(x) {
+211   return x > 0 ? Math.ceil(Math.log2(x)) : 0;
+212 }
+213 
+214 function readInt8(data, offset) {
+215   return (data[offset] << 24) >> 24;
+216 }
+217 
+218 function readUint16(data, offset) {
+219   return (data[offset] << 8) | data[offset + 1];
+220 }
+221 
+222 function readUint32(data, offset) {
+223   return (
+224     ((data[offset] << 24) |
+225       (data[offset + 1] << 16) |
+226       (data[offset + 2] << 8) |
+227       data[offset + 3]) >>>
+228     0
+229   );
+230 }
+231 
+232 // Checks if ch is one of the following characters: SPACE, TAB, CR or LF.
+233 function isWhiteSpace(ch) {
+234   return ch === 0x20 || ch === 0x09 || ch === 0x0d || ch === 0x0a;
+235 }
+236 
+237 /**
+238  * Checks if something is an Array containing only boolean values,
+239  * and (optionally) checks its length.
+240  * @param {any} arr
+241  * @param {number | null} len
+242  * @returns {boolean}
+243  */
+244 function isBooleanArray(arr, len) {
+245   return (
+246     Array.isArray(arr) &&
+247     (len === null || arr.length === len) &&
+248     arr.every(x => typeof x === "boolean")
+249   );
+250 }
+251 
+252 /**
+253  * Checks if something is an Array containing only numbers,
+254  * and (optionally) checks its length.
+255  * @param {any} arr
+256  * @param {number | null} len
+257  * @returns {boolean}
+258  */
+259 function isNumberArray(arr, len) {
+260   if (Array.isArray(arr)) {
+261     return (
+262       (len === null || arr.length === len) &&
+263       arr.every(x => typeof x === "number")
+264     );
+265   }
+266 
+267   // This check allows us to have typed arrays but not the
+268   // BigInt64Array/BigUint64Array types (their elements aren't "number").
+269   return (
+270     ArrayBuffer.isView(arr) &&
+271     (arr.length === 0 || typeof arr[0] === "number") &&
+272     (len === null || arr.length === len)
+273   );
+274 }
+275 
+276 // Returns the matrix, or the fallback value if it's invalid.
+277 function lookupMatrix(arr, fallback) {
+278   return isNumberArray(arr, 6) ? arr : fallback;
+279 }
+280 
+281 // Returns the rectangle, or the fallback value if it's invalid.
+282 function lookupRect(arr, fallback) {
+283   return isNumberArray(arr, 4) ? arr : fallback;
+284 }
+285 
+286 // Returns the normalized rectangle, or the fallback value if it's invalid.
+287 function lookupNormalRect(arr, fallback) {
+288   return isNumberArray(arr, 4) ? Util.normalizeRect(arr) : fallback;
+289 }
+290 
+291 /**
+292  * AcroForm field names use an array like notation to refer to
+293  * repeated XFA elements e.g. foo.bar[nnn].
+294  * see: XFA Spec Chapter 3 - Repeated Elements
+295  *
+296  * @param {string} path - XFA path name.
+297  * @returns {Array} - Array of Objects with the name and pos of
+298  * each part of the path.
+299  */
+300 function parseXFAPath(path) {
+301   const positionPattern = /(.+)\[(\d+)\]$/;
+302   return path.split(".").map(component => {
+303     const m = component.match(positionPattern);
+304     if (m) {
+305       return { name: m[1], pos: parseInt(m[2], 10) };
+306     }
+307     return { name: component, pos: 0 };
+308   });
+309 }
+310 
+311 function escapePDFName(str) {
+312   const buffer = [];
+313   let start = 0;
+314   for (let i = 0, ii = str.length; i < ii; i++) {
+315     const char = str.charCodeAt(i);
+316     // Whitespace or delimiters aren't regular chars, so escape them.
+317     if (
+318       char < 0x21 ||
+319       char > 0x7e ||
+320       char === 0x23 /* # */ ||
+321       char === 0x28 /* ( */ ||
+322       char === 0x29 /* ) */ ||
+323       char === 0x3c /* < */ ||
+324       char === 0x3e /* > */ ||
+325       char === 0x5b /* [ */ ||
+326       char === 0x5d /* ] */ ||
+327       char === 0x7b /* { */ ||
+328       char === 0x7d /* } */ ||
+329       char === 0x2f /* / */ ||
+330       char === 0x25 /* % */
+331     ) {
+332       if (start < i) {
+333         buffer.push(str.substring(start, i));
+334       }
+335       buffer.push(`#${char.toString(16)}`);
+336       start = i + 1;
+337     }
+338   }
+339 
+340   if (buffer.length === 0) {
+341     return str;
+342   }
+343 
+344   if (start < str.length) {
+345     buffer.push(str.substring(start, str.length));
+346   }
+347 
+348   return buffer.join("");
+349 }
+350 
+351 // Replace "(", ")", "\n", "\r" and "\" by "\(", "\)", "\\n", "\\r" and "\\"
+352 // in order to write it in a PDF file.
+353 function escapeString(str) {
+354   return str.replaceAll(/([()\\\n\r])/g, match => {
+355     if (match === "\n") {
+356       return "\\n";
+357     } else if (match === "\r") {
+358       return "\\r";
+359     }
+360     return `\\${match}`;
+361   });
+362 }
+363 
+364 function _collectJS(entry, xref, list, parents) {
+365   if (!entry) {
+366     return;
+367   }
+368 
+369   let parent = null;
+370   if (entry instanceof Ref) {
+371     if (parents.has(entry)) {
+372       // If we've already found entry then we've a cycle.
+373       return;
+374     }
+375     parent = entry;
+376     parents.put(parent);
+377     entry = xref.fetch(entry);
+378   }
+379   if (Array.isArray(entry)) {
+380     for (const element of entry) {
+381       _collectJS(element, xref, list, parents);
+382     }
+383   } else if (entry instanceof Dict) {
+384     if (isName(entry.get("S"), "JavaScript")) {
+385       const js = entry.get("JS");
+386       let code;
+387       if (js instanceof BaseStream) {
+388         code = js.getString();
+389       } else if (typeof js === "string") {
+390         code = js;
+391       }
+392       code &&= stringToPDFString(code).replaceAll("\x00", "");
+393       if (code) {
+394         list.push(code);
+395       }
+396     }
+397     _collectJS(entry.getRaw("Next"), xref, list, parents);
+398   }
+399 
+400   if (parent) {
+401     parents.remove(parent);
+402   }
+403 }
+404 
+405 function collectActions(xref, dict, eventType) {
+406   const actions = Object.create(null);
+407   const additionalActionsDicts = getInheritableProperty({
+408     dict,
+409     key: "AA",
+410     stopWhenFound: false,
+411   });
+412   if (additionalActionsDicts) {
+413     // additionalActionsDicts contains dicts from ancestors
+414     // as they're found in the tree from bottom to top.
+415     // So the dicts are visited in reverse order to guarantee
+416     // that actions from elder ancestors will be overwritten
+417     // by ones from younger ancestors.
+418     for (let i = additionalActionsDicts.length - 1; i >= 0; i--) {
+419       const additionalActions = additionalActionsDicts[i];
+420       if (!(additionalActions instanceof Dict)) {
+421         continue;
+422       }
+423       for (const key of additionalActions.getKeys()) {
+424         const action = eventType[key];
+425         if (!action) {
+426           continue;
+427         }
+428         const actionDict = additionalActions.getRaw(key);
+429         const parents = new RefSet();
+430         const list = [];
+431         _collectJS(actionDict, xref, list, parents);
+432         if (list.length > 0) {
+433           actions[action] = list;
+434         }
+435       }
+436     }
+437   }
+438   // Collect the Action if any (we may have one on pushbutton).
+439   if (dict.has("A")) {
+440     const actionDict = dict.get("A");
+441     const parents = new RefSet();
+442     const list = [];
+443     _collectJS(actionDict, xref, list, parents);
+444     if (list.length > 0) {
+445       actions.Action = list;
+446     }
+447   }
+448   return objectSize(actions) > 0 ? actions : null;
+449 }
+450 
+451 const XMLEntities = {
+452   /* < */ 0x3c: "&lt;",
+453   /* > */ 0x3e: "&gt;",
+454   /* & */ 0x26: "&amp;",
+455   /* " */ 0x22: "&quot;",
+456   /* ' */ 0x27: "&apos;",
+457 };
+458 
+459 function* codePointIter(str) {
+460   for (let i = 0, ii = str.length; i < ii; i++) {
+461     const char = str.codePointAt(i);
+462     if (char > 0xd7ff && (char < 0xe000 || char > 0xfffd)) {
+463       // char is represented by two u16
+464       i++;
+465     }
+466     yield char;
+467   }
+468 }
+469 
+470 function encodeToXmlString(str) {
+471   const buffer = [];
+472   let start = 0;
+473   for (let i = 0, ii = str.length; i < ii; i++) {
+474     const char = str.codePointAt(i);
+475     if (0x20 <= char && char <= 0x7e) {
+476       // ascii
+477       const entity = XMLEntities[char];
+478       if (entity) {
+479         if (start < i) {
+480           buffer.push(str.substring(start, i));
+481         }
+482         buffer.push(entity);
+483         start = i + 1;
+484       }
+485     } else {
+486       if (start < i) {
+487         buffer.push(str.substring(start, i));
+488       }
+489       buffer.push(`&#x${char.toString(16).toUpperCase()};`);
+490       if (char > 0xd7ff && (char < 0xe000 || char > 0xfffd)) {
+491         // char is represented by two u16
+492         i++;
+493       }
+494       start = i + 1;
+495     }
+496   }
+497 
+498   if (buffer.length === 0) {
+499     return str;
+500   }
+501   if (start < str.length) {
+502     buffer.push(str.substring(start, str.length));
+503   }
+504   return buffer.join("");
+505 }
+506 
+507 function validateFontName(fontFamily, mustWarn = false) {
+508   // See https://developer.mozilla.org/en-US/docs/Web/CSS/string.
+509   const m = /^("|').*("|')$/.exec(fontFamily);
+510   if (m && m[1] === m[2]) {
+511     const re = new RegExp(`[^\\\\]${m[1]}`);
+512     if (re.test(fontFamily.slice(1, -1))) {
+513       if (mustWarn) {
+514         warn(`FontFamily contains unescaped ${m[1]}: ${fontFamily}.`);
+515       }
+516       return false;
+517     }
+518   } else {
+519     // See https://developer.mozilla.org/en-US/docs/Web/CSS/custom-ident.
+520     for (const ident of fontFamily.split(/[ \t]+/)) {
+521       if (/^(\d|(-(\d|-)))/.test(ident) || !/^[\w-\\]+$/.test(ident)) {
+522         if (mustWarn) {
+523           warn(`FontFamily contains invalid <custom-ident>: ${fontFamily}.`);
+524         }
+525         return false;
+526       }
+527     }
+528   }
+529   return true;
+530 }
+531 
+532 function validateCSSFont(cssFontInfo) {
+533   // See https://developer.mozilla.org/en-US/docs/Web/CSS/font-style.
+534   const DEFAULT_CSS_FONT_OBLIQUE = "14";
+535   // See https://developer.mozilla.org/en-US/docs/Web/CSS/font-weight.
+536   const DEFAULT_CSS_FONT_WEIGHT = "400";
+537   const CSS_FONT_WEIGHT_VALUES = new Set([
+538     "100",
+539     "200",
+540     "300",
+541     "400",
+542     "500",
+543     "600",
+544     "700",
+545     "800",
+546     "900",
+547     "1000",
+548     "normal",
+549     "bold",
+550     "bolder",
+551     "lighter",
+552   ]);
+553 
+554   const { fontFamily, fontWeight, italicAngle } = cssFontInfo;
+555 
+556   if (!validateFontName(fontFamily, true)) {
+557     return false;
+558   }
+559 
+560   const weight = fontWeight ? fontWeight.toString() : "";
+561   cssFontInfo.fontWeight = CSS_FONT_WEIGHT_VALUES.has(weight)
+562     ? weight
+563     : DEFAULT_CSS_FONT_WEIGHT;
+564 
+565   const angle = parseFloat(italicAngle);
+566   cssFontInfo.italicAngle =
+567     isNaN(angle) || angle < -90 || angle > 90
+568       ? DEFAULT_CSS_FONT_OBLIQUE
+569       : italicAngle.toString();
+570 
+571   return true;
+572 }
+573 
+574 function recoverJsURL(str) {
+575   // Attempt to recover valid URLs from `JS` entries with certain
+576   // white-listed formats:
+577   //  - window.open('http://example.com')
+578   //  - app.launchURL('http://example.com', true)
+579   //  - xfa.host.gotoURL('http://example.com')
+580   const URL_OPEN_METHODS = ["app.launchURL", "window.open", "xfa.host.gotoURL"];
+581   const regex = new RegExp(
+582     "^\\s*(" +
+583       URL_OPEN_METHODS.join("|").replaceAll(".", "\\.") +
+584       ")\\((?:'|\")([^'\"]*)(?:'|\")(?:,\\s*(\\w+)\\)|\\))",
+585     "i"
+586   );
+587 
+588   const jsUrl = regex.exec(str);
+589   if (jsUrl?.[2]) {
+590     return {
+591       url: jsUrl[2],
+592       newWindow: jsUrl[1] === "app.launchURL" && jsUrl[3] === "true",
+593     };
+594   }
+595 
+596   return null;
+597 }
+598 
+599 function numberToString(value) {
+600   if (Number.isInteger(value)) {
+601     return value.toString();
+602   }
+603 
+604   const roundedValue = Math.round(value * 100);
+605   if (roundedValue % 100 === 0) {
+606     return (roundedValue / 100).toString();
+607   }
+608 
+609   if (roundedValue % 10 === 0) {
+610     return value.toFixed(1);
+611   }
+612 
+613   return value.toFixed(2);
+614 }
+615 
+616 function getNewAnnotationsMap(annotationStorage) {
+617   if (!annotationStorage) {
+618     return null;
+619   }
+620   const newAnnotationsByPage = new Map();
+621   // The concept of page in a XFA is very different, so
+622   // editing is just not implemented.
+623   for (const [key, value] of annotationStorage) {
+624     if (!key.startsWith(AnnotationEditorPrefix)) {
+625       continue;
+626     }
+627     let annotations = newAnnotationsByPage.get(value.pageIndex);
+628     if (!annotations) {
+629       annotations = [];
+630       newAnnotationsByPage.set(value.pageIndex, annotations);
+631     }
+632     annotations.push(value);
+633   }
+634   return newAnnotationsByPage.size > 0 ? newAnnotationsByPage : null;
+635 }
+636 
+637 function stringToAsciiOrUTF16BE(str) {
+638   return isAscii(str) ? str : stringToUTF16String(str, /* bigEndian = */ true);
+639 }
+640 
+641 function isAscii(str) {
+642   return /^[\x00-\x7F]*$/.test(str);
+643 }
+644 
+645 function stringToUTF16HexString(str) {
+646   const buf = [];
+647   for (let i = 0, ii = str.length; i < ii; i++) {
+648     const char = str.charCodeAt(i);
+649     buf.push(hexNumbers[(char >> 8) & 0xff], hexNumbers[char & 0xff]);
+650   }
+651   return buf.join("");
+652 }
+653 
+654 function stringToUTF16String(str, bigEndian = false) {
+655   const buf = [];
+656   if (bigEndian) {
+657     buf.push("\xFE\xFF");
+658   }
+659   for (let i = 0, ii = str.length; i < ii; i++) {
+660     const char = str.charCodeAt(i);
+661     buf.push(
+662       String.fromCharCode((char >> 8) & 0xff),
+663       String.fromCharCode(char & 0xff)
+664     );
+665   }
+666   return buf.join("");
+667 }
+668 
+669 function getRotationMatrix(rotation, width, height) {
+670   switch (rotation) {
+671     case 90:
+672       return [0, 1, -1, 0, width, 0];
+673     case 180:
+674       return [-1, 0, 0, -1, width, height];
+675     case 270:
+676       return [0, -1, 1, 0, 0, height];
+677     default:
+678       throw new Error("Invalid rotation");
+679   }
+680 }
+681 
+682 /**
+683  * Get the number of bytes to use to represent the given positive integer.
+684  * If n is zero, the function returns 0 which means that we don't need to waste
+685  * a byte to represent it.
+686  * @param {number} x - a positive integer.
+687  * @returns {number}
+688  */
+689 function getSizeInBytes(x) {
+690   // n bits are required for numbers up to 2^n - 1.
+691   // So for a number x, we need ceil(log2(1 + x)) bits.
+692   return Math.ceil(Math.ceil(Math.log2(1 + x)) / 8);
+693 }
+694 
+695 export {
+696   arrayBuffersToBytes,
+697   codePointIter,
+698   collectActions,
+699   encodeToXmlString,
+700   escapePDFName,
+701   escapeString,
+702   getInheritableProperty,
+703   getLookupTableFactory,
+704   getNewAnnotationsMap,
+705   getParentToUpdate,
+706   getRotationMatrix,
+707   getSizeInBytes,
+708   isAscii,
+709   isBooleanArray,
+710   isNumberArray,
+711   isWhiteSpace,
+712   log2,
+713   lookupMatrix,
+714   lookupNormalRect,
+715   lookupRect,
+716   MissingDataException,
+717   numberToString,
+718   ParserEOFException,
+719   parseXFAPath,
+720   PDF_VERSION_REGEXP,
+721   readInt8,
+722   readUint16,
+723   readUint32,
+724   recoverJsURL,
+725   stringToAsciiOrUTF16BE,
+726   stringToUTF16HexString,
+727   stringToUTF16String,
+728   toRomanNumerals,
+729   validateCSSFont,
+730   validateFontName,
+731   XRefEntryException,
+732   XRefParseException,
+733 };
+File:
+src/core/image_resizer.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { FeatureTest, ImageKind, shadow, warn } from "../shared/util.js";
+17 
+18 const MIN_IMAGE_DIM = 2048;
+19 
+20 // In Chrome, there aren't max dimensions but only a max area. So an image with
+21 // a very large dimensions is acceptable but it probably doesn't hurt to reduce
+22 // it when considering that it will finally rendered on a small canvas.
+23 const MAX_IMAGE_DIM = 65537;
+24 const MAX_ERROR = 128;
+25 
+26 // Large images are encoded in using the BMP format (it's a way faster than
+27 // encoding in PNG because there are no checksums to compute).
+28 // Unfortunately, createImageBitmap will create a task in the main thread in
+29 // order to build the bitmap, hence the main thread is blocked during the
+30 // decoding which can be a bit long (see bug 1817244).
+31 // When bug 1759728 is fixed we can remove the BMP workaround and at least it
+32 // should be a way faster to create the bitmap.
+33 
+34 class ImageResizer {
+35   static #goodSquareLength = MIN_IMAGE_DIM;
+36 
+37   static #isImageDecoderSupported = FeatureTest.isImageDecoderSupported;
+38 
+39   constructor(imgData, isMask) {
+40     this._imgData = imgData;
+41     this._isMask = isMask;
+42   }
+43 
+44   static get canUseImageDecoder() {
+45     return shadow(
+46       this,
+47       "canUseImageDecoder",
+48       this.#isImageDecoderSupported
+49         ? ImageDecoder.isTypeSupported("image/bmp")
+50         : Promise.resolve(false)
+51     );
+52   }
+53 
+54   static needsToBeResized(width, height) {
+55     if (width <= this.#goodSquareLength && height <= this.#goodSquareLength) {
+56       return false;
+57     }
+58 
+59     const { MAX_DIM } = this;
+60     if (width > MAX_DIM || height > MAX_DIM) {
+61       return true;
+62     }
+63 
+64     const area = width * height;
+65     if (this._hasMaxArea) {
+66       return area > this.MAX_AREA;
+67     }
+68 
+69     if (area < this.#goodSquareLength ** 2) {
+70       return false;
+71     }
+72 
+73     // We try as much as possible to avoid to compute the max area.
+74     if (this._areGoodDims(width, height)) {
+75       this.#goodSquareLength = Math.max(
+76         this.#goodSquareLength,
+77         Math.floor(Math.sqrt(width * height))
+78       );
+79       return false;
+80     }
+81 
+82     // TODO: the computation can be a bit long because we potentially allocate
+83     // some large canvas, so in the Firefox case this value (and MAX_DIM) can be
+84     // infered from prefs (MAX_AREA = gfx.max-alloc-size / 4, 4 is because of
+85     // RGBA).
+86     this.#goodSquareLength = this._guessMax(
+87       this.#goodSquareLength,
+88       MAX_DIM,
+89       MAX_ERROR,
+90       0
+91     );
+92     const maxArea = (this.MAX_AREA = this.#goodSquareLength ** 2);
+93 
+94     return area > maxArea;
+95   }
+96 
+97   static get MAX_DIM() {
+98     return shadow(
+99       this,
+100       "MAX_DIM",
+101       this._guessMax(MIN_IMAGE_DIM, MAX_IMAGE_DIM, 0, 1)
+102     );
+103   }
+104 
+105   static get MAX_AREA() {
+106     this._hasMaxArea = true;
+107     return shadow(
+108       this,
+109       "MAX_AREA",
+110       this._guessMax(this.#goodSquareLength, this.MAX_DIM, MAX_ERROR, 0) ** 2
+111     );
+112   }
+113 
+114   static set MAX_AREA(area) {
+115     if (area >= 0) {
+116       this._hasMaxArea = true;
+117       shadow(this, "MAX_AREA", area);
+118     }
+119   }
+120 
+121   static setOptions({
+122     canvasMaxAreaInBytes = -1,
+123     isImageDecoderSupported = false,
+124   }) {
+125     if (!this._hasMaxArea) {
+126       // Divide by 4 to have the value in pixels.
+127       this.MAX_AREA = canvasMaxAreaInBytes >> 2;
+128     }
+129     this.#isImageDecoderSupported = isImageDecoderSupported;
+130   }
+131 
+132   static _areGoodDims(width, height) {
+133     try {
+134       // This code is working in either Firefox or Chrome.
+135       // There is a faster solution using transferToImageBitmap which is faster
+136       // in Firefox (when the dimensions are wrong the resulting bitmap has its
+137       // dimensions equal to 1) but it doesn't find the correct values in
+138       // Chrome.
+139       const canvas = new OffscreenCanvas(width, height);
+140       const ctx = canvas.getContext("2d");
+141       ctx.fillRect(0, 0, 1, 1);
+142       const opacity = ctx.getImageData(0, 0, 1, 1).data[3];
+143       canvas.width = canvas.height = 1;
+144       return opacity !== 0;
+145     } catch {
+146       return false;
+147     }
+148   }
+149 
+150   static _guessMax(start, end, tolerance, defaultHeight) {
+151     // We don't really need to have exact values.
+152     // When we're here then we're in a corner case: we've a very large image.
+153     // So we could potentially downscale an image which fits in the canvas,
+154     // it's maybe a pity in term of perfs but we'll reduce the memory use.
+155     // The tolerance is the acceptable error we can make on the limit we want.
+156     // On Chrome, when the tolerance 0 then it can take ~5s to compute the max
+157     // area... and having a tolerance of 128 divides the time by 2.
+158     while (start + tolerance + 1 < end) {
+159       const middle = Math.floor((start + end) / 2);
+160       const height = defaultHeight || middle;
+161       if (this._areGoodDims(middle, height)) {
+162         start = middle;
+163       } else {
+164         end = middle;
+165       }
+166     }
+167     return start;
+168   }
+169 
+170   static async createImage(imgData, isMask = false) {
+171     return new ImageResizer(imgData, isMask)._createImage();
+172   }
+173 
+174   async _createImage() {
+175     const data = this._encodeBMP();
+176     let decoder, imagePromise;
+177 
+178     if (await ImageResizer.canUseImageDecoder) {
+179       decoder = new ImageDecoder({
+180         data,
+181         type: "image/bmp",
+182         preferAnimation: false,
+183         transfer: [data.buffer],
+184       });
+185       imagePromise = decoder
+186         .decode()
+187         .catch(reason => {
+188           warn(`BMP image decoding failed: ${reason}`);
+189           // It's a bit unfortunate to create the BMP twice but we shouldn't be
+190           // here in the first place.
+191           return createImageBitmap(
+192             new Blob([this._encodeBMP().buffer], {
+193               type: "image/bmp",
+194             })
+195           );
+196         })
+197         .finally(() => {
+198           decoder.close();
+199         });
+200     } else {
+201       imagePromise = createImageBitmap(
+202         new Blob([data.buffer], {
+203           type: "image/bmp",
+204         })
+205       );
+206     }
+207 
+208     const { MAX_AREA, MAX_DIM } = ImageResizer;
+209     const { _imgData: imgData } = this;
+210     const { width, height } = imgData;
+211     const minFactor = Math.max(
+212       width / MAX_DIM,
+213       height / MAX_DIM,
+214       Math.sqrt((width * height) / MAX_AREA)
+215     );
+216 
+217     const firstFactor = Math.max(minFactor, 2);
+218 
+219     // Add 1 to the ratio and round it with 1 digit.
+220     // We add 1.25 in order to have a final image under the limits
+221     // (and not just at the limits) to reduce memory use.
+222     const factor = Math.round(10 * (minFactor + 1.25)) / 10 / firstFactor;
+223 
+224     const N = Math.floor(Math.log2(factor));
+225     const steps = new Array(N + 2).fill(2);
+226     steps[0] = firstFactor;
+227     steps.splice(-1, 1, factor / (1 << N));
+228 
+229     let newWidth = width;
+230     let newHeight = height;
+231     const result = await imagePromise;
+232     let bitmap = result.image || result;
+233 
+234     for (const step of steps) {
+235       const prevWidth = newWidth;
+236       const prevHeight = newHeight;
+237 
+238       // See bug 1820511 (Windows specific bug).
+239       // TODO: once the above bug is fixed we could revert to:
+240       // newWidth = Math.floor(newWidth / 2);
+241       newWidth = Math.floor(newWidth / step) - 1;
+242       newHeight = Math.floor(newHeight / step) - 1;
+243 
+244       const canvas = new OffscreenCanvas(newWidth, newHeight);
+245       const ctx = canvas.getContext("2d");
+246       ctx.drawImage(
+247         bitmap,
+248         0,
+249         0,
+250         prevWidth,
+251         prevHeight,
+252         0,
+253         0,
+254         newWidth,
+255         newHeight
+256       );
+257 
+258       // Release the resources associated with the bitmap.
+259       bitmap.close();
+260       bitmap = canvas.transferToImageBitmap();
+261     }
+262 
+263     imgData.data = null;
+264     imgData.bitmap = bitmap;
+265     imgData.width = newWidth;
+266     imgData.height = newHeight;
+267 
+268     return imgData;
+269   }
+270 
+271   _encodeBMP() {
+272     const { width, height, kind } = this._imgData;
+273     let data = this._imgData.data;
+274     let bitPerPixel;
+275     let colorTable = new Uint8Array(0);
+276     let maskTable = colorTable;
+277     let compression = 0;
+278 
+279     // Each row of the image must be padded in order to have a final size which
+280     // is a multiple of 4.
+281 
+282     switch (kind) {
+283       case ImageKind.GRAYSCALE_1BPP: {
+284         bitPerPixel = 1;
+285         colorTable = new Uint8Array(
+286           this._isMask
+287             ? [255, 255, 255, 255, 0, 0, 0, 0]
+288             : [0, 0, 0, 0, 255, 255, 255, 255]
+289         );
+290         const rowLen = (width + 7) >> 3;
+291         const rowSize = (rowLen + 3) & -4;
+292         if (rowLen !== rowSize) {
+293           const newData = new Uint8Array(rowSize * height);
+294           let k = 0;
+295           for (
+296             let i = 0, ii = height * rowLen;
+297             i < ii;
+298             i += rowLen, k += rowSize
+299           ) {
+300             newData.set(data.subarray(i, i + rowLen), k);
+301           }
+302           data = newData;
+303         }
+304         break;
+305       }
+306       case ImageKind.RGB_24BPP: {
+307         bitPerPixel = 24;
+308         if (width & 3) {
+309           const rowLen = 3 * width;
+310           const rowSize = (rowLen + 3) & -4;
+311           const extraLen = rowSize - rowLen;
+312           const newData = new Uint8Array(rowSize * height);
+313           let k = 0;
+314           for (let i = 0, ii = height * rowLen; i < ii; i += rowLen) {
+315             const row = data.subarray(i, i + rowLen);
+316             for (let j = 0; j < rowLen; j += 3) {
+317               newData[k++] = row[j + 2];
+318               newData[k++] = row[j + 1];
+319               newData[k++] = row[j];
+320             }
+321             k += extraLen;
+322           }
+323           data = newData;
+324         } else {
+325           for (let i = 0, ii = data.length; i < ii; i += 3) {
+326             // Just swap R and B.
+327             const tmp = data[i];
+328             data[i] = data[i + 2];
+329             data[i + 2] = tmp;
+330           }
+331         }
+332         break;
+333       }
+334       case ImageKind.RGBA_32BPP:
+335         bitPerPixel = 32;
+336         compression = 3;
+337         maskTable = new Uint8Array(
+338           4 /* R mask */ +
+339             4 /* G mask */ +
+340             4 /* B mask */ +
+341             4 /* A mask */ +
+342             52 /* Windows color space stuff */
+343         );
+344         const view = new DataView(maskTable.buffer);
+345         if (FeatureTest.isLittleEndian) {
+346           view.setUint32(0, 0x000000ff, true);
+347           view.setUint32(4, 0x0000ff00, true);
+348           view.setUint32(8, 0x00ff0000, true);
+349           view.setUint32(12, 0xff000000, true);
+350         } else {
+351           view.setUint32(0, 0xff000000, true);
+352           view.setUint32(4, 0x00ff0000, true);
+353           view.setUint32(8, 0x0000ff00, true);
+354           view.setUint32(12, 0x000000ff, true);
+355         }
+356         break;
+357       default:
+358         throw new Error("invalid format");
+359     }
+360 
+361     let i = 0;
+362     const headerLength = 40 + maskTable.length;
+363     const fileLength = 14 + headerLength + colorTable.length + data.length;
+364     const bmpData = new Uint8Array(fileLength);
+365     const view = new DataView(bmpData.buffer);
+366 
+367     // Signature.
+368     view.setUint16(i, 0x4d42, true);
+369     i += 2;
+370 
+371     // File size.
+372     view.setUint32(i, fileLength, true);
+373     i += 4;
+374 
+375     // Reserved.
+376     view.setUint32(i, 0, true);
+377     i += 4;
+378 
+379     // Data offset.
+380     view.setUint32(i, 14 + headerLength + colorTable.length, true);
+381     i += 4;
+382 
+383     // Header size.
+384     view.setUint32(i, headerLength, true);
+385     i += 4;
+386 
+387     // Width.
+388     view.setInt32(i, width, true);
+389     i += 4;
+390 
+391     // Height.
+392     // Negative height indicates that the image is stored from top to bottom.
+393     view.setInt32(i, -height, true);
+394     i += 4;
+395 
+396     // Number of planes (must be 1).
+397     view.setUint16(i, 1, true);
+398     i += 2;
+399 
+400     // Number of bit per pixel.
+401     view.setUint16(i, bitPerPixel, true);
+402     i += 2;
+403 
+404     // Compression method.
+405     view.setUint32(i, compression, true);
+406     i += 4;
+407 
+408     // The image size.
+409     view.setUint32(i, 0, true);
+410     i += 4;
+411 
+412     // Horizontal resolution.
+413     view.setInt32(i, 0, true);
+414     i += 4;
+415 
+416     // Vertical resolution.
+417     view.setInt32(i, 0, true);
+418     i += 4;
+419 
+420     // Number of colors in the palette (0 to default).
+421     view.setUint32(i, colorTable.length / 4, true);
+422     i += 4;
+423 
+424     // Number of important colors used (0 to default).
+425     view.setUint32(i, 0, true);
+426     i += 4;
+427 
+428     bmpData.set(maskTable, i);
+429     i += maskTable.length;
+430 
+431     bmpData.set(colorTable, i);
+432     i += colorTable.length;
+433 
+434     bmpData.set(data, i);
+435 
+436     return bmpData;
+437   }
+438 }
+439 
+440 export { ImageResizer };
+File:
+src/core/jbig2.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { BaseException, shadow } from "../shared/util.js";
+17 import { log2, readInt8, readUint16, readUint32 } from "./core_utils.js";
+18 import { ArithmeticDecoder } from "./arithmetic_decoder.js";
+19 import { CCITTFaxDecoder } from "./ccitt.js";
+20 
+21 class Jbig2Error extends BaseException {
+22   constructor(msg) {
+23     super(msg, "Jbig2Error");
+24   }
+25 }
+26 
+27 // Utility data structures
+28 class ContextCache {
+29   getContexts(id) {
+30     if (id in this) {
+31       return this[id];
+32     }
+33     return (this[id] = new Int8Array(1 << 16));
+34   }
+35 }
+36 
+37 class DecodingContext {
+38   constructor(data, start, end) {
+39     this.data = data;
+40     this.start = start;
+41     this.end = end;
+42   }
+43 
+44   get decoder() {
+45     const decoder = new ArithmeticDecoder(this.data, this.start, this.end);
+46     return shadow(this, "decoder", decoder);
+47   }
+48 
+49   get contextCache() {
+50     const cache = new ContextCache();
+51     return shadow(this, "contextCache", cache);
+52   }
+53 }
+54 
+55 const MAX_INT_32 = 2 ** 31 - 1;
+56 const MIN_INT_32 = -(2 ** 31);
+57 
+58 // Annex A. Arithmetic Integer Decoding Procedure
+59 // A.2 Procedure for decoding values
+60 function decodeInteger(contextCache, procedure, decoder) {
+61   const contexts = contextCache.getContexts(procedure);
+62   let prev = 1;
+63 
+64   function readBits(length) {
+65     let v = 0;
+66     for (let i = 0; i < length; i++) {
+67       const bit = decoder.readBit(contexts, prev);
+68       prev = prev < 256 ? (prev << 1) | bit : (((prev << 1) | bit) & 511) | 256;
+69       v = (v << 1) | bit;
+70     }
+71     return v >>> 0;
+72   }
+73 
+74   const sign = readBits(1);
+75   // prettier-ignore
+76   /* eslint-disable no-nested-ternary */
+77   const value = readBits(1) ?
+78                   (readBits(1) ?
+79                     (readBits(1) ?
+80                       (readBits(1) ?
+81                         (readBits(1) ?
+82                           (readBits(32) + 4436) :
+83                         readBits(12) + 340) :
+84                       readBits(8) + 84) :
+85                     readBits(6) + 20) :
+86                   readBits(4) + 4) :
+87                 readBits(2);
+88   /* eslint-enable no-nested-ternary */
+89   let signedValue;
+90   if (sign === 0) {
+91     signedValue = value;
+92   } else if (value > 0) {
+93     signedValue = -value;
+94   }
+95   // Ensure that the integer value doesn't underflow or overflow.
+96   if (signedValue >= MIN_INT_32 && signedValue <= MAX_INT_32) {
+97     return signedValue;
+98   }
+99   return null;
+100 }
+101 
+102 // A.3 The IAID decoding procedure
+103 function decodeIAID(contextCache, decoder, codeLength) {
+104   const contexts = contextCache.getContexts("IAID");
+105 
+106   let prev = 1;
+107   for (let i = 0; i < codeLength; i++) {
+108     const bit = decoder.readBit(contexts, prev);
+109     prev = (prev << 1) | bit;
+110   }
+111   if (codeLength < 31) {
+112     return prev & ((1 << codeLength) - 1);
+113   }
+114   return prev & 0x7fffffff;
+115 }
+116 
+117 // 7.3 Segment types
+118 const SegmentTypes = [
+119   "SymbolDictionary",
+120   null,
+121   null,
+122   null,
+123   "IntermediateTextRegion",
+124   null,
+125   "ImmediateTextRegion",
+126   "ImmediateLosslessTextRegion",
+127   null,
+128   null,
+129   null,
+130   null,
+131   null,
+132   null,
+133   null,
+134   null,
+135   "PatternDictionary",
+136   null,
+137   null,
+138   null,
+139   "IntermediateHalftoneRegion",
+140   null,
+141   "ImmediateHalftoneRegion",
+142   "ImmediateLosslessHalftoneRegion",
+143   null,
+144   null,
+145   null,
+146   null,
+147   null,
+148   null,
+149   null,
+150   null,
+151   null,
+152   null,
+153   null,
+154   null,
+155   "IntermediateGenericRegion",
+156   null,
+157   "ImmediateGenericRegion",
+158   "ImmediateLosslessGenericRegion",
+159   "IntermediateGenericRefinementRegion",
+160   null,
+161   "ImmediateGenericRefinementRegion",
+162   "ImmediateLosslessGenericRefinementRegion",
+163   null,
+164   null,
+165   null,
+166   null,
+167   "PageInformation",
+168   "EndOfPage",
+169   "EndOfStripe",
+170   "EndOfFile",
+171   "Profiles",
+172   "Tables",
+173   null,
+174   null,
+175   null,
+176   null,
+177   null,
+178   null,
+179   null,
+180   null,
+181   "Extension",
+182 ];
+183 
+184 const CodingTemplates = [
+185   [
+186     { x: -1, y: -2 },
+187     { x: 0, y: -2 },
+188     { x: 1, y: -2 },
+189     { x: -2, y: -1 },
+190     { x: -1, y: -1 },
+191     { x: 0, y: -1 },
+192     { x: 1, y: -1 },
+193     { x: 2, y: -1 },
+194     { x: -4, y: 0 },
+195     { x: -3, y: 0 },
+196     { x: -2, y: 0 },
+197     { x: -1, y: 0 },
+198   ],
+199   [
+200     { x: -1, y: -2 },
+201     { x: 0, y: -2 },
+202     { x: 1, y: -2 },
+203     { x: 2, y: -2 },
+204     { x: -2, y: -1 },
+205     { x: -1, y: -1 },
+206     { x: 0, y: -1 },
+207     { x: 1, y: -1 },
+208     { x: 2, y: -1 },
+209     { x: -3, y: 0 },
+210     { x: -2, y: 0 },
+211     { x: -1, y: 0 },
+212   ],
+213   [
+214     { x: -1, y: -2 },
+215     { x: 0, y: -2 },
+216     { x: 1, y: -2 },
+217     { x: -2, y: -1 },
+218     { x: -1, y: -1 },
+219     { x: 0, y: -1 },
+220     { x: 1, y: -1 },
+221     { x: -2, y: 0 },
+222     { x: -1, y: 0 },
+223   ],
+224   [
+225     { x: -3, y: -1 },
+226     { x: -2, y: -1 },
+227     { x: -1, y: -1 },
+228     { x: 0, y: -1 },
+229     { x: 1, y: -1 },
+230     { x: -4, y: 0 },
+231     { x: -3, y: 0 },
+232     { x: -2, y: 0 },
+233     { x: -1, y: 0 },
+234   ],
+235 ];
+236 
+237 const RefinementTemplates = [
+238   {
+239     coding: [
+240       { x: 0, y: -1 },
+241       { x: 1, y: -1 },
+242       { x: -1, y: 0 },
+243     ],
+244     reference: [
+245       { x: 0, y: -1 },
+246       { x: 1, y: -1 },
+247       { x: -1, y: 0 },
+248       { x: 0, y: 0 },
+249       { x: 1, y: 0 },
+250       { x: -1, y: 1 },
+251       { x: 0, y: 1 },
+252       { x: 1, y: 1 },
+253     ],
+254   },
+255   {
+256     coding: [
+257       { x: -1, y: -1 },
+258       { x: 0, y: -1 },
+259       { x: 1, y: -1 },
+260       { x: -1, y: 0 },
+261     ],
+262     reference: [
+263       { x: 0, y: -1 },
+264       { x: -1, y: 0 },
+265       { x: 0, y: 0 },
+266       { x: 1, y: 0 },
+267       { x: 0, y: 1 },
+268       { x: 1, y: 1 },
+269     ],
+270   },
+271 ];
+272 
+273 // See 6.2.5.7 Decoding the bitmap.
+274 const ReusedContexts = [
+275   0x9b25, // 10011 0110010 0101
+276   0x0795, // 0011 110010 101
+277   0x00e5, // 001 11001 01
+278   0x0195, // 011001 0101
+279 ];
+280 
+281 const RefinementReusedContexts = [
+282   0x0020, // '000' + '0' (coding) + '00010000' + '0' (reference)
+283   0x0008, // '0000' + '001000'
+284 ];
+285 
+286 function decodeBitmapTemplate0(width, height, decodingContext) {
+287   const decoder = decodingContext.decoder;
+288   const contexts = decodingContext.contextCache.getContexts("GB");
+289   const bitmap = [];
+290   let contextLabel, i, j, pixel, row, row1, row2;
+291 
+292   // ...ooooo....
+293   // ..ooooooo... Context template for current pixel (X)
+294   // .ooooX...... (concatenate values of 'o'-pixels to get contextLabel)
+295   const OLD_PIXEL_MASK = 0x7bf7; // 01111 0111111 0111
+296 
+297   for (i = 0; i < height; i++) {
+298     row = bitmap[i] = new Uint8Array(width);
+299     row1 = i < 1 ? row : bitmap[i - 1];
+300     row2 = i < 2 ? row : bitmap[i - 2];
+301 
+302     // At the beginning of each row:
+303     // Fill contextLabel with pixels that are above/right of (X)
+304     contextLabel =
+305       (row2[0] << 13) |
+306       (row2[1] << 12) |
+307       (row2[2] << 11) |
+308       (row1[0] << 7) |
+309       (row1[1] << 6) |
+310       (row1[2] << 5) |
+311       (row1[3] << 4);
+312 
+313     for (j = 0; j < width; j++) {
+314       row[j] = pixel = decoder.readBit(contexts, contextLabel);
+315 
+316       // At each pixel: Clear contextLabel pixels that are shifted
+317       // out of the context, then add new ones.
+318       contextLabel =
+319         ((contextLabel & OLD_PIXEL_MASK) << 1) |
+320         (j + 3 < width ? row2[j + 3] << 11 : 0) |
+321         (j + 4 < width ? row1[j + 4] << 4 : 0) |
+322         pixel;
+323     }
+324   }
+325 
+326   return bitmap;
+327 }
+328 
+329 // 6.2 Generic Region Decoding Procedure
+330 function decodeBitmap(
+331   mmr,
+332   width,
+333   height,
+334   templateIndex,
+335   prediction,
+336   skip,
+337   at,
+338   decodingContext
+339 ) {
+340   if (mmr) {
+341     const input = new Reader(
+342       decodingContext.data,
+343       decodingContext.start,
+344       decodingContext.end
+345     );
+346     return decodeMMRBitmap(input, width, height, false);
+347   }
+348 
+349   // Use optimized version for the most common case
+350   if (
+351     templateIndex === 0 &&
+352     !skip &&
+353     !prediction &&
+354     at.length === 4 &&
+355     at[0].x === 3 &&
+356     at[0].y === -1 &&
+357     at[1].x === -3 &&
+358     at[1].y === -1 &&
+359     at[2].x === 2 &&
+360     at[2].y === -2 &&
+361     at[3].x === -2 &&
+362     at[3].y === -2
+363   ) {
+364     return decodeBitmapTemplate0(width, height, decodingContext);
+365   }
+366 
+367   const useskip = !!skip;
+368   const template = CodingTemplates[templateIndex].concat(at);
+369 
+370   // Sorting is non-standard, and it is not required. But sorting increases
+371   // the number of template bits that can be reused from the previous
+372   // contextLabel in the main loop.
+373   template.sort(function (a, b) {
+374     return a.y - b.y || a.x - b.x;
+375   });
+376 
+377   const templateLength = template.length;
+378   const templateX = new Int8Array(templateLength);
+379   const templateY = new Int8Array(templateLength);
+380   const changingTemplateEntries = [];
+381   let reuseMask = 0,
+382     minX = 0,
+383     maxX = 0,
+384     minY = 0;
+385   let c, k;
+386 
+387   for (k = 0; k < templateLength; k++) {
+388     templateX[k] = template[k].x;
+389     templateY[k] = template[k].y;
+390     minX = Math.min(minX, template[k].x);
+391     maxX = Math.max(maxX, template[k].x);
+392     minY = Math.min(minY, template[k].y);
+393     // Check if the template pixel appears in two consecutive context labels,
+394     // so it can be reused. Otherwise, we add it to the list of changing
+395     // template entries.
+396     if (
+397       k < templateLength - 1 &&
+398       template[k].y === template[k + 1].y &&
+399       template[k].x === template[k + 1].x - 1
+400     ) {
+401       reuseMask |= 1 << (templateLength - 1 - k);
+402     } else {
+403       changingTemplateEntries.push(k);
+404     }
+405   }
+406   const changingEntriesLength = changingTemplateEntries.length;
+407 
+408   const changingTemplateX = new Int8Array(changingEntriesLength);
+409   const changingTemplateY = new Int8Array(changingEntriesLength);
+410   const changingTemplateBit = new Uint16Array(changingEntriesLength);
+411   for (c = 0; c < changingEntriesLength; c++) {
+412     k = changingTemplateEntries[c];
+413     changingTemplateX[c] = template[k].x;
+414     changingTemplateY[c] = template[k].y;
+415     changingTemplateBit[c] = 1 << (templateLength - 1 - k);
+416   }
+417 
+418   // Get the safe bounding box edges from the width, height, minX, maxX, minY
+419   const sbb_left = -minX;
+420   const sbb_top = -minY;
+421   const sbb_right = width - maxX;
+422 
+423   const pseudoPixelContext = ReusedContexts[templateIndex];
+424   let row = new Uint8Array(width);
+425   const bitmap = [];
+426 
+427   const decoder = decodingContext.decoder;
+428   const contexts = decodingContext.contextCache.getContexts("GB");
+429 
+430   let ltp = 0,
+431     j,
+432     i0,
+433     j0,
+434     contextLabel = 0,
+435     bit,
+436     shift;
+437   for (let i = 0; i < height; i++) {
+438     if (prediction) {
+439       const sltp = decoder.readBit(contexts, pseudoPixelContext);
+440       ltp ^= sltp;
+441       if (ltp) {
+442         bitmap.push(row); // duplicate previous row
+443         continue;
+444       }
+445     }
+446     row = new Uint8Array(row);
+447     bitmap.push(row);
+448     for (j = 0; j < width; j++) {
+449       if (useskip && skip[i][j]) {
+450         row[j] = 0;
+451         continue;
+452       }
+453       // Are we in the middle of a scanline, so we can reuse contextLabel
+454       // bits?
+455       if (j >= sbb_left && j < sbb_right && i >= sbb_top) {
+456         // If yes, we can just shift the bits that are reusable and only
+457         // fetch the remaining ones.
+458         contextLabel = (contextLabel << 1) & reuseMask;
+459         for (k = 0; k < changingEntriesLength; k++) {
+460           i0 = i + changingTemplateY[k];
+461           j0 = j + changingTemplateX[k];
+462           bit = bitmap[i0][j0];
+463           if (bit) {
+464             bit = changingTemplateBit[k];
+465             contextLabel |= bit;
+466           }
+467         }
+468       } else {
+469         // compute the contextLabel from scratch
+470         contextLabel = 0;
+471         shift = templateLength - 1;
+472         for (k = 0; k < templateLength; k++, shift--) {
+473           j0 = j + templateX[k];
+474           if (j0 >= 0 && j0 < width) {
+475             i0 = i + templateY[k];
+476             if (i0 >= 0) {
+477               bit = bitmap[i0][j0];
+478               if (bit) {
+479                 contextLabel |= bit << shift;
+480               }
+481             }
+482           }
+483         }
+484       }
+485       const pixel = decoder.readBit(contexts, contextLabel);
+486       row[j] = pixel;
+487     }
+488   }
+489   return bitmap;
+490 }
+491 
+492 // 6.3.2 Generic Refinement Region Decoding Procedure
+493 function decodeRefinement(
+494   width,
+495   height,
+496   templateIndex,
+497   referenceBitmap,
+498   offsetX,
+499   offsetY,
+500   prediction,
+501   at,
+502   decodingContext
+503 ) {
+504   let codingTemplate = RefinementTemplates[templateIndex].coding;
+505   if (templateIndex === 0) {
+506     codingTemplate = codingTemplate.concat([at[0]]);
+507   }
+508   const codingTemplateLength = codingTemplate.length;
+509   const codingTemplateX = new Int32Array(codingTemplateLength);
+510   const codingTemplateY = new Int32Array(codingTemplateLength);
+511   let k;
+512   for (k = 0; k < codingTemplateLength; k++) {
+513     codingTemplateX[k] = codingTemplate[k].x;
+514     codingTemplateY[k] = codingTemplate[k].y;
+515   }
+516 
+517   let referenceTemplate = RefinementTemplates[templateIndex].reference;
+518   if (templateIndex === 0) {
+519     referenceTemplate = referenceTemplate.concat([at[1]]);
+520   }
+521   const referenceTemplateLength = referenceTemplate.length;
+522   const referenceTemplateX = new Int32Array(referenceTemplateLength);
+523   const referenceTemplateY = new Int32Array(referenceTemplateLength);
+524   for (k = 0; k < referenceTemplateLength; k++) {
+525     referenceTemplateX[k] = referenceTemplate[k].x;
+526     referenceTemplateY[k] = referenceTemplate[k].y;
+527   }
+528   const referenceWidth = referenceBitmap[0].length;
+529   const referenceHeight = referenceBitmap.length;
+530 
+531   const pseudoPixelContext = RefinementReusedContexts[templateIndex];
+532   const bitmap = [];
+533 
+534   const decoder = decodingContext.decoder;
+535   const contexts = decodingContext.contextCache.getContexts("GR");
+536 
+537   let ltp = 0;
+538   for (let i = 0; i < height; i++) {
+539     if (prediction) {
+540       const sltp = decoder.readBit(contexts, pseudoPixelContext);
+541       ltp ^= sltp;
+542       if (ltp) {
+543         throw new Jbig2Error("prediction is not supported");
+544       }
+545     }
+546     const row = new Uint8Array(width);
+547     bitmap.push(row);
+548     for (let j = 0; j < width; j++) {
+549       let i0, j0;
+550       let contextLabel = 0;
+551       for (k = 0; k < codingTemplateLength; k++) {
+552         i0 = i + codingTemplateY[k];
+553         j0 = j + codingTemplateX[k];
+554         if (i0 < 0 || j0 < 0 || j0 >= width) {
+555           contextLabel <<= 1; // out of bound pixel
+556         } else {
+557           contextLabel = (contextLabel << 1) | bitmap[i0][j0];
+558         }
+559       }
+560       for (k = 0; k < referenceTemplateLength; k++) {
+561         i0 = i + referenceTemplateY[k] - offsetY;
+562         j0 = j + referenceTemplateX[k] - offsetX;
+563         if (i0 < 0 || i0 >= referenceHeight || j0 < 0 || j0 >= referenceWidth) {
+564           contextLabel <<= 1; // out of bound pixel
+565         } else {
+566           contextLabel = (contextLabel << 1) | referenceBitmap[i0][j0];
+567         }
+568       }
+569       const pixel = decoder.readBit(contexts, contextLabel);
+570       row[j] = pixel;
+571     }
+572   }
+573 
+574   return bitmap;
+575 }
+576 
+577 // 6.5.5 Decoding the symbol dictionary
+578 function decodeSymbolDictionary(
+579   huffman,
+580   refinement,
+581   symbols,
+582   numberOfNewSymbols,
+583   numberOfExportedSymbols,
+584   huffmanTables,
+585   templateIndex,
+586   at,
+587   refinementTemplateIndex,
+588   refinementAt,
+589   decodingContext,
+590   huffmanInput
+591 ) {
+592   if (huffman && refinement) {
+593     throw new Jbig2Error("symbol refinement with Huffman is not supported");
+594   }
+595 
+596   const newSymbols = [];
+597   let currentHeight = 0;
+598   let symbolCodeLength = log2(symbols.length + numberOfNewSymbols);
+599 
+600   const decoder = decodingContext.decoder;
+601   const contextCache = decodingContext.contextCache;
+602   let tableB1, symbolWidths;
+603   if (huffman) {
+604     tableB1 = getStandardTable(1); // standard table B.1
+605     symbolWidths = [];
+606     symbolCodeLength = Math.max(symbolCodeLength, 1); // 6.5.8.2.3
+607   }
+608 
+609   while (newSymbols.length < numberOfNewSymbols) {
+610     const deltaHeight = huffman
+611       ? huffmanTables.tableDeltaHeight.decode(huffmanInput)
+612       : decodeInteger(contextCache, "IADH", decoder); // 6.5.6
+613     currentHeight += deltaHeight;
+614     let currentWidth = 0,
+615       totalWidth = 0;
+616     const firstSymbol = huffman ? symbolWidths.length : 0;
+617     while (true) {
+618       const deltaWidth = huffman
+619         ? huffmanTables.tableDeltaWidth.decode(huffmanInput)
+620         : decodeInteger(contextCache, "IADW", decoder); // 6.5.7
+621       if (deltaWidth === null) {
+622         break; // OOB
+623       }
+624       currentWidth += deltaWidth;
+625       totalWidth += currentWidth;
+626       let bitmap;
+627       if (refinement) {
+628         // 6.5.8.2 Refinement/aggregate-coded symbol bitmap
+629         const numberOfInstances = decodeInteger(contextCache, "IAAI", decoder);
+630         if (numberOfInstances > 1) {
+631           bitmap = decodeTextRegion(
+632             huffman,
+633             refinement,
+634             currentWidth,
+635             currentHeight,
+636             0,
+637             numberOfInstances,
+638             1, // strip size
+639             symbols.concat(newSymbols),
+640             symbolCodeLength,
+641             0, // transposed
+642             0, // ds offset
+643             1, // top left 7.4.3.1.1
+644             0, // OR operator
+645             huffmanTables,
+646             refinementTemplateIndex,
+647             refinementAt,
+648             decodingContext,
+649             0,
+650             huffmanInput
+651           );
+652         } else {
+653           const symbolId = decodeIAID(contextCache, decoder, symbolCodeLength);
+654           const rdx = decodeInteger(contextCache, "IARDX", decoder); // 6.4.11.3
+655           const rdy = decodeInteger(contextCache, "IARDY", decoder); // 6.4.11.4
+656           const symbol =
+657             symbolId < symbols.length
+658               ? symbols[symbolId]
+659               : newSymbols[symbolId - symbols.length];
+660           bitmap = decodeRefinement(
+661             currentWidth,
+662             currentHeight,
+663             refinementTemplateIndex,
+664             symbol,
+665             rdx,
+666             rdy,
+667             false,
+668             refinementAt,
+669             decodingContext
+670           );
+671         }
+672         newSymbols.push(bitmap);
+673       } else if (huffman) {
+674         // Store only symbol width and decode a collective bitmap when the
+675         // height class is done.
+676         symbolWidths.push(currentWidth);
+677       } else {
+678         // 6.5.8.1 Direct-coded symbol bitmap
+679         bitmap = decodeBitmap(
+680           false,
+681           currentWidth,
+682           currentHeight,
+683           templateIndex,
+684           false,
+685           null,
+686           at,
+687           decodingContext
+688         );
+689         newSymbols.push(bitmap);
+690       }
+691     }
+692     if (huffman && !refinement) {
+693       // 6.5.9 Height class collective bitmap
+694       const bitmapSize = huffmanTables.tableBitmapSize.decode(huffmanInput);
+695       huffmanInput.byteAlign();
+696       let collectiveBitmap;
+697       if (bitmapSize === 0) {
+698         // Uncompressed collective bitmap
+699         collectiveBitmap = readUncompressedBitmap(
+700           huffmanInput,
+701           totalWidth,
+702           currentHeight
+703         );
+704       } else {
+705         // MMR collective bitmap
+706         const originalEnd = huffmanInput.end;
+707         const bitmapEnd = huffmanInput.position + bitmapSize;
+708         huffmanInput.end = bitmapEnd;
+709         collectiveBitmap = decodeMMRBitmap(
+710           huffmanInput,
+711           totalWidth,
+712           currentHeight,
+713           false
+714         );
+715         huffmanInput.end = originalEnd;
+716         huffmanInput.position = bitmapEnd;
+717       }
+718       const numberOfSymbolsDecoded = symbolWidths.length;
+719       if (firstSymbol === numberOfSymbolsDecoded - 1) {
+720         // collectiveBitmap is a single symbol.
+721         newSymbols.push(collectiveBitmap);
+722       } else {
+723         // Divide collectiveBitmap into symbols.
+724         let i,
+725           y,
+726           xMin = 0,
+727           xMax,
+728           bitmapWidth,
+729           symbolBitmap;
+730         for (i = firstSymbol; i < numberOfSymbolsDecoded; i++) {
+731           bitmapWidth = symbolWidths[i];
+732           xMax = xMin + bitmapWidth;
+733           symbolBitmap = [];
+734           for (y = 0; y < currentHeight; y++) {
+735             symbolBitmap.push(collectiveBitmap[y].subarray(xMin, xMax));
+736           }
+737           newSymbols.push(symbolBitmap);
+738           xMin = xMax;
+739         }
+740       }
+741     }
+742   }
+743 
+744   // 6.5.10 Exported symbols
+745   const exportedSymbols = [],
+746     flags = [];
+747   let currentFlag = false,
+748     i,
+749     ii;
+750   const totalSymbolsLength = symbols.length + numberOfNewSymbols;
+751   while (flags.length < totalSymbolsLength) {
+752     let runLength = huffman
+753       ? tableB1.decode(huffmanInput)
+754       : decodeInteger(contextCache, "IAEX", decoder);
+755     while (runLength--) {
+756       flags.push(currentFlag);
+757     }
+758     currentFlag = !currentFlag;
+759   }
+760   for (i = 0, ii = symbols.length; i < ii; i++) {
+761     if (flags[i]) {
+762       exportedSymbols.push(symbols[i]);
+763     }
+764   }
+765   for (let j = 0; j < numberOfNewSymbols; i++, j++) {
+766     if (flags[i]) {
+767       exportedSymbols.push(newSymbols[j]);
+768     }
+769   }
+770   return exportedSymbols;
+771 }
+772 
+773 function decodeTextRegion(
+774   huffman,
+775   refinement,
+776   width,
+777   height,
+778   defaultPixelValue,
+779   numberOfSymbolInstances,
+780   stripSize,
+781   inputSymbols,
+782   symbolCodeLength,
+783   transposed,
+784   dsOffset,
+785   referenceCorner,
+786   combinationOperator,
+787   huffmanTables,
+788   refinementTemplateIndex,
+789   refinementAt,
+790   decodingContext,
+791   logStripSize,
+792   huffmanInput
+793 ) {
+794   if (huffman && refinement) {
+795     throw new Jbig2Error("refinement with Huffman is not supported");
+796   }
+797 
+798   // Prepare bitmap
+799   const bitmap = [];
+800   let i, row;
+801   for (i = 0; i < height; i++) {
+802     row = new Uint8Array(width);
+803     if (defaultPixelValue) {
+804       for (let j = 0; j < width; j++) {
+805         row[j] = defaultPixelValue;
+806       }
+807     }
+808     bitmap.push(row);
+809   }
+810 
+811   const decoder = decodingContext.decoder;
+812   const contextCache = decodingContext.contextCache;
+813 
+814   let stripT = huffman
+815     ? -huffmanTables.tableDeltaT.decode(huffmanInput)
+816     : -decodeInteger(contextCache, "IADT", decoder); // 6.4.6
+817   let firstS = 0;
+818   i = 0;
+819   while (i < numberOfSymbolInstances) {
+820     const deltaT = huffman
+821       ? huffmanTables.tableDeltaT.decode(huffmanInput)
+822       : decodeInteger(contextCache, "IADT", decoder); // 6.4.6
+823     stripT += deltaT;
+824 
+825     const deltaFirstS = huffman
+826       ? huffmanTables.tableFirstS.decode(huffmanInput)
+827       : decodeInteger(contextCache, "IAFS", decoder); // 6.4.7
+828     firstS += deltaFirstS;
+829     let currentS = firstS;
+830     do {
+831       let currentT = 0; // 6.4.9
+832       if (stripSize > 1) {
+833         currentT = huffman
+834           ? huffmanInput.readBits(logStripSize)
+835           : decodeInteger(contextCache, "IAIT", decoder);
+836       }
+837       const t = stripSize * stripT + currentT;
+838       const symbolId = huffman
+839         ? huffmanTables.symbolIDTable.decode(huffmanInput)
+840         : decodeIAID(contextCache, decoder, symbolCodeLength);
+841       const applyRefinement =
+842         refinement &&
+843         (huffman
+844           ? huffmanInput.readBit()
+845           : decodeInteger(contextCache, "IARI", decoder));
+846       let symbolBitmap = inputSymbols[symbolId];
+847       let symbolWidth = symbolBitmap[0].length;
+848       let symbolHeight = symbolBitmap.length;
+849       if (applyRefinement) {
+850         const rdw = decodeInteger(contextCache, "IARDW", decoder); // 6.4.11.1
+851         const rdh = decodeInteger(contextCache, "IARDH", decoder); // 6.4.11.2
+852         const rdx = decodeInteger(contextCache, "IARDX", decoder); // 6.4.11.3
+853         const rdy = decodeInteger(contextCache, "IARDY", decoder); // 6.4.11.4
+854         symbolWidth += rdw;
+855         symbolHeight += rdh;
+856         symbolBitmap = decodeRefinement(
+857           symbolWidth,
+858           symbolHeight,
+859           refinementTemplateIndex,
+860           symbolBitmap,
+861           (rdw >> 1) + rdx,
+862           (rdh >> 1) + rdy,
+863           false,
+864           refinementAt,
+865           decodingContext
+866         );
+867       }
+868 
+869       let increment = 0;
+870       if (!transposed) {
+871         if (referenceCorner > 1) {
+872           currentS += symbolWidth - 1;
+873         } else {
+874           increment = symbolWidth - 1;
+875         }
+876       } else if (!(referenceCorner & 1)) {
+877         currentS += symbolHeight - 1;
+878       } else {
+879         increment = symbolHeight - 1;
+880       }
+881 
+882       const offsetT = t - (referenceCorner & 1 ? 0 : symbolHeight - 1);
+883       const offsetS = currentS - (referenceCorner & 2 ? symbolWidth - 1 : 0);
+884       let s2, t2, symbolRow;
+885       if (transposed) {
+886         // Place Symbol Bitmap from T1,S1
+887         for (s2 = 0; s2 < symbolHeight; s2++) {
+888           row = bitmap[offsetS + s2];
+889           if (!row) {
+890             continue;
+891           }
+892           symbolRow = symbolBitmap[s2];
+893           // To ignore Parts of Symbol bitmap which goes
+894           // outside bitmap region
+895           const maxWidth = Math.min(width - offsetT, symbolWidth);
+896           switch (combinationOperator) {
+897             case 0: // OR
+898               for (t2 = 0; t2 < maxWidth; t2++) {
+899                 row[offsetT + t2] |= symbolRow[t2];
+900               }
+901               break;
+902             case 2: // XOR
+903               for (t2 = 0; t2 < maxWidth; t2++) {
+904                 row[offsetT + t2] ^= symbolRow[t2];
+905               }
+906               break;
+907             default:
+908               throw new Jbig2Error(
+909                 `operator ${combinationOperator} is not supported`
+910               );
+911           }
+912         }
+913       } else {
+914         for (t2 = 0; t2 < symbolHeight; t2++) {
+915           row = bitmap[offsetT + t2];
+916           if (!row) {
+917             continue;
+918           }
+919           symbolRow = symbolBitmap[t2];
+920           switch (combinationOperator) {
+921             case 0: // OR
+922               for (s2 = 0; s2 < symbolWidth; s2++) {
+923                 row[offsetS + s2] |= symbolRow[s2];
+924               }
+925               break;
+926             case 2: // XOR
+927               for (s2 = 0; s2 < symbolWidth; s2++) {
+928                 row[offsetS + s2] ^= symbolRow[s2];
+929               }
+930               break;
+931             default:
+932               throw new Jbig2Error(
+933                 `operator ${combinationOperator} is not supported`
+934               );
+935           }
+936         }
+937       }
+938       i++;
+939       const deltaS = huffman
+940         ? huffmanTables.tableDeltaS.decode(huffmanInput)
+941         : decodeInteger(contextCache, "IADS", decoder); // 6.4.8
+942       if (deltaS === null) {
+943         break; // OOB
+944       }
+945       currentS += increment + deltaS + dsOffset;
+946     } while (true);
+947   }
+948   return bitmap;
+949 }
+950 
+951 function decodePatternDictionary(
+952   mmr,
+953   patternWidth,
+954   patternHeight,
+955   maxPatternIndex,
+956   template,
+957   decodingContext
+958 ) {
+959   const at = [];
+960   if (!mmr) {
+961     at.push({
+962       x: -patternWidth,
+963       y: 0,
+964     });
+965     if (template === 0) {
+966       at.push(
+967         {
+968           x: -3,
+969           y: -1,
+970         },
+971         {
+972           x: 2,
+973           y: -2,
+974         },
+975         {
+976           x: -2,
+977           y: -2,
+978         }
+979       );
+980     }
+981   }
+982   const collectiveWidth = (maxPatternIndex + 1) * patternWidth;
+983   const collectiveBitmap = decodeBitmap(
+984     mmr,
+985     collectiveWidth,
+986     patternHeight,
+987     template,
+988     false,
+989     null,
+990     at,
+991     decodingContext
+992   );
+993   // Divide collective bitmap into patterns.
+994   const patterns = [];
+995   for (let i = 0; i <= maxPatternIndex; i++) {
+996     const patternBitmap = [];
+997     const xMin = patternWidth * i;
+998     const xMax = xMin + patternWidth;
+999     for (let y = 0; y < patternHeight; y++) {
+1000       patternBitmap.push(collectiveBitmap[y].subarray(xMin, xMax));
+1001     }
+1002     patterns.push(patternBitmap);
+1003   }
+1004   return patterns;
+1005 }
+1006 
+1007 function decodeHalftoneRegion(
+1008   mmr,
+1009   patterns,
+1010   template,
+1011   regionWidth,
+1012   regionHeight,
+1013   defaultPixelValue,
+1014   enableSkip,
+1015   combinationOperator,
+1016   gridWidth,
+1017   gridHeight,
+1018   gridOffsetX,
+1019   gridOffsetY,
+1020   gridVectorX,
+1021   gridVectorY,
+1022   decodingContext
+1023 ) {
+1024   const skip = null;
+1025   if (enableSkip) {
+1026     throw new Jbig2Error("skip is not supported");
+1027   }
+1028   if (combinationOperator !== 0) {
+1029     throw new Jbig2Error(
+1030       `operator "${combinationOperator}" is not supported in halftone region`
+1031     );
+1032   }
+1033 
+1034   // Prepare bitmap.
+1035   const regionBitmap = [];
+1036   let i, j, row;
+1037   for (i = 0; i < regionHeight; i++) {
+1038     row = new Uint8Array(regionWidth);
+1039     if (defaultPixelValue) {
+1040       for (j = 0; j < regionWidth; j++) {
+1041         row[j] = defaultPixelValue;
+1042       }
+1043     }
+1044     regionBitmap.push(row);
+1045   }
+1046 
+1047   const numberOfPatterns = patterns.length;
+1048   const pattern0 = patterns[0];
+1049   const patternWidth = pattern0[0].length,
+1050     patternHeight = pattern0.length;
+1051   const bitsPerValue = log2(numberOfPatterns);
+1052   const at = [];
+1053   if (!mmr) {
+1054     at.push({
+1055       x: template <= 1 ? 3 : 2,
+1056       y: -1,
+1057     });
+1058     if (template === 0) {
+1059       at.push(
+1060         {
+1061           x: -3,
+1062           y: -1,
+1063         },
+1064         {
+1065           x: 2,
+1066           y: -2,
+1067         },
+1068         {
+1069           x: -2,
+1070           y: -2,
+1071         }
+1072       );
+1073     }
+1074   }
+1075   // Annex C. Gray-scale Image Decoding Procedure.
+1076   const grayScaleBitPlanes = [];
+1077   let mmrInput, bitmap;
+1078   if (mmr) {
+1079     // MMR bit planes are in one continuous stream. Only EOFB codes indicate
+1080     // the end of each bitmap, so EOFBs must be decoded.
+1081     mmrInput = new Reader(
+1082       decodingContext.data,
+1083       decodingContext.start,
+1084       decodingContext.end
+1085     );
+1086   }
+1087   for (i = bitsPerValue - 1; i >= 0; i--) {
+1088     if (mmr) {
+1089       bitmap = decodeMMRBitmap(mmrInput, gridWidth, gridHeight, true);
+1090     } else {
+1091       bitmap = decodeBitmap(
+1092         false,
+1093         gridWidth,
+1094         gridHeight,
+1095         template,
+1096         false,
+1097         skip,
+1098         at,
+1099         decodingContext
+1100       );
+1101     }
+1102     grayScaleBitPlanes[i] = bitmap;
+1103   }
+1104   // 6.6.5.2 Rendering the patterns.
+1105   let mg, ng, bit, patternIndex, patternBitmap, x, y, patternRow, regionRow;
+1106   for (mg = 0; mg < gridHeight; mg++) {
+1107     for (ng = 0; ng < gridWidth; ng++) {
+1108       bit = 0;
+1109       patternIndex = 0;
+1110       for (j = bitsPerValue - 1; j >= 0; j--) {
+1111         bit ^= grayScaleBitPlanes[j][mg][ng]; // Gray decoding
+1112         patternIndex |= bit << j;
+1113       }
+1114       patternBitmap = patterns[patternIndex];
+1115       x = (gridOffsetX + mg * gridVectorY + ng * gridVectorX) >> 8;
+1116       y = (gridOffsetY + mg * gridVectorX - ng * gridVectorY) >> 8;
+1117       // Draw patternBitmap at (x, y).
+1118       if (
+1119         x >= 0 &&
+1120         x + patternWidth <= regionWidth &&
+1121         y >= 0 &&
+1122         y + patternHeight <= regionHeight
+1123       ) {
+1124         for (i = 0; i < patternHeight; i++) {
+1125           regionRow = regionBitmap[y + i];
+1126           patternRow = patternBitmap[i];
+1127           for (j = 0; j < patternWidth; j++) {
+1128             regionRow[x + j] |= patternRow[j];
+1129           }
+1130         }
+1131       } else {
+1132         let regionX, regionY;
+1133         for (i = 0; i < patternHeight; i++) {
+1134           regionY = y + i;
+1135           if (regionY < 0 || regionY >= regionHeight) {
+1136             continue;
+1137           }
+1138           regionRow = regionBitmap[regionY];
+1139           patternRow = patternBitmap[i];
+1140           for (j = 0; j < patternWidth; j++) {
+1141             regionX = x + j;
+1142             if (regionX >= 0 && regionX < regionWidth) {
+1143               regionRow[regionX] |= patternRow[j];
+1144             }
+1145           }
+1146         }
+1147       }
+1148     }
+1149   }
+1150   return regionBitmap;
+1151 }
+1152 
+1153 function readSegmentHeader(data, start) {
+1154   const segmentHeader = {};
+1155   segmentHeader.number = readUint32(data, start);
+1156   const flags = data[start + 4];
+1157   const segmentType = flags & 0x3f;
+1158   if (!SegmentTypes[segmentType]) {
+1159     throw new Jbig2Error("invalid segment type: " + segmentType);
+1160   }
+1161   segmentHeader.type = segmentType;
+1162   segmentHeader.typeName = SegmentTypes[segmentType];
+1163   segmentHeader.deferredNonRetain = !!(flags & 0x80);
+1164 
+1165   const pageAssociationFieldSize = !!(flags & 0x40);
+1166   const referredFlags = data[start + 5];
+1167   let referredToCount = (referredFlags >> 5) & 7;
+1168   const retainBits = [referredFlags & 31];
+1169   let position = start + 6;
+1170   if (referredFlags === 7) {
+1171     referredToCount = readUint32(data, position - 1) & 0x1fffffff;
+1172     position += 3;
+1173     let bytes = (referredToCount + 7) >> 3;
+1174     retainBits[0] = data[position++];
+1175     while (--bytes > 0) {
+1176       retainBits.push(data[position++]);
+1177     }
+1178   } else if (referredFlags === 5 || referredFlags === 6) {
+1179     throw new Jbig2Error("invalid referred-to flags");
+1180   }
+1181 
+1182   segmentHeader.retainBits = retainBits;
+1183 
+1184   let referredToSegmentNumberSize = 4;
+1185   if (segmentHeader.number <= 256) {
+1186     referredToSegmentNumberSize = 1;
+1187   } else if (segmentHeader.number <= 65536) {
+1188     referredToSegmentNumberSize = 2;
+1189   }
+1190   const referredTo = [];
+1191   let i, ii;
+1192   for (i = 0; i < referredToCount; i++) {
+1193     let number;
+1194     if (referredToSegmentNumberSize === 1) {
+1195       number = data[position];
+1196     } else if (referredToSegmentNumberSize === 2) {
+1197       number = readUint16(data, position);
+1198     } else {
+1199       number = readUint32(data, position);
+1200     }
+1201     referredTo.push(number);
+1202     position += referredToSegmentNumberSize;
+1203   }
+1204   segmentHeader.referredTo = referredTo;
+1205   if (!pageAssociationFieldSize) {
+1206     segmentHeader.pageAssociation = data[position++];
+1207   } else {
+1208     segmentHeader.pageAssociation = readUint32(data, position);
+1209     position += 4;
+1210   }
+1211   segmentHeader.length = readUint32(data, position);
+1212   position += 4;
+1213 
+1214   if (segmentHeader.length === 0xffffffff) {
+1215     // 7.2.7 Segment data length, unknown segment length
+1216     if (segmentType === 38) {
+1217       // ImmediateGenericRegion
+1218       const genericRegionInfo = readRegionSegmentInformation(data, position);
+1219       const genericRegionSegmentFlags =
+1220         data[position + RegionSegmentInformationFieldLength];
+1221       const genericRegionMmr = !!(genericRegionSegmentFlags & 1);
+1222       // searching for the segment end
+1223       const searchPatternLength = 6;
+1224       const searchPattern = new Uint8Array(searchPatternLength);
+1225       if (!genericRegionMmr) {
+1226         searchPattern[0] = 0xff;
+1227         searchPattern[1] = 0xac;
+1228       }
+1229       searchPattern[2] = (genericRegionInfo.height >>> 24) & 0xff;
+1230       searchPattern[3] = (genericRegionInfo.height >> 16) & 0xff;
+1231       searchPattern[4] = (genericRegionInfo.height >> 8) & 0xff;
+1232       searchPattern[5] = genericRegionInfo.height & 0xff;
+1233       for (i = position, ii = data.length; i < ii; i++) {
+1234         let j = 0;
+1235         while (j < searchPatternLength && searchPattern[j] === data[i + j]) {
+1236           j++;
+1237         }
+1238         if (j === searchPatternLength) {
+1239           segmentHeader.length = i + searchPatternLength;
+1240           break;
+1241         }
+1242       }
+1243       if (segmentHeader.length === 0xffffffff) {
+1244         throw new Jbig2Error("segment end was not found");
+1245       }
+1246     } else {
+1247       throw new Jbig2Error("invalid unknown segment length");
+1248     }
+1249   }
+1250   segmentHeader.headerEnd = position;
+1251   return segmentHeader;
+1252 }
+1253 
+1254 function readSegments(header, data, start, end) {
+1255   const segments = [];
+1256   let position = start;
+1257   while (position < end) {
+1258     const segmentHeader = readSegmentHeader(data, position);
+1259     position = segmentHeader.headerEnd;
+1260     const segment = {
+1261       header: segmentHeader,
+1262       data,
+1263     };
+1264     if (!header.randomAccess) {
+1265       segment.start = position;
+1266       position += segmentHeader.length;
+1267       segment.end = position;
+1268     }
+1269     segments.push(segment);
+1270     if (segmentHeader.type === 51) {
+1271       break; // end of file is found
+1272     }
+1273   }
+1274   if (header.randomAccess) {
+1275     for (let i = 0, ii = segments.length; i < ii; i++) {
+1276       segments[i].start = position;
+1277       position += segments[i].header.length;
+1278       segments[i].end = position;
+1279     }
+1280   }
+1281   return segments;
+1282 }
+1283 
+1284 // 7.4.1 Region segment information field
+1285 function readRegionSegmentInformation(data, start) {
+1286   return {
+1287     width: readUint32(data, start),
+1288     height: readUint32(data, start + 4),
+1289     x: readUint32(data, start + 8),
+1290     y: readUint32(data, start + 12),
+1291     combinationOperator: data[start + 16] & 7,
+1292   };
+1293 }
+1294 const RegionSegmentInformationFieldLength = 17;
+1295 
+1296 function processSegment(segment, visitor) {
+1297   const header = segment.header;
+1298 
+1299   const data = segment.data,
+1300     end = segment.end;
+1301   let position = segment.start;
+1302   let args, at, i, atLength;
+1303   switch (header.type) {
+1304     case 0: // SymbolDictionary
+1305       // 7.4.2 Symbol dictionary segment syntax
+1306       const dictionary = {};
+1307       const dictionaryFlags = readUint16(data, position); // 7.4.2.1.1
+1308       dictionary.huffman = !!(dictionaryFlags & 1);
+1309       dictionary.refinement = !!(dictionaryFlags & 2);
+1310       dictionary.huffmanDHSelector = (dictionaryFlags >> 2) & 3;
+1311       dictionary.huffmanDWSelector = (dictionaryFlags >> 4) & 3;
+1312       dictionary.bitmapSizeSelector = (dictionaryFlags >> 6) & 1;
+1313       dictionary.aggregationInstancesSelector = (dictionaryFlags >> 7) & 1;
+1314       dictionary.bitmapCodingContextUsed = !!(dictionaryFlags & 256);
+1315       dictionary.bitmapCodingContextRetained = !!(dictionaryFlags & 512);
+1316       dictionary.template = (dictionaryFlags >> 10) & 3;
+1317       dictionary.refinementTemplate = (dictionaryFlags >> 12) & 1;
+1318       position += 2;
+1319       if (!dictionary.huffman) {
+1320         atLength = dictionary.template === 0 ? 4 : 1;
+1321         at = [];
+1322         for (i = 0; i < atLength; i++) {
+1323           at.push({
+1324             x: readInt8(data, position),
+1325             y: readInt8(data, position + 1),
+1326           });
+1327           position += 2;
+1328         }
+1329         dictionary.at = at;
+1330       }
+1331       if (dictionary.refinement && !dictionary.refinementTemplate) {
+1332         at = [];
+1333         for (i = 0; i < 2; i++) {
+1334           at.push({
+1335             x: readInt8(data, position),
+1336             y: readInt8(data, position + 1),
+1337           });
+1338           position += 2;
+1339         }
+1340         dictionary.refinementAt = at;
+1341       }
+1342       dictionary.numberOfExportedSymbols = readUint32(data, position);
+1343       position += 4;
+1344       dictionary.numberOfNewSymbols = readUint32(data, position);
+1345       position += 4;
+1346       args = [
+1347         dictionary,
+1348         header.number,
+1349         header.referredTo,
+1350         data,
+1351         position,
+1352         end,
+1353       ];
+1354       break;
+1355     case 6: // ImmediateTextRegion
+1356     case 7: // ImmediateLosslessTextRegion
+1357       const textRegion = {};
+1358       textRegion.info = readRegionSegmentInformation(data, position);
+1359       position += RegionSegmentInformationFieldLength;
+1360       const textRegionSegmentFlags = readUint16(data, position);
+1361       position += 2;
+1362       textRegion.huffman = !!(textRegionSegmentFlags & 1);
+1363       textRegion.refinement = !!(textRegionSegmentFlags & 2);
+1364       textRegion.logStripSize = (textRegionSegmentFlags >> 2) & 3;
+1365       textRegion.stripSize = 1 << textRegion.logStripSize;
+1366       textRegion.referenceCorner = (textRegionSegmentFlags >> 4) & 3;
+1367       textRegion.transposed = !!(textRegionSegmentFlags & 64);
+1368       textRegion.combinationOperator = (textRegionSegmentFlags >> 7) & 3;
+1369       textRegion.defaultPixelValue = (textRegionSegmentFlags >> 9) & 1;
+1370       textRegion.dsOffset = (textRegionSegmentFlags << 17) >> 27;
+1371       textRegion.refinementTemplate = (textRegionSegmentFlags >> 15) & 1;
+1372       if (textRegion.huffman) {
+1373         const textRegionHuffmanFlags = readUint16(data, position);
+1374         position += 2;
+1375         textRegion.huffmanFS = textRegionHuffmanFlags & 3;
+1376         textRegion.huffmanDS = (textRegionHuffmanFlags >> 2) & 3;
+1377         textRegion.huffmanDT = (textRegionHuffmanFlags >> 4) & 3;
+1378         textRegion.huffmanRefinementDW = (textRegionHuffmanFlags >> 6) & 3;
+1379         textRegion.huffmanRefinementDH = (textRegionHuffmanFlags >> 8) & 3;
+1380         textRegion.huffmanRefinementDX = (textRegionHuffmanFlags >> 10) & 3;
+1381         textRegion.huffmanRefinementDY = (textRegionHuffmanFlags >> 12) & 3;
+1382         textRegion.huffmanRefinementSizeSelector = !!(
+1383           textRegionHuffmanFlags & 0x4000
+1384         );
+1385       }
+1386       if (textRegion.refinement && !textRegion.refinementTemplate) {
+1387         at = [];
+1388         for (i = 0; i < 2; i++) {
+1389           at.push({
+1390             x: readInt8(data, position),
+1391             y: readInt8(data, position + 1),
+1392           });
+1393           position += 2;
+1394         }
+1395         textRegion.refinementAt = at;
+1396       }
+1397       textRegion.numberOfSymbolInstances = readUint32(data, position);
+1398       position += 4;
+1399       args = [textRegion, header.referredTo, data, position, end];
+1400       break;
+1401     case 16: // PatternDictionary
+1402       // 7.4.4. Pattern dictionary segment syntax
+1403       const patternDictionary = {};
+1404       const patternDictionaryFlags = data[position++];
+1405       patternDictionary.mmr = !!(patternDictionaryFlags & 1);
+1406       patternDictionary.template = (patternDictionaryFlags >> 1) & 3;
+1407       patternDictionary.patternWidth = data[position++];
+1408       patternDictionary.patternHeight = data[position++];
+1409       patternDictionary.maxPatternIndex = readUint32(data, position);
+1410       position += 4;
+1411       args = [patternDictionary, header.number, data, position, end];
+1412       break;
+1413     case 22: // ImmediateHalftoneRegion
+1414     case 23: // ImmediateLosslessHalftoneRegion
+1415       // 7.4.5 Halftone region segment syntax
+1416       const halftoneRegion = {};
+1417       halftoneRegion.info = readRegionSegmentInformation(data, position);
+1418       position += RegionSegmentInformationFieldLength;
+1419       const halftoneRegionFlags = data[position++];
+1420       halftoneRegion.mmr = !!(halftoneRegionFlags & 1);
+1421       halftoneRegion.template = (halftoneRegionFlags >> 1) & 3;
+1422       halftoneRegion.enableSkip = !!(halftoneRegionFlags & 8);
+1423       halftoneRegion.combinationOperator = (halftoneRegionFlags >> 4) & 7;
+1424       halftoneRegion.defaultPixelValue = (halftoneRegionFlags >> 7) & 1;
+1425       halftoneRegion.gridWidth = readUint32(data, position);
+1426       position += 4;
+1427       halftoneRegion.gridHeight = readUint32(data, position);
+1428       position += 4;
+1429       halftoneRegion.gridOffsetX = readUint32(data, position) & 0xffffffff;
+1430       position += 4;
+1431       halftoneRegion.gridOffsetY = readUint32(data, position) & 0xffffffff;
+1432       position += 4;
+1433       halftoneRegion.gridVectorX = readUint16(data, position);
+1434       position += 2;
+1435       halftoneRegion.gridVectorY = readUint16(data, position);
+1436       position += 2;
+1437       args = [halftoneRegion, header.referredTo, data, position, end];
+1438       break;
+1439     case 38: // ImmediateGenericRegion
+1440     case 39: // ImmediateLosslessGenericRegion
+1441       const genericRegion = {};
+1442       genericRegion.info = readRegionSegmentInformation(data, position);
+1443       position += RegionSegmentInformationFieldLength;
+1444       const genericRegionSegmentFlags = data[position++];
+1445       genericRegion.mmr = !!(genericRegionSegmentFlags & 1);
+1446       genericRegion.template = (genericRegionSegmentFlags >> 1) & 3;
+1447       genericRegion.prediction = !!(genericRegionSegmentFlags & 8);
+1448       if (!genericRegion.mmr) {
+1449         atLength = genericRegion.template === 0 ? 4 : 1;
+1450         at = [];
+1451         for (i = 0; i < atLength; i++) {
+1452           at.push({
+1453             x: readInt8(data, position),
+1454             y: readInt8(data, position + 1),
+1455           });
+1456           position += 2;
+1457         }
+1458         genericRegion.at = at;
+1459       }
+1460       args = [genericRegion, data, position, end];
+1461       break;
+1462     case 48: // PageInformation
+1463       const pageInfo = {
+1464         width: readUint32(data, position),
+1465         height: readUint32(data, position + 4),
+1466         resolutionX: readUint32(data, position + 8),
+1467         resolutionY: readUint32(data, position + 12),
+1468       };
+1469       if (pageInfo.height === 0xffffffff) {
+1470         delete pageInfo.height;
+1471       }
+1472       const pageSegmentFlags = data[position + 16];
+1473       readUint16(data, position + 17); // pageStripingInformation
+1474       pageInfo.lossless = !!(pageSegmentFlags & 1);
+1475       pageInfo.refinement = !!(pageSegmentFlags & 2);
+1476       pageInfo.defaultPixelValue = (pageSegmentFlags >> 2) & 1;
+1477       pageInfo.combinationOperator = (pageSegmentFlags >> 3) & 3;
+1478       pageInfo.requiresBuffer = !!(pageSegmentFlags & 32);
+1479       pageInfo.combinationOperatorOverride = !!(pageSegmentFlags & 64);
+1480       args = [pageInfo];
+1481       break;
+1482     case 49: // EndOfPage
+1483       break;
+1484     case 50: // EndOfStripe
+1485       break;
+1486     case 51: // EndOfFile
+1487       break;
+1488     case 53: // Tables
+1489       args = [header.number, data, position, end];
+1490       break;
+1491     case 62: // 7.4.15 defines 2 extension types which
+1492       // are comments and can be ignored.
+1493       break;
+1494     default:
+1495       throw new Jbig2Error(
+1496         `segment type ${header.typeName}(${header.type}) is not implemented`
+1497       );
+1498   }
+1499   const callbackName = "on" + header.typeName;
+1500   if (callbackName in visitor) {
+1501     // eslint-disable-next-line prefer-spread
+1502     visitor[callbackName].apply(visitor, args);
+1503   }
+1504 }
+1505 
+1506 function processSegments(segments, visitor) {
+1507   for (let i = 0, ii = segments.length; i < ii; i++) {
+1508     processSegment(segments[i], visitor);
+1509   }
+1510 }
+1511 
+1512 function parseJbig2Chunks(chunks) {
+1513   const visitor = new SimpleSegmentVisitor();
+1514   for (let i = 0, ii = chunks.length; i < ii; i++) {
+1515     const chunk = chunks[i];
+1516     const segments = readSegments({}, chunk.data, chunk.start, chunk.end);
+1517     processSegments(segments, visitor);
+1518   }
+1519   return visitor.buffer;
+1520 }
+1521 
+1522 function parseJbig2(data) {
+1523   if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("IMAGE_DECODERS")) {
+1524     throw new Error("Not implemented: parseJbig2");
+1525   }
+1526   const end = data.length;
+1527   let position = 0;
+1528 
+1529   if (
+1530     data[position] !== 0x97 ||
+1531     data[position + 1] !== 0x4a ||
+1532     data[position + 2] !== 0x42 ||
+1533     data[position + 3] !== 0x32 ||
+1534     data[position + 4] !== 0x0d ||
+1535     data[position + 5] !== 0x0a ||
+1536     data[position + 6] !== 0x1a ||
+1537     data[position + 7] !== 0x0a
+1538   ) {
+1539     throw new Jbig2Error("parseJbig2 - invalid header.");
+1540   }
+1541 
+1542   const header = Object.create(null);
+1543   position += 8;
+1544   const flags = data[position++];
+1545   header.randomAccess = !(flags & 1);
+1546   if (!(flags & 2)) {
+1547     header.numberOfPages = readUint32(data, position);
+1548     position += 4;
+1549   }
+1550 
+1551   const segments = readSegments(header, data, position, end);
+1552   const visitor = new SimpleSegmentVisitor();
+1553   processSegments(segments, visitor);
+1554 
+1555   const { width, height } = visitor.currentPageInfo;
+1556   const bitPacked = visitor.buffer;
+1557   const imgData = new Uint8ClampedArray(width * height);
+1558   let q = 0,
+1559     k = 0;
+1560   for (let i = 0; i < height; i++) {
+1561     let mask = 0,
+1562       buffer;
+1563     for (let j = 0; j < width; j++) {
+1564       if (!mask) {
+1565         mask = 128;
+1566         buffer = bitPacked[k++];
+1567       }
+1568       imgData[q++] = buffer & mask ? 0 : 255;
+1569       mask >>= 1;
+1570     }
+1571   }
+1572 
+1573   return { imgData, width, height };
+1574 }
+1575 
+1576 class SimpleSegmentVisitor {
+1577   onPageInformation(info) {
+1578     this.currentPageInfo = info;
+1579     const rowSize = (info.width + 7) >> 3;
+1580     const buffer = new Uint8ClampedArray(rowSize * info.height);
+1581     // The contents of ArrayBuffers are initialized to 0.
+1582     // Fill the buffer with 0xFF only if info.defaultPixelValue is set
+1583     if (info.defaultPixelValue) {
+1584       buffer.fill(0xff);
+1585     }
+1586     this.buffer = buffer;
+1587   }
+1588 
+1589   drawBitmap(regionInfo, bitmap) {
+1590     const pageInfo = this.currentPageInfo;
+1591     const width = regionInfo.width,
+1592       height = regionInfo.height;
+1593     const rowSize = (pageInfo.width + 7) >> 3;
+1594     const combinationOperator = pageInfo.combinationOperatorOverride
+1595       ? regionInfo.combinationOperator
+1596       : pageInfo.combinationOperator;
+1597     const buffer = this.buffer;
+1598     const mask0 = 128 >> (regionInfo.x & 7);
+1599     let offset0 = regionInfo.y * rowSize + (regionInfo.x >> 3);
+1600     let i, j, mask, offset;
+1601     switch (combinationOperator) {
+1602       case 0: // OR
+1603         for (i = 0; i < height; i++) {
+1604           mask = mask0;
+1605           offset = offset0;
+1606           for (j = 0; j < width; j++) {
+1607             if (bitmap[i][j]) {
+1608               buffer[offset] |= mask;
+1609             }
+1610             mask >>= 1;
+1611             if (!mask) {
+1612               mask = 128;
+1613               offset++;
+1614             }
+1615           }
+1616           offset0 += rowSize;
+1617         }
+1618         break;
+1619       case 2: // XOR
+1620         for (i = 0; i < height; i++) {
+1621           mask = mask0;
+1622           offset = offset0;
+1623           for (j = 0; j < width; j++) {
+1624             if (bitmap[i][j]) {
+1625               buffer[offset] ^= mask;
+1626             }
+1627             mask >>= 1;
+1628             if (!mask) {
+1629               mask = 128;
+1630               offset++;
+1631             }
+1632           }
+1633           offset0 += rowSize;
+1634         }
+1635         break;
+1636       default:
+1637         throw new Jbig2Error(
+1638           `operator ${combinationOperator} is not supported`
+1639         );
+1640     }
+1641   }
+1642 
+1643   onImmediateGenericRegion(region, data, start, end) {
+1644     const regionInfo = region.info;
+1645     const decodingContext = new DecodingContext(data, start, end);
+1646     const bitmap = decodeBitmap(
+1647       region.mmr,
+1648       regionInfo.width,
+1649       regionInfo.height,
+1650       region.template,
+1651       region.prediction,
+1652       null,
+1653       region.at,
+1654       decodingContext
+1655     );
+1656     this.drawBitmap(regionInfo, bitmap);
+1657   }
+1658 
+1659   onImmediateLosslessGenericRegion() {
+1660     this.onImmediateGenericRegion(...arguments);
+1661   }
+1662 
+1663   onSymbolDictionary(
+1664     dictionary,
+1665     currentSegment,
+1666     referredSegments,
+1667     data,
+1668     start,
+1669     end
+1670   ) {
+1671     let huffmanTables, huffmanInput;
+1672     if (dictionary.huffman) {
+1673       huffmanTables = getSymbolDictionaryHuffmanTables(
+1674         dictionary,
+1675         referredSegments,
+1676         this.customTables
+1677       );
+1678       huffmanInput = new Reader(data, start, end);
+1679     }
+1680 
+1681     // Combines exported symbols from all referred segments
+1682     let symbols = this.symbols;
+1683     if (!symbols) {
+1684       this.symbols = symbols = {};
+1685     }
+1686 
+1687     const inputSymbols = [];
+1688     for (const referredSegment of referredSegments) {
+1689       const referredSymbols = symbols[referredSegment];
+1690       // referredSymbols is undefined when we have a reference to a Tables
+1691       // segment instead of a SymbolDictionary.
+1692       if (referredSymbols) {
+1693         inputSymbols.push(...referredSymbols);
+1694       }
+1695     }
+1696 
+1697     const decodingContext = new DecodingContext(data, start, end);
+1698     symbols[currentSegment] = decodeSymbolDictionary(
+1699       dictionary.huffman,
+1700       dictionary.refinement,
+1701       inputSymbols,
+1702       dictionary.numberOfNewSymbols,
+1703       dictionary.numberOfExportedSymbols,
+1704       huffmanTables,
+1705       dictionary.template,
+1706       dictionary.at,
+1707       dictionary.refinementTemplate,
+1708       dictionary.refinementAt,
+1709       decodingContext,
+1710       huffmanInput
+1711     );
+1712   }
+1713 
+1714   onImmediateTextRegion(region, referredSegments, data, start, end) {
+1715     const regionInfo = region.info;
+1716     let huffmanTables, huffmanInput;
+1717 
+1718     // Combines exported symbols from all referred segments
+1719     const symbols = this.symbols;
+1720     const inputSymbols = [];
+1721     for (const referredSegment of referredSegments) {
+1722       const referredSymbols = symbols[referredSegment];
+1723       // referredSymbols is undefined when we have a reference to a Tables
+1724       // segment instead of a SymbolDictionary.
+1725       if (referredSymbols) {
+1726         inputSymbols.push(...referredSymbols);
+1727       }
+1728     }
+1729     const symbolCodeLength = log2(inputSymbols.length);
+1730     if (region.huffman) {
+1731       huffmanInput = new Reader(data, start, end);
+1732       huffmanTables = getTextRegionHuffmanTables(
+1733         region,
+1734         referredSegments,
+1735         this.customTables,
+1736         inputSymbols.length,
+1737         huffmanInput
+1738       );
+1739     }
+1740 
+1741     const decodingContext = new DecodingContext(data, start, end);
+1742     const bitmap = decodeTextRegion(
+1743       region.huffman,
+1744       region.refinement,
+1745       regionInfo.width,
+1746       regionInfo.height,
+1747       region.defaultPixelValue,
+1748       region.numberOfSymbolInstances,
+1749       region.stripSize,
+1750       inputSymbols,
+1751       symbolCodeLength,
+1752       region.transposed,
+1753       region.dsOffset,
+1754       region.referenceCorner,
+1755       region.combinationOperator,
+1756       huffmanTables,
+1757       region.refinementTemplate,
+1758       region.refinementAt,
+1759       decodingContext,
+1760       region.logStripSize,
+1761       huffmanInput
+1762     );
+1763     this.drawBitmap(regionInfo, bitmap);
+1764   }
+1765 
+1766   onImmediateLosslessTextRegion() {
+1767     this.onImmediateTextRegion(...arguments);
+1768   }
+1769 
+1770   onPatternDictionary(dictionary, currentSegment, data, start, end) {
+1771     let patterns = this.patterns;
+1772     if (!patterns) {
+1773       this.patterns = patterns = {};
+1774     }
+1775     const decodingContext = new DecodingContext(data, start, end);
+1776     patterns[currentSegment] = decodePatternDictionary(
+1777       dictionary.mmr,
+1778       dictionary.patternWidth,
+1779       dictionary.patternHeight,
+1780       dictionary.maxPatternIndex,
+1781       dictionary.template,
+1782       decodingContext
+1783     );
+1784   }
+1785 
+1786   onImmediateHalftoneRegion(region, referredSegments, data, start, end) {
+1787     // HalftoneRegion refers to exactly one PatternDictionary.
+1788     const patterns = this.patterns[referredSegments[0]];
+1789     const regionInfo = region.info;
+1790     const decodingContext = new DecodingContext(data, start, end);
+1791     const bitmap = decodeHalftoneRegion(
+1792       region.mmr,
+1793       patterns,
+1794       region.template,
+1795       regionInfo.width,
+1796       regionInfo.height,
+1797       region.defaultPixelValue,
+1798       region.enableSkip,
+1799       region.combinationOperator,
+1800       region.gridWidth,
+1801       region.gridHeight,
+1802       region.gridOffsetX,
+1803       region.gridOffsetY,
+1804       region.gridVectorX,
+1805       region.gridVectorY,
+1806       decodingContext
+1807     );
+1808     this.drawBitmap(regionInfo, bitmap);
+1809   }
+1810 
+1811   onImmediateLosslessHalftoneRegion() {
+1812     this.onImmediateHalftoneRegion(...arguments);
+1813   }
+1814 
+1815   onTables(currentSegment, data, start, end) {
+1816     let customTables = this.customTables;
+1817     if (!customTables) {
+1818       this.customTables = customTables = {};
+1819     }
+1820     customTables[currentSegment] = decodeTablesSegment(data, start, end);
+1821   }
+1822 }
+1823 
+1824 class HuffmanLine {
+1825   constructor(lineData) {
+1826     if (lineData.length === 2) {
+1827       // OOB line.
+1828       this.isOOB = true;
+1829       this.rangeLow = 0;
+1830       this.prefixLength = lineData[0];
+1831       this.rangeLength = 0;
+1832       this.prefixCode = lineData[1];
+1833       this.isLowerRange = false;
+1834     } else {
+1835       // Normal, upper range or lower range line.
+1836       // Upper range lines are processed like normal lines.
+1837       this.isOOB = false;
+1838       this.rangeLow = lineData[0];
+1839       this.prefixLength = lineData[1];
+1840       this.rangeLength = lineData[2];
+1841       this.prefixCode = lineData[3];
+1842       this.isLowerRange = lineData[4] === "lower";
+1843     }
+1844   }
+1845 }
+1846 
+1847 class HuffmanTreeNode {
+1848   constructor(line) {
+1849     this.children = [];
+1850     if (line) {
+1851       // Leaf node
+1852       this.isLeaf = true;
+1853       this.rangeLength = line.rangeLength;
+1854       this.rangeLow = line.rangeLow;
+1855       this.isLowerRange = line.isLowerRange;
+1856       this.isOOB = line.isOOB;
+1857     } else {
+1858       // Intermediate or root node
+1859       this.isLeaf = false;
+1860     }
+1861   }
+1862 
+1863   buildTree(line, shift) {
+1864     const bit = (line.prefixCode >> shift) & 1;
+1865     if (shift <= 0) {
+1866       // Create a leaf node.
+1867       this.children[bit] = new HuffmanTreeNode(line);
+1868     } else {
+1869       // Create an intermediate node and continue recursively.
+1870       let node = this.children[bit];
+1871       if (!node) {
+1872         this.children[bit] = node = new HuffmanTreeNode(null);
+1873       }
+1874       node.buildTree(line, shift - 1);
+1875     }
+1876   }
+1877 
+1878   decodeNode(reader) {
+1879     if (this.isLeaf) {
+1880       if (this.isOOB) {
+1881         return null;
+1882       }
+1883       const htOffset = reader.readBits(this.rangeLength);
+1884       return this.rangeLow + (this.isLowerRange ? -htOffset : htOffset);
+1885     }
+1886     const node = this.children[reader.readBit()];
+1887     if (!node) {
+1888       throw new Jbig2Error("invalid Huffman data");
+1889     }
+1890     return node.decodeNode(reader);
+1891   }
+1892 }
+1893 
+1894 class HuffmanTable {
+1895   constructor(lines, prefixCodesDone) {
+1896     if (!prefixCodesDone) {
+1897       this.assignPrefixCodes(lines);
+1898     }
+1899     // Create Huffman tree.
+1900     this.rootNode = new HuffmanTreeNode(null);
+1901     for (let i = 0, ii = lines.length; i < ii; i++) {
+1902       const line = lines[i];
+1903       if (line.prefixLength > 0) {
+1904         this.rootNode.buildTree(line, line.prefixLength - 1);
+1905       }
+1906     }
+1907   }
+1908 
+1909   decode(reader) {
+1910     return this.rootNode.decodeNode(reader);
+1911   }
+1912 
+1913   assignPrefixCodes(lines) {
+1914     // Annex B.3 Assigning the prefix codes.
+1915     const linesLength = lines.length;
+1916     let prefixLengthMax = 0;
+1917     for (let i = 0; i < linesLength; i++) {
+1918       prefixLengthMax = Math.max(prefixLengthMax, lines[i].prefixLength);
+1919     }
+1920 
+1921     const histogram = new Uint32Array(prefixLengthMax + 1);
+1922     for (let i = 0; i < linesLength; i++) {
+1923       histogram[lines[i].prefixLength]++;
+1924     }
+1925     let currentLength = 1,
+1926       firstCode = 0,
+1927       currentCode,
+1928       currentTemp,
+1929       line;
+1930     histogram[0] = 0;
+1931 
+1932     while (currentLength <= prefixLengthMax) {
+1933       firstCode = (firstCode + histogram[currentLength - 1]) << 1;
+1934       currentCode = firstCode;
+1935       currentTemp = 0;
+1936       while (currentTemp < linesLength) {
+1937         line = lines[currentTemp];
+1938         if (line.prefixLength === currentLength) {
+1939           line.prefixCode = currentCode;
+1940           currentCode++;
+1941         }
+1942         currentTemp++;
+1943       }
+1944       currentLength++;
+1945     }
+1946   }
+1947 }
+1948 
+1949 function decodeTablesSegment(data, start, end) {
+1950   // Decodes a Tables segment, i.e., a custom Huffman table.
+1951   // Annex B.2 Code table structure.
+1952   const flags = data[start];
+1953   const lowestValue = readUint32(data, start + 1) & 0xffffffff;
+1954   const highestValue = readUint32(data, start + 5) & 0xffffffff;
+1955   const reader = new Reader(data, start + 9, end);
+1956 
+1957   const prefixSizeBits = ((flags >> 1) & 7) + 1;
+1958   const rangeSizeBits = ((flags >> 4) & 7) + 1;
+1959   const lines = [];
+1960   let prefixLength,
+1961     rangeLength,
+1962     currentRangeLow = lowestValue;
+1963 
+1964   // Normal table lines
+1965   do {
+1966     prefixLength = reader.readBits(prefixSizeBits);
+1967     rangeLength = reader.readBits(rangeSizeBits);
+1968     lines.push(
+1969       new HuffmanLine([currentRangeLow, prefixLength, rangeLength, 0])
+1970     );
+1971     currentRangeLow += 1 << rangeLength;
+1972   } while (currentRangeLow < highestValue);
+1973 
+1974   // Lower range table line
+1975   prefixLength = reader.readBits(prefixSizeBits);
+1976   lines.push(new HuffmanLine([lowestValue - 1, prefixLength, 32, 0, "lower"]));
+1977 
+1978   // Upper range table line
+1979   prefixLength = reader.readBits(prefixSizeBits);
+1980   lines.push(new HuffmanLine([highestValue, prefixLength, 32, 0]));
+1981 
+1982   if (flags & 1) {
+1983     // Out-of-band table line
+1984     prefixLength = reader.readBits(prefixSizeBits);
+1985     lines.push(new HuffmanLine([prefixLength, 0]));
+1986   }
+1987 
+1988   return new HuffmanTable(lines, false);
+1989 }
+1990 
+1991 const standardTablesCache = {};
+1992 
+1993 function getStandardTable(number) {
+1994   // Annex B.5 Standard Huffman tables.
+1995   let table = standardTablesCache[number];
+1996   if (table) {
+1997     return table;
+1998   }
+1999   let lines;
+2000   switch (number) {
+2001     case 1:
+2002       lines = [
+2003         [0, 1, 4, 0x0],
+2004         [16, 2, 8, 0x2],
+2005         [272, 3, 16, 0x6],
+2006         [65808, 3, 32, 0x7], // upper
+2007       ];
+2008       break;
+2009     case 2:
+2010       lines = [
+2011         [0, 1, 0, 0x0],
+2012         [1, 2, 0, 0x2],
+2013         [2, 3, 0, 0x6],
+2014         [3, 4, 3, 0xe],
+2015         [11, 5, 6, 0x1e],
+2016         [75, 6, 32, 0x3e], // upper
+2017         [6, 0x3f], // OOB
+2018       ];
+2019       break;
+2020     case 3:
+2021       lines = [
+2022         [-256, 8, 8, 0xfe],
+2023         [0, 1, 0, 0x0],
+2024         [1, 2, 0, 0x2],
+2025         [2, 3, 0, 0x6],
+2026         [3, 4, 3, 0xe],
+2027         [11, 5, 6, 0x1e],
+2028         [-257, 8, 32, 0xff, "lower"],
+2029         [75, 7, 32, 0x7e], // upper
+2030         [6, 0x3e], // OOB
+2031       ];
+2032       break;
+2033     case 4:
+2034       lines = [
+2035         [1, 1, 0, 0x0],
+2036         [2, 2, 0, 0x2],
+2037         [3, 3, 0, 0x6],
+2038         [4, 4, 3, 0xe],
+2039         [12, 5, 6, 0x1e],
+2040         [76, 5, 32, 0x1f], // upper
+2041       ];
+2042       break;
+2043     case 5:
+2044       lines = [
+2045         [-255, 7, 8, 0x7e],
+2046         [1, 1, 0, 0x0],
+2047         [2, 2, 0, 0x2],
+2048         [3, 3, 0, 0x6],
+2049         [4, 4, 3, 0xe],
+2050         [12, 5, 6, 0x1e],
+2051         [-256, 7, 32, 0x7f, "lower"],
+2052         [76, 6, 32, 0x3e], // upper
+2053       ];
+2054       break;
+2055     case 6:
+2056       lines = [
+2057         [-2048, 5, 10, 0x1c],
+2058         [-1024, 4, 9, 0x8],
+2059         [-512, 4, 8, 0x9],
+2060         [-256, 4, 7, 0xa],
+2061         [-128, 5, 6, 0x1d],
+2062         [-64, 5, 5, 0x1e],
+2063         [-32, 4, 5, 0xb],
+2064         [0, 2, 7, 0x0],
+2065         [128, 3, 7, 0x2],
+2066         [256, 3, 8, 0x3],
+2067         [512, 4, 9, 0xc],
+2068         [1024, 4, 10, 0xd],
+2069         [-2049, 6, 32, 0x3e, "lower"],
+2070         [2048, 6, 32, 0x3f], // upper
+2071       ];
+2072       break;
+2073     case 7:
+2074       lines = [
+2075         [-1024, 4, 9, 0x8],
+2076         [-512, 3, 8, 0x0],
+2077         [-256, 4, 7, 0x9],
+2078         [-128, 5, 6, 0x1a],
+2079         [-64, 5, 5, 0x1b],
+2080         [-32, 4, 5, 0xa],
+2081         [0, 4, 5, 0xb],
+2082         [32, 5, 5, 0x1c],
+2083         [64, 5, 6, 0x1d],
+2084         [128, 4, 7, 0xc],
+2085         [256, 3, 8, 0x1],
+2086         [512, 3, 9, 0x2],
+2087         [1024, 3, 10, 0x3],
+2088         [-1025, 5, 32, 0x1e, "lower"],
+2089         [2048, 5, 32, 0x1f], // upper
+2090       ];
+2091       break;
+2092     case 8:
+2093       lines = [
+2094         [-15, 8, 3, 0xfc],
+2095         [-7, 9, 1, 0x1fc],
+2096         [-5, 8, 1, 0xfd],
+2097         [-3, 9, 0, 0x1fd],
+2098         [-2, 7, 0, 0x7c],
+2099         [-1, 4, 0, 0xa],
+2100         [0, 2, 1, 0x0],
+2101         [2, 5, 0, 0x1a],
+2102         [3, 6, 0, 0x3a],
+2103         [4, 3, 4, 0x4],
+2104         [20, 6, 1, 0x3b],
+2105         [22, 4, 4, 0xb],
+2106         [38, 4, 5, 0xc],
+2107         [70, 5, 6, 0x1b],
+2108         [134, 5, 7, 0x1c],
+2109         [262, 6, 7, 0x3c],
+2110         [390, 7, 8, 0x7d],
+2111         [646, 6, 10, 0x3d],
+2112         [-16, 9, 32, 0x1fe, "lower"],
+2113         [1670, 9, 32, 0x1ff], // upper
+2114         [2, 0x1], // OOB
+2115       ];
+2116       break;
+2117     case 9:
+2118       lines = [
+2119         [-31, 8, 4, 0xfc],
+2120         [-15, 9, 2, 0x1fc],
+2121         [-11, 8, 2, 0xfd],
+2122         [-7, 9, 1, 0x1fd],
+2123         [-5, 7, 1, 0x7c],
+2124         [-3, 4, 1, 0xa],
+2125         [-1, 3, 1, 0x2],
+2126         [1, 3, 1, 0x3],
+2127         [3, 5, 1, 0x1a],
+2128         [5, 6, 1, 0x3a],
+2129         [7, 3, 5, 0x4],
+2130         [39, 6, 2, 0x3b],
+2131         [43, 4, 5, 0xb],
+2132         [75, 4, 6, 0xc],
+2133         [139, 5, 7, 0x1b],
+2134         [267, 5, 8, 0x1c],
+2135         [523, 6, 8, 0x3c],
+2136         [779, 7, 9, 0x7d],
+2137         [1291, 6, 11, 0x3d],
+2138         [-32, 9, 32, 0x1fe, "lower"],
+2139         [3339, 9, 32, 0x1ff], // upper
+2140         [2, 0x0], // OOB
+2141       ];
+2142       break;
+2143     case 10:
+2144       lines = [
+2145         [-21, 7, 4, 0x7a],
+2146         [-5, 8, 0, 0xfc],
+2147         [-4, 7, 0, 0x7b],
+2148         [-3, 5, 0, 0x18],
+2149         [-2, 2, 2, 0x0],
+2150         [2, 5, 0, 0x19],
+2151         [3, 6, 0, 0x36],
+2152         [4, 7, 0, 0x7c],
+2153         [5, 8, 0, 0xfd],
+2154         [6, 2, 6, 0x1],
+2155         [70, 5, 5, 0x1a],
+2156         [102, 6, 5, 0x37],
+2157         [134, 6, 6, 0x38],
+2158         [198, 6, 7, 0x39],
+2159         [326, 6, 8, 0x3a],
+2160         [582, 6, 9, 0x3b],
+2161         [1094, 6, 10, 0x3c],
+2162         [2118, 7, 11, 0x7d],
+2163         [-22, 8, 32, 0xfe, "lower"],
+2164         [4166, 8, 32, 0xff], // upper
+2165         [2, 0x2], // OOB
+2166       ];
+2167       break;
+2168     case 11:
+2169       lines = [
+2170         [1, 1, 0, 0x0],
+2171         [2, 2, 1, 0x2],
+2172         [4, 4, 0, 0xc],
+2173         [5, 4, 1, 0xd],
+2174         [7, 5, 1, 0x1c],
+2175         [9, 5, 2, 0x1d],
+2176         [13, 6, 2, 0x3c],
+2177         [17, 7, 2, 0x7a],
+2178         [21, 7, 3, 0x7b],
+2179         [29, 7, 4, 0x7c],
+2180         [45, 7, 5, 0x7d],
+2181         [77, 7, 6, 0x7e],
+2182         [141, 7, 32, 0x7f], // upper
+2183       ];
+2184       break;
+2185     case 12:
+2186       lines = [
+2187         [1, 1, 0, 0x0],
+2188         [2, 2, 0, 0x2],
+2189         [3, 3, 1, 0x6],
+2190         [5, 5, 0, 0x1c],
+2191         [6, 5, 1, 0x1d],
+2192         [8, 6, 1, 0x3c],
+2193         [10, 7, 0, 0x7a],
+2194         [11, 7, 1, 0x7b],
+2195         [13, 7, 2, 0x7c],
+2196         [17, 7, 3, 0x7d],
+2197         [25, 7, 4, 0x7e],
+2198         [41, 8, 5, 0xfe],
+2199         [73, 8, 32, 0xff], // upper
+2200       ];
+2201       break;
+2202     case 13:
+2203       lines = [
+2204         [1, 1, 0, 0x0],
+2205         [2, 3, 0, 0x4],
+2206         [3, 4, 0, 0xc],
+2207         [4, 5, 0, 0x1c],
+2208         [5, 4, 1, 0xd],
+2209         [7, 3, 3, 0x5],
+2210         [15, 6, 1, 0x3a],
+2211         [17, 6, 2, 0x3b],
+2212         [21, 6, 3, 0x3c],
+2213         [29, 6, 4, 0x3d],
+2214         [45, 6, 5, 0x3e],
+2215         [77, 7, 6, 0x7e],
+2216         [141, 7, 32, 0x7f], // upper
+2217       ];
+2218       break;
+2219     case 14:
+2220       lines = [
+2221         [-2, 3, 0, 0x4],
+2222         [-1, 3, 0, 0x5],
+2223         [0, 1, 0, 0x0],
+2224         [1, 3, 0, 0x6],
+2225         [2, 3, 0, 0x7],
+2226       ];
+2227       break;
+2228     case 15:
+2229       lines = [
+2230         [-24, 7, 4, 0x7c],
+2231         [-8, 6, 2, 0x3c],
+2232         [-4, 5, 1, 0x1c],
+2233         [-2, 4, 0, 0xc],
+2234         [-1, 3, 0, 0x4],
+2235         [0, 1, 0, 0x0],
+2236         [1, 3, 0, 0x5],
+2237         [2, 4, 0, 0xd],
+2238         [3, 5, 1, 0x1d],
+2239         [5, 6, 2, 0x3d],
+2240         [9, 7, 4, 0x7d],
+2241         [-25, 7, 32, 0x7e, "lower"],
+2242         [25, 7, 32, 0x7f], // upper
+2243       ];
+2244       break;
+2245     default:
+2246       throw new Jbig2Error(`standard table B.${number} does not exist`);
+2247   }
+2248 
+2249   for (let i = 0, ii = lines.length; i < ii; i++) {
+2250     lines[i] = new HuffmanLine(lines[i]);
+2251   }
+2252   table = new HuffmanTable(lines, true);
+2253   standardTablesCache[number] = table;
+2254   return table;
+2255 }
+2256 
+2257 class Reader {
+2258   constructor(data, start, end) {
+2259     this.data = data;
+2260     this.start = start;
+2261     this.end = end;
+2262     this.position = start;
+2263     this.shift = -1;
+2264     this.currentByte = 0;
+2265   }
+2266 
+2267   readBit() {
+2268     if (this.shift < 0) {
+2269       if (this.position >= this.end) {
+2270         throw new Jbig2Error("end of data while reading bit");
+2271       }
+2272       this.currentByte = this.data[this.position++];
+2273       this.shift = 7;
+2274     }
+2275     const bit = (this.currentByte >> this.shift) & 1;
+2276     this.shift--;
+2277     return bit;
+2278   }
+2279 
+2280   readBits(numBits) {
+2281     let result = 0,
+2282       i;
+2283     for (i = numBits - 1; i >= 0; i--) {
+2284       result |= this.readBit() << i;
+2285     }
+2286     return result;
+2287   }
+2288 
+2289   byteAlign() {
+2290     this.shift = -1;
+2291   }
+2292 
+2293   next() {
+2294     if (this.position >= this.end) {
+2295       return -1;
+2296     }
+2297     return this.data[this.position++];
+2298   }
+2299 }
+2300 
+2301 function getCustomHuffmanTable(index, referredTo, customTables) {
+2302   // Returns a Tables segment that has been earlier decoded.
+2303   // See 7.4.2.1.6 (symbol dictionary) or 7.4.3.1.6 (text region).
+2304   let currentIndex = 0;
+2305   for (let i = 0, ii = referredTo.length; i < ii; i++) {
+2306     const table = customTables[referredTo[i]];
+2307     if (table) {
+2308       if (index === currentIndex) {
+2309         return table;
+2310       }
+2311       currentIndex++;
+2312     }
+2313   }
+2314   throw new Jbig2Error("can't find custom Huffman table");
+2315 }
+2316 
+2317 function getTextRegionHuffmanTables(
+2318   textRegion,
+2319   referredTo,
+2320   customTables,
+2321   numberOfSymbols,
+2322   reader
+2323 ) {
+2324   // 7.4.3.1.7 Symbol ID Huffman table decoding
+2325 
+2326   // Read code lengths for RUNCODEs 0...34.
+2327   const codes = [];
+2328   for (let i = 0; i <= 34; i++) {
+2329     const codeLength = reader.readBits(4);
+2330     codes.push(new HuffmanLine([i, codeLength, 0, 0]));
+2331   }
+2332   // Assign Huffman codes for RUNCODEs.
+2333   const runCodesTable = new HuffmanTable(codes, false);
+2334 
+2335   // Read a Huffman code using the assignment above.
+2336   // Interpret the RUNCODE codes and the additional bits (if any).
+2337   codes.length = 0;
+2338   for (let i = 0; i < numberOfSymbols; ) {
+2339     const codeLength = runCodesTable.decode(reader);
+2340     if (codeLength >= 32) {
+2341       let repeatedLength, numberOfRepeats, j;
+2342       switch (codeLength) {
+2343         case 32:
+2344           if (i === 0) {
+2345             throw new Jbig2Error("no previous value in symbol ID table");
+2346           }
+2347           numberOfRepeats = reader.readBits(2) + 3;
+2348           repeatedLength = codes[i - 1].prefixLength;
+2349           break;
+2350         case 33:
+2351           numberOfRepeats = reader.readBits(3) + 3;
+2352           repeatedLength = 0;
+2353           break;
+2354         case 34:
+2355           numberOfRepeats = reader.readBits(7) + 11;
+2356           repeatedLength = 0;
+2357           break;
+2358         default:
+2359           throw new Jbig2Error("invalid code length in symbol ID table");
+2360       }
+2361       for (j = 0; j < numberOfRepeats; j++) {
+2362         codes.push(new HuffmanLine([i, repeatedLength, 0, 0]));
+2363         i++;
+2364       }
+2365     } else {
+2366       codes.push(new HuffmanLine([i, codeLength, 0, 0]));
+2367       i++;
+2368     }
+2369   }
+2370   reader.byteAlign();
+2371   const symbolIDTable = new HuffmanTable(codes, false);
+2372 
+2373   // 7.4.3.1.6 Text region segment Huffman table selection
+2374 
+2375   let customIndex = 0,
+2376     tableFirstS,
+2377     tableDeltaS,
+2378     tableDeltaT;
+2379 
+2380   switch (textRegion.huffmanFS) {
+2381     case 0:
+2382     case 1:
+2383       tableFirstS = getStandardTable(textRegion.huffmanFS + 6);
+2384       break;
+2385     case 3:
+2386       tableFirstS = getCustomHuffmanTable(
+2387         customIndex,
+2388         referredTo,
+2389         customTables
+2390       );
+2391       customIndex++;
+2392       break;
+2393     default:
+2394       throw new Jbig2Error("invalid Huffman FS selector");
+2395   }
+2396 
+2397   switch (textRegion.huffmanDS) {
+2398     case 0:
+2399     case 1:
+2400     case 2:
+2401       tableDeltaS = getStandardTable(textRegion.huffmanDS + 8);
+2402       break;
+2403     case 3:
+2404       tableDeltaS = getCustomHuffmanTable(
+2405         customIndex,
+2406         referredTo,
+2407         customTables
+2408       );
+2409       customIndex++;
+2410       break;
+2411     default:
+2412       throw new Jbig2Error("invalid Huffman DS selector");
+2413   }
+2414 
+2415   switch (textRegion.huffmanDT) {
+2416     case 0:
+2417     case 1:
+2418     case 2:
+2419       tableDeltaT = getStandardTable(textRegion.huffmanDT + 11);
+2420       break;
+2421     case 3:
+2422       tableDeltaT = getCustomHuffmanTable(
+2423         customIndex,
+2424         referredTo,
+2425         customTables
+2426       );
+2427       customIndex++;
+2428       break;
+2429     default:
+2430       throw new Jbig2Error("invalid Huffman DT selector");
+2431   }
+2432 
+2433   if (textRegion.refinement) {
+2434     // Load tables RDW, RDH, RDX and RDY.
+2435     throw new Jbig2Error("refinement with Huffman is not supported");
+2436   }
+2437 
+2438   return {
+2439     symbolIDTable,
+2440     tableFirstS,
+2441     tableDeltaS,
+2442     tableDeltaT,
+2443   };
+2444 }
+2445 
+2446 function getSymbolDictionaryHuffmanTables(
+2447   dictionary,
+2448   referredTo,
+2449   customTables
+2450 ) {
+2451   // 7.4.2.1.6 Symbol dictionary segment Huffman table selection
+2452 
+2453   let customIndex = 0,
+2454     tableDeltaHeight,
+2455     tableDeltaWidth;
+2456   switch (dictionary.huffmanDHSelector) {
+2457     case 0:
+2458     case 1:
+2459       tableDeltaHeight = getStandardTable(dictionary.huffmanDHSelector + 4);
+2460       break;
+2461     case 3:
+2462       tableDeltaHeight = getCustomHuffmanTable(
+2463         customIndex,
+2464         referredTo,
+2465         customTables
+2466       );
+2467       customIndex++;
+2468       break;
+2469     default:
+2470       throw new Jbig2Error("invalid Huffman DH selector");
+2471   }
+2472 
+2473   switch (dictionary.huffmanDWSelector) {
+2474     case 0:
+2475     case 1:
+2476       tableDeltaWidth = getStandardTable(dictionary.huffmanDWSelector + 2);
+2477       break;
+2478     case 3:
+2479       tableDeltaWidth = getCustomHuffmanTable(
+2480         customIndex,
+2481         referredTo,
+2482         customTables
+2483       );
+2484       customIndex++;
+2485       break;
+2486     default:
+2487       throw new Jbig2Error("invalid Huffman DW selector");
+2488   }
+2489 
+2490   let tableBitmapSize, tableAggregateInstances;
+2491   if (dictionary.bitmapSizeSelector) {
+2492     tableBitmapSize = getCustomHuffmanTable(
+2493       customIndex,
+2494       referredTo,
+2495       customTables
+2496     );
+2497     customIndex++;
+2498   } else {
+2499     tableBitmapSize = getStandardTable(1);
+2500   }
+2501 
+2502   if (dictionary.aggregationInstancesSelector) {
+2503     tableAggregateInstances = getCustomHuffmanTable(
+2504       customIndex,
+2505       referredTo,
+2506       customTables
+2507     );
+2508   } else {
+2509     tableAggregateInstances = getStandardTable(1);
+2510   }
+2511 
+2512   return {
+2513     tableDeltaHeight,
+2514     tableDeltaWidth,
+2515     tableBitmapSize,
+2516     tableAggregateInstances,
+2517   };
+2518 }
+2519 
+2520 function readUncompressedBitmap(reader, width, height) {
+2521   const bitmap = [];
+2522   for (let y = 0; y < height; y++) {
+2523     const row = new Uint8Array(width);
+2524     bitmap.push(row);
+2525     for (let x = 0; x < width; x++) {
+2526       row[x] = reader.readBit();
+2527     }
+2528     reader.byteAlign();
+2529   }
+2530   return bitmap;
+2531 }
+2532 
+2533 function decodeMMRBitmap(input, width, height, endOfBlock) {
+2534   // MMR is the same compression algorithm as the PDF filter
+2535   // CCITTFaxDecode with /K -1.
+2536   const params = {
+2537     K: -1,
+2538     Columns: width,
+2539     Rows: height,
+2540     BlackIs1: true,
+2541     EndOfBlock: endOfBlock,
+2542   };
+2543   const decoder = new CCITTFaxDecoder(input, params);
+2544   const bitmap = [];
+2545   let currentByte,
+2546     eof = false;
+2547 
+2548   for (let y = 0; y < height; y++) {
+2549     const row = new Uint8Array(width);
+2550     bitmap.push(row);
+2551     let shift = -1;
+2552     for (let x = 0; x < width; x++) {
+2553       if (shift < 0) {
+2554         currentByte = decoder.readNextChar();
+2555         if (currentByte === -1) {
+2556           // Set the rest of the bits to zero.
+2557           currentByte = 0;
+2558           eof = true;
+2559         }
+2560         shift = 7;
+2561       }
+2562       row[x] = (currentByte >> shift) & 1;
+2563       shift--;
+2564     }
+2565   }
+2566 
+2567   if (endOfBlock && !eof) {
+2568     // Read until EOFB has been consumed.
+2569     const lookForEOFLimit = 5;
+2570     for (let i = 0; i < lookForEOFLimit; i++) {
+2571       if (decoder.readNextChar() === -1) {
+2572         break;
+2573       }
+2574     }
+2575   }
+2576 
+2577   return bitmap;
+2578 }
+2579 
+2580 class Jbig2Image {
+2581   parseChunks(chunks) {
+2582     return parseJbig2Chunks(chunks);
+2583   }
+2584 
+2585   parse(data) {
+2586     if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("IMAGE_DECODERS")) {
+2587       throw new Error("Not implemented: Jbig2Image.parse");
+2588     }
+2589     const { imgData, width, height } = parseJbig2(data);
+2590     this.width = width;
+2591     this.height = height;
+2592     return imgData;
+2593   }
+2594 }
+2595 
+2596 export { Jbig2Error, Jbig2Image };
+File:
+src/shared/image_utils.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { FeatureTest, ImageKind } from "./util.js";
+17 
+18 function convertToRGBA(params) {
+19   switch (params.kind) {
+20     case ImageKind.GRAYSCALE_1BPP:
+21       return convertBlackAndWhiteToRGBA(params);
+22     case ImageKind.RGB_24BPP:
+23       return convertRGBToRGBA(params);
+24   }
+25 
+26   return null;
+27 }
+28 
+29 function convertBlackAndWhiteToRGBA({
+30   src,
+31   srcPos = 0,
+32   dest,
+33   width,
+34   height,
+35   nonBlackColor = 0xffffffff,
+36   inverseDecode = false,
+37 }) {
+38   const black = FeatureTest.isLittleEndian ? 0xff000000 : 0x000000ff;
+39   const [zeroMapping, oneMapping] = inverseDecode
+40     ? [nonBlackColor, black]
+41     : [black, nonBlackColor];
+42   const widthInSource = width >> 3;
+43   const widthRemainder = width & 7;
+44   const srcLength = src.length;
+45   dest = new Uint32Array(dest.buffer);
+46   let destPos = 0;
+47 
+48   for (let i = 0; i < height; i++) {
+49     for (const max = srcPos + widthInSource; srcPos < max; srcPos++) {
+50       const elem = srcPos < srcLength ? src[srcPos] : 255;
+51       dest[destPos++] = elem & 0b10000000 ? oneMapping : zeroMapping;
+52       dest[destPos++] = elem & 0b1000000 ? oneMapping : zeroMapping;
+53       dest[destPos++] = elem & 0b100000 ? oneMapping : zeroMapping;
+54       dest[destPos++] = elem & 0b10000 ? oneMapping : zeroMapping;
+55       dest[destPos++] = elem & 0b1000 ? oneMapping : zeroMapping;
+56       dest[destPos++] = elem & 0b100 ? oneMapping : zeroMapping;
+57       dest[destPos++] = elem & 0b10 ? oneMapping : zeroMapping;
+58       dest[destPos++] = elem & 0b1 ? oneMapping : zeroMapping;
+59     }
+60     if (widthRemainder === 0) {
+61       continue;
+62     }
+63     const elem = srcPos < srcLength ? src[srcPos++] : 255;
+64     for (let j = 0; j < widthRemainder; j++) {
+65       dest[destPos++] = elem & (1 << (7 - j)) ? oneMapping : zeroMapping;
+66     }
+67   }
+68   return { srcPos, destPos };
+69 }
+70 
+71 function convertRGBToRGBA({
+72   src,
+73   srcPos = 0,
+74   dest,
+75   destPos = 0,
+76   width,
+77   height,
+78 }) {
+79   let i = 0;
+80   const len32 = src.length >> 2;
+81   const src32 = new Uint32Array(src.buffer, srcPos, len32);
+82 
+83   if (FeatureTest.isLittleEndian) {
+84     // It's a way faster to do the shuffle manually instead of working
+85     // component by component with some Uint8 arrays.
+86     for (; i < len32 - 2; i += 3, destPos += 4) {
+87       const s1 = src32[i]; // R2B1G1R1
+88       const s2 = src32[i + 1]; // G3R3B2G2
+89       const s3 = src32[i + 2]; // B4G4R4B3
+90 
+91       dest[destPos] = s1 | 0xff000000;
+92       dest[destPos + 1] = (s1 >>> 24) | (s2 << 8) | 0xff000000;
+93       dest[destPos + 2] = (s2 >>> 16) | (s3 << 16) | 0xff000000;
+94       dest[destPos + 3] = (s3 >>> 8) | 0xff000000;
+95     }
+96 
+97     for (let j = i * 4, jj = src.length; j < jj; j += 3) {
+98       dest[destPos++] =
+99         src[j] | (src[j + 1] << 8) | (src[j + 2] << 16) | 0xff000000;
+100     }
+101   } else {
+102     for (; i < len32 - 2; i += 3, destPos += 4) {
+103       const s1 = src32[i]; // R1G1B1R2
+104       const s2 = src32[i + 1]; // G2B2R3G3
+105       const s3 = src32[i + 2]; // B3R4G4B4
+106 
+107       dest[destPos] = s1 | 0xff;
+108       dest[destPos + 1] = (s1 << 24) | (s2 >>> 8) | 0xff;
+109       dest[destPos + 2] = (s2 << 16) | (s3 >>> 16) | 0xff;
+110       dest[destPos + 3] = (s3 << 8) | 0xff;
+111     }
+112 
+113     for (let j = i * 4, jj = src.length; j < jj; j += 3) {
+114       dest[destPos++] =
+115         (src[j] << 24) | (src[j + 1] << 16) | (src[j + 2] << 8) | 0xff;
+116     }
+117   }
+118 
+119   return { srcPos, destPos };
+120 }
+121 
+122 function grayToRGBA(src, dest) {
+123   if (FeatureTest.isLittleEndian) {
+124     for (let i = 0, ii = src.length; i < ii; i++) {
+125       dest[i] = (src[i] * 0x10101) | 0xff000000;
+126     }
+127   } else {
+128     for (let i = 0, ii = src.length; i < ii; i++) {
+129       dest[i] = (src[i] * 0x1010100) | 0x000000ff;
+130     }
+131   }
+132 }
+133 
+134 export { convertBlackAndWhiteToRGBA, convertToRGBA, grayToRGBA };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/core_utils_spec.js
+/* Copyright 2019 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  arrayBuffersToBytes,
+  encodeToXmlString,
+  escapePDFName,
+  escapeString,
+  getInheritableProperty,
+  getSizeInBytes,
+  isAscii,
+  isWhiteSpace,
+  log2,
+  numberToString,
+  parseXFAPath,
+  recoverJsURL,
+  stringToUTF16HexString,
+  stringToUTF16String,
+  toRomanNumerals,
+  validateCSSFont,
+} from "../../src/core/core_utils.js";
+import { Dict, Ref } from "../../src/core/primitives.js";
+import { XRefMock } from "./test_utils.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

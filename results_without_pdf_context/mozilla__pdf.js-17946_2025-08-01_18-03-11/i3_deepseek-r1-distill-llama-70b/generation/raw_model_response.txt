@@ -1,0 +1,83 @@
+<think>
+Okay, I need to write a test that verifies the patch resolves the issue where large images in PDFs aren't rendered by PDF.js. The user provided the necessary code changes, and I need to ensure the test fails before the patch and passes after.
+
+First, I'll look at the problem. The user mentioned that when opening a specific PDF, the scanned image doesn't render. The console logs indicate issues with decoding the JPX image, particularly with unsupported options and dependent images not being ready.
+
+The patch modifies several files, primarily in the jpx.js and decode_stream.js. It seems they're replacing the custom JPX decoder with an external OpenJPEG library and adjusting how image streams are handled.
+
+To test this, I'll create a test case that loads the example PDF, extracts the first page, and checks if the image renders correctly. I'll need to set up a mock XRef and stream to simulate the PDF data.
+
+I'll structure the test using Jest. I'll import necessary modules, set up mocks for XRef and streams, and create a buffer with the example PDF data. Then, I'll parse the PDF, get the first page, and check if the image is rendered without errors.
+
+The test should fail before the patch because the custom JPX decoder can't handle the image, resulting in an error. After applying the patch, the test should pass as OpenJPEG correctly decodes the image.
+
+I'll use async/await for promises and make sure the test is self-contained, using only the provided imports. The test will compare the expected and actual results, ensuring the image is rendered properly.
+</think>
+
+```javascript
+it("should render large JPX images in PDF", async () => {
+  const examplePdfBuffer = new TextEncoder().encode(
+    "%PDF-1.0\n" +
+    "/Type /Catalog\n" +
+    "/Pages /Pages\n" +
+    "endobj\n" +
+    "/Pages\n" +
+    "<<\n" +
+    "/Kids [ /Kid1 ]\n" +
+    "/Count 1\n" +
+    "/Type /Pages\n" +
+    ">>\n" +
+    "endobj\n" +
+    "/Kid1\n" +
+    "<<\n" +
+    "/Type /Page\n" +
+    "/Parent /Pages\n" +
+    "/Resources\n" +
+    "<<\n" +
+    "/XObject /Im1\n" +
+    ">>\n" +
+    "/Contents\n" +
+    "<<\n" +
+    "/Length 7\n" +
+    ">>\n" +
+    "stream\n" +
+    "BT\n" +
+    "  /Name /Im1\n" +
+    "  /Subtype /Image\n" +
+    "  /Filter /JPXDecode\n" +
+    "  /Width 100\n" +
+    "  /Height 100\n" +
+    "  /ColorSpace /DeviceRGB\n" +
+    "  /BitsPerComponent 8\n" +
+    "  /Length 7\n" +
+    ">>\n" +
+    "stream\n" +
+    "JP2\n" +
+    "endstream\n" +
+    "endobj\n" +
+    "endobj\n"
+  );
+
+  const xref = new XRefMock();
+  const stream = new StringStream(examplePdfBuffer);
+  
+  try {
+    await xref.load(stream, {
+      start: 0,
+      end: examplePdfBuffer.length,
+    });
+  } catch (e) {
+    console.error("Error loading PDF", e);
+  }
+
+  const pdfDocument = await PDFDocumentLoadingTask.create(xref).promise;
+
+  const firstPagePromise = pdfDocument.getPage(1).promise;
+  const page = await firstPagePromise;
+
+  const imagePromise = page.drawImageToImage();
+  const image = await imagePromise;
+
+  expect(image).not.toBeNull();
+});
+```

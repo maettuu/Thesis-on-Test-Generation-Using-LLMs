@@ -1,0 +1,33 @@
+```javascript
+it("should release ImageBitmap data after cleanup", async () => {
+  const { PDFWorker, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } = await import("../../src/display/api.js");
+  const { DefaultFileReaderFactory, TEST_PDFS_PATH } = await import("./test_utils.js");
+  const worker = new PDFWorker({
+    workerSrc: "../../build/generic/build/pdf.worker.mjs",
+  });
+  const loadingTask = new PDFDocumentLoadingTask({
+    cMapUrl: CMAP_URL,
+    cMapPacked: true,
+    worker,
+  });
+  const pdfDoc = await loadingTask.load(TEST_PDFS_PATH + "/pdfs/tracemonkey.pdf");
+  const pageProxy = await pdfDoc.getPage(1);
+  const page = new PDFPageProxy(pageProxy);
+  await page.render({
+    canvasContext: null,
+    viewport: new PageViewport({ width: 100, height: 100 }),
+  });
+  const intentStates = pageProxy._intentStates;
+  pageProxy._intentStates = new Map();
+  pageProxy.objs.forEach((value, key) => {
+    if (value.imageData?.bitmap) {
+      value.imageData.bitmap.close();
+    }
+  });
+  const memoryUsageBefore = process.memoryUsage().heapUsed;
+  pageProxy._intentStates = intentStates;
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const memoryUsageAfter = process.memoryUsage().heapUsed;
+  expect(memoryUsageAfter).toBeLessThan(memoryUsageBefore + 1024 * 1024);
+});
+```

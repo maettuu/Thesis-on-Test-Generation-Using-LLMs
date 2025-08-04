@@ -1,0 +1,52 @@
+it("should compute bbox for a Type3 glyph with setCharWidth operator", async () => {
+  const { OPS } = await import("../../src/shared/util.js");
+  const { Dict } = await import("../../src/core/primitives.js");
+  const { StringStream } = await import("../../src/core/stream.js");
+  const { OperatorList } = await import("../../src/core/operator_list.js");
+  const { PartialEvaluator, TranslatedFont } = await import("../../src/core/evaluator.js");
+  const { WorkerTask } = await import("../../src/core/worker.js");
+
+  // Create a fake CharProcs dictionary.
+  const charProcs = new Dict();
+  charProcs.getKeys = () => ["A"];
+  const fakeStream = new StringStream("");
+  charProcs.get = () => fakeStream;
+
+  // Create a fake Type3 font dictionary.
+  const fontDict = new Dict();
+  fontDict.set("CharProcs", charProcs);
+  fontDict.set("Resources", new Dict());
+
+  // Create a fake Type3 font object with an empty bbox.
+  const font = { isType3Font: true, bbox: [0, 0, 0, 0] };
+  const loadedName = "TestType3Font";
+
+  // Instantiate a PartialEvaluator.
+  const evaluator = new PartialEvaluator({});
+  // Override getOperatorList to simulate processing a glyph stream.
+  evaluator.getOperatorList = function({ stream, operatorList }) {
+    operatorList.fnArray.push(OPS.setCharWidth);
+    operatorList.argsArray.push([]); // d0 operator has no bbox info.
+    operatorList.fnArray.push(OPS.constructPath);
+    // The third argument contains the bbox we want to compute.
+    operatorList.argsArray.push([null, null, [10, 20, 30, 40]]);
+    operatorList.length = operatorList.fnArray.length;
+    return Promise.resolve();
+  };
+
+  const task = new WorkerTask("test", "");
+  const translatedFont = new TranslatedFont({ loadedName, font, dict: fontDict });
+  await translatedFont.loadType3Data(evaluator, fontDict, task);
+  if (!font.isCharBBox) {
+    throw new Error("Expected font.isCharBBox to be true");
+  }
+  const expected = [10, 20, 30, 40];
+  if (
+    font.bbox[0] !== expected[0] ||
+    font.bbox[1] !== expected[1] ||
+    font.bbox[2] !== expected[2] ||
+    font.bbox[3] !== expected[3]
+  ) {
+    throw new Error("Font bbox does not match expected value");
+  }
+});

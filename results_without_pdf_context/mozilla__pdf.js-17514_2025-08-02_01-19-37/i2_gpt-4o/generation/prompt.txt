@@ -1,0 +1,641 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Single point ink annotation doesn't show on Chrome pdf viewer
+Configuration:
+- Web browser and its version: Firefox 115.5.0esr  / Chrome 120.0.6099.71
+- Operating system and its version: Ubuntu 22.04
+- PDF.js version: 4.0.347
+- Is a browser extension: No
+
+Steps to reproduce the problem:
+1. Open the [viewer](https://mozilla.github.io/pdf.js/web/viewer.html).
+2. Draw a single point annotation (not a line) with the ink tool.
+3. Save the pdf.
+4. Open the pdf in a Chrome tab.
+
+What is the expected behavior?
+The point ink annotation should be visible
+
+What went wrong?
+The point ink annotation doesn't show on Chrome.
+
+Is it a bug in the Chrome pdf viewer? Is there a way to draw a circle annotation instead of a single point line?
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/annotation.js b/src/core/annotation.js
+--- a/src/core/annotation.js
++++ b/src/core/annotation.js
+@@ -4397,14 +4397,20 @@ class InkAnnotation extends MarkupAnnotation {
+       buffer.push(
+         `${numberToString(bezier[0])} ${numberToString(bezier[1])} m`
+       );
+-      for (let i = 2, ii = bezier.length; i < ii; i += 6) {
+-        const curve = bezier
+-          .slice(i, i + 6)
+-          .map(numberToString)
+-          .join(" ");
+-        buffer.push(`${curve} c`);
++      if (bezier.length === 2) {
++        buffer.push(
++          `${numberToString(bezier[0])} ${numberToString(bezier[1])} l S`
++        );
++      } else {
++        for (let i = 2, ii = bezier.length; i < ii; i += 6) {
++          const curve = bezier
++            .slice(i, i + 6)
++            .map(numberToString)
++            .join(" ");
++          buffer.push(`${curve} c`);
++        }
++        buffer.push("S");
+       }
+-      buffer.push("S");
+       appearanceBuffer.push(buffer.join("\n"));
+     }
+     const appearance = appearanceBuffer.join("\n");
+
+diff --git a/src/display/editor/ink.js b/src/display/editor/ink.js
+--- a/src/display/editor/ink.js
++++ b/src/display/editor/ink.js
+@@ -628,7 +628,7 @@ class InkEditor extends AnnotationEditor {
+ 
+     this.parent.addInkEditorIfNeeded(/* isCommitting = */ true);
+ 
+-    // When commiting, the position of this editor is changed, hence we must
++    // When committing, the position of this editor is changed, hence we must
+     // move it to the right position in the DOM.
+     this.moveInDOM();
+     this.div.focus({
+@@ -994,6 +994,14 @@ class InkEditor extends AnnotationEditor {
+       const points = [];
+       for (let j = 0, jj = bezier.length; j < jj; j++) {
+         const [first, control1, control2, second] = bezier[j];
++        if (first[0] === second[0] && first[1] === second[1] && jj === 1) {
++          // We have only one point.
++          const p0 = s * first[0] + shiftX;
++          const p1 = s * first[1] + shiftY;
++          buffer.push(p0, p1);
++          points.push(p0, p1);
++          break;
++        }
+         const p10 = s * first[0] + shiftX;
+         const p11 = s * first[1] + shiftY;
+         const p20 = s * control1[0] + shiftX;
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.7
+- @babel/preset-env: ^7.23.7
+- @babel/runtime: ^7.23.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @javascript-obfuscator/escodegen: 2.3.0
+- @jazzer.js/core: ^2.1.0
+- acorn: ^8.11.3
+- autoprefixer: ^10.4.16
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001574
+- canvas: ^2.11.2
+- core-js: ^3.35.0
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.2
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^50.0.1
+- globals: ^13.24.0
+- gulp: ^4.0.2
+- gulp-cli: ^2.3.0
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.33
+- postcss-dark-theme-class: ^1.1.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.1.1
+- puppeteer: ^21.7.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.1.0
+- stylelint-prettier: ^5.0.0
+- terser: ^5.26.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.89.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n.js`: L10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/annotation.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationActionEventType,
+18   AnnotationBorderStyleType,
+19   AnnotationEditorType,
+20   AnnotationFieldFlag,
+21   AnnotationFlag,
+22   AnnotationReplyType,
+23   AnnotationType,
+24   assert,
+25   BASELINE_FACTOR,
+26   FeatureTest,
+27   getModificationDate,
+28   IDENTITY_MATRIX,
+29   info,
+30   LINE_DESCENT_FACTOR,
+31   LINE_FACTOR,
+32   OPS,
+33   RenderingIntentFlag,
+34   shadow,
+35   stringToPDFString,
+36   unreachable,
+37   Util,
+38   warn,
+39 } from "../shared/util.js";
+40 import {
+41   collectActions,
+42   escapeString,
+43   getInheritableProperty,
+44   getRotationMatrix,
+45   isAscii,
+46   numberToString,
+47   stringToUTF16String,
+48 } from "./core_utils.js";
+49 import {
+50   createDefaultAppearance,
+51   FakeUnicodeFont,
+52   getPdfColor,
+53   parseAppearanceStream,
+54   parseDefaultAppearance,
+55 } from "./default_appearance.js";
+56 import { Dict, isName, isRefsEqual, Name, Ref, RefSet } from "./primitives.js";
+57 import { Stream, StringStream } from "./stream.js";
+58 import { BaseStream } from "./base_stream.js";
+59 import { bidi } from "./bidi.js";
+60 import { Catalog } from "./catalog.js";
+61 import { ColorSpace } from "./colorspace.js";
+62 import { FileSpec } from "./file_spec.js";
+63 import { JpegStream } from "./jpeg_stream.js";
+64 import { ObjectLoader } from "./object_loader.js";
+65 import { OperatorList } from "./operator_list.js";
+66 import { writeObject } from "./writer.js";
+67 import { XFAFactory } from "./xfa/factory.js";
+68 
+4266 class InkAnnotation extends MarkupAnnotation {
+4267   constructor(params) {
+4268     super(params);
+4269 
+4270     this.data.hasOwnCanvas = this.data.noRotate;
+4271     this.data.noHTML = false;
+4272 
+4273     const { dict, xref } = params;
+4274     this.data.annotationType = AnnotationType.INK;
+4275     this.data.inkLists = [];
+4276 
+4277     const rawInkLists = dict.getArray("InkList");
+4278     if (!Array.isArray(rawInkLists)) {
+4279       return;
+4280     }
+4281     for (let i = 0, ii = rawInkLists.length; i < ii; ++i) {
+4282       // The raw ink lists array contains arrays of numbers representing
+4283       // the alternating horizontal and vertical coordinates, respectively,
+4284       // of each vertex. Convert this to an array of objects with x and y
+4285       // coordinates.
+4286       this.data.inkLists.push([]);
+4287       for (let j = 0, jj = rawInkLists[i].length; j < jj; j += 2) {
+4288         this.data.inkLists[i].push({
+4289           x: xref.fetchIfRef(rawInkLists[i][j]),
+4290           y: xref.fetchIfRef(rawInkLists[i][j + 1]),
+4291         });
+4292       }
+4293     }
+4294 
+4295     if (!this.appearance) {
+4296       // The default stroke color is black.
+4297       const strokeColor = this.color ? getPdfColorArray(this.color) : [0, 0, 0];
+4298       const strokeAlpha = dict.get("CA");
+4299 
+4300       const borderWidth = this.borderStyle.width || 1,
+4301         borderAdjust = 2 * borderWidth;
+4302 
+4303       // If the /Rect-entry is empty/wrong, create a fallback rectangle so that
+4304       // we get similar rendering/highlighting behaviour as in Adobe Reader.
+4305       const bbox = [Infinity, Infinity, -Infinity, -Infinity];
+4306       for (const inkLists of this.data.inkLists) {
+4307         for (const vertex of inkLists) {
+4308           bbox[0] = Math.min(bbox[0], vertex.x - borderAdjust);
+4309           bbox[1] = Math.min(bbox[1], vertex.y - borderAdjust);
+4310           bbox[2] = Math.max(bbox[2], vertex.x + borderAdjust);
+4311           bbox[3] = Math.max(bbox[3], vertex.y + borderAdjust);
+4312         }
+4313       }
+4314       if (!Util.intersect(this.rectangle, bbox)) {
+4315         this.rectangle = bbox;
+4316       }
+4317 
+4318       this._setDefaultAppearance({
+4319         xref,
+4320         extra: `${borderWidth} w`,
+4321         strokeColor,
+4322         strokeAlpha,
+4323         pointsCallback: (buffer, points) => {
+4324           // According to the specification, see "12.5.6.13 Ink Annotations":
+4325           //   When drawn, the points shall be connected by straight lines or
+4326           //   curves in an implementation-dependent way.
+4327           // In order to simplify things, we utilize straight lines for now.
+4328           for (const inkList of this.data.inkLists) {
+4329             for (let i = 0, ii = inkList.length; i < ii; i++) {
+4330               buffer.push(
+4331                 `${inkList[i].x} ${inkList[i].y} ${i === 0 ? "m" : "l"}`
+4332               );
+4333             }
+4334             buffer.push("S");
+4335           }
+4336           return [points[0].x, points[1].x, points[3].y, points[1].y];
+4337         },
+4338       });
+4339     }
+4340   }
+4341 
+4382   static async createNewAppearanceStream(annotation, xref, params) {
+4383     const { color, rect, paths, thickness, opacity } = annotation;
+4384 
+4385     const appearanceBuffer = [
+4386       `${thickness} w 1 J 1 j`,
+4387       `${getPdfColor(color, /* isFill */ false)}`,
+4388     ];
+4389 
+4390     if (opacity !== 1) {
+4391       appearanceBuffer.push("/R0 gs");
+4392     }
+4393 
+4394     const buffer = [];
+4395     for (const { bezier } of paths) {
+4396       buffer.length = 0;
+4397       buffer.push(
+4398         `${numberToString(bezier[0])} ${numberToString(bezier[1])} m`
+4399       );
+4400       for (let i = 2, ii = bezier.length; i < ii; i += 6) {
+4401         const curve = bezier
+4402           .slice(i, i + 6)
+4403           .map(numberToString)
+4404           .join(" ");
+4405         buffer.push(`${curve} c`);
+4406       }
+4407       buffer.push("S");
+4408       appearanceBuffer.push(buffer.join("\n"));
+4409     }
+4410     const appearance = appearanceBuffer.join("\n");
+4411 
+4412     const appearanceStreamDict = new Dict(xref);
+4413     appearanceStreamDict.set("FormType", 1);
+4414     appearanceStreamDict.set("Subtype", Name.get("Form"));
+4415     appearanceStreamDict.set("Type", Name.get("XObject"));
+4416     appearanceStreamDict.set("BBox", rect);
+4417     appearanceStreamDict.set("Length", appearance.length);
+4418 
+4419     if (opacity !== 1) {
+4420       const resources = new Dict(xref);
+4421       const extGState = new Dict(xref);
+4422       const r0 = new Dict(xref);
+4423       r0.set("CA", opacity);
+4424       r0.set("Type", Name.get("ExtGState"));
+4425       extGState.set("R0", r0);
+4426       resources.set("ExtGState", extGState);
+4427       appearanceStreamDict.set("Resources", resources);
+4428     }
+4429 
+4430     const ap = new StringStream(appearance);
+4431     ap.dict = appearanceStreamDict;
+4432 
+4433     return ap;
+4434   }
+4435 }
+4436 
+4862 
+File:
+src/display/editor/ink.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorParamsType,
+18   AnnotationEditorType,
+19   Util,
+20 } from "../../shared/util.js";
+21 import { AnnotationEditor } from "./editor.js";
+22 import { InkAnnotationElement } from "../annotation_layer.js";
+23 import { noContextMenu } from "../display_utils.js";
+24 import { opacityToHex } from "./tools.js";
+25 
+26 /**
+27  * Basic draw editor in order to generate an Ink annotation.
+28  */
+29 class InkEditor extends AnnotationEditor {
+30   #baseHeight = 0;
+31 
+32   #baseWidth = 0;
+33 
+34   #boundCanvasPointermove = this.canvasPointermove.bind(this);
+35 
+36   #boundCanvasPointerleave = this.canvasPointerleave.bind(this);
+37 
+38   #boundCanvasPointerup = this.canvasPointerup.bind(this);
+39 
+40   #boundCanvasPointerdown = this.canvasPointerdown.bind(this);
+41 
+42   #canvasContextMenuTimeoutId = null;
+43 
+44   #currentPath2D = new Path2D();
+45 
+46   #disableEditing = false;
+47 
+48   #hasSomethingToDraw = false;
+49 
+50   #isCanvasInitialized = false;
+51 
+52   #observer = null;
+53 
+54   #realWidth = 0;
+55 
+56   #realHeight = 0;
+57 
+58   #requestFrameCallback = null;
+59 
+60   static _defaultColor = null;
+61 
+62   static _defaultOpacity = 1;
+63 
+64   static _defaultThickness = 1;
+65 
+66   static _type = "ink";
+67 
+68   static _editorType = AnnotationEditorType.INK;
+69 
+70   constructor(params) {
+71     super({ ...params, name: "inkEditor" });
+72     this.color = params.color || null;
+73     this.thickness = params.thickness || null;
+74     this.opacity = params.opacity || null;
+75     this.paths = [];
+76     this.bezierPath2D = [];
+77     this.allRawPaths = [];
+78     this.currentPath = [];
+79     this.scaleFactor = 1;
+80     this.translationX = this.translationY = 0;
+81     this.x = 0;
+82     this.y = 0;
+83     this._willKeepAspectRatio = true;
+84   }
+85 
+607   /**
+608    * Commit the curves we have in this editor.
+609    */
+610   commit() {
+611     if (this.#disableEditing) {
+612       return;
+613     }
+614 
+615     super.commit();
+616 
+617     this.isEditing = false;
+618     this.disableEditMode();
+619 
+620     // This editor must be on top of the main ink editor.
+621     this.setInForeground();
+622 
+623     this.#disableEditing = true;
+624     this.div.classList.add("disabled");
+625 
+626     this.#fitToContent(/* firstTime = */ true);
+627     this.select();
+628 
+629     this.parent.addInkEditorIfNeeded(/* isCommitting = */ true);
+630 
+631     // When commiting, the position of this editor is changed, hence we must
+632     // move it to the right position in the DOM.
+633     this.moveInDOM();
+634     this.div.focus({
+635       preventScroll: true /* See issue #15744 */,
+636     });
+637   }
+638 
+980   /**
+981    * Transform and serialize the paths.
+982    * @param {number} s - scale factor
+983    * @param {number} tx - abscissa of the translation
+984    * @param {number} ty - ordinate of the translation
+985    * @param {Array<number>} rect - the bounding box of the annotation
+986    */
+987   #serializePaths(s, tx, ty, rect) {
+988     const paths = [];
+989     const padding = this.thickness / 2;
+990     const shiftX = s * tx + padding;
+991     const shiftY = s * ty + padding;
+992     for (const bezier of this.paths) {
+993       const buffer = [];
+994       const points = [];
+995       for (let j = 0, jj = bezier.length; j < jj; j++) {
+996         const [first, control1, control2, second] = bezier[j];
+997         const p10 = s * first[0] + shiftX;
+998         const p11 = s * first[1] + shiftY;
+999         const p20 = s * control1[0] + shiftX;
+1000         const p21 = s * control1[1] + shiftY;
+1001         const p30 = s * control2[0] + shiftX;
+1002         const p31 = s * control2[1] + shiftY;
+1003         const p40 = s * second[0] + shiftX;
+1004         const p41 = s * second[1] + shiftY;
+1005 
+1006         if (j === 0) {
+1007           buffer.push(p10, p11);
+1008           points.push(p10, p11);
+1009         }
+1010         buffer.push(p20, p21, p30, p31, p40, p41);
+1011         points.push(p20, p21);
+1012         if (j === jj - 1) {
+1013           points.push(p40, p41);
+1014         }
+1015       }
+1016       paths.push({
+1017         bezier: InkEditor.#toPDFCoordinates(buffer, rect, this.rotation),
+1018         points: InkEditor.#toPDFCoordinates(points, rect, this.rotation),
+1019       });
+1020     }
+1021 
+1022     return paths;
+1023   }
+1024 
+1197 }
+1198 
+</code>
+
+PR summary:
+<pr_summary>
+[Editor] Draw a line instead of a Bezier curve when an Ink has only one point
+Fixes #17418.
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

@@ -1,0 +1,55 @@
+<think>
+Okay, I need to write a regression test for the issue where a warning appears in the console when printing a PDF with an added annotation. The warning is "Warning: Unknown field name, falling back to empty field name." 
+
+First, I should understand the problem. From the issue description, the warning is triggered when printing a PDF that has annotations. The patch provided modifies the `AnnotationFactory` and `Annotation` classes. The key change is in how `collectFields` is handled. Before the patch, `collectFields` wasn't being passed correctly, leading to the warning.
+
+The test needs to fail before the patch and pass after. So, I'll write a test that simulates adding an annotation and then printing it, checking that no warning is logged after the patch.
+
+I'll start by looking at the existing test file. It imports necessary modules and has setup functions. I can use `createIdFactory`, `XRefMock`, and `StringStream` from the imports.
+
+I'll create a mock PDF document with an annotation. The annotation should have a subtype that's handled correctly. Maybe a "Highlight" annotation would be a good choice since it's one of the common types.
+
+I'll set up the PDF manager and evaluator to handle the annotation. Then, I'll create the annotation using `AnnotationFactory.create` with `collectFields` set to true because the issue occurs during printing, which involves collecting fields.
+
+Next, I'll simulate the printing process. This might involve rendering the annotation and checking if any warnings are emitted. Since the warning is logged using `warn`, I can override `console.warn` to capture it.
+
+After applying the patch, the warning should no longer appear. So, the test will check that `console.warn` wasn't called during the test run.
+
+I'll structure the test as an `it` block. I'll import necessary modules, set up mocks, create the annotation, and then check for the warning. If no warning is logged, the test passes.
+
+I need to make sure all dependencies are correctly mocked, especially the `acroForm` and `pdfManager`, to avoid any runtime errors during the test.
+
+Finally, I'll write the test code, ensuring it's concise and only tests the specific behavior related to the warning when printing with annotations.
+</think>
+
+```javascript
+it("should not warn about unknown field names when printing with annotations", async () => {
+  const idFactory = createIdFactory();
+  const xref = new XRefMock();
+  const pdfManager = {
+    evaluatorOptions: {},
+    getAcroForm: () => ({
+      get: () => false
+    }),
+    ensure: (constructor, method, args) => constructor[method](...args)
+  };
+  const annotationGlobals = {
+    pdfManager,
+    acroForm: {
+      get: () => null
+    },
+    structTreeRoot: null
+  };
+
+  const dict = new Dict();
+  dict.set("Subtype", new Name("Highlight"));
+  dict.set("T", new Name("title"));
+  dict.set("Contents", new Name("content"));
+
+  const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+  const annotation = await AnnotationFactory.create(xref, new Ref(1), annotationGlobals, idFactory, true);
+
+  expect(consoleWarnSpy).not.toHaveBeenCalled();
+});
+```

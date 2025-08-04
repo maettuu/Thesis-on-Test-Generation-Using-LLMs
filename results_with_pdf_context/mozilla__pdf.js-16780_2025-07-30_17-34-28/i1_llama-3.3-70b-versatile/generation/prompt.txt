@@ -1,0 +1,404 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Added SVG images cannot be resized horizontally/vertically in pdf.js
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/tools.js b/src/display/editor/tools.js
+--- a/src/display/editor/tools.js
++++ b/src/display/editor/tools.js
+@@ -75,6 +75,25 @@ class ImageManager {
+ 
+   #cache = null;
+ 
++  static _checkIfSVGFitsInCanvas() {
++    // By default, Firefox doesn't rescale without preserving the aspect ratio
++    // when drawing an SVG image on a canvas, see https://bugzilla.mozilla.org/1547776.
++    // The "workaround" is to append "svgView(preserveAspectRatio(none))" to the
++    // url, but according to comment #15, it seems that it leads to unexpected
++    // behavior in Safari.
++    const svg = `data:image/svg+xml;charset=UTF-8,<svg viewBox="0 0 1 1" width="1" height="1" xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1" style="fill:red;"/></svg>`;
++    const canvas = new OffscreenCanvas(1, 3);
++    const ctx = canvas.getContext("2d");
++    const image = new Image();
++    image.src = svg;
++    const promise = image.decode().then(() => {
++      ctx.drawImage(image, 0, 0, 1, 1, 0, 0, 1, 3);
++      return new Uint32Array(ctx.getImageData(0, 0, 1, 1).data.buffer)[0] === 0;
++    });
++
++    return shadow(this, "_checkIfSVGFitsInCanvas", promise);
++  }
++
+   async #get(key, rawData) {
+     this.#cache ||= new Map();
+     let data = this.#cache.get(key);
+@@ -109,6 +128,8 @@ class ImageManager {
+       if (image.type === "image/svg+xml") {
+         // Unfortunately, createImageBitmap doesn't work with SVG images.
+         // (see https://bugzilla.mozilla.org/1841972).
++        const mustRemoveAspectRatioPromise =
++          ImageManager._checkIfSVGFitsInCanvas();
+         const fileReader = new FileReader();
+         const imageElement = new Image();
+         const imagePromise = new Promise((resolve, reject) => {
+@@ -117,8 +138,13 @@ class ImageManager {
+             data.isSvg = true;
+             resolve();
+           };
+-          fileReader.onload = () => {
+-            imageElement.src = data.svgUrl = fileReader.result;
++          fileReader.onload = async () => {
++            const url = (data.svgUrl = fileReader.result);
++            // We need to set the preserveAspectRatio to none in order to let
++            // the image fits the canvas when resizing.
++            imageElement.src = (await mustRemoveAspectRatioPromise)
++              ? `${url}#svgView(preserveAspectRatio(none))`
++              : url;
+           };
+           imageElement.onerror = fileReader.onerror = reject;
+         });
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.9
+- @babel/plugin-transform-modules-commonjs: ^7.22.5
+- @babel/preset-env: ^7.22.9
+- @babel/runtime: ^7.22.6
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.14
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001517
+- canvas: ^2.11.2
+- core-js: ^3.31.1
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.45.0
+- eslint-config-prettier: ^8.8.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.27.5
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.0
+- globals: ^13.20.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.27
+- postcss-dir-pseudo-class: ^8.0.0
+- prettier: ^3.0.0
+- puppeteer: ^20.9.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.2
+- stylelint-prettier: ^4.0.0
+- terser: ^5.19.2
+- through2: ^4.0.2
+- ttest: ^4.0.0
+- typescript: ^5.1.6
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/tools.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+17 // eslint-disable-next-line max-len
+19 
+20 import {
+21   AnnotationEditorPrefix,
+22   AnnotationEditorType,
+23   FeatureTest,
+24   getUuid,
+25   shadow,
+26   Util,
+27   warn,
+28 } from "../../shared/util.js";
+29 import { getColorValues, getRGB, PixelsPerInch } from "../display_utils.js";
+30 
+63 /**
+64  * Class to manage the images used by the editors.
+65  * The main idea is to try to minimize the memory used by the images.
+66  * The images are cached and reused when possible
+67  * We use a refCounter to know when an image is not used anymore but we need to
+68  * be able to restore an image after a remove+undo, so we keep a file reference
+69  * or an url one.
+70  */
+71 class ImageManager {
+72   #baseId = getUuid();
+73 
+74   #id = 0;
+75 
+76   #cache = null;
+77 
+78   async #get(key, rawData) {
+79     this.#cache ||= new Map();
+80     let data = this.#cache.get(key);
+81     if (data === null) {
+82       // We already tried to load the image but it failed.
+83       return null;
+84     }
+85     if (data?.bitmap) {
+86       data.refCounter += 1;
+87       return data;
+88     }
+89     try {
+90       data ||= {
+91         bitmap: null,
+92         id: `image_${this.#baseId}_${this.#id++}`,
+93         refCounter: 0,
+94         isSvg: false,
+95       };
+96       let image;
+97       if (typeof rawData === "string") {
+98         data.url = rawData;
+99 
+100         const response = await fetch(rawData);
+101         if (!response.ok) {
+102           throw new Error(response.statusText);
+103         }
+104         image = await response.blob();
+105       } else {
+106         image = data.file = rawData;
+107       }
+108 
+109       if (image.type === "image/svg+xml") {
+110         // Unfortunately, createImageBitmap doesn't work with SVG images.
+111         // (see https://bugzilla.mozilla.org/1841972).
+112         const fileReader = new FileReader();
+113         const imageElement = new Image();
+114         const imagePromise = new Promise((resolve, reject) => {
+115           imageElement.onload = () => {
+116             data.bitmap = imageElement;
+117             data.isSvg = true;
+118             resolve();
+119           };
+120           fileReader.onload = () => {
+121             imageElement.src = data.svgUrl = fileReader.result;
+122           };
+123           imageElement.onerror = fileReader.onerror = reject;
+124         });
+125         fileReader.readAsDataURL(image);
+126         await imagePromise;
+127       } else {
+128         data.bitmap = await createImageBitmap(image);
+129       }
+130       data.refCounter = 1;
+131     } catch (e) {
+132       console.error(e);
+133       data = null;
+134     }
+135     this.#cache.set(key, data);
+136     if (data) {
+137       this.#cache.set(data.id, data);
+138     }
+139     return data;
+140   }
+141 
+189   // We can use the id only if it belongs this manager.
+190   // We must take care of having the right manager because we can copy/paste
+191   // some images from other documents, hence it'd be a pity to use an id from an
+192   // other manager.
+196 }
+197 
+1458 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/annotation_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  Annotation,
+  AnnotationBorderStyle,
+  AnnotationFactory,
+  getQuadPoints,
+  MarkupAnnotation,
+} from "../../src/core/annotation.js";
+import {
+  AnnotationBorderStyleType,
+  AnnotationEditorType,
+  AnnotationFieldFlag,
+  AnnotationFlag,
+  AnnotationType,
+  OPS,
+  RenderingIntentFlag,
+  stringToBytes,
+  stringToUTF8String,
+} from "../../src/shared/util.js";
+import {
+  CMAP_URL,
+  createIdFactory,
+  STANDARD_FONT_DATA_URL,
+  XRefMock,
+} from "./test_utils.js";
+import {
+  DefaultCMapReaderFactory,
+  DefaultStandardFontDataFactory,
+} from "../../src/display/api.js";
+import { Dict, Name, Ref, RefSetCache } from "../../src/core/primitives.js";
+import { Lexer, Parser } from "../../src/core/parser.js";
+import { PartialEvaluator } from "../../src/core/evaluator.js";
+import { StringStream } from "../../src/core/stream.js";
+import { WorkerTask } from "../../src/core/worker.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

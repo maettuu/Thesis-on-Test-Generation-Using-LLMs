@@ -1,0 +1,75 @@
+<think>
+Okay, I need to write a regression test for the issue where the mouse cursor doesn't change its state when resizing images or drawings in PDF documents. The patch provided adds resizers and handles resizing with aspect ratio, so the test should verify that the cursor changes correctly when resizing from different edges.
+
+First, I'll create a test case using Jest. I'll need to import the necessary modules like PDFDocument, PDFPage, and AnnotationEditor from their respective paths.
+
+I'll set up a mock PDF document with a page and an annotation. Then, I'll initialize the AnnotationEditor and make it resizable. I'll simulate the user selecting the editor, which should display the resizers.
+
+Next, I'll check the cursor styles when hovering over each resizer. For example, hovering over the top-left resizer should change the cursor to 'nwse-resize', and similarly for other edges. I'll write assertions to verify each expected cursor style.
+
+I'll structure the test with clear descriptions for each check to ensure readability. The test should fail before the patch because the resizers aren't present or the cursor doesn't change. After applying the patch, the resizers should exist, and the cursor should change as expected, making the test pass.
+
+I'll make sure the test is self-contained, uses dynamic imports, and doesn't add any new dependencies. The code will be concise and focused on verifying the cursor behavior when resizing from different edges.
+</think>
+
+```javascript
+it("should change mouse cursor when resizing from different edges", async () => {
+  const { PDFDocument } = await import("../../src/core/pdf_document.js");
+  const { PDFPage } = await import("../../src/core/pdf_page.js");
+  const { AnnotationEditor } = await import("../../src/display/editor/editor.js");
+
+  // Create a mock PDF document with a page
+  const pdf = new PDFDocument({
+    length: 1,
+    getInputStream: () => new ReadableStream({
+      start(controller) { controller.close(); }
+    }),
+    get page() {
+      return new PDFPage({
+        pageIndex: 0,
+        getInputStream: () => new ReadableStream({
+          start(controller) { controller.close(); }
+        }),
+        getAnnotations: () => [],
+        get viewport() {
+          return {
+            width: 100,
+            height: 100,
+            rotation: 0,
+          };
+        },
+      });
+    },
+  });
+
+  // Create an editor for an image annotation
+  const editor = new AnnotationEditor({
+    parent: pdf.getPage(0),
+    parentDimensions: [100, 100],
+    x: 0,
+    y: 0,
+    width: 50,
+    height: 50,
+    uiManager: {
+      stopUndoAccumulation: () => {},
+    },
+  });
+
+  // Initialize the editor and make it resizable
+  editor.select();
+  editor.makeResizable();
+
+  // Check cursor styles for different resizers
+  const resizers = editor.#resizersDiv.querySelectorAll(".resizer");
+  expect(resizers[0].style.cursor).toBe("nwse-resize"); // topLeft
+  expect(resizers[1].style.cursor).toBe("nesw-resize"); // topRight
+  expect(resizers[2].style.cursor).toBe("nwse-resize"); // bottomRight
+  expect(resizers[3].style.cursor).toBe("nesw-resize"); // bottomLeft
+  if (resizers.length > 4) {
+    expect(resizers[4].style.cursor).toBe("ns-resize"); // topMiddle
+    expect(resizers[5].style.cursor).toBe("ew-resize"); // middleRight
+    expect(resizers[6].style.cursor).toBe("ns-resize"); // bottomMiddle
+    expect(resizers[7].style.cursor).toBe("ew-resize"); // middleLeft
+  }
+});
+```

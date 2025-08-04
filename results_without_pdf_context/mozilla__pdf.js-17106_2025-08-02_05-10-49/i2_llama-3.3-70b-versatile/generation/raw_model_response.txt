@@ -1,0 +1,33 @@
+```javascript
+it("should release ImageBitmap data after cleanup", async () => {
+  const { WorkerTransport, PDFWorkerUtil, PDFDocumentProxy, MessageHandler } = await import("../../src/display/api.js");
+  const { createIdFactory } = await import("./test_utils.js");
+  const { PDFDataTransportStream } = await import("../../src/display/transport_stream.js");
+  const { PDFFetchStream } = await import("../../src/display/fetch_stream.js");
+
+  const messageHandler = new MessageHandler();
+  const transport = new PDFDataTransportStream(new PDFFetchStream());
+  const workerTransport = new WorkerTransport(messageHandler, null, transport, {}, {});
+  const pageProxy = { objs: new Map(), _intentStates: new Map(), _maybeCleanupAfterRender: true };
+
+  workerTransport.#pageCache.set(1, pageProxy);
+
+  const imageData = { bitmap: { close: jest.fn() } };
+
+  workerTransport.messageHandler.on("obj", ([id, pageIndex, type, imageData]) => {
+    if (pageIndex === 1 && type === "Image") {
+      pageProxy.objs.set(id, imageData);
+    }
+  });
+
+  workerTransport.messageHandler.send("obj", [1, 1, "Image", imageData]);
+
+  expect(imageData.bitmap.close).not.toHaveBeenCalled();
+
+  pageProxy._intentStates.clear();
+
+  workerTransport.messageHandler.send("obj", [1, 1, "Image", imageData]);
+
+  expect(imageData.bitmap.close).toHaveBeenCalledTimes(1);
+});
+```

@@ -1,0 +1,66 @@
+<think>
+Okay, I need to write a regression test for the issue where the font size slider in the text editor isn't working smoothly. The patch provided modifies the moveInDOM method to debounce it using setTimeout. So, the problem before the patch was that moving the editor in the DOM was too expensive and blocked the UI, especially when changing the font size.
+
+First, I should understand what the test needs to verify. The test should check that after applying the patch, moving the editor in the DOM doesn't cause UI blocking. Specifically, when the font size is changed via the slider, the editor should update without lag or delays.
+
+I'll start by setting up a test environment. I'll create a mock PDF document and a page. Then, I'll create an AnnotationEditor instance, which is where the issue occurs. I'll set it into edit mode and add some text to edit.
+
+Next, I need to simulate the font size change using a slider. Since the slider's input event triggers the font size change, I'll dispatch an input event with a target value, say 24px, which is a common font size.
+
+Before the patch, moving the editor in the DOM would happen immediately, causing UI blocking. After the patch, it should be debounced, so the moveInDOM function should be called after a timeout. My test needs to ensure that the moveInDOM method is not called synchronously but is instead delayed.
+
+To verify this, I'll use a spy or mock on the moveInDOM method. I'll track when it's called. Since the patch uses a timeout of 0 milliseconds, I'll need to use a fake timer to advance the clock and check if the method is called after the timeout.
+
+I'll set up a promise that resolves when the moveInDOM method is called. Then, I'll dispatch the input event and wait for the promise to resolve within a reasonable timeout, say 100ms. This ensures that the method isn't called immediately but after the timeout.
+
+After the patch, the test should pass because the moveInDOM is properly debounced. Before the patch, the test would fail because the method would be called immediately, causing the UI to block.
+
+I also need to make sure all necessary modules are imported dynamically, as per the provided imports. I'll import AnnotationEditor from the correct path and any other required modules like PDFDocument and Page.
+
+Putting it all together, the test will simulate the font size change, monitor the moveInDOM calls, and ensure the method is called after a delay, confirming the UI doesn't block.
+</think>
+
+```javascript
+it("should not block UI when changing font size in text editor", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Page } = await import("../../src/core/document.js");
+  const { AnnotationEditor } = await import("../../src/display/editor/editor.js");
+  
+  // Create a mock PDF document and page
+  const pdf = new PDFDocument(null, new PDFPage());
+  const page = pdf.getPage(1);
+  
+  // Create an annotation editor instance
+  const editor = new AnnotationEditor();
+  editor.setMode(AnnotationEditor.EDIT_MODE.FREETEXT);
+  editor.setPDFPage(page);
+  editor.initialize();
+  
+  // Simulate font size change via slider
+  const inputEvent = {
+    target: {
+      value: "24px", // Simulate changing font size
+      getBoundingClientRect: () => ({ top: 0, left: 0 })
+    }
+  };
+  
+  // Create a promise to track when moveInDOM is called
+  const moveInDOMSpy = jest.fn();
+  const moveInDOMPromise = new Promise(resolve => {
+    const originalMoveInDOM = editor.moveInDOM.bind(editor);
+    editor.moveInDOM = (...args) => {
+      moveInDOMSpy(...args);
+      resolve();
+    };
+  });
+  
+  // Dispatch the input event to simulate font size change
+  editor._onFontSizeChanged(inputEvent);
+  
+  // Wait for the moveInDOM to be called with debouncing
+  await expect(moveInDOMPromise).resolves.toBeDefined();
+  
+  // Cleanup
+  editor.destroy();
+});
+```

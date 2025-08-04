@@ -1,0 +1,84 @@
+<think>
+Okay, so I need to write a regression test for this issue where the console is throwing an error because the MIME type for the module script is missing. The error happens when importing the pdf.worker.mjs file, which is causing the module script to fail to load. 
+
+First, I should understand why this is happening. The error message says that the server responded with an empty MIME type, and module scripts require a specific MIME type, which is "text/javascript" for .mjs files. So, the problem is that when the worker script is being fetched, it's not getting the correct MIME type, causing the browser to reject it.
+
+Looking at the patch provided, it's modifying the code in src/display/api.js. The change is in the createObjectURL function. Before, it was creating a Blob without specifying the type, which might default to an empty string or another type. The patch adds the type "text/javascript" to the Blob, ensuring that the MIME type is correct when the browser tries to load it as a module.
+
+So, the test needs to verify that after this patch, when we import the worker script, the MIME type is correctly set. The test should fail before the patch because the MIME type is missing, and pass after because it's correctly set.
+
+I need to structure the test as a JavaScript Mocha test. The test should import the necessary modules and simulate the import of the worker script. Then, it should check if the response has the correct MIME type.
+
+I'll start by importing the necessary modules. Since the test is in the web/test directory, I'll need to import from '../../src/display/api.js' and any other required modules like '../../src/shared/util.js'.
+
+In the test, I'll set up a URL for the worker script. Then, I'll create a Blob with the wrapper code that imports this URL. The key part is to check the MIME type of this Blob. 
+
+Wait, but in the code, the Blob is created with the type "text/javascript". So, when we create the Blob in the test, it should have that type. The test should then fetch this Blob and check its type.
+
+But how can I simulate the import and check the MIME type? Maybe I can create a Blob, set its type, and then use a fetch to get its response and check the Content-Type header.
+
+Alternatively, since the Blob's type is set when it's created, perhaps I can directly check the type property of the Blob. But I'm not sure if that's sufficient because the test needs to ensure that when the script is imported as a module, the MIME type is correctly set.
+
+Wait, in the test, I can create a Blob with the wrapper code and set its type to "text/javascript". Then, I can create an object URL for it and try to import it. If the import succeeds without throwing an error, that means the MIME type is correct. But in the test, I need to assert that the MIME type is set.
+
+Alternatively, perhaps the test can check the Blob's type directly. But I'm not sure if that's enough because the issue is about the server responding with the correct MIME type when the script is fetched.
+
+Hmm, maybe a better approach is to create a Blob with the wrapper code, set its type, and then use a fetch to get it. Then, check the Content-Type header of the response.
+
+So, the steps in the test would be:
+
+1. Import the necessary modules, like api.js and util.js.
+2. Create a sample URL for the worker script.
+3. Create a wrapper script that imports this URL.
+4. Create a Blob with this wrapper script and set the type to "text/javascript".
+5. Create an object URL for this Blob.
+6. Fetch this URL and check the Content-Type header of the response.
+7. Assert that the Content-Type is "text/javascript".
+
+But wait, when you fetch a Blob URL, the Content-Type is determined by the Blob's type. So, if we set the Blob's type correctly, the fetch should return the correct MIME type.
+
+So, the test can be structured as follows:
+
+- Create the Blob with the correct type.
+- Fetch it and check the response headers.
+
+Alternatively, perhaps the test can try to import the script and see if it throws an error. But that might be more complex.
+
+I think the most straightforward way is to create the Blob, set its type, and then fetch it to check the Content-Type.
+
+So, putting it all together, the test will:
+
+- Import the necessary modules.
+- Create a URL for the worker script.
+- Create a wrapper script that imports this URL.
+- Create a Blob with the wrapper script and type "text/javascript".
+- Create an object URL for this Blob.
+- Fetch the object URL and get the response headers.
+- Assert that the Content-Type is "text/javascript".
+
+This should ensure that after the patch, the MIME type is correctly set, thus resolving the console error.
+
+Now, I'll structure the test code accordingly. I'll use async/await for the fetch and response handling. The test will be self-contained, using dynamic imports as required.
+
+I also need to make sure that the test doesn't have any external dependencies beyond the provided imports. So, I'll only import from the specified paths.
+
+Finally, the test should be named something like "should set correct MIME type for worker script" to clearly describe its purpose.
+</think>
+
+```javascript
+it("should set correct MIME type for worker script", async () => {
+  const { PDFWorkerUtil } = await import("../../src/display/api.js");
+  const { Util } = await import("../../src/shared/util.js");
+  
+  const url = "https://mozilla.github.io/pdf.js/build/pdf.worker.mjs";
+  const wrapper = `await import("${url}");`;
+  
+  const blob = new Blob([wrapper], { type: "text/javascript" });
+  const blobUrl = URL.createObjectURL(blob);
+  
+  const response = await fetch(blobUrl);
+  
+  const contentType = response.headers.get("Content-Type");
+  expect(contentType).toBe("text/javascript");
+});
+```

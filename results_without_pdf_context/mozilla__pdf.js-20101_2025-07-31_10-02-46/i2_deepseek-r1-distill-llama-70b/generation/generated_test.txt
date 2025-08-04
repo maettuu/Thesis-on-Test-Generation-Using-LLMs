@@ -1,0 +1,66 @@
+it("should render text with missing fonts using canvas text primitives", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { getTestPDFPath } = await import("../../src/display/test_utils.js");
+
+  // Mock canvas context for testing
+  class Canvas {
+    constructor() {
+      this.actions = [];
+    }
+    getContext() {
+      return this;
+    }
+    measureText() {
+      return { width: 0 };
+    }
+    fillText(text, x, y) {
+      this.actions.push({ type: 'fillText', text, x, y });
+    }
+    strokeText(text, x, y) {
+      this.actions.push({ type: 'strokeText', text, x, y });
+    }
+    getTransform() {
+      return new DOMMatrix();
+    }
+    setTransform(...args) {}
+    clip() {}
+    save() {}
+    restore() {}
+    scale() {}
+    translate() {}
+  }
+
+  const pdfPath = getTestPDFPath("form.pdf");
+  const pdf = await PDFDocument.load(pdfPath);
+  const page = await pdf.getPage(1);
+
+  // Set up graphics context with font.disableFontFace = true
+  const ctx = new Canvas();
+  const graphics = new CanvasGraphics(
+    ctx,
+    {},
+    {},
+    {},
+    {},
+    { optionalContentConfig: null },
+    new Map(),
+    null
+  );
+
+  graphics.current.font.disableFontFace = true;
+
+  // Render page and check if text is rendered with canvas text primitives
+  await page.render({
+    graphics,
+    viewport: page.getViewport({ scale: 1 }),
+    useTextLayer: false,
+  });
+
+  const expectedText = "山"; // Example text from the PDF
+  const actualActions = ctx.actions;
+
+  expect(actualActions.some(action => 
+    (action.type === 'fillText' || action.type === 'strokeText') && 
+    action.text.includes(expectedText)
+  )).toBe(true);
+});

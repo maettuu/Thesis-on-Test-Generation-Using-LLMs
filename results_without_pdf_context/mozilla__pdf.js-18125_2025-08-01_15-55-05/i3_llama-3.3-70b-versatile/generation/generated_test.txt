@@ -1,0 +1,22 @@
+it("should correctly detect a truncated endstream marker and return the proper stream length", async () => {
+  const assert = require("assert");
+  const { StringStream } = await import("../../src/core/stream.js");
+  const { Lexer, Parser } = await import("../../src/core/parser.js");
+  // Construct a fake PDF stream:
+  // "stream" followed by a newline, then the stream data "123456",
+  // then a truncated "endstream" command "endstrea " (i.e. missing final character, but followed by whitespace),
+  // then a proper "endstream" (which will not be reached).
+  const pdfData = "stream\n123456endstrea \nendstream";
+  const stream = new StringStream(pdfData);
+  const lexer = new Lexer(stream);
+  const parser = new Parser({ lexer, xref: {} });
+  // Provide an incorrect declared length to force scanning for the endstream marker.
+  const dict = { get: key => key === "Length" ? 2 : null };
+  const resultStream = parser.makeStream(dict, null);
+  // The expected stream data is the bytes starting at startPos (one byte before the first character after "stream\n")
+  // up to the beginning of the truncated "endstream" marker.
+  // In our pdfData, after "stream\n" (i.e. after byte index 6), the data "123456" occupies 6 bytes,
+  // plus the newline before "stream" makes the total length 7.
+  const actualLength = resultStream.end - resultStream.pos;
+  assert.strictEqual(actualLength, 7);
+});

@@ -1,0 +1,59 @@
+it("should not block the UI when changing font size", async () => {
+  const { AnnotationEditor } = await import("./editor.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+
+  const uiManager = new AnnotationEditorUIManager();
+  const pageProxy = new PDFPageProxy(1, 100, 100);
+  const editor = new (class extends AnnotationEditor {
+    moveInDOM() {
+      this.parent?.moveEditorInDOM(this);
+    }
+  })({ parent: pageProxy, uiManager, id: 1, name: "test", x: 10, y: 10 });
+
+  let blocked = false;
+  const originalMoveInDOM = editor.moveInDOM;
+  editor.moveInDOM = () => {
+    blocked = true;
+    originalMoveInDOM.call(editor);
+  };
+
+  const startTime = Date.now();
+  editor.moveInDOM();
+  while (blocked && Date.now() - startTime < 100) {
+    await new Promise(resolve => globalThis.setTimeout(resolve, 10));
+  }
+
+  const { setTimeout } = await import("timers");
+  const { moveInDOM } = await import("./editor.js");
+
+  const patchedEditor = new (class extends AnnotationEditor {
+    moveInDOM() {
+      // Moving the editor in the DOM can be expensive, so we wait a bit before.
+      // It's important to not block the UI (for example when changing the font
+      // size in a FreeText).
+      if (this.#moveInDOMTimeout) {
+        clearTimeout(this.#moveInDOMTimeout);
+      }
+      this.#moveInDOMTimeout = setTimeout(() => {
+        this.#moveInDOMTimeout = null;
+        this.parent?.moveEditorInDOM(this);
+      }, 0);
+    }
+  })({ parent: pageProxy, uiManager, id: 1, name: "test", x: 10, y: 10 });
+
+  blocked = false;
+  const originalPatchedMoveInDOM = patchedEditor.moveInDOM;
+  patchedEditor.moveInDOM = () => {
+    blocked = true;
+    originalPatchedMoveInDOM.call(patchedEditor);
+  };
+
+  const patchedStartTime = Date.now();
+  patchedEditor.moveInDOM();
+  while (blocked && Date.now() - patchedStartTime < 100) {
+    await new Promise(resolve => globalThis.setTimeout(resolve, 10));
+  }
+
+  expect(blocked).toBe(false);
+});

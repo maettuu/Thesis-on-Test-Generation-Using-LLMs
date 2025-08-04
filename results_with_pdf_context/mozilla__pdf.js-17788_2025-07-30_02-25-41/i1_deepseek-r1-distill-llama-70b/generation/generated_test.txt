@@ -1,0 +1,49 @@
+it("should make highlighted text accessible to screen readers", async () => {
+  const { PDFWorker } = await import("../../src/display/api.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { DrawLayer } = await import("../../src/display/draw_layer.js");
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+
+  // Setup PDF worker and document
+  const pdfWorker = await PDFWorker.create();
+  const pdfDoc = await pdfWorker.getPDFDocument("test.pdf");
+  const page = await pdfDoc.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+
+  // Setup UI components
+  const container = document.createElement("div");
+  const editorLayer = new AnnotationEditorLayer(viewport);
+  const uiManager = new AnnotationEditorUIManager(container, viewport, null, null, pdfDoc, null, null, null);
+
+  // Create a selection and highlight it
+  const selection = document.getSelection();
+  selection.selectAllChildren(document.createElement("div"));
+  const range = document.createRange();
+  range.selectNodeText(document.createTextNode("Test Highlight"));
+
+  // Simulate highlight creation
+  const highlightEditor = new (await import("../../src/display/editor/highlight.js").then(c => c.HighlightEditor));
+  highlightEditor.constructor({
+    methodOfCreation: "test",
+    anchorNode: range.startContainer,
+    anchorOffset: 0,
+    focusNode: range.endContainer,
+    focusOffset: 1,
+    boxes: [],
+    color: "#ffff00",
+    thickness: 2,
+    opacity: 1
+  });
+
+  // Verify accessibility structure
+  const highlightDiv = editorLayer.highlightDiv;
+  const markElement = highlightDiv.querySelector("mark.visuallyHidden");
+  const svgElements = highlightDiv.querySelectorAll("svg");
+
+  expect(markElement).toBeTruthy();
+  expect(markElement.textContent).toBe("Test Highlight");
+  expect(svgElements.length > 0);
+  svgElements.forEach(svg => {
+    expect(svg.getAttribute("aria-hidden")).toBe("true");
+  });
+});

@@ -1,0 +1,40 @@
+<think>
+Okay, I need to write a regression test for the issue where emojis aren't shown in PDFs. The patch provided modifies several files, so I should focus on what the test needs to verify.
+
+First, I'll look at the changes. The main change is in `annotation.js` where `FakeUnicodeFont.toUnicodeStream` is no longer added to `_streams`. Also, in `default_appearance.js`, the `toUnicodeRef` method was removed, and `baseFontRef` now uses `Name.get("Identity-H")` for the "ToUnicode" field.
+
+So, the test should check if emojis are correctly rendered in the PDF. I'll create a FreeTextAnnotation with an emoji, generate the appearance stream, and then check if the emoji is present in the generated content.
+
+I'll use the test file `test/unit/annotation_spec.js` because it already imports necessary modules. I'll import `FakeUnicodeFont` from `default_appearance.js` since it's needed to create the annotation.
+
+In the test, I'll set up an XRefMock and create a FreeTextAnnotation with an emoji text. Then, I'll generate the appearance stream and check if the emoji's Unicode is present in the stream's data.
+
+I need to ensure that before the patch, the test would fail because the emoji isn't rendered, and after the patch, it passes. So, the test will look for the presence of the emoji's Unicode in the appearance stream.
+
+I'll write the test using Jest's `it` function, making it async. I'll create the annotation, generate the stream, convert it to a string, and use `expect` to check for the emoji's presence.
+
+Finally, I'll make sure the test is self-contained, using only the provided imports and no new dependencies. The test should clearly show that the patch resolves the emoji rendering issue in PDFs.
+</think>
+
+```javascript
+it("should include emojis in PDF appearance streams", async () => {
+  const { FakeUnicodeFont } = await import("../../src/core/default_appearance.js");
+  const xref = new XRefMock();
+  const annotation = new FreeTextAnnotation({
+    xref,
+    dict: new Dict(),
+    annotationType: AnnotationType.FREETEXT,
+    contents: new StringStream("👋 Emoji Test"),
+    rectangle: [0, 0, 100, 100],
+    rotation: 0,
+    evaluatorOptions: {},
+  });
+
+  const appearanceStream = annotation.appearance;
+  const appearanceData = await appearanceStream.getString();
+
+  // Check if the emoji Unicode is present in the appearance stream
+  const expectedEmojiCode = String.fromCodePoint(0x1F44B).replace(/\uE000/g, "");
+  expect(appearanceData).toContain(expectedEmojiCode);
+});
+```

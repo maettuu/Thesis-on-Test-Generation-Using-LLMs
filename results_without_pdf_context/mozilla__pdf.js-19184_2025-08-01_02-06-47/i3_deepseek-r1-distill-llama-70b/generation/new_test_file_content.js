@@ -1,0 +1,24 @@
+#test/unit/to_unicode_map_spec.js
+import { ToUnicodeMap } from "../../core/to_unicode_map.js";
+
+describe("Regression test for Extension B characters in form fields", () => {
+  it("Should correctly map Extension B characters", async () => {
+    // Create a test ToUnicodeMap with a known Extension B character
+    const testMap = {
+      "0x10400": "\uD800\uDC00", // Represents U+10400 in UTF-16 surrogate pairs
+    };
+    const toUnicodeMap = new ToUnicodeMap(testMap);
+
+    // Collect the actual code points from the map
+    const actualCodePoints = [];
+    toUnicodeMap.forEach((charCode, codePoint) => {
+      actualCodePoints.push(codePoint);
+    });
+
+    // The expected code point for the Extension B character
+    const expectedCodePoint = 0x10400;
+
+    // Check if the expected code point is present in the actual results
+    expect(actualCodePoints).toContain(expectedCodePoint);
+  });
+});

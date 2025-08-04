@@ -1,0 +1,67 @@
+<think>
+Okay, I need to write a regression test for the issue where the highlight on a cropped PDF isn't visible when saving or printing. The patch provided modifies the `serializeBoxes` and `serializeOutlines` methods in `highlight.js` to correctly calculate the coordinates relative to the page, ensuring the highlight is rendered correctly.
+
+First, I'll start by understanding the problem. The highlight wasn't visible because the serialization methods weren't correctly handling the page coordinates, especially after cropping. The patch adds `rect` parameters to these methods to adjust the points based on the rectangle's position.
+
+To test this, I'll create a test case that simulates a cropped PDF scenario. I'll set up a page with specific dimensions and a cropped rectangle. Then, I'll create a highlight editor with boxes within that cropped area.
+
+I'll need to import the necessary modules, like `PDFPageProxy` and `HighlightEditor`, and set up a mock PDF document and page. I'll define the page dimensions and a cropped rectangle. Then, I'll create a highlight editor with boxes inside this rectangle.
+
+Next, I'll serialize the highlight data using the updated `serializeBoxes` and `serializeOutlines` methods. I'll extract the quadPoints and outlines from the serialized data.
+
+I'll then deserialize the data back into a HighlightEditor instance to ensure that the deserialized boxes match the original ones. This checks if the round-trip serialization works correctly.
+
+Finally, I'll compare the expected and actual box coordinates to ensure they match, confirming that the highlight is correctly positioned and visible after the patch.
+
+I need to make sure the test is self-contained, uses dynamic imports for compatibility, and only includes the necessary code without any extra dependencies. The test should fail before the patch and pass after, verifying the fix.
+</think>
+
+```javascript
+it("should correctly serialize highlight boxes in cropped PDFs", async () => {
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+  
+  // Setup mock PDF page and editor
+  const page = new PDFPageProxy({
+    pageWidth: 100,
+    pageHeight: 100,
+    pageIndex: 0,
+  });
+  
+  const rect = [10, 10, 50, 50]; // Cropped rectangle
+  const boxes = [{ x: 0.2, y: 0.2, width: 0.3, height: 0.3 }];
+  
+  // Create editor with cropped coordinates
+  const editor = new HighlightEditor({
+    pageIndex: 0,
+    color: "#000",
+    boxes: boxes,
+    x: rect[0],
+    y: rect[1],
+    width: rect[2] - rect[0],
+    height: rect[3] - rect[1],
+    page: page,
+    parent: null,
+    uiManager: null,
+  });
+  
+  // Serialize the data
+  const data = editor.serialize();
+  const serializedQuadPoints = data.quadPoints;
+  const serializedOutlines = data.outlines;
+  
+  // Deserialize back to compare
+  const deserializedEditor = HighlightEditor.deserialize(data, null, null);
+  
+  // Check if the deserialized boxes match the expected coordinates
+  // within the cropped rectangle
+  const expectedBox = {
+    x: (rect[2] - rect[0]) * 0.2,
+    y: (rect[3] - rect[1]) * 0.2,
+    width: (rect[2] - rect[0]) * 0.3,
+    height: (rect[3] - rect[1]) * 0.3,
+  };
+  
+  expect(deserializedEditor.#boxes[0]).toEqual(expectedBox);
+});
+```

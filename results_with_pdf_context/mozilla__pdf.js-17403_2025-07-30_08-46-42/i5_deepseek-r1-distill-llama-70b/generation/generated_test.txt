@@ -1,0 +1,47 @@
+it("should improve rendering performance for PDFs with many pages", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { PDFPage } = await import("../../src/core/document.js");
+
+  // Create a test PDF with 1000 pages
+  const pdf = new PDFDocument();
+  for (let i = 0; i < 1000; i++) {
+    const page = pdf.addPage();
+    const graphics = page.getGraphics();
+    graphics.rect(0, 0, 100, 100);
+    graphics.fill();
+  }
+
+  // Load the PDF through the proxy
+  const proxy = new PDFDocumentProxy({
+    getDocument: () => Promise.resolve(pdf),
+    getMetadata: () => Promise.resolve({}),
+  });
+
+  // Measure rendering time
+  const startTime = Date.now();
+  const pagesRendered = new Promise(resolve => {
+    let count = 0;
+    const interval = setInterval(() => {
+      count++;
+      if (count >= 1000) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 1);
+  });
+
+  // Simulate page rendering
+  for (let i = 0; i < 1000; i++) {
+    const page = await proxy.getPage(i + 1);
+    await page.render();
+  }
+
+  await pagesRendered;
+  const endTime = Date.now();
+  const renderTime = endTime - startTime;
+
+  // The expected maximum rendering time in milliseconds
+  const expectedMaxTime = 1000;
+  expect(renderTime).toBeLessThan(expectedMaxTime);
+});

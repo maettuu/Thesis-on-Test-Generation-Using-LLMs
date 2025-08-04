@@ -1,0 +1,621 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: Some pdf texts are not shown and can not be selected when is shown by pdf.js
+### Attach (recommended) or Link to PDF file
+
+When PDF.js renders the attached PDF, the text 'D-FLT-020153-2060' cannot be selected with the cursor, while other text can be selected without issue.
+
+[okm2500682934750615600.pdf](https://github.com/user-attachments/files/19126771/okm2500682934750615600.pdf)
+
+### Web browser and its version
+
+Firefox, Chrome
+
+### Operating system and its version
+
+Windows 10
+
+### PDF.js version
+
+pdfjsVersion = "4.5.136";pdfjsBuild = "3a21f03b0";
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+1- Preview attached pdf with pdf.js
+2- Try to select 'D-FLT-020153-2060' text with cursor which is positioned at the end of pdf
+
+### What is the expected behavior?
+
+Text be selected and can be copied to clipboard
+
+### What went wrong?
+
+Text can not be selected
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+_No response_
+</issue>
+
+PDF File:
+<pdf>
+issue19624.pdf
+</pdf>
+
+Patch:
+<patch>
+diff --git a/src/core/evaluator.js b/src/core/evaluator.js
+--- a/src/core/evaluator.js
++++ b/src/core/evaluator.js
+@@ -4679,8 +4679,15 @@ class TranslatedFont {
+             //   not execute any operators that set the colour (or other
+             //   colour-related parameters) in the graphics state;
+             //   any use of such operators shall be ignored."
+-            if (operatorList.fnArray[0] === OPS.setCharWidthAndBounds) {
+-              this.#removeType3ColorOperators(operatorList, fontBBoxSize);
++            switch (operatorList.fnArray[0]) {
++              case OPS.setCharWidthAndBounds:
++                this.#removeType3ColorOperators(operatorList, fontBBoxSize);
++                break;
++              case OPS.setCharWidth:
++                if (!fontBBoxSize) {
++                  this.#guessType3FontBBox(operatorList);
++                }
++                break;
+             }
+             charProcOperatorList[key] = operatorList.getIR();
+ 
+@@ -4728,13 +4735,7 @@ class TranslatedFont {
+       // Override the fontBBox when it's undefined/empty, or when it's at least
+       // (approximately) one order of magnitude smaller than the charBBox
+       // (fixes issue14999_reduced.pdf).
+-      if (!this._bbox) {
+-        this._bbox = [Infinity, Infinity, -Infinity, -Infinity];
+-      }
+-      this._bbox[0] = Math.min(this._bbox[0], charBBox[0]);
+-      this._bbox[1] = Math.min(this._bbox[1], charBBox[1]);
+-      this._bbox[2] = Math.max(this._bbox[2], charBBox[2]);
+-      this._bbox[3] = Math.max(this._bbox[3], charBBox[3]);
++      this.#computeCharBBox(charBBox);
+     }
+ 
+     let i = 0,
+@@ -4787,6 +4788,37 @@ class TranslatedFont {
+       i++;
+     }
+   }
++
++  #guessType3FontBBox(operatorList) {
++    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
++      assert(
++        operatorList.fnArray[0] === OPS.setCharWidth,
++        "Type3 glyph shall start with the d0 operator."
++      );
++    }
++
++    let i = 1;
++    const ii = operatorList.length;
++    while (i < ii) {
++      switch (operatorList.fnArray[i]) {
++        case OPS.constructPath:
++          const minMax = operatorList.argsArray[i][2];
++          // Override the fontBBox when it's undefined/empty (fixes 19624.pdf).
++          this.#computeCharBBox(minMax);
++          break;
++      }
++      i++;
++    }
++  }
++
++  #computeCharBBox(bbox) {
++    this._bbox ||= [Infinity, Infinity, -Infinity, -Infinity];
++
++    this._bbox[0] = Math.min(this._bbox[0], bbox[0]);
++    this._bbox[1] = Math.min(this._bbox[1], bbox[1]);
++    this._bbox[2] = Math.max(this._bbox[2], bbox[2]);
++    this._bbox[3] = Math.max(this._bbox[3], bbox[3]);
++  }
+ }
+ 
+ class StateManager {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.9
+- @babel/preset-env: ^7.26.9
+- @babel/runtime: ^7.26.9
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.67
+- @types/node: ^22.13.5
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001700
+- core-js: ^3.40.0
+- eslint: ^9.21.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.9.0
+- eslint-plugin-prettier: ^5.2.3
+- eslint-plugin-unicorn: ^57.0.0
+- globals: ^16.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.6.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.3
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.5.2
+- puppeteer: ^24.2.1
+- stylelint: ^16.14.1
+- stylelint-prettier: ^5.0.3
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.11
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.7.3
+- vinyl: ^3.0.0
+- webpack: ^5.98.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/calculate_md5.js`: calculateMD5
+- `../../src/core/calculate_sha256.js`: calculateSHA256
+- `../../src/core/calculate_sha_other.js`: calculateSHA384, calculateSHA512
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/colorspace_utils.js`: ColorSpaceUtils
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalColorSpaceCache, GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, isValidExplicitDest, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, FeatureTest, FormatError, ImageKind, InvalidPDFException, MathClamp, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/evaluator.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AbortException,
+18   assert,
+19   FONT_IDENTITY_MATRIX,
+20   FormatError,
+21   IDENTITY_MATRIX,
+22   info,
+23   isArrayEqual,
+24   normalizeUnicode,
+25   OPS,
+26   shadow,
+27   stringToPDFString,
+28   TextRenderingMode,
+29   Util,
+30   warn,
+31 } from "../shared/util.js";
+32 import { CMapFactory, IdentityCMap } from "./cmap.js";
+33 import { Cmd, Dict, EOF, isName, Name, Ref, RefSet } from "./primitives.js";
+34 import { ErrorFont, Font } from "./fonts.js";
+35 import {
+36   fetchBinaryData,
+37   isNumberArray,
+38   lookupMatrix,
+39   lookupNormalRect,
+40 } from "./core_utils.js";
+41 import {
+42   getEncoding,
+43   MacRomanEncoding,
+44   StandardEncoding,
+45   SymbolSetEncoding,
+46   WinAnsiEncoding,
+47   ZapfDingbatsEncoding,
+48 } from "./encodings.js";
+49 import {
+50   getFontNameToFileMap,
+51   getSerifFonts,
+52   getStandardFontName,
+53   getStdFontMap,
+54   getSymbolsFonts,
+55   isKnownFontName,
+56 } from "./standard_fonts.js";
+57 import { getTilingPatternIR, Pattern } from "./pattern.js";
+58 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
+59 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
+60 import { isPDFFunction, PDFFunctionFactory } from "./function.js";
+61 import { Lexer, Parser } from "./parser.js";
+62 import {
+63   LocalColorSpaceCache,
+64   LocalGStateCache,
+65   LocalImageCache,
+66   LocalTilingPatternCache,
+67   RegionalImageCache,
+68 } from "./image_utils.js";
+69 import { BaseStream } from "./base_stream.js";
+70 import { bidi } from "./bidi.js";
+71 import { ColorSpace } from "./colorspace.js";
+72 import { ColorSpaceUtils } from "./colorspace_utils.js";
+73 import { DecodeStream } from "./decode_stream.js";
+74 import { FontFlags } from "./fonts_utils.js";
+75 import { getFontSubstitution } from "./font_substitutions.js";
+76 import { getGlyphsUnicode } from "./glyphlist.js";
+77 import { getMetrics } from "./metrics.js";
+78 import { getUnicodeForGlyph } from "./unicode.js";
+79 import { MurmurHash3_64 } from "../shared/murmurhash3.js";
+80 import { OperatorList } from "./operator_list.js";
+81 import { PDFImage } from "./image.js";
+82 import { Stream } from "./stream.js";
+83 
+84 const DefaultPartialEvaluatorOptions = Object.freeze({
+85   maxImageSize: -1,
+86   disableFontFace: false,
+87   ignoreErrors: false,
+88   isEvalSupported: true,
+89   isOffscreenCanvasSupported: false,
+90   isImageDecoderSupported: false,
+91   canvasMaxAreaInBytes: -1,
+92   fontExtraProperties: false,
+93   useSystemFonts: true,
+94   useWasm: true,
+95   useWorkerFetch: true,
+96   cMapUrl: null,
+97   standardFontDataUrl: null,
+98   wasmUrl: null,
+99 });
+100 
+101 const PatternType = {
+102   TILING: 1,
+103   SHADING: 2,
+104 };
+105 
+106 // Optionally avoid sending individual, or very few, text chunks to reduce
+107 // `postMessage` overhead with ReadableStream (see issue 13962).
+108 //
+109 // PLEASE NOTE: This value should *not* be too large (it's used as a lower limit
+110 // in `enqueueChunk`), since that would cause streaming of textContent to become
+111 // essentially useless in practice by sending all (or most) chunks at once.
+112 // Also, a too large value would (indirectly) affect the main-thread `textLayer`
+113 // building negatively by forcing all textContent to be handled at once, which
+114 // could easily end up hurting *overall* performance (e.g. rendering as well).
+115 const TEXT_CHUNK_BATCH_SIZE = 10;
+116 
+117 const deferred = Promise.resolve();
+118 
+119 // Convert PDF blend mode names to HTML5 blend mode names.
+180 
+192 // Trying to minimize Date.now() usage and check every 100 time.
+215 
+4591 class TranslatedFont {
+4592   #sent = false;
+4593 
+4594   #type3Loaded = null;
+4595 
+4596   constructor({ loadedName, font, dict }) {
+4597     this.loadedName = loadedName;
+4598     this.font = font;
+4599     this.dict = dict;
+4600     this.type3Dependencies = font.isType3Font ? new Set() : null;
+4601   }
+4602 
+4636   loadType3Data(evaluator, resources, task) {
+4637     if (this.#type3Loaded) {
+4638       return this.#type3Loaded;
+4639     }
+4640     const { font, type3Dependencies } = this;
+4641     assert(font.isType3Font, "Must be a Type3 font.");
+4642 
+4643     // When parsing Type3 glyphs, always ignore them if there are errors.
+4644     // Compared to the parsing of e.g. an entire page, it doesn't really
+4645     // make sense to only be able to render a Type3 glyph partially.
+4646     const type3Evaluator = evaluator.clone({ ignoreErrors: false });
+4647     // Prevent circular references in Type3 fonts.
+4648     const type3FontRefs = new RefSet(evaluator.type3FontRefs);
+4649     if (this.dict.objId && !type3FontRefs.has(this.dict.objId)) {
+4650       type3FontRefs.put(this.dict.objId);
+4651     }
+4652     type3Evaluator.type3FontRefs = type3FontRefs;
+4653 
+4654     let loadCharProcsPromise = Promise.resolve();
+4655     const charProcs = this.dict.get("CharProcs");
+4656     const fontResources = this.dict.get("Resources") || resources;
+4657     const charProcOperatorList = Object.create(null);
+4658 
+4659     const fontBBox = Util.normalizeRect(font.bbox || [0, 0, 0, 0]),
+4660       width = fontBBox[2] - fontBBox[0],
+4661       height = fontBBox[3] - fontBBox[1];
+4662     const fontBBoxSize = Math.hypot(width, height);
+4663 
+4664     for (const key of charProcs.getKeys()) {
+4665       loadCharProcsPromise = loadCharProcsPromise.then(() => {
+4666         const glyphStream = charProcs.get(key);
+4667         const operatorList = new OperatorList();
+4668         return type3Evaluator
+4669           .getOperatorList({
+4670             stream: glyphStream,
+4671             task,
+4672             resources: fontResources,
+4673             operatorList,
+4674           })
+4675           .then(() => {
+4676             // According to the PDF specification, section "9.6.5 Type 3 Fonts"
+4677             // and "Table 113":
+4678             //  "A glyph description that begins with the d1 operator should
+4679             //   not execute any operators that set the colour (or other
+4680             //   colour-related parameters) in the graphics state;
+4681             //   any use of such operators shall be ignored."
+4682             if (operatorList.fnArray[0] === OPS.setCharWidthAndBounds) {
+4683               this.#removeType3ColorOperators(operatorList, fontBBoxSize);
+4684             }
+4685             charProcOperatorList[key] = operatorList.getIR();
+4686 
+4687             for (const dependency of operatorList.dependencies) {
+4688               type3Dependencies.add(dependency);
+4689             }
+4690           })
+4691           .catch(function (reason) {
+4692             warn(`Type3 font resource "${key}" is not available.`);
+4693             const dummyOperatorList = new OperatorList();
+4694             charProcOperatorList[key] = dummyOperatorList.getIR();
+4695           });
+4696       });
+4697     }
+4698     this.#type3Loaded = loadCharProcsPromise.then(() => {
+4699       font.charProcOperatorList = charProcOperatorList;
+4700       if (this._bbox) {
+4701         font.isCharBBox = true;
+4702         font.bbox = this._bbox;
+4703       }
+4704     });
+4705     return this.#type3Loaded;
+4706   }
+4707 
+4708   #removeType3ColorOperators(operatorList, fontBBoxSize = NaN) {
+4709     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+4710       assert(
+4711         operatorList.fnArray[0] === OPS.setCharWidthAndBounds,
+4712         "Type3 glyph shall start with the d1 operator."
+4713       );
+4714     }
+4715     const charBBox = Util.normalizeRect(operatorList.argsArray[0].slice(2)),
+4716       width = charBBox[2] - charBBox[0],
+4717       height = charBBox[3] - charBBox[1];
+4718     const charBBoxSize = Math.hypot(width, height);
+4719 
+4720     if (width === 0 || height === 0) {
+4721       // Skip the d1 operator when its bounds are bogus (fixes issue14953.pdf).
+4722       operatorList.fnArray.splice(0, 1);
+4723       operatorList.argsArray.splice(0, 1);
+4724     } else if (
+4725       fontBBoxSize === 0 ||
+4726       Math.round(charBBoxSize / fontBBoxSize) >= 10
+4727     ) {
+4728       // Override the fontBBox when it's undefined/empty, or when it's at least
+4729       // (approximately) one order of magnitude smaller than the charBBox
+4730       // (fixes issue14999_reduced.pdf).
+4731       if (!this._bbox) {
+4732         this._bbox = [Infinity, Infinity, -Infinity, -Infinity];
+4733       }
+4734       this._bbox[0] = Math.min(this._bbox[0], charBBox[0]);
+4735       this._bbox[1] = Math.min(this._bbox[1], charBBox[1]);
+4736       this._bbox[2] = Math.max(this._bbox[2], charBBox[2]);
+4737       this._bbox[3] = Math.max(this._bbox[3], charBBox[3]);
+4738     }
+4739 
+4740     let i = 0,
+4741       ii = operatorList.length;
+4742     while (i < ii) {
+4743       switch (operatorList.fnArray[i]) {
+4744         case OPS.setCharWidthAndBounds:
+4745           break; // Handled above.
+4746         case OPS.setStrokeColorSpace:
+4747         case OPS.setFillColorSpace:
+4748         case OPS.setStrokeColor:
+4749         case OPS.setStrokeColorN:
+4750         case OPS.setFillColor:
+4751         case OPS.setFillColorN:
+4752         case OPS.setStrokeGray:
+4753         case OPS.setFillGray:
+4754         case OPS.setStrokeRGBColor:
+4755         case OPS.setFillRGBColor:
+4756         case OPS.setStrokeCMYKColor:
+4757         case OPS.setFillCMYKColor:
+4758         case OPS.shadingFill:
+4759         case OPS.setRenderingIntent:
+4760           operatorList.fnArray.splice(i, 1);
+4761           operatorList.argsArray.splice(i, 1);
+4762           ii--;
+4763           continue;
+4764 
+4765         case OPS.setGState:
+4766           const [gStateObj] = operatorList.argsArray[i];
+4767           let j = 0,
+4768             jj = gStateObj.length;
+4769           while (j < jj) {
+4770             const [gStateKey] = gStateObj[j];
+4771             switch (gStateKey) {
+4772               case "TR":
+4773               case "TR2":
+4774               case "HT":
+4775               case "BG":
+4776               case "BG2":
+4777               case "UCR":
+4778               case "UCR2":
+4779                 gStateObj.splice(j, 1);
+4780                 jj--;
+4781                 continue;
+4782             }
+4783             j++;
+4784           }
+4785           break;
+4786       }
+4787       i++;
+4788     }
+4789   }
+4790 }
+4791 
+5189 
+</code>
+
+PR summary:
+<pr_summary>
+Improve text-selection for Type3 fonts, using `d0` operators, with empty /FontBBox-entries (issue 19624)
+For Type3 glyphs with `d1` operators it's easy to compute a fallback bounding box, however for `d0` the situation is more difficult.
+Given that we nowadays compute the min/max of basic path-rendering operators on the worker-thread, we can utilize that by parsing these Type3 operatorLists to guess a more suitable fallback bounding box.
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. You can use the PDF file for testing as follows:
+const { getDocument } = await import('../../src/display/api.js');
+const { buildGetDocumentParams } = await import('./test_utils.js');
+const loadingTask = getDocument(buildGetDocumentParams('issue19624.pdf'))
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

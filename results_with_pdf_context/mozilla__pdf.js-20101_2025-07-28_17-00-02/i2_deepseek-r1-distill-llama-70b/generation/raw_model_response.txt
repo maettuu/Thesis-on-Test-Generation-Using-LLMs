@@ -1,0 +1,45 @@
+<think>
+Okay, I need to write a regression test for the issue where text isn't shown because the browser.display.use_document_fonts setting is disabled. The test should fail before the patch and pass after applying the patch. 
+
+First, I should understand the problem. The user reported that with use_document_fonts set to 0, some texts are hidden. The patch modifies the CanvasGraphics class to handle cases where the font file is missing by using canvas text primitives.
+
+So, the test needs to simulate this scenario. I'll create a test that sets the browser.display.use_document_fonts flag to 0, opens the PDF, and checks if the text is rendered correctly.
+
+I'll use the provided PDF file, issue20065.pdf. The test will load the PDF and check the text in the first page. 
+
+I'll structure the test using Jest. I'll import the necessary modules: getDocument from api.js and buildGetDocumentParams from test_utils.js. 
+
+I'll set up a mock for browser.display.use_document_fonts using a mock function. Then, I'll load the document and render the first page. 
+
+To check if the text is rendered, I'll look for specific text strings in the page's textContent. If the text is present, the test passes; otherwise, it fails.
+
+I need to ensure that the test is self-contained and doesn't rely on any external dependencies beyond the provided imports. 
+
+Putting it all together, the test will load the PDF with the setting disabled, render the page, and assert that the expected text is present. This should fail before the patch and pass after.
+</think>
+
+```javascript
+it("should render text when use_document_fonts is disabled", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue20065.pdf'));
+  
+  const doc = await loadingTask;
+  const page = await doc.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.scale(viewport.width, viewport.height);
+  
+  const textLayer = await new Promise(resolve => {
+    const textLayer = page.getTextContent();
+    resolve(textLayer);
+  });
+  
+  const expectedText = "山";
+  const actualText = textLayer.items[0].str;
+  
+  expect(actualText).toContain(expectedText);
+});
+```

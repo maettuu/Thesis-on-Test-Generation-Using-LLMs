@@ -1,0 +1,42 @@
+it("should improve performance when rendering PDF with poster", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const TEST_PDF_PATH = "./test.pdf";
+
+  // Create test PDF with poster image
+  const pdfDoc = await getDocument(TEST_PDF_PATH);
+  const page = await pdfDoc.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+
+  // Create canvas to measure rendering time
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  // Measure rendering time before patch
+  console.time("renderBefore");
+  await page.render({
+    canvasContext: ctx,
+    viewport: viewport,
+    renderInteractive: false
+  });
+  console.timeEnd("renderBefore");
+
+  // Apply patch and measure again
+  const originalFilter = ctx.filter;
+  ctx.filter = "some-filter";
+
+  console.time("renderAfter");
+  await page.render({
+    canvasContext: ctx,
+    viewport: viewport,
+    renderInteractive: false
+  });
+  console.timeEnd("renderAfter");
+
+  // Verify performance improvement
+  const renderBeforeTime = performance.getEntriesByName("renderBefore")[0].duration;
+  const renderAfterTime = performance.getEntriesByName("renderAfter")[0].duration;
+
+  expect(renderAfterTime).toBeLessThan(renderBeforeTime);
+});

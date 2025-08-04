@@ -1,0 +1,55 @@
+it("should render password fields as password input elements", async () => {
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { DefaultStandardFontDataFactory } = await import("../../src/display/standard_fontdata_factory.js");
+  const { createIdFactory, XRefMock } = await import("./test_utils.js");
+
+  const idFactory = createIdFactory();
+  const xref = new XRefMock(idFactory);
+  const fontDataFactory = new DefaultStandardFontDataFactory();
+
+  // Create a sample PDF with a password field
+  const pdfData = `
+    1 0 obj
+    <</Type /Catalog /Pages 2 0 R>>
+    endobj
+    2 0 obj
+    <</Type /Pages /Kids [3 0 R] /Count 1>>
+    endobj
+    3 0 obj
+    <</Type /Page /Parent 2 0 R /Resources 4 0 R
+      /Contents [] >>
+    endobj
+    4 0 obj
+    <</ProcSet [/PDF /Text] >>
+    endobj
+    5 0 obj
+    <</FT /Btn /Ff 0 /Type /Widget /Subtype /Widget
+      /T (passwordField) /F (0) >>
+    endobj
+  `;
+
+  const parser = new Parser(new Lexer(new StringStream(pdfData)));
+  const pdf = await parser.parse();
+
+  const annotationFactory = new AnnotationFactory(
+    new DefaultStandardFontDataFactory(),
+    fontDataFactory,
+    xref,
+    idFactory
+  );
+
+  const annotation = await annotationFactory.createAnnotation(
+    pdf.get(5),
+    null,
+    null,
+    null,
+    null
+  );
+
+  expect(annotation.data.password).toBe(true);
+
+  const element = await annotation.render();
+  const html = element.outerHTML;
+
+  expect(html).toContain("input type=\"password\"");
+});

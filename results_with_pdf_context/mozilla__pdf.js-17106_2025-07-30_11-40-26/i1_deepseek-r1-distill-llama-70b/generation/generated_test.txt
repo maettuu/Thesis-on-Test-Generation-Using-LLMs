@@ -1,0 +1,30 @@
+it("should prevent memory ballooning when scrolling through PDF", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { GlobalImageCache } = await import("../../src/core/image_utils.js");
+  const { TEST_PDFS_PATH } = await import("./test_utils.js");
+
+  // Use a PDF with many images to test memory usage
+  const pdfPath = `${TEST_PDFS_PATH}/image-pdf.pdf`;
+  const params = buildGetDocumentParams(pdfPath, null, null, WORKER_SRC);
+  const doc = await getDocument(params);
+  const cache = new GlobalImageCache();
+
+  // Simulate scrolling by rendering multiple pages
+  for (let i = 0; i < 10; i++) {
+    const page = await doc.getPage(i + 1);
+    await page.render({
+      canvasContext: { getContext: () => ({} ) },
+      viewport: page.getViewport({ scale: 1 }),
+    });
+  }
+
+  // Verify that image data is properly released
+  await new Promise(resolve => setTimeout(resolve, 1000)); // Give cleanup time
+  global.gc(); // Force garbage collection
+
+  // In the buggy version, the cache size would remain large
+  const expectedCacheSize = 0;
+  const actualCacheSize = Object.keys(cache._cache).length;
+
+  assert.strictEqual(actualCacheSize, expectedCacheSize);
+});

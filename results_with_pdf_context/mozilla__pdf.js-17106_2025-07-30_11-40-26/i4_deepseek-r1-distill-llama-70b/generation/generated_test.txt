@@ -1,0 +1,28 @@
+it("should release image data after cleanup", async () => {
+  const { PDFWorker, PDFDocument, PDFWorkerUtil } = await import("../../src/display/api.js");
+  const { PDFDataRangeTransport } = await import("../../src/display/api.js");
+  const { CMAP_URL, TEST_PDFS_PATH } = await import("./test_utils.js");
+
+  const worker = new PDFWorker({ verbosity: 'error' });
+  const transport = new PDFDataRangeTransport(0, null, true);
+  const doc = await PDFDocument.load({
+    url: `${TEST_PDFS_PATH}/trivial.pdf`,
+    range: transport,
+    worker,
+  });
+
+  const page = await doc.getPage(1);
+  await page.render({
+    canvasContext: new (await import("../../src/display/canvas.js")).CanvasGraphics(),
+    viewport: page.getViewport({ scale: 1 }),
+  });
+
+  const transportAfter = new PDFDataRangeTransport(0, null, true);
+  const pageAfter = new PDFPageProxy(0, {}, transportAfter);
+  const cleanupResult = await pageAfter.cleanup();
+
+  const { commonObjs } = pageAfter._transport;
+  const imageData = Object.values(commonObjs._objs).find(obj => obj.data?.bitmap);
+
+  expect(imageData?.bitmap?.closed).toBe(true);
+});

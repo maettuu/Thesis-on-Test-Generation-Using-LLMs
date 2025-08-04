@@ -1,0 +1,82 @@
+<think>
+Okay, I need to write a test that verifies the fix for the issue where pasting an image from the clipboard into the editor doesn't work. The test should fail before the patch is applied and pass after.
+
+First, I'll look at the existing test file. It's test/unit/editor_spec.js, which currently only imports CommandManager. I'll need to add more imports for the classes involved in the editor, like AnnotationEditorUIManager, StampEditor, etc.
+
+The test should simulate the user pasting an image. So, I'll create a mock clipboard event with a sample image. I'll use a small PNG image encoded in base64 for this purpose.
+
+I'll set up the UI manager and a mock layer. Then, I'll define the paste event and dispatch it. After that, I'll check if a new StampEditor was created and if it's properly added to the layer.
+
+I need to make sure that before the patch, this test fails because the paste functionality isn't handling images. After applying the patch, the test should pass, indicating that the image was correctly pasted.
+
+I'll structure the test using async/await for any promises, like initializing the UI manager. I'll also make sure to clean up any created elements to avoid affecting other tests.
+
+Finally, I'll write the test block, making sure it's self-contained and only uses the provided imports. I'll use dynamic imports where necessary to maintain compatibility with Node.js.
+</think>
+
+```javascript
+it("should create a stamp editor when pasting an image from clipboard", async () => {
+  const { default: AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { default: StampEditor } = await import("../../src/display/editor/stamp.js");
+
+  // Setup mock data
+  const mockClipboardData = {
+    items: [
+      {
+        type: "image/png",
+        kind: "file",
+        getAsFile: () => new File(["iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAYAAAC4qZBY4GYAAACGIHgYk5PjdXQBFY5jGPbIHMID1mQUAAIABAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU", "base64"])
+      }
+    ],
+    getData: () => "application/pdfjs"
+  };
+
+  // Create UI manager and layer
+  const uiManager = new AnnotationEditorUIManager({
+    container: document.createElement("div"),
+    viewer: document.createElement("div"),
+    eventBus: {
+      _on: () => {},
+      _off: () => {},
+      dispatch: () => {}
+    },
+    pdfDocument: {
+      annotationStorage: {
+        has: () => false,
+        getValue: () => null,
+        setValue: () => {},
+        remove: () => {}
+      },
+      filterFactory: {}
+    },
+    pageColors: {}
+  });
+
+  const layer = {
+    div: document.createElement("div"),
+    enable() {},
+    disable() {},
+    updateMode() {},
+    addOrRebuild: (editor) => {
+      editor.parent = this;
+    }
+  };
+
+  uiManager.addLayer(layer);
+
+  // Dispatch paste event
+  const event = {
+    preventDefault: () => {},
+    clipboardData: mockClipboardData
+  };
+
+  await uiManager.paste(event);
+
+  // Verify that a StampEditor was created and added to the layer
+  const editors = uiManager.getEditors(layer.pageIndex);
+  const stampEditor = editors.find(editor => editor instanceof StampEditor);
+
+  expect(stampEditor).toBeDefined();
+  expect(layer.addOrRebuild).toHaveBeenCalled();
+});
+```

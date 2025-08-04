@@ -1,0 +1,69 @@
+<think>
+Okay, I need to create a regression test for the issue where the mouse cursor doesn't change correctly when resizing images or drawings in PDF documents. The patch provided modifies the editor.js, ink.js, stamp.js, tools.js, and util.js files. 
+
+First, I should understand what the patch does. It introduces resizers that change the cursor based on the edge being resized. So the test needs to check if the cursor changes as expected when resizing from different edges.
+
+I'll start by looking at the existing test file, editor_spec.js. It imports CommandManager from tools.js, which might be useful. I need to write a new test block that fails before the patch and passes after.
+
+I'll create a test case where I simulate resizing from different edges and check the cursor style. I'll use Jest with Puppeteer for browser automation since it can simulate pointer events and check CSS properties.
+
+I'll set up a PDF document with an image or drawing. Then, I'll create an editor instance, make it resizable, and simulate pointer down on each resizer. After each simulation, I'll check the cursor's CSS property to see if it matches the expected style (like 'nwse-resize' for bottom-right corner).
+
+I'll structure the test to loop through each resizer, simulate the pointer down event, and assert the cursor style. This ensures that each edge triggers the correct cursor change.
+
+I need to make sure the test is self-contained, so I'll use a sample PDF and set up the necessary variables within the test block. Also, I'll import any required modules dynamically to maintain compatibility.
+
+Finally, I'll write the test block, making sure it's concise and only tests the cursor behavior after resizing from each edge.
+</think>
+
+```javascript
+it("should change cursor when resizing from different edges", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { PDFViewer } = await import("../../src/display/display_utils.js");
+  const { AnnotationEditor } = await import("../../src/display/editor/editor.js");
+
+  const pdf = await PDFDocument.load(
+    new Uint8Array(await (await fetch("test.pdf")).arrayBuffer())
+  );
+  const viewer = new PDFViewer/pdf();
+  const uiManager = new AnnotationEditorUIManager(viewer);
+  const editor = new AnnotationEditor({
+    parent: viewer,
+    uiManager: uiManager,
+    type: AnnotationEditorType.INITIAL,
+    id: "test-editor",
+    name: "test-editor",
+  });
+
+  editor.makeResizable();
+  editor.select();
+
+  const page = pdf.getPage(0);
+  const viewport = page.getViewPort();
+
+  const resizers = editor.div.querySelectorAll(".resizer");
+  const cursorStyles = {
+    topLeft: "nwse-resize",
+    topRight: "nesw-resize",
+    bottomRight: "nwse-resize",
+    bottomLeft: "nesw-resize",
+  };
+
+  for (const resizer of resizers) {
+    const name = resizer.classList[1];
+    const event = new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 0,
+      clientY: 0,
+    });
+
+    resizer.dispatchEvent(event);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const cursor = window.getComputedStyle(resizer).cursor;
+    expect(cursor).toBe(cursorStyles[name]);
+  }
+});
+```

@@ -1,0 +1,69 @@
+<think>
+Okay, I need to write a regression test for the issue where rendering a PDF with a lot of pages is slow. The patch provided modifies the MessageHandler class to introduce queuing and postponing of task execution. 
+
+First, I should understand what the patch does. It looks like the patch adds a queue to handle messages, postpones execution if needed, and skips cancelled tasks. This should prevent the main thread from being blocked by a large number of messages, which would cause slow rendering.
+
+The test should simulate a scenario where multiple pages are being rendered. I'll create a test PDF with many pages and measure the rendering time before and after the patch. If the patch works, the rendering should be faster.
+
+I'll use the PDFDocumentProxy from the display module to load the PDF. I'll set up a timer to measure how long it takes to render all pages. Since this is a regression test, I'll use a mock timer to simulate the passage of time.
+
+I'll create a large number of pages, say 1000, each with a small rectangle to keep the PDF size manageable. Then, I'll load the PDF and measure the time it takes to render all pages. If the time is within an expected range, the test passes.
+
+I need to import the necessary modules like PDFDocument, PDFPage, and PDFDocumentProxy. I'll also use a mock implementation of PDFDocumentProxy to control the rendering flow.
+
+In the test, I'll create the PDF, add all pages, and then load it using the proxy. I'll set a timeout to wait for all pages to render and check if the time taken is reasonable.
+
+I should ensure that the test is self-contained and doesn't rely on external files. Using a dynamically generated PDF in the test will help with this.
+
+So, putting it all together, the test will generate a large PDF, measure the rendering time, and assert that it's within an acceptable threshold. This should fail before the patch because rendering is slow and pass after the patch is applied.
+</think>
+
+```javascript
+it("should improve rendering performance for PDFs with many pages", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { PDFPage } = await import("../../src/core/document.js");
+  
+  // Create a test PDF with 1000 pages
+  const pdf = new PDFDocument();
+  for (let i = 0; i < 1000; i++) {
+    const page = pdf.addPage();
+    const graphics = page.getGraphics();
+    graphics.rect(0, 0, 100, 100);
+    graphics.fill();
+  }
+
+  // Load the PDF through the proxy
+  const proxy = new PDFDocumentProxy({
+    getDocument: () => Promise.resolve(pdf),
+    getMetadata: () => Promise.resolve({}),
+  });
+
+  // Measure rendering time
+  const startTime = Date.now();
+  const pagesRendered = new Promise(resolve => {
+    let count = 0;
+    const interval = setInterval(() => {
+      count++;
+      if (count >= 1000) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 1);
+  });
+
+  // Simulate page rendering
+  for (let i = 0; i < 1000; i++) {
+    const page = await proxy.getPage(i + 1);
+    await page.render();
+  }
+
+  await pagesRendered;
+  const endTime = Date.now();
+  const renderTime = endTime - startTime;
+
+  // The expected maximum rendering time in milliseconds
+  const expectedMaxTime = 1000;
+  expect(renderTime).toBeLessThan(expectedMaxTime);
+});
+```

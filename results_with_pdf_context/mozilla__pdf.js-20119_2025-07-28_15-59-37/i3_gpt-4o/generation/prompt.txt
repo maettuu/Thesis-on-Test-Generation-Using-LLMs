@@ -1,0 +1,3484 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Add an entry in the context menu in order to highlight and comment the text selection in a pdf
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/toolbar.js b/src/display/editor/toolbar.js
+--- a/src/display/editor/toolbar.js
++++ b/src/display/editor/toolbar.js
+@@ -123,7 +123,7 @@ class EditorToolbar {
+     const { editorType, _uiManager } = this.#editor;
+ 
+     const button = document.createElement("button");
+-    button.className = "delete";
++    button.classList.add("basic", "deleteButton");
+     button.tabIndex = 0;
+     button.setAttribute("data-l10n-id", EditorToolbar.#l10nRemove[editorType]);
+     this.#addListenersToElement(button);
+@@ -214,7 +214,7 @@ class EditorToolbar {
+   }
+ }
+ 
+-class HighlightToolbar {
++class FloatingToolbar {
+   #buttons = null;
+ 
+   #toolbar = null;
+@@ -237,7 +237,25 @@ class HighlightToolbar {
+     buttons.className = "buttons";
+     editToolbar.append(buttons);
+ 
+-    this.#addHighlightButton();
++    if (this.#uiManager.hasCommentManager()) {
++      this.#makeButton(
++        "commentButton",
++        `pdfjs-comment-floating-button`,
++        "pdfjs-comment-floating-button-label",
++        () => {
++          this.#uiManager.commentSelection("floating_button");
++        }
++      );
++    }
++
++    this.#makeButton(
++      "highlightButton",
++      `pdfjs-highlight-floating-button1`,
++      "pdfjs-highlight-floating-button-label",
++      () => {
++        this.#uiManager.highlightSelection("floating_button");
++      }
++    );
+ 
+     return editToolbar;
+   }
+@@ -279,26 +297,20 @@ class HighlightToolbar {
+     this.#toolbar.remove();
+   }
+ 
+-  #addHighlightButton() {
++  #makeButton(buttonClass, l10nId, labelL10nId, clickHandler) {
+     const button = document.createElement("button");
+-    button.className = "highlightButton";
++    button.classList.add("basic", buttonClass);
+     button.tabIndex = 0;
+-    button.setAttribute("data-l10n-id", `pdfjs-highlight-floating-button1`);
++    button.setAttribute("data-l10n-id", l10nId);
+     const span = document.createElement("span");
+     button.append(span);
+     span.className = "visuallyHidden";
+-    span.setAttribute("data-l10n-id", "pdfjs-highlight-floating-button-label");
++    span.setAttribute("data-l10n-id", labelL10nId);
+     const signal = this.#uiManager._signal;
+     button.addEventListener("contextmenu", noContextMenu, { signal });
+-    button.addEventListener(
+-      "click",
+-      () => {
+-        this.#uiManager.highlightSelection("floating_button");
+-      },
+-      { signal }
+-    );
++    button.addEventListener("click", clickHandler, { signal });
+     this.#buttons.append(button);
+   }
+ }
+ 
+-export { EditorToolbar, HighlightToolbar };
++export { EditorToolbar, FloatingToolbar };
+
+diff --git a/src/display/editor/tools.js b/src/display/editor/tools.js
+--- a/src/display/editor/tools.js
++++ b/src/display/editor/tools.js
+@@ -34,7 +34,7 @@ import {
+   PixelsPerInch,
+   stopEvent,
+ } from "../display_utils.js";
+-import { HighlightToolbar } from "./toolbar.js";
++import { FloatingToolbar } from "./toolbar.js";
+ 
+ function bindEvents(obj, element, names) {
+   for (const name of names) {
+@@ -631,7 +631,7 @@ class AnnotationEditorUIManager {
+ 
+   #highlightWhenShiftUp = false;
+ 
+-  #highlightToolbar = null;
++  #floatingToolbar = null;
+ 
+   #idManager = new IdManager();
+ 
+@@ -908,8 +908,8 @@ class AnnotationEditorUIManager {
+     this.#altTextManager?.destroy();
+     this.#commentManager?.destroy();
+     this.#signatureManager?.destroy();
+-    this.#highlightToolbar?.hide();
+-    this.#highlightToolbar = null;
++    this.#floatingToolbar?.hide();
++    this.#floatingToolbar = null;
+     this.#mainHighlightColorPicker?.destroy();
+     this.#mainHighlightColorPicker = null;
+     if (this.#focusMainContainerTimeoutId) {
+@@ -1157,7 +1157,7 @@ class AnnotationEditorUIManager {
+     return null;
+   }
+ 
+-  highlightSelection(methodOfCreation = "") {
++  highlightSelection(methodOfCreation = "", comment = false) {
+     const selection = document.getSelection();
+     if (!selection || selection.isCollapsed) {
+       return;
+@@ -1175,7 +1175,7 @@ class AnnotationEditorUIManager {
+     const layer = this.#getLayerForTextLayer(textLayer);
+     const isNoneMode = this.#mode === AnnotationEditorType.NONE;
+     const callback = () => {
+-      layer?.createAndAddNewEditor({ x: 0, y: 0 }, false, {
++      const editor = layer?.createAndAddNewEditor({ x: 0, y: 0 }, false, {
+         methodOfCreation,
+         boxes,
+         anchorNode,
+@@ -1187,6 +1187,9 @@ class AnnotationEditorUIManager {
+       if (isNoneMode) {
+         this.showAllEditors("highlight", true, /* updateButton = */ true);
+       }
++      if (comment) {
++        editor?.editComment();
++      }
+     };
+     if (isNoneMode) {
+       this.switchToMode(AnnotationEditorType.HIGHLIGHT, callback);
+@@ -1195,7 +1198,11 @@ class AnnotationEditorUIManager {
+     callback();
+   }
+ 
+-  #displayHighlightToolbar() {
++  commentSelection(methodOfCreation = "") {
++    this.highlightSelection(methodOfCreation, /* comment */ true);
++  }
++
++  #displayFloatingToolbar() {
+     const selection = document.getSelection();
+     if (!selection || selection.isCollapsed) {
+       return;
+@@ -1206,8 +1213,8 @@ class AnnotationEditorUIManager {
+     if (!boxes) {
+       return;
+     }
+-    this.#highlightToolbar ||= new HighlightToolbar(this);
+-    this.#highlightToolbar.show(textLayer, boxes, this.direction === "ltr");
++    this.#floatingToolbar ||= new FloatingToolbar(this);
++    this.#floatingToolbar.show(textLayer, boxes, this.direction === "ltr");
+   }
+ 
+   /**
+@@ -1241,7 +1248,7 @@ class AnnotationEditorUIManager {
+     const selection = document.getSelection();
+     if (!selection || selection.isCollapsed) {
+       if (this.#selectedTextNode) {
+-        this.#highlightToolbar?.hide();
++        this.#floatingToolbar?.hide();
+         this.#selectedTextNode = null;
+         this.#dispatchUpdateStates({
+           hasSelectedText: false,
+@@ -1258,7 +1265,7 @@ class AnnotationEditorUIManager {
+     const textLayer = anchorElement.closest(".textLayer");
+     if (!textLayer) {
+       if (this.#selectedTextNode) {
+-        this.#highlightToolbar?.hide();
++        this.#floatingToolbar?.hide();
+         this.#selectedTextNode = null;
+         this.#dispatchUpdateStates({
+           hasSelectedText: false,
+@@ -1267,7 +1274,7 @@ class AnnotationEditorUIManager {
+       return;
+     }
+ 
+-    this.#highlightToolbar?.hide();
++    this.#floatingToolbar?.hide();
+     this.#selectedTextNode = anchorNode;
+     this.#dispatchUpdateStates({
+       hasSelectedText: true,
+@@ -1315,7 +1322,7 @@ class AnnotationEditorUIManager {
+     if (this.#mode === AnnotationEditorType.HIGHLIGHT) {
+       this.highlightSelection(methodOfCreation);
+     } else if (this.#enableHighlightFloatingButton) {
+-      this.#displayHighlightToolbar();
++      this.#displayFloatingToolbar();
+     }
+   }
+ 
+@@ -1606,6 +1613,9 @@ class AnnotationEditorUIManager {
+       case "highlightSelection":
+         this.highlightSelection("context_menu");
+         break;
++      case "commentSelection":
++        this.commentSelection("context_menu");
++        break;
+     }
+   }
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.28.0
+- @babel/preset-env: ^7.28.0
+- @babel/runtime: ^7.27.6
+- @csstools/postcss-light-dark-function: ^2.0.9
+- @fluent/bundle: ^0.19.1
+- @fluent/dom: ^0.10.2
+- @metalsmith/layouts: ^3.0.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.74
+- @types/node: ^24.0.15
+- autoprefixer: ^10.4.21
+- babel-loader: ^10.0.0
+- caniuse-lite: ^1.0.30001727
+- core-js: ^3.44.0
+- eslint: ^9.31.0
+- eslint-plugin-import: ^2.32.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.15.0
+- eslint-plugin-prettier: ^5.5.3
+- eslint-plugin-unicorn: ^59.0.1
+- globals: ^16.3.0
+- gulp: ^5.0.1
+- gulp-cli: ^3.1.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.1.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.8.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.7
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.6
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.4
+- postcss-nesting: ^13.0.2
+- prettier: ^3.6.2
+- puppeteer: ^24.14.0
+- stylelint: ^16.22.0
+- stylelint-prettier: ^5.0.3
+- svglint: ^4.1.0
+- terser-webpack-plugin: ^5.3.14
+- tsc-alias: ^1.8.16
+- ttest: ^4.0.0
+- typescript: ^5.8.3
+- vinyl: ^3.0.1
+- webpack: ^5.100.2
+- webpack-stream: ^7.0.0
+- yargs: ^18.0.0
+
+Engines:
+- node: >=20.16.0 || >=22.3.0
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/calculate_md5.js`: calculateMD5
+- `../../src/core/calculate_sha256.js`: calculateSHA256
+- `../../src/core/calculate_sha_other.js`: calculateSHA384, calculateSHA512
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/colorspace_utils.js`: ColorSpaceUtils
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalColorSpaceCache, GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/api_utils.js`: LoopbackPort, isValidExplicitDest
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getRGB, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, DrawOPS, FeatureTest, FormatError, ImageKind, InvalidPDFException, MathClamp, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util, updateUrlHash
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/toolbar.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { noContextMenu, stopEvent } from "../display_utils.js";
+17 
+18 class EditorToolbar {
+19   #toolbar = null;
+20 
+21   #colorPicker = null;
+22 
+23   #editor;
+24 
+25   #buttons = null;
+26 
+27   #altText = null;
+28 
+29   #comment = null;
+30 
+31   #signatureDescriptionButton = null;
+32 
+33   static #l10nRemove = null;
+34 
+35   constructor(editor) {
+36     this.#editor = editor;
+37 
+38     EditorToolbar.#l10nRemove ||= Object.freeze({
+39       freetext: "pdfjs-editor-remove-freetext-button",
+40       highlight: "pdfjs-editor-remove-highlight-button",
+41       ink: "pdfjs-editor-remove-ink-button",
+42       stamp: "pdfjs-editor-remove-stamp-button",
+43       signature: "pdfjs-editor-remove-signature-button",
+44     });
+45   }
+46 
+47   render() {
+48     const editToolbar = (this.#toolbar = document.createElement("div"));
+49     editToolbar.classList.add("editToolbar", "hidden");
+50     editToolbar.setAttribute("role", "toolbar");
+51     const signal = this.#editor._uiManager._signal;
+52     editToolbar.addEventListener("contextmenu", noContextMenu, { signal });
+53     editToolbar.addEventListener("pointerdown", EditorToolbar.#pointerDown, {
+54       signal,
+55     });
+56 
+57     const buttons = (this.#buttons = document.createElement("div"));
+58     buttons.className = "buttons";
+59     editToolbar.append(buttons);
+60 
+61     const position = this.#editor.toolbarPosition;
+62     if (position) {
+63       const { style } = editToolbar;
+64       const x =
+65         this.#editor._uiManager.direction === "ltr"
+66           ? 1 - position[0]
+67           : position[0];
+68       style.insetInlineEnd = `${100 * x}%`;
+69       style.top = `calc(${
+70         100 * position[1]
+71       }% + var(--editor-toolbar-vert-offset))`;
+72     }
+73 
+74     return editToolbar;
+75   }
+76 
+77   get div() {
+78     return this.#toolbar;
+79   }
+80 
+81   static #pointerDown(e) {
+82     e.stopPropagation();
+83   }
+84 
+85   #focusIn(e) {
+86     this.#editor._focusEventsAllowed = false;
+87     stopEvent(e);
+88   }
+89 
+90   #focusOut(e) {
+91     this.#editor._focusEventsAllowed = true;
+92     stopEvent(e);
+93   }
+94 
+95   #addListenersToElement(element) {
+96     // If we're clicking on a button with the keyboard or with
+97     // the mouse, we don't want to trigger any focus events on
+98     // the editor.
+99     const signal = this.#editor._uiManager._signal;
+100     element.addEventListener("focusin", this.#focusIn.bind(this), {
+101       capture: true,
+102       signal,
+103     });
+104     element.addEventListener("focusout", this.#focusOut.bind(this), {
+105       capture: true,
+106       signal,
+107     });
+108     element.addEventListener("contextmenu", noContextMenu, { signal });
+109   }
+110 
+111   hide() {
+112     this.#toolbar.classList.add("hidden");
+113     this.#colorPicker?.hideDropdown();
+114   }
+115 
+116   show() {
+117     this.#toolbar.classList.remove("hidden");
+118     this.#altText?.shown();
+119     this.#comment?.shown();
+120   }
+121 
+122   addDeleteButton() {
+123     const { editorType, _uiManager } = this.#editor;
+124 
+125     const button = document.createElement("button");
+126     button.className = "delete";
+127     button.tabIndex = 0;
+128     button.setAttribute("data-l10n-id", EditorToolbar.#l10nRemove[editorType]);
+129     this.#addListenersToElement(button);
+130     button.addEventListener(
+131       "click",
+132       e => {
+133         _uiManager.delete();
+134       },
+135       { signal: _uiManager._signal }
+136     );
+137     this.#buttons.append(button);
+138   }
+139 
+140   get #divider() {
+141     const divider = document.createElement("div");
+142     divider.className = "divider";
+143     return divider;
+144   }
+145 
+146   async addAltText(altText) {
+147     const button = await altText.render();
+148     this.#addListenersToElement(button);
+149     this.#buttons.append(button, this.#divider);
+150     this.#altText = altText;
+151   }
+152 
+153   addComment(comment) {
+154     if (this.#comment) {
+155       return;
+156     }
+157     const button = comment.render();
+158     if (!button) {
+159       return;
+160     }
+161     this.#addListenersToElement(button);
+162     this.#buttons.prepend(button, this.#divider);
+163     this.#comment = comment;
+164     comment.toolbar = this;
+165   }
+166 
+167   addColorPicker(colorPicker) {
+168     if (this.#colorPicker) {
+169       return;
+170     }
+171     this.#colorPicker = colorPicker;
+172     const button = colorPicker.renderButton();
+173     this.#addListenersToElement(button);
+174     this.#buttons.append(button, this.#divider);
+175   }
+176 
+177   async addEditSignatureButton(signatureManager) {
+178     const button = (this.#signatureDescriptionButton =
+179       await signatureManager.renderEditButton(this.#editor));
+180     this.#addListenersToElement(button);
+181     this.#buttons.append(button, this.#divider);
+182   }
+183 
+184   async addButton(name, tool) {
+185     switch (name) {
+186       case "colorPicker":
+187         this.addColorPicker(tool);
+188         break;
+189       case "altText":
+190         await this.addAltText(tool);
+191         break;
+192       case "editSignature":
+193         await this.addEditSignatureButton(tool);
+194         break;
+195       case "delete":
+196         this.addDeleteButton();
+197         break;
+198       case "comment":
+199         this.addComment(tool);
+200         break;
+201     }
+202   }
+203 
+204   updateEditSignatureButton(description) {
+205     if (this.#signatureDescriptionButton) {
+206       this.#signatureDescriptionButton.title = description;
+207     }
+208   }
+209 
+210   remove() {
+211     this.#toolbar.remove();
+212     this.#colorPicker?.destroy();
+213     this.#colorPicker = null;
+214   }
+215 }
+216 
+217 class HighlightToolbar {
+218   #buttons = null;
+219 
+220   #toolbar = null;
+221 
+222   #uiManager;
+223 
+224   constructor(uiManager) {
+225     this.#uiManager = uiManager;
+226   }
+227 
+228   #render() {
+229     const editToolbar = (this.#toolbar = document.createElement("div"));
+230     editToolbar.className = "editToolbar";
+231     editToolbar.setAttribute("role", "toolbar");
+232     editToolbar.addEventListener("contextmenu", noContextMenu, {
+233       signal: this.#uiManager._signal,
+234     });
+235 
+236     const buttons = (this.#buttons = document.createElement("div"));
+237     buttons.className = "buttons";
+238     editToolbar.append(buttons);
+239 
+240     this.#addHighlightButton();
+241 
+242     return editToolbar;
+243   }
+244 
+245   #getLastPoint(boxes, isLTR) {
+246     let lastY = 0;
+247     let lastX = 0;
+248     for (const box of boxes) {
+249       const y = box.y + box.height;
+250       if (y < lastY) {
+251         continue;
+252       }
+253       const x = box.x + (isLTR ? box.width : 0);
+254       if (y > lastY) {
+255         lastX = x;
+256         lastY = y;
+257         continue;
+258       }
+259       if (isLTR) {
+260         if (x > lastX) {
+261           lastX = x;
+262         }
+263       } else if (x < lastX) {
+264         lastX = x;
+265       }
+266     }
+267     return [isLTR ? 1 - lastX : lastX, lastY];
+268   }
+269 
+270   show(parent, boxes, isLTR) {
+271     const [x, y] = this.#getLastPoint(boxes, isLTR);
+272     const { style } = (this.#toolbar ||= this.#render());
+273     parent.append(this.#toolbar);
+274     style.insetInlineEnd = `${100 * x}%`;
+275     style.top = `calc(${100 * y}% + var(--editor-toolbar-vert-offset))`;
+276   }
+277 
+278   hide() {
+279     this.#toolbar.remove();
+280   }
+281 
+282   #addHighlightButton() {
+283     const button = document.createElement("button");
+284     button.className = "highlightButton";
+285     button.tabIndex = 0;
+286     button.setAttribute("data-l10n-id", `pdfjs-highlight-floating-button1`);
+287     const span = document.createElement("span");
+288     button.append(span);
+289     span.className = "visuallyHidden";
+290     span.setAttribute("data-l10n-id", "pdfjs-highlight-floating-button-label");
+291     const signal = this.#uiManager._signal;
+292     button.addEventListener("contextmenu", noContextMenu, { signal });
+293     button.addEventListener(
+294       "click",
+295       () => {
+296         this.#uiManager.highlightSelection("floating_button");
+297       },
+298       { signal }
+299     );
+300     this.#buttons.append(button);
+301   }
+302 }
+303 
+304 export { EditorToolbar, HighlightToolbar };
+File:
+src/display/editor/tools.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 /** @typedef {import("./editor.js").AnnotationEditor} AnnotationEditor */
+17 // eslint-disable-next-line max-len
+18 /** @typedef {import("./annotation_editor_layer.js").AnnotationEditorLayer} AnnotationEditorLayer */
+19 
+20 import {
+21   AnnotationEditorParamsType,
+22   AnnotationEditorPrefix,
+23   AnnotationEditorType,
+24   FeatureTest,
+25   getUuid,
+26   shadow,
+27   Util,
+28   warn,
+29 } from "../../shared/util.js";
+30 import {
+31   fetchData,
+32   getColorValues,
+33   getRGB,
+34   PixelsPerInch,
+35   stopEvent,
+36 } from "../display_utils.js";
+37 import { HighlightToolbar } from "./toolbar.js";
+38 
+39 function bindEvents(obj, element, names) {
+40   for (const name of names) {
+41     element.addEventListener(name, obj[name].bind(obj));
+42   }
+43 }
+44 
+45 /**
+46  * Class to create some unique ids for the different editors.
+47  */
+48 class IdManager {
+49   #id = 0;
+50 
+51   constructor() {
+52     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+53       Object.defineProperty(this, "reset", {
+54         value: () => (this.#id = 0),
+55       });
+56     }
+57   }
+58 
+59   /**
+60    * Get a unique id.
+61    * @returns {string}
+62    */
+63   get id() {
+64     return `${AnnotationEditorPrefix}${this.#id++}`;
+65   }
+66 }
+67 
+68 /**
+69  * Class to manage the images used by the editors.
+70  * The main idea is to try to minimize the memory used by the images.
+71  * The images are cached and reused when possible
+72  * We use a refCounter to know when an image is not used anymore but we need to
+73  * be able to restore an image after a remove+undo, so we keep a file reference
+74  * or an url one.
+75  */
+76 class ImageManager {
+77   #baseId = getUuid();
+78 
+79   #id = 0;
+80 
+81   #cache = null;
+82 
+83   static get _isSVGFittingCanvas() {
+84     // By default, Firefox doesn't rescale without preserving the aspect ratio
+85     // when drawing an SVG image on a canvas, see https://bugzilla.mozilla.org/1547776.
+86     // The "workaround" is to append "svgView(preserveAspectRatio(none))" to the
+87     // url, but according to comment #15, it seems that it leads to unexpected
+88     // behavior in Safari.
+89     const svg = `data:image/svg+xml;charset=UTF-8,<svg viewBox="0 0 1 1" width="1" height="1" xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1" style="fill:red;"/></svg>`;
+90     const canvas = new OffscreenCanvas(1, 3);
+91     const ctx = canvas.getContext("2d", { willReadFrequently: true });
+92     const image = new Image();
+93     image.src = svg;
+94     const promise = image.decode().then(() => {
+95       ctx.drawImage(image, 0, 0, 1, 1, 0, 0, 1, 3);
+96       return new Uint32Array(ctx.getImageData(0, 0, 1, 1).data.buffer)[0] === 0;
+97     });
+98 
+99     return shadow(this, "_isSVGFittingCanvas", promise);
+100   }
+101 
+102   async #get(key, rawData) {
+103     this.#cache ||= new Map();
+104     let data = this.#cache.get(key);
+105     if (data === null) {
+106       // We already tried to load the image but it failed.
+107       return null;
+108     }
+109     if (data?.bitmap) {
+110       data.refCounter += 1;
+111       return data;
+112     }
+113     try {
+114       data ||= {
+115         bitmap: null,
+116         id: `image_${this.#baseId}_${this.#id++}`,
+117         refCounter: 0,
+118         isSvg: false,
+119       };
+120       let image;
+121       if (typeof rawData === "string") {
+122         data.url = rawData;
+123         image = await fetchData(rawData, "blob");
+124       } else if (rawData instanceof File) {
+125         image = data.file = rawData;
+126       } else if (rawData instanceof Blob) {
+127         image = rawData;
+128       }
+129 
+130       if (image.type === "image/svg+xml") {
+131         // Unfortunately, createImageBitmap doesn't work with SVG images.
+132         // (see https://bugzilla.mozilla.org/1841972).
+133         const mustRemoveAspectRatioPromise = ImageManager._isSVGFittingCanvas;
+134         const fileReader = new FileReader();
+135         const imageElement = new Image();
+136         const imagePromise = new Promise((resolve, reject) => {
+137           imageElement.onload = () => {
+138             data.bitmap = imageElement;
+139             data.isSvg = true;
+140             resolve();
+141           };
+142           fileReader.onload = async () => {
+143             const url = (data.svgUrl = fileReader.result);
+144             // We need to set the preserveAspectRatio to none in order to let
+145             // the image fits the canvas when resizing.
+146             imageElement.src = (await mustRemoveAspectRatioPromise)
+147               ? `${url}#svgView(preserveAspectRatio(none))`
+148               : url;
+149           };
+150           imageElement.onerror = fileReader.onerror = reject;
+151         });
+152         fileReader.readAsDataURL(image);
+153         await imagePromise;
+154       } else {
+155         data.bitmap = await createImageBitmap(image);
+156       }
+157       data.refCounter = 1;
+158     } catch (e) {
+159       warn(e);
+160       data = null;
+161     }
+162     this.#cache.set(key, data);
+163     if (data) {
+164       this.#cache.set(data.id, data);
+165     }
+166     return data;
+167   }
+168 
+169   async getFromFile(file) {
+170     const { lastModified, name, size, type } = file;
+171     return this.#get(`${lastModified}_${name}_${size}_${type}`, file);
+172   }
+173 
+174   async getFromUrl(url) {
+175     return this.#get(url, url);
+176   }
+177 
+178   async getFromBlob(id, blobPromise) {
+179     const blob = await blobPromise;
+180     return this.#get(id, blob);
+181   }
+182 
+183   async getFromId(id) {
+184     this.#cache ||= new Map();
+185     const data = this.#cache.get(id);
+186     if (!data) {
+187       return null;
+188     }
+189     if (data.bitmap) {
+190       data.refCounter += 1;
+191       return data;
+192     }
+193 
+194     if (data.file) {
+195       return this.getFromFile(data.file);
+196     }
+197     if (data.blobPromise) {
+198       const { blobPromise } = data;
+199       delete data.blobPromise;
+200       return this.getFromBlob(data.id, blobPromise);
+201     }
+202     return this.getFromUrl(data.url);
+203   }
+204 
+205   getFromCanvas(id, canvas) {
+206     this.#cache ||= new Map();
+207     let data = this.#cache.get(id);
+208     if (data?.bitmap) {
+209       data.refCounter += 1;
+210       return data;
+211     }
+212     const offscreen = new OffscreenCanvas(canvas.width, canvas.height);
+213     const ctx = offscreen.getContext("2d");
+214     ctx.drawImage(canvas, 0, 0);
+215     data = {
+216       bitmap: offscreen.transferToImageBitmap(),
+217       id: `image_${this.#baseId}_${this.#id++}`,
+218       refCounter: 1,
+219       isSvg: false,
+220     };
+221     this.#cache.set(id, data);
+222     this.#cache.set(data.id, data);
+223     return data;
+224   }
+225 
+226   getSvgUrl(id) {
+227     const data = this.#cache.get(id);
+228     if (!data?.isSvg) {
+229       return null;
+230     }
+231     return data.svgUrl;
+232   }
+233 
+234   deleteId(id) {
+235     this.#cache ||= new Map();
+236     const data = this.#cache.get(id);
+237     if (!data) {
+238       return;
+239     }
+240     data.refCounter -= 1;
+241     if (data.refCounter !== 0) {
+242       return;
+243     }
+244     const { bitmap } = data;
+245     if (!data.url && !data.file) {
+246       // The image has no way to be restored (ctrl+z) so we must fix that.
+247       const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+248       const ctx = canvas.getContext("bitmaprenderer");
+249       ctx.transferFromImageBitmap(bitmap);
+250       data.blobPromise = canvas.convertToBlob();
+251     }
+252 
+253     bitmap.close?.();
+254     data.bitmap = null;
+255   }
+256 
+257   // We can use the id only if it belongs this manager.
+258   // We must take care of having the right manager because we can copy/paste
+259   // some images from other documents, hence it'd be a pity to use an id from an
+260   // other manager.
+261   isValidId(id) {
+262     return id.startsWith(`image_${this.#baseId}_`);
+263   }
+264 }
+265 
+266 /**
+267  * Class to handle undo/redo.
+268  * Commands are just saved in a buffer.
+269  * If we hit some memory issues we could likely use a circular buffer.
+270  * It has to be used as a singleton.
+271  */
+272 class CommandManager {
+273   #commands = [];
+274 
+275   #locked = false;
+276 
+277   #maxSize;
+278 
+279   #position = -1;
+280 
+281   constructor(maxSize = 128) {
+282     this.#maxSize = maxSize;
+283   }
+284 
+285   /**
+286    * @typedef {Object} addOptions
+287    * @property {function} cmd
+288    * @property {function} undo
+289    * @property {function} [post]
+290    * @property {boolean} mustExec
+291    * @property {number} type
+292    * @property {boolean} overwriteIfSameType
+293    * @property {boolean} keepUndo
+294    */
+295 
+296   /**
+297    * Add a new couple of commands to be used in case of redo/undo.
+298    * @param {addOptions} options
+299    */
+300   add({
+301     cmd,
+302     undo,
+303     post,
+304     mustExec,
+305     type = NaN,
+306     overwriteIfSameType = false,
+307     keepUndo = false,
+308   }) {
+309     if (mustExec) {
+310       cmd();
+311     }
+312 
+313     if (this.#locked) {
+314       return;
+315     }
+316 
+317     const save = { cmd, undo, post, type };
+318     if (this.#position === -1) {
+319       if (this.#commands.length > 0) {
+320         // All the commands have been undone and then a new one is added
+321         // hence we clear the queue.
+322         this.#commands.length = 0;
+323       }
+324       this.#position = 0;
+325       this.#commands.push(save);
+326       return;
+327     }
+328 
+329     if (overwriteIfSameType && this.#commands[this.#position].type === type) {
+330       // For example when we change a color we don't want to
+331       // be able to undo all the steps, hence we only want to
+332       // keep the last undoable action in this sequence of actions.
+333       if (keepUndo) {
+334         save.undo = this.#commands[this.#position].undo;
+335       }
+336       this.#commands[this.#position] = save;
+337       return;
+338     }
+339 
+340     const next = this.#position + 1;
+341     if (next === this.#maxSize) {
+342       this.#commands.splice(0, 1);
+343     } else {
+344       this.#position = next;
+345       if (next < this.#commands.length) {
+346         this.#commands.splice(next);
+347       }
+348     }
+349 
+350     this.#commands.push(save);
+351   }
+352 
+353   /**
+354    * Undo the last command.
+355    */
+356   undo() {
+357     if (this.#position === -1) {
+358       // Nothing to undo.
+359       return;
+360     }
+361 
+362     // Avoid to insert something during the undo execution.
+363     this.#locked = true;
+364     const { undo, post } = this.#commands[this.#position];
+365     undo();
+366     post?.();
+367     this.#locked = false;
+368 
+369     this.#position -= 1;
+370   }
+371 
+372   /**
+373    * Redo the last command.
+374    */
+375   redo() {
+376     if (this.#position < this.#commands.length - 1) {
+377       this.#position += 1;
+378 
+379       // Avoid to insert something during the redo execution.
+380       this.#locked = true;
+381       const { cmd, post } = this.#commands[this.#position];
+382       cmd();
+383       post?.();
+384       this.#locked = false;
+385     }
+386   }
+387 
+388   /**
+389    * Check if there is something to undo.
+390    * @returns {boolean}
+391    */
+392   hasSomethingToUndo() {
+393     return this.#position !== -1;
+394   }
+395 
+396   /**
+397    * Check if there is something to redo.
+398    * @returns {boolean}
+399    */
+400   hasSomethingToRedo() {
+401     return this.#position < this.#commands.length - 1;
+402   }
+403 
+404   cleanType(type) {
+405     if (this.#position === -1) {
+406       return;
+407     }
+408     for (let i = this.#position; i >= 0; i--) {
+409       if (this.#commands[i].type !== type) {
+410         this.#commands.splice(i + 1, this.#position - i);
+411         this.#position = i;
+412         return;
+413       }
+414     }
+415     this.#commands.length = 0;
+416     this.#position = -1;
+417   }
+418 
+419   destroy() {
+420     this.#commands = null;
+421   }
+422 }
+423 
+424 /**
+425  * Class to handle the different keyboards shortcuts we can have on mac or
+426  * non-mac OSes.
+427  */
+428 class KeyboardManager {
+429   /**
+430    * Create a new keyboard manager class.
+431    * @param {Array<Array>} callbacks - an array containing an array of shortcuts
+432    * and a callback to call.
+433    * A shortcut is a string like `ctrl+c` or `mac+ctrl+c` for mac OS.
+434    */
+435   constructor(callbacks) {
+436     this.buffer = [];
+437     this.callbacks = new Map();
+438     this.allKeys = new Set();
+439 
+440     const { isMac } = FeatureTest.platform;
+441     for (const [keys, callback, options = {}] of callbacks) {
+442       for (const key of keys) {
+443         const isMacKey = key.startsWith("mac+");
+444         if (isMac && isMacKey) {
+445           this.callbacks.set(key.slice(4), { callback, options });
+446           this.allKeys.add(key.split("+").at(-1));
+447         } else if (!isMac && !isMacKey) {
+448           this.callbacks.set(key, { callback, options });
+449           this.allKeys.add(key.split("+").at(-1));
+450         }
+451       }
+452     }
+453   }
+454 
+455   /**
+456    * Serialize an event into a string in order to match a
+457    * potential key for a callback.
+458    * @param {KeyboardEvent} event
+459    * @returns {string}
+460    */
+461   #serialize(event) {
+462     if (event.altKey) {
+463       this.buffer.push("alt");
+464     }
+465     if (event.ctrlKey) {
+466       this.buffer.push("ctrl");
+467     }
+468     if (event.metaKey) {
+469       this.buffer.push("meta");
+470     }
+471     if (event.shiftKey) {
+472       this.buffer.push("shift");
+473     }
+474     this.buffer.push(event.key);
+475     const str = this.buffer.join("+");
+476     this.buffer.length = 0;
+477 
+478     return str;
+479   }
+480 
+481   /**
+482    * Execute a callback, if any, for a given keyboard event.
+483    * The self is used as `this` in the callback.
+484    * @param {Object} self
+485    * @param {KeyboardEvent} event
+486    * @returns
+487    */
+488   exec(self, event) {
+489     if (!this.allKeys.has(event.key)) {
+490       return;
+491     }
+492     const info = this.callbacks.get(this.#serialize(event));
+493     if (!info) {
+494       return;
+495     }
+496     const {
+497       callback,
+498       options: { bubbles = false, args = [], checker = null },
+499     } = info;
+500 
+501     if (checker && !checker(self, event)) {
+502       return;
+503     }
+504     callback.bind(self, ...args, event)();
+505 
+506     // For example, ctrl+s in a FreeText must be handled by the viewer, hence
+507     // the event must bubble.
+508     if (!bubbles) {
+509       stopEvent(event);
+510     }
+511   }
+512 }
+513 
+514 class ColorManager {
+515   static _colorsMapping = new Map([
+516     ["CanvasText", [0, 0, 0]],
+517     ["Canvas", [255, 255, 255]],
+518   ]);
+519 
+520   get _colors() {
+521     if (
+522       typeof PDFJSDev !== "undefined" &&
+523       PDFJSDev.test("LIB") &&
+524       typeof document === "undefined"
+525     ) {
+526       return shadow(this, "_colors", ColorManager._colorsMapping);
+527     }
+528 
+529     const colors = new Map([
+530       ["CanvasText", null],
+531       ["Canvas", null],
+532     ]);
+533     getColorValues(colors);
+534     return shadow(this, "_colors", colors);
+535   }
+536 
+537   /**
+538    * In High Contrast Mode, the color on the screen is not always the
+539    * real color used in the pdf.
+540    * For example in some cases white can appear to be black but when saving
+541    * we want to have white.
+542    * @param {string} color
+543    * @returns {Array<number>}
+544    */
+545   convert(color) {
+546     const rgb = getRGB(color);
+547     if (!window.matchMedia("(forced-colors: active)").matches) {
+548       return rgb;
+549     }
+550 
+551     for (const [name, RGB] of this._colors) {
+552       if (RGB.every((x, i) => x === rgb[i])) {
+553         return ColorManager._colorsMapping.get(name);
+554       }
+555     }
+556     return rgb;
+557   }
+558 
+559   /**
+560    * An input element must have its color value as a hex string
+561    * and not as color name.
+562    * So this function converts a name into an hex string.
+563    * @param {string} name
+564    * @returns {string}
+565    */
+566   getHexCode(name) {
+567     const rgb = this._colors.get(name);
+568     if (!rgb) {
+569       return name;
+570     }
+571     return Util.makeHexColor(...rgb);
+572   }
+573 }
+574 
+575 /**
+576  * A pdf has several pages and each of them when it will rendered
+577  * will have an AnnotationEditorLayer which will contain the some
+578  * new Annotations associated to an editor in order to modify them.
+579  *
+580  * This class is used to manage all the different layers, editors and
+581  * some action like copy/paste, undo/redo, ...
+582  */
+583 class AnnotationEditorUIManager {
+584   #abortController = new AbortController();
+585 
+586   #activeEditor = null;
+587 
+588   #allEditors = new Map();
+589 
+590   #allLayers = new Map();
+591 
+592   #altTextManager = null;
+593 
+594   #annotationStorage = null;
+595 
+596   #changedExistingAnnotations = null;
+597 
+598   #commandManager = new CommandManager();
+599 
+600   #commentManager = null;
+601 
+602   #copyPasteAC = null;
+603 
+604   #currentDrawingSession = null;
+605 
+606   #currentPageIndex = 0;
+607 
+608   #deletedAnnotationsElementIds = new Set();
+609 
+610   #draggingEditors = null;
+611 
+612   #editorTypes = null;
+613 
+614   #editorsToRescale = new Set();
+615 
+616   _editorUndoBar = null;
+617 
+618   #enableHighlightFloatingButton = false;
+619 
+620   #enableUpdatedAddImage = false;
+621 
+622   #enableNewAltTextWhenAddingImage = false;
+623 
+624   #filterFactory = null;
+625 
+626   #focusMainContainerTimeoutId = null;
+627 
+628   #focusManagerAC = null;
+629 
+630   #highlightColors = null;
+631 
+632   #highlightWhenShiftUp = false;
+633 
+634   #highlightToolbar = null;
+635 
+636   #idManager = new IdManager();
+637 
+638   #isEnabled = false;
+639 
+640   #isWaiting = false;
+641 
+642   #keyboardManagerAC = null;
+643 
+644   #lastActiveElement = null;
+645 
+646   #mainHighlightColorPicker = null;
+647 
+648   #missingCanvases = null;
+649 
+650   #mlManager = null;
+651 
+652   #mode = AnnotationEditorType.NONE;
+653 
+654   #selectedEditors = new Set();
+655 
+656   #selectedTextNode = null;
+657 
+658   #signatureManager = null;
+659 
+660   #pageColors = null;
+661 
+662   #showAllStates = null;
+663 
+664   #previousStates = {
+665     isEditing: false,
+666     isEmpty: true,
+667     hasSomethingToUndo: false,
+668     hasSomethingToRedo: false,
+669     hasSelectedEditor: false,
+670     hasSelectedText: false,
+671   };
+672 
+673   #translation = [0, 0];
+674 
+675   #translationTimeoutId = null;
+676 
+677   #container = null;
+678 
+679   #viewer = null;
+680 
+681   #viewerAlert = null;
+682 
+683   #updateModeCapability = null;
+684 
+685   static TRANSLATE_SMALL = 1; // page units.
+686 
+687   static TRANSLATE_BIG = 10; // page units.
+688 
+689   static get _keyboardManager() {
+690     const proto = AnnotationEditorUIManager.prototype;
+691 
+692     /**
+693      * If the focused element is an input, we don't want to handle the arrow.
+694      * For example, sliders can be controlled with the arrow keys.
+695      */
+696     const arrowChecker = self =>
+697       self.#container.contains(document.activeElement) &&
+698       document.activeElement.tagName !== "BUTTON" &&
+699       self.hasSomethingToControl();
+700 
+701     const textInputChecker = (_self, { target: el }) => {
+702       if (el instanceof HTMLInputElement) {
+703         const { type } = el;
+704         return type !== "text" && type !== "number";
+705       }
+706       return true;
+707     };
+708 
+709     const small = this.TRANSLATE_SMALL;
+710     const big = this.TRANSLATE_BIG;
+711 
+712     return shadow(
+713       this,
+714       "_keyboardManager",
+715       new KeyboardManager([
+716         [
+717           ["ctrl+a", "mac+meta+a"],
+718           proto.selectAll,
+719           { checker: textInputChecker },
+720         ],
+721         [["ctrl+z", "mac+meta+z"], proto.undo, { checker: textInputChecker }],
+722         [
+723           // On mac, depending of the OS version, the event.key is either "z" or
+724           // "Z" when the user presses "meta+shift+z".
+725           [
+726             "ctrl+y",
+727             "ctrl+shift+z",
+728             "mac+meta+shift+z",
+729             "ctrl+shift+Z",
+730             "mac+meta+shift+Z",
+731           ],
+732           proto.redo,
+733           { checker: textInputChecker },
+734         ],
+735         [
+736           [
+737             "Backspace",
+738             "alt+Backspace",
+739             "ctrl+Backspace",
+740             "shift+Backspace",
+741             "mac+Backspace",
+742             "mac+alt+Backspace",
+743             "mac+ctrl+Backspace",
+744             "Delete",
+745             "ctrl+Delete",
+746             "shift+Delete",
+747             "mac+Delete",
+748           ],
+749           proto.delete,
+750           { checker: textInputChecker },
+751         ],
+752         [
+753           ["Enter", "mac+Enter"],
+754           proto.addNewEditorFromKeyboard,
+755           {
+756             // Those shortcuts can be used in the toolbar for some other actions
+757             // like zooming, hence we need to check if the container has the
+758             // focus.
+759             checker: (self, { target: el }) =>
+760               !(el instanceof HTMLButtonElement) &&
+761               self.#container.contains(el) &&
+762               !self.isEnterHandled,
+763           },
+764         ],
+765         [
+766           [" ", "mac+ "],
+767           proto.addNewEditorFromKeyboard,
+768           {
+769             // Those shortcuts can be used in the toolbar for some other actions
+770             // like zooming, hence we need to check if the container has the
+771             // focus.
+772             checker: (self, { target: el }) =>
+773               !(el instanceof HTMLButtonElement) &&
+774               self.#container.contains(document.activeElement),
+775           },
+776         ],
+777         [["Escape", "mac+Escape"], proto.unselectAll],
+778         [
+779           ["ArrowLeft", "mac+ArrowLeft"],
+780           proto.translateSelectedEditors,
+781           { args: [-small, 0], checker: arrowChecker },
+782         ],
+783         [
+784           ["ctrl+ArrowLeft", "mac+shift+ArrowLeft"],
+785           proto.translateSelectedEditors,
+786           { args: [-big, 0], checker: arrowChecker },
+787         ],
+788         [
+789           ["ArrowRight", "mac+ArrowRight"],
+790           proto.translateSelectedEditors,
+791           { args: [small, 0], checker: arrowChecker },
+792         ],
+793         [
+794           ["ctrl+ArrowRight", "mac+shift+ArrowRight"],
+795           proto.translateSelectedEditors,
+796           { args: [big, 0], checker: arrowChecker },
+797         ],
+798         [
+799           ["ArrowUp", "mac+ArrowUp"],
+800           proto.translateSelectedEditors,
+801           { args: [0, -small], checker: arrowChecker },
+802         ],
+803         [
+804           ["ctrl+ArrowUp", "mac+shift+ArrowUp"],
+805           proto.translateSelectedEditors,
+806           { args: [0, -big], checker: arrowChecker },
+807         ],
+808         [
+809           ["ArrowDown", "mac+ArrowDown"],
+810           proto.translateSelectedEditors,
+811           { args: [0, small], checker: arrowChecker },
+812         ],
+813         [
+814           ["ctrl+ArrowDown", "mac+shift+ArrowDown"],
+815           proto.translateSelectedEditors,
+816           { args: [0, big], checker: arrowChecker },
+817         ],
+818       ])
+819     );
+820   }
+821 
+822   constructor(
+823     container,
+824     viewer,
+825     viewerAlert,
+826     altTextManager,
+827     commentManager,
+828     signatureManager,
+829     eventBus,
+830     pdfDocument,
+831     pageColors,
+832     highlightColors,
+833     enableHighlightFloatingButton,
+834     enableUpdatedAddImage,
+835     enableNewAltTextWhenAddingImage,
+836     mlManager,
+837     editorUndoBar,
+838     supportsPinchToZoom
+839   ) {
+840     const signal = (this._signal = this.#abortController.signal);
+841     this.#container = container;
+842     this.#viewer = viewer;
+843     this.#viewerAlert = viewerAlert;
+844     this.#altTextManager = altTextManager;
+845     this.#commentManager = commentManager;
+846     this.#signatureManager = signatureManager;
+847     this._eventBus = eventBus;
+848     eventBus._on("editingaction", this.onEditingAction.bind(this), { signal });
+849     eventBus._on("pagechanging", this.onPageChanging.bind(this), { signal });
+850     eventBus._on("scalechanging", this.onScaleChanging.bind(this), { signal });
+851     eventBus._on("rotationchanging", this.onRotationChanging.bind(this), {
+852       signal,
+853     });
+854     eventBus._on("setpreference", this.onSetPreference.bind(this), { signal });
+855     eventBus._on(
+856       "switchannotationeditorparams",
+857       evt => this.updateParams(evt.type, evt.value),
+858       { signal }
+859     );
+860     this.#addSelectionListener();
+861     this.#addDragAndDropListeners();
+862     this.#addKeyboardManager();
+863     this.#annotationStorage = pdfDocument.annotationStorage;
+864     this.#filterFactory = pdfDocument.filterFactory;
+865     this.#pageColors = pageColors;
+866     this.#highlightColors = highlightColors || null;
+867     this.#enableHighlightFloatingButton = enableHighlightFloatingButton;
+868     this.#enableUpdatedAddImage = enableUpdatedAddImage;
+869     this.#enableNewAltTextWhenAddingImage = enableNewAltTextWhenAddingImage;
+870     this.#mlManager = mlManager || null;
+871     this.viewParameters = {
+872       realScale: PixelsPerInch.PDF_TO_CSS_UNITS,
+873       rotation: 0,
+874     };
+875     this.isShiftKeyDown = false;
+876     this._editorUndoBar = editorUndoBar || null;
+877     this._supportsPinchToZoom = supportsPinchToZoom !== false;
+878 
+879     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+880       Object.defineProperty(this, "reset", {
+881         value: () => {
+882           this.selectAll();
+883           this.delete();
+884           this.#idManager.reset();
+885         },
+886       });
+887     }
+888   }
+889 
+890   destroy() {
+891     this.#updateModeCapability?.resolve();
+892     this.#updateModeCapability = null;
+893 
+894     this.#abortController?.abort();
+895     this.#abortController = null;
+896     this._signal = null;
+897 
+898     for (const layer of this.#allLayers.values()) {
+899       layer.destroy();
+900     }
+901     this.#allLayers.clear();
+902     this.#allEditors.clear();
+903     this.#editorsToRescale.clear();
+904     this.#missingCanvases?.clear();
+905     this.#activeEditor = null;
+906     this.#selectedEditors.clear();
+907     this.#commandManager.destroy();
+908     this.#altTextManager?.destroy();
+909     this.#commentManager?.destroy();
+910     this.#signatureManager?.destroy();
+911     this.#highlightToolbar?.hide();
+912     this.#highlightToolbar = null;
+913     this.#mainHighlightColorPicker?.destroy();
+914     this.#mainHighlightColorPicker = null;
+915     if (this.#focusMainContainerTimeoutId) {
+916       clearTimeout(this.#focusMainContainerTimeoutId);
+917       this.#focusMainContainerTimeoutId = null;
+918     }
+919     if (this.#translationTimeoutId) {
+920       clearTimeout(this.#translationTimeoutId);
+921       this.#translationTimeoutId = null;
+922     }
+923     this._editorUndoBar?.destroy();
+924   }
+925 
+926   combinedSignal(ac) {
+927     return AbortSignal.any([this._signal, ac.signal]);
+928   }
+929 
+930   get mlManager() {
+931     return this.#mlManager;
+932   }
+933 
+934   get useNewAltTextFlow() {
+935     return this.#enableUpdatedAddImage;
+936   }
+937 
+938   get useNewAltTextWhenAddingImage() {
+939     return this.#enableNewAltTextWhenAddingImage;
+940   }
+941 
+942   get hcmFilter() {
+943     return shadow(
+944       this,
+945       "hcmFilter",
+946       this.#pageColors
+947         ? this.#filterFactory.addHCMFilter(
+948             this.#pageColors.foreground,
+949             this.#pageColors.background
+950           )
+951         : "none"
+952     );
+953   }
+954 
+955   get direction() {
+956     return shadow(
+957       this,
+958       "direction",
+959       getComputedStyle(this.#container).direction
+960     );
+961   }
+962 
+963   get _highlightColors() {
+964     return shadow(
+965       this,
+966       "_highlightColors",
+967       this.#highlightColors
+968         ? new Map(
+969             this.#highlightColors.split(",").map(pair => {
+970               pair = pair.split("=").map(x => x.trim());
+971               pair[1] = pair[1].toUpperCase();
+972               return pair;
+973             })
+974           )
+975         : null
+976     );
+977   }
+978 
+979   get highlightColors() {
+980     const { _highlightColors } = this;
+981     if (!_highlightColors) {
+982       return shadow(this, "highlightColors", null);
+983     }
+984     const map = new Map();
+985     const hasHCM = !!this.#pageColors;
+986     for (const [name, color] of _highlightColors) {
+987       const isNameForHCM = name.endsWith("_HCM");
+988       if (hasHCM && isNameForHCM) {
+989         map.set(name.replace("_HCM", ""), color);
+990         continue;
+991       }
+992       if (!hasHCM && !isNameForHCM) {
+993         map.set(name, color);
+994       }
+995     }
+996     return shadow(this, "highlightColors", map);
+997   }
+998 
+999   get highlightColorNames() {
+1000     return shadow(
+1001       this,
+1002       "highlightColorNames",
+1003       this.highlightColors
+1004         ? new Map(Array.from(this.highlightColors, e => e.reverse()))
+1005         : null
+1006     );
+1007   }
+1008 
+1009   getNonHCMColor(color) {
+1010     if (!this._highlightColors) {
+1011       return color;
+1012     }
+1013     const colorName = this.highlightColorNames.get(color);
+1014     return this._highlightColors.get(colorName) || color;
+1015   }
+1016 
+1017   getNonHCMColorName(color) {
+1018     return this.highlightColorNames.get(color) || color;
+1019   }
+1020 
+1021   /**
+1022    * Set the current drawing session.
+1023    * @param {AnnotationEditorLayer} layer
+1024    */
+1025   setCurrentDrawingSession(layer) {
+1026     if (layer) {
+1027       this.unselectAll();
+1028       this.disableUserSelect(true);
+1029     } else {
+1030       this.disableUserSelect(false);
+1031     }
+1032     this.#currentDrawingSession = layer;
+1033   }
+1034 
+1035   setMainHighlightColorPicker(colorPicker) {
+1036     this.#mainHighlightColorPicker = colorPicker;
+1037   }
+1038 
+1039   editAltText(editor, firstTime = false) {
+1040     this.#altTextManager?.editAltText(this, editor, firstTime);
+1041   }
+1042 
+1043   hasCommentManager() {
+1044     return !!this.#commentManager;
+1045   }
+1046 
+1047   editComment(editor, position) {
+1048     this.#commentManager?.open(this, editor, position);
+1049   }
+1050 
+1051   getSignature(editor) {
+1052     this.#signatureManager?.getSignature({ uiManager: this, editor });
+1053   }
+1054 
+1055   get signatureManager() {
+1056     return this.#signatureManager;
+1057   }
+1058 
+1059   switchToMode(mode, callback) {
+1060     // Switching to a mode can be asynchronous.
+1061     this._eventBus.on("annotationeditormodechanged", callback, {
+1062       once: true,
+1063       signal: this._signal,
+1064     });
+1065     this._eventBus.dispatch("showannotationeditorui", {
+1066       source: this,
+1067       mode,
+1068     });
+1069   }
+1070 
+1071   setPreference(name, value) {
+1072     this._eventBus.dispatch("setpreference", {
+1073       source: this,
+1074       name,
+1075       value,
+1076     });
+1077   }
+1078 
+1079   onSetPreference({ name, value }) {
+1080     switch (name) {
+1081       case "enableNewAltTextWhenAddingImage":
+1082         this.#enableNewAltTextWhenAddingImage = value;
+1083         break;
+1084     }
+1085   }
+1086 
+1087   onPageChanging({ pageNumber }) {
+1088     this.#currentPageIndex = pageNumber - 1;
+1089   }
+1090 
+1091   focusMainContainer() {
+1092     this.#container.focus();
+1093   }
+1094 
+1095   findParent(x, y) {
+1096     for (const layer of this.#allLayers.values()) {
+1097       const {
+1098         x: layerX,
+1099         y: layerY,
+1100         width,
+1101         height,
+1102       } = layer.div.getBoundingClientRect();
+1103       if (
+1104         x >= layerX &&
+1105         x <= layerX + width &&
+1106         y >= layerY &&
+1107         y <= layerY + height
+1108       ) {
+1109         return layer;
+1110       }
+1111     }
+1112     return null;
+1113   }
+1114 
+1115   disableUserSelect(value = false) {
+1116     this.#viewer.classList.toggle("noUserSelect", value);
+1117   }
+1118 
+1119   addShouldRescale(editor) {
+1120     this.#editorsToRescale.add(editor);
+1121   }
+1122 
+1123   removeShouldRescale(editor) {
+1124     this.#editorsToRescale.delete(editor);
+1125   }
+1126 
+1127   onScaleChanging({ scale }) {
+1128     this.commitOrRemove();
+1129     this.viewParameters.realScale = scale * PixelsPerInch.PDF_TO_CSS_UNITS;
+1130     for (const editor of this.#editorsToRescale) {
+1131       editor.onScaleChanging();
+1132     }
+1133     this.#currentDrawingSession?.onScaleChanging();
+1134   }
+1135 
+1136   onRotationChanging({ pagesRotation }) {
+1137     this.commitOrRemove();
+1138     this.viewParameters.rotation = pagesRotation;
+1139   }
+1140 
+1141   #getAnchorElementForSelection({ anchorNode }) {
+1142     return anchorNode.nodeType === Node.TEXT_NODE
+1143       ? anchorNode.parentElement
+1144       : anchorNode;
+1145   }
+1146 
+1147   #getLayerForTextLayer(textLayer) {
+1148     const { currentLayer } = this;
+1149     if (currentLayer.hasTextLayer(textLayer)) {
+1150       return currentLayer;
+1151     }
+1152     for (const layer of this.#allLayers.values()) {
+1153       if (layer.hasTextLayer(textLayer)) {
+1154         return layer;
+1155       }
+1156     }
+1157     return null;
+1158   }
+1159 
+1160   highlightSelection(methodOfCreation = "") {
+1161     const selection = document.getSelection();
+1162     if (!selection || selection.isCollapsed) {
+1163       return;
+1164     }
+1165     const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
+1166     const text = selection.toString();
+1167     const anchorElement = this.#getAnchorElementForSelection(selection);
+1168     const textLayer = anchorElement.closest(".textLayer");
+1169     const boxes = this.getSelectionBoxes(textLayer);
+1170     if (!boxes) {
+1171       return;
+1172     }
+1173     selection.empty();
+1174 
+1175     const layer = this.#getLayerForTextLayer(textLayer);
+1176     const isNoneMode = this.#mode === AnnotationEditorType.NONE;
+1177     const callback = () => {
+1178       layer?.createAndAddNewEditor({ x: 0, y: 0 }, false, {
+1179         methodOfCreation,
+1180         boxes,
+1181         anchorNode,
+1182         anchorOffset,
+1183         focusNode,
+1184         focusOffset,
+1185         text,
+1186       });
+1187       if (isNoneMode) {
+1188         this.showAllEditors("highlight", true, /* updateButton = */ true);
+1189       }
+1190     };
+1191     if (isNoneMode) {
+1192       this.switchToMode(AnnotationEditorType.HIGHLIGHT, callback);
+1193       return;
+1194     }
+1195     callback();
+1196   }
+1197 
+1198   #displayHighlightToolbar() {
+1199     const selection = document.getSelection();
+1200     if (!selection || selection.isCollapsed) {
+1201       return;
+1202     }
+1203     const anchorElement = this.#getAnchorElementForSelection(selection);
+1204     const textLayer = anchorElement.closest(".textLayer");
+1205     const boxes = this.getSelectionBoxes(textLayer);
+1206     if (!boxes) {
+1207       return;
+1208     }
+1209     this.#highlightToolbar ||= new HighlightToolbar(this);
+1210     this.#highlightToolbar.show(textLayer, boxes, this.direction === "ltr");
+1211   }
+1212 
+1213   /**
+1214    * Add an editor in the annotation storage.
+1215    * @param {AnnotationEditor} editor
+1216    */
+1217   addToAnnotationStorage(editor) {
+1218     if (
+1219       !editor.isEmpty() &&
+1220       this.#annotationStorage &&
+1221       !this.#annotationStorage.has(editor.id)
+1222     ) {
+1223       this.#annotationStorage.setValue(editor.id, editor);
+1224     }
+1225   }
+1226 
+1227   a11yAlert(messageId, args = null) {
+1228     const viewerAlert = this.#viewerAlert;
+1229     if (!viewerAlert) {
+1230       return;
+1231     }
+1232     viewerAlert.setAttribute("data-l10n-id", messageId);
+1233     if (args) {
+1234       viewerAlert.setAttribute("data-l10n-args", JSON.stringify(args));
+1235     } else {
+1236       viewerAlert.removeAttribute("data-l10n-args");
+1237     }
+1238   }
+1239 
+1240   #selectionChange() {
+1241     const selection = document.getSelection();
+1242     if (!selection || selection.isCollapsed) {
+1243       if (this.#selectedTextNode) {
+1244         this.#highlightToolbar?.hide();
+1245         this.#selectedTextNode = null;
+1246         this.#dispatchUpdateStates({
+1247           hasSelectedText: false,
+1248         });
+1249       }
+1250       return;
+1251     }
+1252     const { anchorNode } = selection;
+1253     if (anchorNode === this.#selectedTextNode) {
+1254       return;
+1255     }
+1256 
+1257     const anchorElement = this.#getAnchorElementForSelection(selection);
+1258     const textLayer = anchorElement.closest(".textLayer");
+1259     if (!textLayer) {
+1260       if (this.#selectedTextNode) {
+1261         this.#highlightToolbar?.hide();
+1262         this.#selectedTextNode = null;
+1263         this.#dispatchUpdateStates({
+1264           hasSelectedText: false,
+1265         });
+1266       }
+1267       return;
+1268     }
+1269 
+1270     this.#highlightToolbar?.hide();
+1271     this.#selectedTextNode = anchorNode;
+1272     this.#dispatchUpdateStates({
+1273       hasSelectedText: true,
+1274     });
+1275 
+1276     if (
+1277       this.#mode !== AnnotationEditorType.HIGHLIGHT &&
+1278       this.#mode !== AnnotationEditorType.NONE
+1279     ) {
+1280       return;
+1281     }
+1282 
+1283     if (this.#mode === AnnotationEditorType.HIGHLIGHT) {
+1284       this.showAllEditors("highlight", true, /* updateButton = */ true);
+1285     }
+1286 
+1287     this.#highlightWhenShiftUp = this.isShiftKeyDown;
+1288     if (!this.isShiftKeyDown) {
+1289       const activeLayer =
+1290         this.#mode === AnnotationEditorType.HIGHLIGHT
+1291           ? this.#getLayerForTextLayer(textLayer)
+1292           : null;
+1293       activeLayer?.toggleDrawing();
+1294 
+1295       const ac = new AbortController();
+1296       const signal = this.combinedSignal(ac);
+1297 
+1298       const pointerup = e => {
+1299         if (e.type === "pointerup" && e.button !== 0) {
+1300           // Do nothing on right click.
+1301           return;
+1302         }
+1303         ac.abort();
+1304         activeLayer?.toggleDrawing(true);
+1305         if (e.type === "pointerup") {
+1306           this.#onSelectEnd("main_toolbar");
+1307         }
+1308       };
+1309       window.addEventListener("pointerup", pointerup, { signal });
+1310       window.addEventListener("blur", pointerup, { signal });
+1311     }
+1312   }
+1313 
+1314   #onSelectEnd(methodOfCreation = "") {
+1315     if (this.#mode === AnnotationEditorType.HIGHLIGHT) {
+1316       this.highlightSelection(methodOfCreation);
+1317     } else if (this.#enableHighlightFloatingButton) {
+1318       this.#displayHighlightToolbar();
+1319     }
+1320   }
+1321 
+1322   #addSelectionListener() {
+1323     document.addEventListener(
+1324       "selectionchange",
+1325       this.#selectionChange.bind(this),
+1326       { signal: this._signal }
+1327     );
+1328   }
+1329 
+1330   #addFocusManager() {
+1331     if (this.#focusManagerAC) {
+1332       return;
+1333     }
+1334     this.#focusManagerAC = new AbortController();
+1335     const signal = this.combinedSignal(this.#focusManagerAC);
+1336 
+1337     window.addEventListener("focus", this.focus.bind(this), { signal });
+1338     window.addEventListener("blur", this.blur.bind(this), { signal });
+1339   }
+1340 
+1341   #removeFocusManager() {
+1342     this.#focusManagerAC?.abort();
+1343     this.#focusManagerAC = null;
+1344   }
+1345 
+1346   blur() {
+1347     this.isShiftKeyDown = false;
+1348     if (this.#highlightWhenShiftUp) {
+1349       this.#highlightWhenShiftUp = false;
+1350       this.#onSelectEnd("main_toolbar");
+1351     }
+1352     if (!this.hasSelection) {
+1353       return;
+1354     }
+1355     // When several editors are selected and the window loses focus, we want to
+1356     // keep the last active element in order to be able to focus it again when
+1357     // the window gets the focus back but we don't want to trigger any focus
+1358     // callbacks else only one editor will be selected.
+1359     const { activeElement } = document;
+1360     for (const editor of this.#selectedEditors) {
+1361       if (editor.div.contains(activeElement)) {
+1362         this.#lastActiveElement = [editor, activeElement];
+1363         editor._focusEventsAllowed = false;
+1364         break;
+1365       }
+1366     }
+1367   }
+1368 
+1369   focus() {
+1370     if (!this.#lastActiveElement) {
+1371       return;
+1372     }
+1373     const [lastEditor, lastActiveElement] = this.#lastActiveElement;
+1374     this.#lastActiveElement = null;
+1375     lastActiveElement.addEventListener(
+1376       "focusin",
+1377       () => {
+1378         lastEditor._focusEventsAllowed = true;
+1379       },
+1380       { once: true, signal: this._signal }
+1381     );
+1382     lastActiveElement.focus();
+1383   }
+1384 
+1385   #addKeyboardManager() {
+1386     if (this.#keyboardManagerAC) {
+1387       return;
+1388     }
+1389     this.#keyboardManagerAC = new AbortController();
+1390     const signal = this.combinedSignal(this.#keyboardManagerAC);
+1391 
+1392     // The keyboard events are caught at the container level in order to be able
+1393     // to execute some callbacks even if the current page doesn't have focus.
+1394     window.addEventListener("keydown", this.keydown.bind(this), { signal });
+1395     window.addEventListener("keyup", this.keyup.bind(this), { signal });
+1396   }
+1397 
+1398   #removeKeyboardManager() {
+1399     this.#keyboardManagerAC?.abort();
+1400     this.#keyboardManagerAC = null;
+1401   }
+1402 
+1403   #addCopyPasteListeners() {
+1404     if (this.#copyPasteAC) {
+1405       return;
+1406     }
+1407     this.#copyPasteAC = new AbortController();
+1408     const signal = this.combinedSignal(this.#copyPasteAC);
+1409 
+1410     document.addEventListener("copy", this.copy.bind(this), { signal });
+1411     document.addEventListener("cut", this.cut.bind(this), { signal });
+1412     document.addEventListener("paste", this.paste.bind(this), { signal });
+1413   }
+1414 
+1415   #removeCopyPasteListeners() {
+1416     this.#copyPasteAC?.abort();
+1417     this.#copyPasteAC = null;
+1418   }
+1419 
+1420   #addDragAndDropListeners() {
+1421     const signal = this._signal;
+1422     document.addEventListener("dragover", this.dragOver.bind(this), { signal });
+1423     document.addEventListener("drop", this.drop.bind(this), { signal });
+1424   }
+1425 
+1426   addEditListeners() {
+1427     this.#addKeyboardManager();
+1428     this.#addCopyPasteListeners();
+1429   }
+1430 
+1431   removeEditListeners() {
+1432     this.#removeKeyboardManager();
+1433     this.#removeCopyPasteListeners();
+1434   }
+1435 
+1436   dragOver(event) {
+1437     for (const { type } of event.dataTransfer.items) {
+1438       for (const editorType of this.#editorTypes) {
+1439         if (editorType.isHandlingMimeForPasting(type)) {
+1440           event.dataTransfer.dropEffect = "copy";
+1441           event.preventDefault();
+1442           return;
+1443         }
+1444       }
+1445     }
+1446   }
+1447 
+1448   /**
+1449    * Drop callback.
+1450    * @param {DragEvent} event
+1451    */
+1452   drop(event) {
+1453     for (const item of event.dataTransfer.items) {
+1454       for (const editorType of this.#editorTypes) {
+1455         if (editorType.isHandlingMimeForPasting(item.type)) {
+1456           editorType.paste(item, this.currentLayer);
+1457           event.preventDefault();
+1458           return;
+1459         }
+1460       }
+1461     }
+1462   }
+1463 
+1464   /**
+1465    * Copy callback.
+1466    * @param {ClipboardEvent} event
+1467    */
+1468   copy(event) {
+1469     event.preventDefault();
+1470 
+1471     // An editor is being edited so just commit it.
+1472     this.#activeEditor?.commitOrRemove();
+1473 
+1474     if (!this.hasSelection) {
+1475       return;
+1476     }
+1477 
+1478     const editors = [];
+1479     for (const editor of this.#selectedEditors) {
+1480       const serialized = editor.serialize(/* isForCopying = */ true);
+1481       if (serialized) {
+1482         editors.push(serialized);
+1483       }
+1484     }
+1485     if (editors.length === 0) {
+1486       return;
+1487     }
+1488 
+1489     event.clipboardData.setData("application/pdfjs", JSON.stringify(editors));
+1490   }
+1491 
+1492   /**
+1493    * Cut callback.
+1494    * @param {ClipboardEvent} event
+1495    */
+1496   cut(event) {
+1497     this.copy(event);
+1498     this.delete();
+1499   }
+1500 
+1501   /**
+1502    * Paste callback.
+1503    * @param {ClipboardEvent} event
+1504    */
+1505   async paste(event) {
+1506     event.preventDefault();
+1507     const { clipboardData } = event;
+1508     for (const item of clipboardData.items) {
+1509       for (const editorType of this.#editorTypes) {
+1510         if (editorType.isHandlingMimeForPasting(item.type)) {
+1511           editorType.paste(item, this.currentLayer);
+1512           return;
+1513         }
+1514       }
+1515     }
+1516 
+1517     let data = clipboardData.getData("application/pdfjs");
+1518     if (!data) {
+1519       return;
+1520     }
+1521 
+1522     try {
+1523       data = JSON.parse(data);
+1524     } catch (ex) {
+1525       warn(`paste: "${ex.message}".`);
+1526       return;
+1527     }
+1528 
+1529     if (!Array.isArray(data)) {
+1530       return;
+1531     }
+1532 
+1533     this.unselectAll();
+1534     const layer = this.currentLayer;
+1535 
+1536     try {
+1537       const newEditors = [];
+1538       for (const editor of data) {
+1539         const deserializedEditor = await layer.deserialize(editor);
+1540         if (!deserializedEditor) {
+1541           return;
+1542         }
+1543         newEditors.push(deserializedEditor);
+1544       }
+1545 
+1546       const cmd = () => {
+1547         for (const editor of newEditors) {
+1548           this.#addEditorToLayer(editor);
+1549         }
+1550         this.#selectEditors(newEditors);
+1551       };
+1552       const undo = () => {
+1553         for (const editor of newEditors) {
+1554           editor.remove();
+1555         }
+1556       };
+1557       this.addCommands({ cmd, undo, mustExec: true });
+1558     } catch (ex) {
+1559       warn(`paste: "${ex.message}".`);
+1560     }
+1561   }
+1562 
+1563   /**
+1564    * Keydown callback.
+1565    * @param {KeyboardEvent} event
+1566    */
+1567   keydown(event) {
+1568     if (!this.isShiftKeyDown && event.key === "Shift") {
+1569       this.isShiftKeyDown = true;
+1570     }
+1571     if (
+1572       this.#mode !== AnnotationEditorType.NONE &&
+1573       !this.isEditorHandlingKeyboard
+1574     ) {
+1575       AnnotationEditorUIManager._keyboardManager.exec(this, event);
+1576     }
+1577   }
+1578 
+1579   /**
+1580    * Keyup callback.
+1581    * @param {KeyboardEvent} event
+1582    */
+1583   keyup(event) {
+1584     if (this.isShiftKeyDown && event.key === "Shift") {
+1585       this.isShiftKeyDown = false;
+1586       if (this.#highlightWhenShiftUp) {
+1587         this.#highlightWhenShiftUp = false;
+1588         this.#onSelectEnd("main_toolbar");
+1589       }
+1590     }
+1591   }
+1592 
+1593   /**
+1594    * Execute an action for a given name.
+1595    * For example, the user can click on the "Undo" entry in the context menu
+1596    * and it'll trigger the undo action.
+1597    */
+1598   onEditingAction({ name }) {
+1599     switch (name) {
+1600       case "undo":
+1601       case "redo":
+1602       case "delete":
+1603       case "selectAll":
+1604         this[name]();
+1605         break;
+1606       case "highlightSelection":
+1607         this.highlightSelection("context_menu");
+1608         break;
+1609     }
+1610   }
+1611 
+1612   /**
+1613    * Update the different possible states of this manager, e.g. is there
+1614    * something to undo, redo, ...
+1615    * @param {Object} details
+1616    */
+1617   #dispatchUpdateStates(details) {
+1618     const hasChanged = Object.entries(details).some(
+1619       ([key, value]) => this.#previousStates[key] !== value
+1620     );
+1621 
+1622     if (hasChanged) {
+1623       this._eventBus.dispatch("annotationeditorstateschanged", {
+1624         source: this,
+1625         details: Object.assign(this.#previousStates, details),
+1626       });
+1627       // We could listen on our own event but it sounds like a bit weird and
+1628       // it's a way to simpler to handle that stuff here instead of having to
+1629       // add something in every place where an editor can be unselected.
+1630       if (
+1631         this.#mode === AnnotationEditorType.HIGHLIGHT &&
+1632         details.hasSelectedEditor === false
+1633       ) {
+1634         this.#dispatchUpdateUI([
+1635           [AnnotationEditorParamsType.HIGHLIGHT_FREE, true],
+1636         ]);
+1637       }
+1638     }
+1639   }
+1640 
+1641   #dispatchUpdateUI(details) {
+1642     this._eventBus.dispatch("annotationeditorparamschanged", {
+1643       source: this,
+1644       details,
+1645     });
+1646   }
+1647 
+1648   /**
+1649    * Set the editing state.
+1650    * It can be useful to temporarily disable it when the user is editing a
+1651    * FreeText annotation.
+1652    * @param {boolean} isEditing
+1653    */
+1654   setEditingState(isEditing) {
+1655     if (isEditing) {
+1656       this.#addFocusManager();
+1657       this.#addCopyPasteListeners();
+1658       this.#dispatchUpdateStates({
+1659         isEditing: this.#mode !== AnnotationEditorType.NONE,
+1660         isEmpty: this.#isEmpty(),
+1661         hasSomethingToUndo: this.#commandManager.hasSomethingToUndo(),
+1662         hasSomethingToRedo: this.#commandManager.hasSomethingToRedo(),
+1663         hasSelectedEditor: false,
+1664       });
+1665     } else {
+1666       this.#removeFocusManager();
+1667       this.#removeCopyPasteListeners();
+1668       this.#dispatchUpdateStates({
+1669         isEditing: false,
+1670       });
+1671       this.disableUserSelect(false);
+1672     }
+1673   }
+1674 
+1675   registerEditorTypes(types) {
+1676     if (this.#editorTypes) {
+1677       return;
+1678     }
+1679     this.#editorTypes = types;
+1680     for (const editorType of this.#editorTypes) {
+1681       this.#dispatchUpdateUI(editorType.defaultPropertiesToUpdate);
+1682     }
+1683   }
+1684 
+1685   /**
+1686    * Get an id.
+1687    * @returns {string}
+1688    */
+1689   getId() {
+1690     return this.#idManager.id;
+1691   }
+1692 
+1693   get currentLayer() {
+1694     return this.#allLayers.get(this.#currentPageIndex);
+1695   }
+1696 
+1697   getLayer(pageIndex) {
+1698     return this.#allLayers.get(pageIndex);
+1699   }
+1700 
+1701   get currentPageIndex() {
+1702     return this.#currentPageIndex;
+1703   }
+1704 
+1705   /**
+1706    * Add a new layer for a page which will contains the editors.
+1707    * @param {AnnotationEditorLayer} layer
+1708    */
+1709   addLayer(layer) {
+1710     this.#allLayers.set(layer.pageIndex, layer);
+1711     if (this.#isEnabled) {
+1712       layer.enable();
+1713     } else {
+1714       layer.disable();
+1715     }
+1716   }
+1717 
+1718   /**
+1719    * Remove a layer.
+1720    * @param {AnnotationEditorLayer} layer
+1721    */
+1722   removeLayer(layer) {
+1723     this.#allLayers.delete(layer.pageIndex);
+1724   }
+1725 
+1726   /**
+1727    * Change the editor mode (None, FreeText, Ink, ...)
+1728    * @param {number} mode
+1729    * @param {string|null} editId
+1730    * @param {boolean} [isFromKeyboard] - true if the mode change is due to a
+1731    *   keyboard action.
+1732    * @param {boolean} [mustEnterInEditMode] - true if the editor must enter in
+1733    *   edit mode.
+1734    * @param {boolean} [editComment] - true if the mode change is due to a
+1735    *   comment edit.
+1736    */
+1737   async updateMode(
+1738     mode,
+1739     editId = null,
+1740     isFromKeyboard = false,
+1741     mustEnterInEditMode = false,
+1742     editComment = false
+1743   ) {
+1744     if (this.#mode === mode) {
+1745       return;
+1746     }
+1747 
+1748     if (this.#updateModeCapability) {
+1749       await this.#updateModeCapability.promise;
+1750       if (!this.#updateModeCapability) {
+1751         // This ui manager has been destroyed.
+1752         return;
+1753       }
+1754     }
+1755 
+1756     this.#updateModeCapability = Promise.withResolvers();
+1757     this.#currentDrawingSession?.commitOrRemove();
+1758 
+1759     this.#mode = mode;
+1760     if (mode === AnnotationEditorType.NONE) {
+1761       this.setEditingState(false);
+1762       this.#disableAll();
+1763 
+1764       this._editorUndoBar?.hide();
+1765 
+1766       this.#updateModeCapability.resolve();
+1767       return;
+1768     }
+1769     if (mode === AnnotationEditorType.SIGNATURE) {
+1770       await this.#signatureManager?.loadSignatures();
+1771     }
+1772     this.setEditingState(true);
+1773     await this.#enableAll();
+1774     this.unselectAll();
+1775     for (const layer of this.#allLayers.values()) {
+1776       layer.updateMode(mode);
+1777     }
+1778     if (!editId) {
+1779       if (isFromKeyboard) {
+1780         this.addNewEditorFromKeyboard();
+1781       }
+1782 
+1783       this.#updateModeCapability.resolve();
+1784       return;
+1785     }
+1786 
+1787     for (const editor of this.#allEditors.values()) {
+1788       if (editor.annotationElementId === editId || editor.id === editId) {
+1789         this.setSelected(editor);
+1790         if (editComment) {
+1791           editor.editComment();
+1792         } else if (mustEnterInEditMode) {
+1793           editor.enterInEditMode();
+1794         }
+1795       } else {
+1796         editor.unselect();
+1797       }
+1798     }
+1799 
+1800     this.#updateModeCapability.resolve();
+1801   }
+1802 
+1803   addNewEditorFromKeyboard() {
+1804     if (this.currentLayer.canCreateNewEmptyEditor()) {
+1805       this.currentLayer.addNewEditor();
+1806     }
+1807   }
+1808 
+1809   /**
+1810    * Update the toolbar if it's required to reflect the tool currently used.
+1811    * @param {Object} options
+1812    * @param {number} mode
+1813    * @returns {undefined}
+1814    */
+1815   updateToolbar(options) {
+1816     if (options.mode === this.#mode) {
+1817       return;
+1818     }
+1819     this._eventBus.dispatch("switchannotationeditormode", {
+1820       source: this,
+1821       ...options,
+1822     });
+1823   }
+1824 
+1825   /**
+1826    * Update a parameter in the current editor or globally.
+1827    * @param {number} type
+1828    * @param {*} value
+1829    */
+1830   updateParams(type, value) {
+1831     if (!this.#editorTypes) {
+1832       return;
+1833     }
+1834 
+1835     switch (type) {
+1836       case AnnotationEditorParamsType.CREATE:
+1837         this.currentLayer.addNewEditor(value);
+1838         return;
+1839       case AnnotationEditorParamsType.HIGHLIGHT_SHOW_ALL:
+1840         this._eventBus.dispatch("reporttelemetry", {
+1841           source: this,
+1842           details: {
+1843             type: "editing",
+1844             data: {
+1845               type: "highlight",
+1846               action: "toggle_visibility",
+1847             },
+1848           },
+1849         });
+1850         (this.#showAllStates ||= new Map()).set(type, value);
+1851         this.showAllEditors("highlight", value);
+1852         break;
+1853     }
+1854 
+1855     if (this.hasSelection) {
+1856       for (const editor of this.#selectedEditors) {
+1857         editor.updateParams(type, value);
+1858       }
+1859     } else {
+1860       for (const editorType of this.#editorTypes) {
+1861         editorType.updateDefaultParams(type, value);
+1862       }
+1863     }
+1864   }
+1865 
+1866   showAllEditors(type, visible, updateButton = false) {
+1867     for (const editor of this.#allEditors.values()) {
+1868       if (editor.editorType === type) {
+1869         editor.show(visible);
+1870       }
+1871     }
+1872     const state =
+1873       this.#showAllStates?.get(AnnotationEditorParamsType.HIGHLIGHT_SHOW_ALL) ??
+1874       true;
+1875     if (state !== visible) {
+1876       this.#dispatchUpdateUI([
+1877         [AnnotationEditorParamsType.HIGHLIGHT_SHOW_ALL, visible],
+1878       ]);
+1879     }
+1880   }
+1881 
+1882   enableWaiting(mustWait = false) {
+1883     if (this.#isWaiting === mustWait) {
+1884       return;
+1885     }
+1886     this.#isWaiting = mustWait;
+1887     for (const layer of this.#allLayers.values()) {
+1888       if (mustWait) {
+1889         layer.disableClick();
+1890       } else {
+1891         layer.enableClick();
+1892       }
+1893       layer.div.classList.toggle("waiting", mustWait);
+1894     }
+1895   }
+1896 
+1897   /**
+1898    * Enable all the layers.
+1899    */
+1900   async #enableAll() {
+1901     if (!this.#isEnabled) {
+1902       this.#isEnabled = true;
+1903       const promises = [];
+1904       for (const layer of this.#allLayers.values()) {
+1905         promises.push(layer.enable());
+1906       }
+1907       await Promise.all(promises);
+1908       for (const editor of this.#allEditors.values()) {
+1909         editor.enable();
+1910       }
+1911     }
+1912   }
+1913 
+1914   /**
+1915    * Disable all the layers.
+1916    */
+1917   #disableAll() {
+1918     this.unselectAll();
+1919     if (this.#isEnabled) {
+1920       this.#isEnabled = false;
+1921       for (const layer of this.#allLayers.values()) {
+1922         layer.disable();
+1923       }
+1924       for (const editor of this.#allEditors.values()) {
+1925         editor.disable();
+1926       }
+1927     }
+1928   }
+1929 
+1930   /**
+1931    * Get all the editors belonging to a given page.
+1932    * @param {number} pageIndex
+1933    * @returns {Array<AnnotationEditor>}
+1934    */
+1935   getEditors(pageIndex) {
+1936     const editors = [];
+1937     for (const editor of this.#allEditors.values()) {
+1938       if (editor.pageIndex === pageIndex) {
+1939         editors.push(editor);
+1940       }
+1941     }
+1942     return editors;
+1943   }
+1944 
+1945   /**
+1946    * Get an editor with the given id.
+1947    * @param {string} id
+1948    * @returns {AnnotationEditor}
+1949    */
+1950   getEditor(id) {
+1951     return this.#allEditors.get(id);
+1952   }
+1953 
+1954   /**
+1955    * Add a new editor.
+1956    * @param {AnnotationEditor} editor
+1957    */
+1958   addEditor(editor) {
+1959     this.#allEditors.set(editor.id, editor);
+1960   }
+1961 
+1962   /**
+1963    * Remove an editor.
+1964    * @param {AnnotationEditor} editor
+1965    */
+1966   removeEditor(editor) {
+1967     if (editor.div.contains(document.activeElement)) {
+1968       if (this.#focusMainContainerTimeoutId) {
+1969         clearTimeout(this.#focusMainContainerTimeoutId);
+1970       }
+1971       this.#focusMainContainerTimeoutId = setTimeout(() => {
+1972         // When the div is removed from DOM the focus can move on the
+1973         // document.body, so we need to move it back to the main container.
+1974         this.focusMainContainer();
+1975         this.#focusMainContainerTimeoutId = null;
+1976       }, 0);
+1977     }
+1978     this.#allEditors.delete(editor.id);
+1979     if (editor.annotationElementId) {
+1980       this.#missingCanvases?.delete(editor.annotationElementId);
+1981     }
+1982     this.unselect(editor);
+1983     if (
+1984       !editor.annotationElementId ||
+1985       !this.#deletedAnnotationsElementIds.has(editor.annotationElementId)
+1986     ) {
+1987       this.#annotationStorage?.remove(editor.id);
+1988     }
+1989   }
+1990 
+1991   /**
+1992    * The annotation element with the given id has been deleted.
+1993    * @param {AnnotationEditor} editor
+1994    */
+1995   addDeletedAnnotationElement(editor) {
+1996     this.#deletedAnnotationsElementIds.add(editor.annotationElementId);
+1997     this.addChangedExistingAnnotation(editor);
+1998     editor.deleted = true;
+1999   }
+2000 
+2001   /**
+2002    * Check if the annotation element with the given id has been deleted.
+2003    * @param {string} annotationElementId
+2004    * @returns {boolean}
+2005    */
+2006   isDeletedAnnotationElement(annotationElementId) {
+2007     return this.#deletedAnnotationsElementIds.has(annotationElementId);
+2008   }
+2009 
+2010   /**
+2011    * The annotation element with the given id have been restored.
+2012    * @param {AnnotationEditor} editor
+2013    */
+2014   removeDeletedAnnotationElement(editor) {
+2015     this.#deletedAnnotationsElementIds.delete(editor.annotationElementId);
+2016     this.removeChangedExistingAnnotation(editor);
+2017     editor.deleted = false;
+2018   }
+2019 
+2020   /**
+2021    * Add an editor to the layer it belongs to or add it to the global map.
+2022    * @param {AnnotationEditor} editor
+2023    */
+2024   #addEditorToLayer(editor) {
+2025     const layer = this.#allLayers.get(editor.pageIndex);
+2026     if (layer) {
+2027       layer.addOrRebuild(editor);
+2028     } else {
+2029       this.addEditor(editor);
+2030       this.addToAnnotationStorage(editor);
+2031     }
+2032   }
+2033 
+2034   /**
+2035    * Set the given editor as the active one.
+2036    * @param {AnnotationEditor} editor
+2037    */
+2038   setActiveEditor(editor) {
+2039     if (this.#activeEditor === editor) {
+2040       return;
+2041     }
+2042 
+2043     this.#activeEditor = editor;
+2044     if (editor) {
+2045       this.#dispatchUpdateUI(editor.propertiesToUpdate);
+2046     }
+2047   }
+2048 
+2049   get #lastSelectedEditor() {
+2050     let ed = null;
+2051     for (ed of this.#selectedEditors) {
+2052       // Iterate to get the last element.
+2053     }
+2054     return ed;
+2055   }
+2056 
+2057   /**
+2058    * Update the UI of the active editor.
+2059    * @param {AnnotationEditor} editor
+2060    */
+2061   updateUI(editor) {
+2062     if (this.#lastSelectedEditor === editor) {
+2063       this.#dispatchUpdateUI(editor.propertiesToUpdate);
+2064     }
+2065   }
+2066 
+2067   updateUIForDefaultProperties(editorType) {
+2068     this.#dispatchUpdateUI(editorType.defaultPropertiesToUpdate);
+2069   }
+2070 
+2071   /**
+2072    * Add or remove an editor the current selection.
+2073    * @param {AnnotationEditor} editor
+2074    */
+2075   toggleSelected(editor) {
+2076     if (this.#selectedEditors.has(editor)) {
+2077       this.#selectedEditors.delete(editor);
+2078       editor.unselect();
+2079       this.#dispatchUpdateStates({
+2080         hasSelectedEditor: this.hasSelection,
+2081       });
+2082       return;
+2083     }
+2084     this.#selectedEditors.add(editor);
+2085     editor.select();
+2086     this.#dispatchUpdateUI(editor.propertiesToUpdate);
+2087     this.#dispatchUpdateStates({
+2088       hasSelectedEditor: true,
+2089     });
+2090   }
+2091 
+2092   /**
+2093    * Set the last selected editor.
+2094    * @param {AnnotationEditor} editor
+2095    */
+2096   setSelected(editor) {
+2097     this.updateToolbar({
+2098       mode: editor.mode,
+2099       editId: editor.id,
+2100     });
+2101 
+2102     this.#currentDrawingSession?.commitOrRemove();
+2103     for (const ed of this.#selectedEditors) {
+2104       if (ed !== editor) {
+2105         ed.unselect();
+2106       }
+2107     }
+2108     this.#selectedEditors.clear();
+2109 
+2110     this.#selectedEditors.add(editor);
+2111     editor.select();
+2112     this.#dispatchUpdateUI(editor.propertiesToUpdate);
+2113     this.#dispatchUpdateStates({
+2114       hasSelectedEditor: true,
+2115     });
+2116   }
+2117 
+2118   /**
+2119    * Check if the editor is selected.
+2120    * @param {AnnotationEditor} editor
+2121    */
+2122   isSelected(editor) {
+2123     return this.#selectedEditors.has(editor);
+2124   }
+2125 
+2126   get firstSelectedEditor() {
+2127     return this.#selectedEditors.values().next().value;
+2128   }
+2129 
+2130   /**
+2131    * Unselect an editor.
+2132    * @param {AnnotationEditor} editor
+2133    */
+2134   unselect(editor) {
+2135     editor.unselect();
+2136     this.#selectedEditors.delete(editor);
+2137     this.#dispatchUpdateStates({
+2138       hasSelectedEditor: this.hasSelection,
+2139     });
+2140   }
+2141 
+2142   get hasSelection() {
+2143     return this.#selectedEditors.size !== 0;
+2144   }
+2145 
+2146   get isEnterHandled() {
+2147     return (
+2148       this.#selectedEditors.size === 1 &&
+2149       this.firstSelectedEditor.isEnterHandled
+2150     );
+2151   }
+2152 
+2153   /**
+2154    * Undo the last command.
+2155    */
+2156   undo() {
+2157     this.#commandManager.undo();
+2158     this.#dispatchUpdateStates({
+2159       hasSomethingToUndo: this.#commandManager.hasSomethingToUndo(),
+2160       hasSomethingToRedo: true,
+2161       isEmpty: this.#isEmpty(),
+2162     });
+2163     this._editorUndoBar?.hide();
+2164   }
+2165 
+2166   /**
+2167    * Redo the last undoed command.
+2168    */
+2169   redo() {
+2170     this.#commandManager.redo();
+2171     this.#dispatchUpdateStates({
+2172       hasSomethingToUndo: true,
+2173       hasSomethingToRedo: this.#commandManager.hasSomethingToRedo(),
+2174       isEmpty: this.#isEmpty(),
+2175     });
+2176   }
+2177 
+2178   /**
+2179    * Add a command to execute (cmd) and another one to undo it.
+2180    * @param {Object} params
+2181    */
+2182   addCommands(params) {
+2183     this.#commandManager.add(params);
+2184     this.#dispatchUpdateStates({
+2185       hasSomethingToUndo: true,
+2186       hasSomethingToRedo: false,
+2187       isEmpty: this.#isEmpty(),
+2188     });
+2189   }
+2190 
+2191   cleanUndoStack(type) {
+2192     this.#commandManager.cleanType(type);
+2193   }
+2194 
+2195   #isEmpty() {
+2196     if (this.#allEditors.size === 0) {
+2197       return true;
+2198     }
+2199 
+2200     if (this.#allEditors.size === 1) {
+2201       for (const editor of this.#allEditors.values()) {
+2202         return editor.isEmpty();
+2203       }
+2204     }
+2205 
+2206     return false;
+2207   }
+2208 
+2209   /**
+2210    * Delete the current editor or all.
+2211    */
+2212   delete() {
+2213     this.commitOrRemove();
+2214     const drawingEditor = this.currentLayer?.endDrawingSession(
+2215       /* isAborted = */ true
+2216     );
+2217     if (!this.hasSelection && !drawingEditor) {
+2218       return;
+2219     }
+2220 
+2221     const editors = drawingEditor
+2222       ? [drawingEditor]
+2223       : [...this.#selectedEditors];
+2224     const cmd = () => {
+2225       this._editorUndoBar?.show(
+2226         undo,
+2227         editors.length === 1 ? editors[0].editorType : editors.length
+2228       );
+2229       for (const editor of editors) {
+2230         editor.remove();
+2231       }
+2232     };
+2233     const undo = () => {
+2234       for (const editor of editors) {
+2235         this.#addEditorToLayer(editor);
+2236       }
+2237     };
+2238 
+2239     this.addCommands({ cmd, undo, mustExec: true });
+2240   }
+2241 
+2242   commitOrRemove() {
+2243     // An editor is being edited so just commit it.
+2244     this.#activeEditor?.commitOrRemove();
+2245   }
+2246 
+2247   hasSomethingToControl() {
+2248     return this.#activeEditor || this.hasSelection;
+2249   }
+2250 
+2251   /**
+2252    * Select the editors.
+2253    * @param {Array<AnnotationEditor>} editors
+2254    */
+2255   #selectEditors(editors) {
+2256     for (const editor of this.#selectedEditors) {
+2257       editor.unselect();
+2258     }
+2259     this.#selectedEditors.clear();
+2260     for (const editor of editors) {
+2261       if (editor.isEmpty()) {
+2262         continue;
+2263       }
+2264       this.#selectedEditors.add(editor);
+2265       editor.select();
+2266     }
+2267     this.#dispatchUpdateStates({ hasSelectedEditor: this.hasSelection });
+2268   }
+2269 
+2270   /**
+2271    * Select all the editors.
+2272    */
+2273   selectAll() {
+2274     for (const editor of this.#selectedEditors) {
+2275       editor.commit();
+2276     }
+2277     this.#selectEditors(this.#allEditors.values());
+2278   }
+2279 
+2280   /**
+2281    * Unselect all the selected editors.
+2282    */
+2283   unselectAll() {
+2284     if (this.#activeEditor) {
+2285       // An editor is being edited so just commit it.
+2286       this.#activeEditor.commitOrRemove();
+2287       if (this.#mode !== AnnotationEditorType.NONE) {
+2288         // If the mode is NONE, we want to really unselect the editor, hence we
+2289         // mustn't return here.
+2290         return;
+2291       }
+2292     }
+2293 
+2294     if (this.#currentDrawingSession?.commitOrRemove()) {
+2295       return;
+2296     }
+2297 
+2298     if (!this.hasSelection) {
+2299       return;
+2300     }
+2301     for (const editor of this.#selectedEditors) {
+2302       editor.unselect();
+2303     }
+2304     this.#selectedEditors.clear();
+2305     this.#dispatchUpdateStates({
+2306       hasSelectedEditor: false,
+2307     });
+2308   }
+2309 
+2310   translateSelectedEditors(x, y, noCommit = false) {
+2311     if (!noCommit) {
+2312       this.commitOrRemove();
+2313     }
+2314     if (!this.hasSelection) {
+2315       return;
+2316     }
+2317 
+2318     this.#translation[0] += x;
+2319     this.#translation[1] += y;
+2320     const [totalX, totalY] = this.#translation;
+2321     const editors = [...this.#selectedEditors];
+2322 
+2323     // We don't want to have an undo/redo for each translation so we wait a bit
+2324     // before adding the command to the command manager.
+2325     const TIME_TO_WAIT = 1000;
+2326 
+2327     if (this.#translationTimeoutId) {
+2328       clearTimeout(this.#translationTimeoutId);
+2329     }
+2330 
+2331     this.#translationTimeoutId = setTimeout(() => {
+2332       this.#translationTimeoutId = null;
+2333       this.#translation[0] = this.#translation[1] = 0;
+2334 
+2335       this.addCommands({
+2336         cmd: () => {
+2337           for (const editor of editors) {
+2338             if (this.#allEditors.has(editor.id)) {
+2339               editor.translateInPage(totalX, totalY);
+2340               editor.translationDone();
+2341             }
+2342           }
+2343         },
+2344         undo: () => {
+2345           for (const editor of editors) {
+2346             if (this.#allEditors.has(editor.id)) {
+2347               editor.translateInPage(-totalX, -totalY);
+2348               editor.translationDone();
+2349             }
+2350           }
+2351         },
+2352         mustExec: false,
+2353       });
+2354     }, TIME_TO_WAIT);
+2355 
+2356     for (const editor of editors) {
+2357       editor.translateInPage(x, y);
+2358       editor.translationDone();
+2359     }
+2360   }
+2361 
+2362   /**
+2363    * Set up the drag session for moving the selected editors.
+2364    */
+2365   setUpDragSession() {
+2366     // Note: don't use any references to the editor's parent which can be null
+2367     // if the editor belongs to a destroyed page.
+2368     if (!this.hasSelection) {
+2369       return;
+2370     }
+2371     // Avoid to have spurious text selection in the text layer when dragging.
+2372     this.disableUserSelect(true);
+2373     this.#draggingEditors = new Map();
+2374     for (const editor of this.#selectedEditors) {
+2375       this.#draggingEditors.set(editor, {
+2376         savedX: editor.x,
+2377         savedY: editor.y,
+2378         savedPageIndex: editor.pageIndex,
+2379         newX: 0,
+2380         newY: 0,
+2381         newPageIndex: -1,
+2382       });
+2383     }
+2384   }
+2385 
+2386   /**
+2387    * Ends the drag session.
+2388    * @returns {boolean} true if at least one editor has been moved.
+2389    */
+2390   endDragSession() {
+2391     if (!this.#draggingEditors) {
+2392       return false;
+2393     }
+2394     this.disableUserSelect(false);
+2395     const map = this.#draggingEditors;
+2396     this.#draggingEditors = null;
+2397     let mustBeAddedInUndoStack = false;
+2398 
+2399     for (const [{ x, y, pageIndex }, value] of map) {
+2400       value.newX = x;
+2401       value.newY = y;
+2402       value.newPageIndex = pageIndex;
+2403       mustBeAddedInUndoStack ||=
+2404         x !== value.savedX ||
+2405         y !== value.savedY ||
+2406         pageIndex !== value.savedPageIndex;
+2407     }
+2408 
+2409     if (!mustBeAddedInUndoStack) {
+2410       return false;
+2411     }
+2412 
+2413     const move = (editor, x, y, pageIndex) => {
+2414       if (this.#allEditors.has(editor.id)) {
+2415         // The editor can be undone/redone on a page which is not visible (and
+2416         // which potentially has no annotation editor layer), hence we need to
+2417         // use the pageIndex instead of the parent.
+2418         const parent = this.#allLayers.get(pageIndex);
+2419         if (parent) {
+2420           editor._setParentAndPosition(parent, x, y);
+2421         } else {
+2422           editor.pageIndex = pageIndex;
+2423           editor.x = x;
+2424           editor.y = y;
+2425         }
+2426       }
+2427     };
+2428 
+2429     this.addCommands({
+2430       cmd: () => {
+2431         for (const [editor, { newX, newY, newPageIndex }] of map) {
+2432           move(editor, newX, newY, newPageIndex);
+2433         }
+2434       },
+2435       undo: () => {
+2436         for (const [editor, { savedX, savedY, savedPageIndex }] of map) {
+2437           move(editor, savedX, savedY, savedPageIndex);
+2438         }
+2439       },
+2440       mustExec: true,
+2441     });
+2442 
+2443     return true;
+2444   }
+2445 
+2446   /**
+2447    * Drag the set of selected editors.
+2448    * @param {number} tx
+2449    * @param {number} ty
+2450    */
+2451   dragSelectedEditors(tx, ty) {
+2452     if (!this.#draggingEditors) {
+2453       return;
+2454     }
+2455     for (const editor of this.#draggingEditors.keys()) {
+2456       editor.drag(tx, ty);
+2457     }
+2458   }
+2459 
+2460   /**
+2461    * Rebuild the editor (usually on undo/redo actions) on a potentially
+2462    * non-rendered page.
+2463    * @param {AnnotationEditor} editor
+2464    */
+2465   rebuild(editor) {
+2466     if (editor.parent === null) {
+2467       const parent = this.getLayer(editor.pageIndex);
+2468       if (parent) {
+2469         parent.changeParent(editor);
+2470         parent.addOrRebuild(editor);
+2471       } else {
+2472         this.addEditor(editor);
+2473         this.addToAnnotationStorage(editor);
+2474         editor.rebuild();
+2475       }
+2476     } else {
+2477       editor.parent.addOrRebuild(editor);
+2478     }
+2479   }
+2480 
+2481   get isEditorHandlingKeyboard() {
+2482     return (
+2483       this.getActive()?.shouldGetKeyboardEvents() ||
+2484       (this.#selectedEditors.size === 1 &&
+2485         this.firstSelectedEditor.shouldGetKeyboardEvents())
+2486     );
+2487   }
+2488 
+2489   /**
+2490    * Is the current editor the one passed as argument?
+2491    * @param {AnnotationEditor} editor
+2492    * @returns
+2493    */
+2494   isActive(editor) {
+2495     return this.#activeEditor === editor;
+2496   }
+2497 
+2498   /**
+2499    * Get the current active editor.
+2500    * @returns {AnnotationEditor|null}
+2501    */
+2502   getActive() {
+2503     return this.#activeEditor;
+2504   }
+2505 
+2506   /**
+2507    * Get the current editor mode.
+2508    * @returns {number}
+2509    */
+2510   getMode() {
+2511     return this.#mode;
+2512   }
+2513 
+2514   get imageManager() {
+2515     return shadow(this, "imageManager", new ImageManager());
+2516   }
+2517 
+2518   getSelectionBoxes(textLayer) {
+2519     if (!textLayer) {
+2520       return null;
+2521     }
+2522     const selection = document.getSelection();
+2523     for (let i = 0, ii = selection.rangeCount; i < ii; i++) {
+2524       if (
+2525         !textLayer.contains(selection.getRangeAt(i).commonAncestorContainer)
+2526       ) {
+2527         return null;
+2528       }
+2529     }
+2530 
+2531     const {
+2532       x: layerX,
+2533       y: layerY,
+2534       width: parentWidth,
+2535       height: parentHeight,
+2536     } = textLayer.getBoundingClientRect();
+2537 
+2538     // We must rotate the boxes because we want to have them in the non-rotated
+2539     // page coordinates.
+2540     let rotator;
+2541     switch (textLayer.getAttribute("data-main-rotation")) {
+2542       case "90":
+2543         rotator = (x, y, w, h) => ({
+2544           x: (y - layerY) / parentHeight,
+2545           y: 1 - (x + w - layerX) / parentWidth,
+2546           width: h / parentHeight,
+2547           height: w / parentWidth,
+2548         });
+2549         break;
+2550       case "180":
+2551         rotator = (x, y, w, h) => ({
+2552           x: 1 - (x + w - layerX) / parentWidth,
+2553           y: 1 - (y + h - layerY) / parentHeight,
+2554           width: w / parentWidth,
+2555           height: h / parentHeight,
+2556         });
+2557         break;
+2558       case "270":
+2559         rotator = (x, y, w, h) => ({
+2560           x: 1 - (y + h - layerY) / parentHeight,
+2561           y: (x - layerX) / parentWidth,
+2562           width: h / parentHeight,
+2563           height: w / parentWidth,
+2564         });
+2565         break;
+2566       default:
+2567         rotator = (x, y, w, h) => ({
+2568           x: (x - layerX) / parentWidth,
+2569           y: (y - layerY) / parentHeight,
+2570           width: w / parentWidth,
+2571           height: h / parentHeight,
+2572         });
+2573         break;
+2574     }
+2575 
+2576     const boxes = [];
+2577     for (let i = 0, ii = selection.rangeCount; i < ii; i++) {
+2578       const range = selection.getRangeAt(i);
+2579       if (range.collapsed) {
+2580         continue;
+2581       }
+2582       for (const { x, y, width, height } of range.getClientRects()) {
+2583         if (width === 0 || height === 0) {
+2584           continue;
+2585         }
+2586         boxes.push(rotator(x, y, width, height));
+2587       }
+2588     }
+2589     return boxes.length === 0 ? null : boxes;
+2590   }
+2591 
+2592   addChangedExistingAnnotation({ annotationElementId, id }) {
+2593     (this.#changedExistingAnnotations ||= new Map()).set(
+2594       annotationElementId,
+2595       id
+2596     );
+2597   }
+2598 
+2599   removeChangedExistingAnnotation({ annotationElementId }) {
+2600     this.#changedExistingAnnotations?.delete(annotationElementId);
+2601   }
+2602 
+2603   renderAnnotationElement(annotation) {
+2604     const editorId = this.#changedExistingAnnotations?.get(annotation.data.id);
+2605     if (!editorId) {
+2606       return;
+2607     }
+2608     const editor = this.#annotationStorage.getRawValue(editorId);
+2609     if (!editor) {
+2610       return;
+2611     }
+2612     if (this.#mode === AnnotationEditorType.NONE && !editor.hasBeenModified) {
+2613       return;
+2614     }
+2615     editor.renderAnnotationElement(annotation);
+2616   }
+2617 
+2618   setMissingCanvas(annotationId, annotationElementId, canvas) {
+2619     const editor = this.#missingCanvases?.get(annotationId);
+2620     if (!editor) {
+2621       return;
+2622     }
+2623     editor.setCanvas(annotationElementId, canvas);
+2624     this.#missingCanvases.delete(annotationId);
+2625   }
+2626 
+2627   addMissingCanvas(annotationId, editor) {
+2628     (this.#missingCanvases ||= new Map()).set(annotationId, editor);
+2629   }
+2630 }
+2631 
+2632 export {
+2633   AnnotationEditorUIManager,
+2634   bindEvents,
+2635   ColorManager,
+2636   CommandManager,
+2637   KeyboardManager,
+2638 };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/pdf_spec.js
+/* Copyright 2023 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  AbortException,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationMode,
+  AnnotationType,
+  createValidAbsoluteUrl,
+  FeatureTest,
+  getUuid,
+  ImageKind,
+  InvalidPDFException,
+  MathClamp,
+  normalizeUnicode,
+  OPS,
+  PasswordResponses,
+  PermissionFlag,
+  ResponseException,
+  shadow,
+  updateUrlHash,
+  Util,
+  VerbosityLevel,
+} from "../../src/shared/util.js";
+import {
+  build,
+  getDocument,
+  PDFDataRangeTransport,
+  PDFWorker,
+  version,
+} from "../../src/display/api.js";
+import {
+  fetchData,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getRGB,
+  getXfaPageViewport,
+  isDataScheme,
+  isPdfFile,
+  noContextMenu,
+  OutputScale,
+  PDFDateString,
+  PixelsPerInch,
+  RenderingCancelledException,
+  setLayerDimensions,
+  stopEvent,
+  SupportedImageMimeTypes,
+} from "../../src/display/display_utils.js";
+import { AnnotationEditorLayer } from "../../src/display/editor/annotation_editor_layer.js";
+import { AnnotationEditorUIManager } from "../../src/display/editor/tools.js";
+import { AnnotationLayer } from "../../src/display/annotation_layer.js";
+import { ColorPicker } from "../../src/display/editor/color_picker.js";
+import { DOMSVGFactory } from "../../src/display/svg_factory.js";
+import { DrawLayer } from "../../src/display/draw_layer.js";
+import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
+import { isValidExplicitDest } from "../../src/display/api_utils.js";
+import { SignatureExtractor } from "../../src/display/editor/drawers/signaturedraw.js";
+import { TextLayer } from "../../src/display/text_layer.js";
+import { TouchManager } from "../../src/display/touch_manager.js";
+import { XfaLayer } from "../../src/display/xfa_layer.js";
+const expectedAPI = Object.freeze({
+  AbortException,
+  AnnotationEditorLayer,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationEditorUIManager,
+  AnnotationLayer,
+  AnnotationMode,
+  AnnotationType,
+  build,
+  ColorPicker,
+  createValidAbsoluteUrl,
+  DOMSVGFactory,
+  DrawLayer,
+  FeatureTest,
+  fetchData,
+  getDocument,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getRGB,
+  getUuid,
+  getXfaPageViewport,
+  GlobalWorkerOptions,
+  ImageKind,
+  InvalidPDFException,
+  isDataScheme,
+  isPdfFile,
+  isValidExplicitDest,
+  MathClamp,
+  noContextMenu,
+  normalizeUnicode,
+  OPS,
+  OutputScale,
+  PasswordResponses,
+  PDFDataRangeTransport,
+  PDFDateString,
+  PDFWorker,
+  PermissionFlag,
+  PixelsPerInch,
+  RenderingCancelledException,
+  ResponseException,
+  setLayerDimensions,
+  shadow,
+  SignatureExtractor,
+  stopEvent,
+  SupportedImageMimeTypes,
+  TextLayer,
+  TouchManager,
+  updateUrlHash,
+  Util,
+  VerbosityLevel,
+  version,
+  XfaLayer,
+});
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

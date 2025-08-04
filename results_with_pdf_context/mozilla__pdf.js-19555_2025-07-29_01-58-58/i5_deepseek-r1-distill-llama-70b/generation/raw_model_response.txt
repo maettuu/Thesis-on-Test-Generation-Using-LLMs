@@ -1,0 +1,42 @@
+<think>
+Okay, I need to write a regression test for the issue where PDFs with a specific RC4 encryption weren't opening in pdf.js. The patch provided extends the encryption key to 16 bytes if it's shorter, which should fix the problem. 
+
+First, I should understand what the patch does. It checks if the algorithm is 4 (RC4) and the key length is less than 16 bytes. If so, it extends the key to 16 bytes by appending zeros. So the test needs to verify that with this fix, the PDF can be decrypted and rendered correctly.
+
+I'll start by setting up the test structure. I'll use the provided PDF file, issue19484_1.pdf, which has a 40-bit key. The test should attempt to load this PDF and check if it can be read without errors.
+
+I'll import the necessary modules: getDocument from the display API and buildGetDocumentParams from test_utils.js. Then, I'll create a loading task for the PDF.
+
+Next, I need to handle the loading process. Since loading might take some time, I'll wrap it in a promise with a timeout. If the PDF fails to load within the timeout, the test should fail.
+
+Once the PDF is loaded, I'll retrieve the first page and try to render it. If the encryption was handled correctly, the page should load without issues. I'll check if the page's text content is retrieved successfully, which indicates that the PDF was decrypted and parsed correctly.
+
+I should also handle any exceptions that might occur during loading or rendering. If an exception is thrown, the test will fail, indicating that the PDF couldn't be processed, which would mean the patch didn't resolve the issue.
+
+I need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll structure the test using async/await for readability and ensure that all operations are properly awaited to prevent race conditions.
+
+Finally, I'll write the test block, making sure it's concise and only tests the specific behavior addressed by the patch. The test will fail before the patch is applied because the key isn't extended, causing decryption to fail. After the patch, the key is extended, allowing the PDF to load correctly, and the test should pass.
+</think>
+
+```javascript
+it("should correctly handle RC4 encryption with 40-bit key", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue19484_1.pdf'));
+  
+  const loadPromise = new Promise((resolve, reject) => {
+    loadingTask.onProgress = (progress) => {
+      if (progress.state === 'DONE') {
+        resolve(loadingTask.pdf);
+      }
+    };
+    loadingTask.onError = reject;
+  });
+
+  const pdf = await loadPromise;
+  const page = await pdf.getPage(1);
+  const textContent = await page.getTextContent();
+  
+  expect(textContent.items.length).toBeGreaterThan(0);
+});
+```

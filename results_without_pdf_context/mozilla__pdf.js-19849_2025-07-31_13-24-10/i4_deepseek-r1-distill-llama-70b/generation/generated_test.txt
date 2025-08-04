@@ -1,0 +1,46 @@
+it("should render a correct form XObject even if a preceding form XObject has a faulty Resources entry", async () => {
+  const evaluator = new PartialEvaluator({
+    xref: new XRefMock(),
+    handler: {},
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: {},
+    builtInCMapCache: {},
+    standardFontDataCache: {},
+    globalColorSpaceCache: {},
+    globalImageCache: {},
+    systemFontCache: {},
+    options: { ignoreErrors: true }
+  });
+  const parentResources = new Dict();
+  const operatorList = new OperatorList();
+  const task = { ensureNotTerminated: () => {} };
+  const initialState = {};
+  const localColorSpaceCache = {};
+  const seenRefs = new Set();
+
+  // Faulty Form XObject: its Resources entry is not a Dict.
+  const faultyStream = new StringStream("");
+  faultyStream.dict = new Dict();
+  faultyStream.dict.set("Subtype", new Name("Form"));
+  faultyStream.dict.set("Matrix", [1, 0, 0, 1, 0, 0]);
+  faultyStream.dict.set("BBox", [0, 0, 10, 10]);
+  faultyStream.dict.set("Resources", new Name("Faulty"));
+
+  // Correct Form XObject: its Resources entry is a proper Dict.
+  const correctStream = new StringStream("");
+  correctStream.dict = new Dict();
+  correctStream.dict.set("Subtype", new Name("Form"));
+  correctStream.dict.set("Matrix", [1, 0, 0, 1, 0, 0]);
+  correctStream.dict.set("BBox", [0, 0, 10, 10]);
+  const validResources = new Dict();
+  correctStream.dict.set("Resources", validResources);
+
+  await evaluator.buildFormXObject(parentResources, faultyStream, null, operatorList, task, initialState, localColorSpaceCache, seenRefs);
+  await evaluator.buildFormXObject(parentResources, correctStream, null, operatorList, task, initialState, localColorSpaceCache, seenRefs);
+
+  const beginOps = operatorList.fnArray.filter(op => op === OPS.paintFormXObjectBegin);
+  if (beginOps.length !== 2) {
+    throw new Error(`Expected 2 paintFormXObjectBegin operations, but got ${beginOps.length}`);
+  }
+});

@@ -1,0 +1,757 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: Warning: loadFont - translateFont failed: "TypeError: e.peekBytes is not a function"
+### Attach (recommended) or Link to PDF file
+
+[21_10_2024_FAMI INVERSION SAS_901060703_inicial.pdf](https://github.com/user-attachments/files/17473385/21_10_2024_FAMI.INVERSION.SAS_901060703_inicial.pdf)
+
+
+### Web browser and its version
+
+Chrome v130.0.6723.58
+
+### Operating system and its version
+
+Windows 10
+
+### PDF.js version
+
+4.7.76
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+Load the given file
+
+### What is the expected behavior?
+
+See the file text, as in the screenshot of chrome pdf viewer :
+![image](https://github.com/user-attachments/assets/21a511f4-d143-41f0-a07a-ff9b6ae9fb15)
+
+
+### What went wrong?
+
+No text is visible, and I get this warning in the devtools console :
+Warning: loadFont - translateFont failed: "TypeError: file.peekBytes is not a function".
+
+What I see :
+![image](https://github.com/user-attachments/assets/b3bedf50-2058-4193-a1c4-c2517707d68a)
+
+### Link to a viewer
+
+https://pdfupload.io/docs/5689abd7
+
+### Additional context
+
+I debugged the pdf.worker.min.mjs file, and I found that this is the getFontFileType function that is causing an issue :
+```
+function getFontFileType(e, {type: t, subtype: i, composite: a}) {
+    let s, r;
+    if (function isTrueTypeFile(e) {
+        const t = e.peekBytes(4);
+        return 65536 === readUint32(t, 0) || "true" === bytesToString(t)
+    }(e) || isTrueTypeCollectionFile(e))
+        s = a ? "CIDFontType2" : "TrueType";
+    else if (function isOpenTypeFile(e) {
+        return "OTTO" === bytesToString(e.peekBytes(4))
+    }(e))
+        s = a ? "CIDFontType2" : "OpenType";
+    else if (function isType1File(e) {
+        const t = e.peekBytes(2);
+        return 37 === t[0] && 33 === t[1] || 128 === t[0] && 1 === t[1]
+    }(e))
+        s = a ? "CIDFontType0" : "MMType1" === t ? "MMType1" : "Type1";
+    else if (function isCFFFile(e) {
+        const t = e.peekBytes(4);
+        return t[0] >= 1 && t[3] >= 1 && t[3] <= 4
+    }(e))
+        if (a) {
+            s = "CIDFontType0";
+            r = "CIDFontType0C"
+        } else {
+            s = "MMType1" === t ? "MMType1" : "Type1";
+            r = "Type1C"
+        }
+    else {
+        warn("getFontFileType: Unable to detect correct font file Type/Subtype.");
+        s = t;
+        r = i
+    }
+    return [s, r]
+}
+```
+
+And here's the line causing the error : (3rd line of the function). The "e" variable should have a Stream type, but it is a "Dict" instead.
+
+![image](https://github.com/user-attachments/assets/cfdeb094-962a-4f10-9de5-8485eed8cee4)
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/evaluator.js b/src/core/evaluator.js
+--- a/src/core/evaluator.js
++++ b/src/core/evaluator.js
+@@ -63,7 +63,6 @@ import {
+   LocalTilingPatternCache,
+   RegionalImageCache,
+ } from "./image_utils.js";
+-import { NullStream, Stream } from "./stream.js";
+ import { BaseStream } from "./base_stream.js";
+ import { bidi } from "./bidi.js";
+ import { ColorSpace } from "./colorspace.js";
+@@ -77,6 +76,7 @@ import { ImageResizer } from "./image_resizer.js";
+ import { MurmurHash3_64 } from "../shared/murmurhash3.js";
+ import { OperatorList } from "./operator_list.js";
+ import { PDFImage } from "./image.js";
++import { Stream } from "./stream.js";
+ 
+ const DefaultPartialEvaluatorOptions = Object.freeze({
+   maxImageSize: -1,
+@@ -4425,12 +4425,20 @@ class PartialEvaluator {
+     let fontFile, subtype, length1, length2, length3;
+     try {
+       fontFile = descriptor.get("FontFile", "FontFile2", "FontFile3");
++
++      if (fontFile) {
++        if (!(fontFile instanceof BaseStream)) {
++          throw new FormatError("FontFile should be a stream");
++        } else if (fontFile.isEmpty) {
++          throw new FormatError("FontFile is empty");
++        }
++      }
+     } catch (ex) {
+       if (!this.options.ignoreErrors) {
+         throw ex;
+       }
+       warn(`translateFont - fetching "${fontName.name}" font file: "${ex}".`);
+-      fontFile = new NullStream();
++      fontFile = null;
+     }
+     let isInternalFont = false;
+     let glyphScaleFactors = null;
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.25.8
+- @babel/preset-env: ^7.25.8
+- @babel/runtime: ^7.25.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001669
+- canvas: ^3.0.0-rc2
+- core-js: ^3.38.1
+- eslint: ^8.57.1
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^3.9.1
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-unicorn: ^56.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.4.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.5
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.47
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.0
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.0
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.10.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.3
+- vinyl: ^3.0.0
+- webpack: ^5.95.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/evaluator.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 /* eslint-disable no-var */
+16 
+17 import {
+18   AbortException,
+19   assert,
+20   CMapCompressionType,
+21   FONT_IDENTITY_MATRIX,
+22   FormatError,
+23   IDENTITY_MATRIX,
+24   info,
+25   isArrayEqual,
+26   normalizeUnicode,
+27   OPS,
+28   shadow,
+29   stringToPDFString,
+30   TextRenderingMode,
+31   Util,
+32   warn,
+33 } from "../shared/util.js";
+34 import { CMapFactory, IdentityCMap } from "./cmap.js";
+35 import { Cmd, Dict, EOF, isName, Name, Ref, RefSet } from "./primitives.js";
+36 import { ErrorFont, Font } from "./fonts.js";
+37 import {
+38   getEncoding,
+39   MacRomanEncoding,
+40   StandardEncoding,
+41   SymbolSetEncoding,
+42   WinAnsiEncoding,
+43   ZapfDingbatsEncoding,
+44 } from "./encodings.js";
+45 import {
+46   getFontNameToFileMap,
+47   getSerifFonts,
+48   getStandardFontName,
+49   getStdFontMap,
+50   getSymbolsFonts,
+51   isKnownFontName,
+52 } from "./standard_fonts.js";
+53 import { getTilingPatternIR, Pattern } from "./pattern.js";
+54 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
+55 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
+56 import { isNumberArray, lookupMatrix, lookupNormalRect } from "./core_utils.js";
+57 import { isPDFFunction, PDFFunctionFactory } from "./function.js";
+58 import { Lexer, Parser } from "./parser.js";
+59 import {
+60   LocalColorSpaceCache,
+61   LocalGStateCache,
+62   LocalImageCache,
+63   LocalTilingPatternCache,
+64   RegionalImageCache,
+65 } from "./image_utils.js";
+66 import { NullStream, Stream } from "./stream.js";
+67 import { BaseStream } from "./base_stream.js";
+68 import { bidi } from "./bidi.js";
+69 import { ColorSpace } from "./colorspace.js";
+70 import { DecodeStream } from "./decode_stream.js";
+71 import { FontFlags } from "./fonts_utils.js";
+72 import { getFontSubstitution } from "./font_substitutions.js";
+73 import { getGlyphsUnicode } from "./glyphlist.js";
+74 import { getMetrics } from "./metrics.js";
+75 import { getUnicodeForGlyph } from "./unicode.js";
+76 import { ImageResizer } from "./image_resizer.js";
+77 import { MurmurHash3_64 } from "../shared/murmurhash3.js";
+78 import { OperatorList } from "./operator_list.js";
+79 import { PDFImage } from "./image.js";
+80 
+81 const DefaultPartialEvaluatorOptions = Object.freeze({
+82   maxImageSize: -1,
+83   disableFontFace: false,
+84   ignoreErrors: false,
+85   isEvalSupported: true,
+86   isOffscreenCanvasSupported: false,
+87   canvasMaxAreaInBytes: -1,
+88   fontExtraProperties: false,
+89   useSystemFonts: true,
+90   cMapUrl: null,
+91   standardFontDataUrl: null,
+92 });
+93 
+94 const PatternType = {
+95   TILING: 1,
+96   SHADING: 2,
+97 };
+98 
+99 // Optionally avoid sending individual, or very few, text chunks to reduce
+100 // `postMessage` overhead with ReadableStream (see issue 13962).
+101 //
+102 // PLEASE NOTE: This value should *not* be too large (it's used as a lower limit
+103 // in `enqueueChunk`), since that would cause streaming of textContent to become
+104 // essentially useless in practice by sending all (or most) chunks at once.
+105 // Also, a too large value would (indirectly) affect the main-thread `textLayer`
+106 // building negatively by forcing all textContent to be handled at once, which
+107 // could easily end up hurting *overall* performance (e.g. rendering as well).
+108 const TEXT_CHUNK_BATCH_SIZE = 10;
+109 
+110 const deferred = Promise.resolve();
+111 
+112 // Convert PDF blend mode names to HTML5 blend mode names.
+173 
+185 // Trying to minimize Date.now() usage and check every 100 time.
+208 
+209 class PartialEvaluator {
+210   constructor({
+211     xref,
+212     handler,
+213     pageIndex,
+214     idFactory,
+215     fontCache,
+216     builtInCMapCache,
+217     standardFontDataCache,
+218     globalImageCache,
+219     systemFontCache,
+220     options = null,
+221   }) {
+222     this.xref = xref;
+223     this.handler = handler;
+224     this.pageIndex = pageIndex;
+225     this.idFactory = idFactory;
+226     this.fontCache = fontCache;
+227     this.builtInCMapCache = builtInCMapCache;
+228     this.standardFontDataCache = standardFontDataCache;
+229     this.globalImageCache = globalImageCache;
+230     this.systemFontCache = systemFontCache;
+231     this.options = options || DefaultPartialEvaluatorOptions;
+232     this.type3FontRefs = null;
+233 
+234     this._regionalImageCache = new RegionalImageCache();
+235     this._fetchBuiltInCMapBound = this.fetchBuiltInCMap.bind(this);
+236     ImageResizer.setMaxArea(this.options.canvasMaxAreaInBytes);
+237   }
+238 
+4278   async translateFont({
+4279     descriptor,
+4280     dict,
+4281     baseDict,
+4282     composite,
+4283     type,
+4284     firstChar,
+4285     lastChar,
+4286     toUnicode,
+4287     cssFontInfo,
+4288   }) {
+4289     const isType3Font = type === "Type3";
+4290 
+4291     if (!descriptor) {
+4292       if (isType3Font) {
+4293         const bbox = lookupNormalRect(dict.getArray("FontBBox"), [0, 0, 0, 0]);
+4294         // FontDescriptor is only required for Type3 fonts when the document
+4295         // is a tagged pdf. Create a barbebones one to get by.
+4296         descriptor = new Dict(null);
+4297         descriptor.set("FontName", Name.get(type));
+4298         descriptor.set("FontBBox", bbox);
+4299       } else {
+4300         // Before PDF 1.5 if the font was one of the base 14 fonts, having a
+4301         // FontDescriptor was not required.
+4302         // This case is here for compatibility.
+4303         let baseFontName = dict.get("BaseFont");
+4304         if (!(baseFontName instanceof Name)) {
+4305           throw new FormatError("Base font is not specified");
+4306         }
+4307 
+4308         // Using base font name as a font name.
+4309         baseFontName = baseFontName.name.replaceAll(/[,_]/g, "-");
+4310         const metrics = this.getBaseFontMetrics(baseFontName);
+4311 
+4312         // Simulating descriptor flags attribute
+4313         const fontNameWoStyle = baseFontName.split("-", 1)[0];
+4314         const flags =
+4315           (this.isSerifFont(fontNameWoStyle) ? FontFlags.Serif : 0) |
+4316           (metrics.monospace ? FontFlags.FixedPitch : 0) |
+4317           (getSymbolsFonts()[fontNameWoStyle]
+4318             ? FontFlags.Symbolic
+4319             : FontFlags.Nonsymbolic);
+4320 
+4321         const properties = {
+4322           type,
+4323           name: baseFontName,
+4324           loadedName: baseDict.loadedName,
+4325           systemFontInfo: null,
+4326           widths: metrics.widths,
+4327           defaultWidth: metrics.defaultWidth,
+4328           isSimulatedFlags: true,
+4329           flags,
+4330           firstChar,
+4331           lastChar,
+4332           toUnicode,
+4333           xHeight: 0,
+4334           capHeight: 0,
+4335           italicAngle: 0,
+4336           isType3Font,
+4337         };
+4338         const widths = dict.get("Widths");
+4339 
+4340         const standardFontName = getStandardFontName(baseFontName);
+4341         let file = null;
+4342         if (standardFontName) {
+4343           file = await this.fetchStandardFontData(standardFontName);
+4344           properties.isInternalFont = !!file;
+4345         }
+4346         if (!properties.isInternalFont && this.options.useSystemFonts) {
+4347           properties.systemFontInfo = getFontSubstitution(
+4348             this.systemFontCache,
+4349             this.idFactory,
+4350             this.options.standardFontDataUrl,
+4351             baseFontName,
+4352             standardFontName,
+4353             type
+4354           );
+4355         }
+4356 
+4357         const newProperties = await this.extractDataStructures(
+4358           dict,
+4359           properties
+4360         );
+4361         if (Array.isArray(widths)) {
+4362           const glyphWidths = [];
+4363           let j = firstChar;
+4364           for (const w of widths) {
+4365             const width = this.xref.fetchIfRef(w);
+4366             if (typeof width === "number") {
+4367               glyphWidths[j] = width;
+4368             }
+4369             j++;
+4370           }
+4371           newProperties.widths = glyphWidths;
+4372         } else {
+4373           newProperties.widths = this.buildCharCodeToWidth(
+4374             metrics.widths,
+4375             newProperties
+4376           );
+4377         }
+4378         return new Font(baseFontName, file, newProperties);
+4379       }
+4380     }
+4381 
+4382     // According to the spec if 'FontDescriptor' is declared, 'FirstChar',
+4383     // 'LastChar' and 'Widths' should exist too, but some PDF encoders seem
+4384     // to ignore this rule when a variant of a standard font is used.
+4385     // TODO Fill the width array depending on which of the base font this is
+4386     // a variant.
+4387 
+4388     let fontName = descriptor.get("FontName");
+4389     let baseFont = dict.get("BaseFont");
+4390     // Some bad PDFs have a string as the font name.
+4391     if (typeof fontName === "string") {
+4392       fontName = Name.get(fontName);
+4393     }
+4394     if (typeof baseFont === "string") {
+4395       baseFont = Name.get(baseFont);
+4396     }
+4397 
+4398     const fontNameStr = fontName?.name;
+4399     const baseFontStr = baseFont?.name;
+4400     if (!isType3Font && fontNameStr !== baseFontStr) {
+4401       info(
+4402         `The FontDescriptor's FontName is "${fontNameStr}" but ` +
+4403           `should be the same as the Font's BaseFont "${baseFontStr}".`
+4404       );
+4405       // - Workaround for cases where e.g. fontNameStr = 'Arial' and
+4406       //   baseFontStr = 'Arial,Bold' (needed when no font file is embedded).
+4407       //
+4408       // - Workaround for cases where e.g. fontNameStr = 'wg09np' and
+4409       //   baseFontStr = 'Wingdings-Regular' (fixes issue7454.pdf).
+4410       if (
+4411         fontNameStr &&
+4412         baseFontStr &&
+4413         (baseFontStr.startsWith(fontNameStr) ||
+4414           (!isKnownFontName(fontNameStr) && isKnownFontName(baseFontStr)))
+4415       ) {
+4416         fontName = null;
+4417       }
+4418     }
+4419     fontName ||= baseFont;
+4420 
+4421     if (!(fontName instanceof Name)) {
+4422       throw new FormatError("invalid font name");
+4423     }
+4424 
+4425     let fontFile, subtype, length1, length2, length3;
+4426     try {
+4427       fontFile = descriptor.get("FontFile", "FontFile2", "FontFile3");
+4428     } catch (ex) {
+4429       if (!this.options.ignoreErrors) {
+4430         throw ex;
+4431       }
+4432       warn(`translateFont - fetching "${fontName.name}" font file: "${ex}".`);
+4433       fontFile = new NullStream();
+4434     }
+4435     let isInternalFont = false;
+4436     let glyphScaleFactors = null;
+4437     let systemFontInfo = null;
+4438     if (fontFile) {
+4439       if (fontFile.dict) {
+4440         const subtypeEntry = fontFile.dict.get("Subtype");
+4441         if (subtypeEntry instanceof Name) {
+4442           subtype = subtypeEntry.name;
+4443         }
+4444         length1 = fontFile.dict.get("Length1");
+4445         length2 = fontFile.dict.get("Length2");
+4446         length3 = fontFile.dict.get("Length3");
+4447       }
+4448     } else if (cssFontInfo) {
+4449       // We've a missing XFA font.
+4450       const standardFontName = getXfaFontName(fontName.name);
+4451       if (standardFontName) {
+4452         cssFontInfo.fontFamily = `${cssFontInfo.fontFamily}-PdfJS-XFA`;
+4453         cssFontInfo.metrics = standardFontName.metrics || null;
+4454         glyphScaleFactors = standardFontName.factors || null;
+4455         fontFile = await this.fetchStandardFontData(standardFontName.name);
+4456         isInternalFont = !!fontFile;
+4457 
+4458         // We're using a substitution font but for example widths (if any)
+4459         // are related to the glyph positions in the font.
+4460         // So we overwrite everything here to be sure that widths are
+4461         // correct.
+4462         baseDict = dict = getXfaFontDict(fontName.name);
+4463         composite = true;
+4464       }
+4465     } else if (!isType3Font) {
+4466       const standardFontName = getStandardFontName(fontName.name);
+4467       if (standardFontName) {
+4468         fontFile = await this.fetchStandardFontData(standardFontName);
+4469         isInternalFont = !!fontFile;
+4470       }
+4471       if (!isInternalFont && this.options.useSystemFonts) {
+4472         systemFontInfo = getFontSubstitution(
+4473           this.systemFontCache,
+4474           this.idFactory,
+4475           this.options.standardFontDataUrl,
+4476           fontName.name,
+4477           standardFontName,
+4478           type
+4479         );
+4480       }
+4481     }
+4482 
+4483     const fontMatrix = lookupMatrix(
+4484       dict.getArray("FontMatrix"),
+4485       FONT_IDENTITY_MATRIX
+4486     );
+4487     const bbox = lookupNormalRect(
+4488       descriptor.getArray("FontBBox") || dict.getArray("FontBBox"),
+4489       undefined
+4490     );
+4491     let ascent = descriptor.get("Ascent");
+4492     if (typeof ascent !== "number") {
+4493       ascent = undefined;
+4494     }
+4495     let descent = descriptor.get("Descent");
+4496     if (typeof descent !== "number") {
+4497       descent = undefined;
+4498     }
+4499     let xHeight = descriptor.get("XHeight");
+4500     if (typeof xHeight !== "number") {
+4501       xHeight = 0;
+4502     }
+4503     let capHeight = descriptor.get("CapHeight");
+4504     if (typeof capHeight !== "number") {
+4505       capHeight = 0;
+4506     }
+4507     let flags = descriptor.get("Flags");
+4508     if (!Number.isInteger(flags)) {
+4509       flags = 0;
+4510     }
+4511     let italicAngle = descriptor.get("ItalicAngle");
+4512     if (typeof italicAngle !== "number") {
+4513       italicAngle = 0;
+4514     }
+4515 
+4516     const properties = {
+4517       type,
+4518       name: fontName.name,
+4519       subtype,
+4520       file: fontFile,
+4521       length1,
+4522       length2,
+4523       length3,
+4524       isInternalFont,
+4525       loadedName: baseDict.loadedName,
+4526       composite,
+4527       fixedPitch: false,
+4528       fontMatrix,
+4529       firstChar,
+4530       lastChar,
+4531       toUnicode,
+4532       bbox,
+4533       ascent,
+4534       descent,
+4535       xHeight,
+4536       capHeight,
+4537       flags,
+4538       italicAngle,
+4539       isType3Font,
+4540       cssFontInfo,
+4541       scaleFactors: glyphScaleFactors,
+4542       systemFontInfo,
+4543     };
+4544 
+4545     if (composite) {
+4546       const cidEncoding = baseDict.get("Encoding");
+4547       if (cidEncoding instanceof Name) {
+4548         properties.cidEncoding = cidEncoding.name;
+4549       }
+4550       const cMap = await CMapFactory.create({
+4551         encoding: cidEncoding,
+4552         fetchBuiltInCMap: this._fetchBuiltInCMapBound,
+4553         useCMap: null,
+4554       });
+4555       properties.cMap = cMap;
+4556       properties.vertical = properties.cMap.vertical;
+4557     }
+4558 
+4559     const newProperties = await this.extractDataStructures(dict, properties);
+4560     this.extractWidths(dict, descriptor, newProperties);
+4561 
+4562     return new Font(fontName.name, fontFile, newProperties);
+4563   }
+4564 
+4607 }
+4608 
+5212 
+</code>
+
+PR summary:
+<pr_summary>
+Fallback to a standard font if a font-file entry doesn't contain a Stream (issue 18941)
+The PDF document is clearly corrupt, since it has /FontFile2 entries that are Dictionaries which obviously isn't correct.
+While there's obviously no guarantee that things will look perfect this way, actually rendering the text at all should be an improvement in general.
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

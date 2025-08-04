@@ -1,0 +1,854 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Highlight on cropped pdf isn't visible when saving/printing
+</issue>
+
+PDF File:
+<pdf>
+bug1872721.pdf
+</pdf>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/highlight.js b/src/display/editor/highlight.js
+--- a/src/display/editor/highlight.js
++++ b/src/display/editor/highlight.js
+@@ -361,14 +361,15 @@ class HighlightEditor extends AnnotationEditor {
+     this.parent?.drawLayer.removeClass(this.#outlineId, "selected");
+   }
+ 
+-  #serializeBoxes() {
++  #serializeBoxes(rect) {
+     const [pageWidth, pageHeight] = this.pageDimensions;
+     const boxes = this.#boxes;
+     const quadPoints = new Array(boxes.length * 8);
++    const [tx, ty] = rect;
+     let i = 0;
+     for (const { x, y, width, height } of boxes) {
+-      const sx = x * pageWidth;
+-      const sy = (1 - y - height) * pageHeight;
++      const sx = tx + x * pageWidth;
++      const sy = ty + (1 - y - height) * pageHeight;
+       // The specifications say that the rectangle should start from the bottom
+       // left corner and go counter-clockwise.
+       // But when opening the file in Adobe Acrobat it appears that this isn't
+@@ -382,12 +383,11 @@ class HighlightEditor extends AnnotationEditor {
+     return quadPoints;
+   }
+ 
+-  #serializeOutlines() {
++  #serializeOutlines(rect) {
+     const [pageWidth, pageHeight] = this.pageDimensions;
+     const width = this.width * pageWidth;
+     const height = this.height * pageHeight;
+-    const tx = this.x * pageWidth;
+-    const ty = (1 - this.y - this.height) * pageHeight;
++    const [tx, ty] = rect;
+     const outlines = [];
+     for (const outline of this.#highlightOutlines.outlines) {
+       const points = new Array(outline.length);
+@@ -404,18 +404,22 @@ class HighlightEditor extends AnnotationEditor {
+   static deserialize(data, parent, uiManager) {
+     const editor = super.deserialize(data, parent, uiManager);
+ 
+-    const { rect, color, quadPoints } = data;
++    const {
++      rect: [blX, blY, trX, trY],
++      color,
++      quadPoints,
++    } = data;
+     editor.color = Util.makeHexColor(...color);
+     editor.#opacity = data.opacity;
+ 
+     const [pageWidth, pageHeight] = editor.pageDimensions;
+-    editor.width = (rect[2] - rect[0]) / pageWidth;
+-    editor.height = (rect[3] - rect[1]) / pageHeight;
++    editor.width = (trX - blX) / pageWidth;
++    editor.height = (trY - blY) / pageHeight;
+     const boxes = (editor.#boxes = []);
+     for (let i = 0; i < quadPoints.length; i += 8) {
+       boxes.push({
+-        x: quadPoints[4] / pageWidth,
+-        y: 1 - quadPoints[i + 5] / pageHeight,
++        x: (quadPoints[4] - trX) / pageWidth,
++        y: (trY - (1 - quadPoints[i + 5])) / pageHeight,
+         width: (quadPoints[i + 2] - quadPoints[i]) / pageWidth,
+         height: (quadPoints[i + 5] - quadPoints[i + 1]) / pageHeight,
+       });
+@@ -439,8 +443,8 @@ class HighlightEditor extends AnnotationEditor {
+       annotationType: AnnotationEditorType.HIGHLIGHT,
+       color,
+       opacity: this.#opacity,
+-      quadPoints: this.#serializeBoxes(),
+-      outlines: this.#serializeOutlines(),
++      quadPoints: this.#serializeBoxes(rect),
++      outlines: this.#serializeOutlines(rect),
+       pageIndex: this.pageIndex,
+       rect,
+       rotation: 0,
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.6
+- @babel/preset-env: ^7.23.6
+- @babel/runtime: ^7.23.6
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @javascript-obfuscator/escodegen: 2.3.0
+- @jazzer.js/core: ^2.1.0
+- acorn: ^8.11.2
+- autoprefixer: ^10.4.16
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001571
+- canvas: ^2.11.2
+- core-js: ^3.34.0
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.1
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^50.0.1
+- globals: ^13.24.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.32
+- postcss-dark-theme-class: ^1.1.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.1.1
+- puppeteer: ^21.6.1
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.0.2
+- stylelint-prettier: ^5.0.0
+- terser: ^5.26.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.89.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n.js`: L10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/highlight.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorParamsType,
+18   AnnotationEditorType,
+19   Util,
+20 } from "../../shared/util.js";
+21 import { AnnotationEditor } from "./editor.js";
+22 import { bindEvents } from "./tools.js";
+23 import { ColorPicker } from "./color_picker.js";
+24 import { Outliner } from "./outliner.js";
+25 
+26 /**
+27  * Basic draw editor in order to generate an Highlight annotation.
+28  */
+29 class HighlightEditor extends AnnotationEditor {
+30   #boxes;
+31 
+32   #clipPathId = null;
+33 
+34   #colorPicker = null;
+35 
+36   #focusOutlines = null;
+37 
+38   #highlightDiv = null;
+39 
+40   #highlightOutlines = null;
+41 
+42   #id = null;
+43 
+44   #lastPoint = null;
+45 
+46   #opacity;
+47 
+48   #outlineId = null;
+49 
+50   static _defaultColor = null;
+51 
+52   static _defaultOpacity = 1;
+53 
+54   static _l10nPromise;
+55 
+56   static _type = "highlight";
+57 
+58   static _editorType = AnnotationEditorType.HIGHLIGHT;
+59 
+60   constructor(params) {
+61     super({ ...params, name: "highlightEditor" });
+62     HighlightEditor._defaultColor ||=
+63       this._uiManager.highlightColors?.values().next().value || "#fff066";
+64     this.color = params.color || HighlightEditor._defaultColor;
+65     this.#opacity = params.opacity || HighlightEditor._defaultOpacity;
+66     this.#boxes = params.boxes || null;
+67     this._isDraggable = false;
+68 
+69     this.#createOutlines();
+70     this.#addToDrawLayer();
+71     this.rotate(this.rotation);
+72   }
+73 
+74   #createOutlines() {
+75     const outliner = new Outliner(this.#boxes, /* borderWidth = */ 0.001);
+76     this.#highlightOutlines = outliner.getOutlines();
+77     ({
+78       x: this.x,
+79       y: this.y,
+80       width: this.width,
+81       height: this.height,
+82     } = this.#highlightOutlines.box);
+83 
+84     const outlinerForOutline = new Outliner(
+85       this.#boxes,
+86       /* borderWidth = */ 0.0025,
+87       /* innerMargin = */ 0.001,
+88       this._uiManager.direction === "ltr"
+89     );
+90     this.#focusOutlines = outlinerForOutline.getOutlines();
+91 
+92     // The last point is in the pages coordinate system.
+93     const { lastPoint } = this.#focusOutlines.box;
+94     this.#lastPoint = [
+95       (lastPoint[0] - this.x) / this.width,
+96       (lastPoint[1] - this.y) / this.height,
+97     ];
+98   }
+99 
+100   static initialize(l10n) {
+101     AnnotationEditor.initialize(l10n);
+102   }
+103 
+104   static updateDefaultParams(type, value) {
+105     switch (type) {
+106       case AnnotationEditorParamsType.HIGHLIGHT_DEFAULT_COLOR:
+107         HighlightEditor._defaultColor = value;
+108         break;
+109     }
+110   }
+111 
+112   /** @inheritdoc */
+113   get toolbarPosition() {
+114     return this.#lastPoint;
+115   }
+116 
+117   /** @inheritdoc */
+118   updateParams(type, value) {
+119     switch (type) {
+120       case AnnotationEditorParamsType.HIGHLIGHT_COLOR:
+121         this.#updateColor(value);
+122         break;
+123     }
+124   }
+125 
+126   static get defaultPropertiesToUpdate() {
+127     return [
+128       [
+129         AnnotationEditorParamsType.HIGHLIGHT_DEFAULT_COLOR,
+130         HighlightEditor._defaultColor,
+131       ],
+132     ];
+133   }
+134 
+135   /** @inheritdoc */
+136   get propertiesToUpdate() {
+137     return [
+138       [
+139         AnnotationEditorParamsType.HIGHLIGHT_COLOR,
+140         this.color || HighlightEditor._defaultColor,
+141       ],
+142     ];
+143   }
+144 
+145   /**
+146    * Update the color and make this action undoable.
+147    * @param {string} color
+148    */
+149   #updateColor(color) {
+150     const savedColor = this.color;
+151     this.addCommands({
+152       cmd: () => {
+153         this.color = color;
+154         this.parent.drawLayer.changeColor(this.#id, color);
+155         this.#colorPicker?.updateColor(color);
+156       },
+157       undo: () => {
+158         this.color = savedColor;
+159         this.parent.drawLayer.changeColor(this.#id, savedColor);
+160         this.#colorPicker?.updateColor(savedColor);
+161       },
+162       mustExec: true,
+163       type: AnnotationEditorParamsType.HIGHLIGHT_COLOR,
+164       overwriteIfSameType: true,
+165       keepUndo: true,
+166     });
+167   }
+168 
+169   /** @inheritdoc */
+170   async addEditToolbar() {
+171     const toolbar = await super.addEditToolbar();
+172     if (!toolbar) {
+173       return null;
+174     }
+175     if (this._uiManager.highlightColors) {
+176       this.#colorPicker = new ColorPicker({ editor: this });
+177       toolbar.addColorPicker(this.#colorPicker);
+178     }
+179     return toolbar;
+180   }
+181 
+182   /** @inheritdoc */
+183   disableEditing() {
+184     super.disableEditing();
+185     this.div.classList.toggle("disabled", true);
+186   }
+187 
+188   /** @inheritdoc */
+189   enableEditing() {
+190     super.enableEditing();
+191     this.div.classList.toggle("disabled", false);
+192   }
+193 
+194   /** @inheritdoc */
+195   fixAndSetPosition() {
+196     return super.fixAndSetPosition(0);
+197   }
+198 
+199   /** @inheritdoc */
+200   getRect(tx, ty) {
+201     return super.getRect(tx, ty, 0);
+202   }
+203 
+204   /** @inheritdoc */
+205   onceAdded() {
+206     this.parent.addUndoableEditor(this);
+207     this.div.focus();
+208   }
+209 
+210   /** @inheritdoc */
+211   remove() {
+212     super.remove();
+213     this.#cleanDrawLayer();
+214   }
+215 
+216   /** @inheritdoc */
+217   rebuild() {
+218     if (!this.parent) {
+219       return;
+220     }
+221     super.rebuild();
+222     if (this.div === null) {
+223       return;
+224     }
+225 
+226     this.#addToDrawLayer();
+227 
+228     if (!this.isAttachedToDOM) {
+229       // At some point this editor was removed and we're rebuilting it,
+230       // hence we must add it to its parent.
+231       this.parent.add(this);
+232     }
+233   }
+234 
+235   setParent(parent) {
+236     let mustBeSelected = false;
+237     if (this.parent && !parent) {
+238       this.#cleanDrawLayer();
+239     } else if (parent) {
+240       this.#addToDrawLayer(parent);
+241       // If mustBeSelected is true it means that this editor was selected
+242       // when its parent has been destroyed, hence we must select it again.
+243       mustBeSelected =
+244         !this.parent && this.div?.classList.contains("selectedEditor");
+245     }
+246     super.setParent(parent);
+247     if (mustBeSelected) {
+248       // We select it after the parent has been set.
+249       this.select();
+250     }
+251   }
+252 
+253   #cleanDrawLayer() {
+254     if (this.#id === null || !this.parent) {
+255       return;
+256     }
+257     this.parent.drawLayer.remove(this.#id);
+258     this.#id = null;
+259     this.parent.drawLayer.remove(this.#outlineId);
+260     this.#outlineId = null;
+261   }
+262 
+263   #addToDrawLayer(parent = this.parent) {
+264     if (this.#id !== null) {
+265       return;
+266     }
+267     ({ id: this.#id, clipPathId: this.#clipPathId } =
+268       parent.drawLayer.highlight(
+269         this.#highlightOutlines,
+270         this.color,
+271         this.#opacity
+272       ));
+273     if (this.#highlightDiv) {
+274       this.#highlightDiv.style.clipPath = this.#clipPathId;
+275     }
+276     this.#outlineId = parent.drawLayer.highlightOutline(this.#focusOutlines);
+277   }
+278 
+279   static #rotateBbox({ x, y, width, height }, angle) {
+280     switch (angle) {
+281       case 90:
+282         return {
+283           x: 1 - y - height,
+284           y: x,
+285           width: height,
+286           height: width,
+287         };
+288       case 180:
+289         return {
+290           x: 1 - x - width,
+291           y: 1 - y - height,
+292           width,
+293           height,
+294         };
+295       case 270:
+296         return {
+297           x: y,
+298           y: 1 - x - width,
+299           width: height,
+300           height: width,
+301         };
+302     }
+303     return {
+304       x,
+305       y,
+306       width,
+307       height,
+308     };
+309   }
+310 
+311   /** @inheritdoc */
+312   rotate(angle) {
+313     const { drawLayer } = this.parent;
+314     drawLayer.rotate(this.#id, angle);
+315     drawLayer.rotate(this.#outlineId, angle);
+316     drawLayer.updateBox(this.#id, HighlightEditor.#rotateBbox(this, angle));
+317     drawLayer.updateBox(
+318       this.#outlineId,
+319       HighlightEditor.#rotateBbox(this.#focusOutlines.box, angle)
+320     );
+321   }
+322 
+323   /** @inheritdoc */
+324   render() {
+325     if (this.div) {
+326       return this.div;
+327     }
+328 
+329     const div = super.render();
+330     const highlightDiv = (this.#highlightDiv = document.createElement("div"));
+331     div.append(highlightDiv);
+332     highlightDiv.className = "internal";
+333     highlightDiv.style.clipPath = this.#clipPathId;
+334     const [parentWidth, parentHeight] = this.parentDimensions;
+335     this.setDims(this.width * parentWidth, this.height * parentHeight);
+336 
+337     bindEvents(this, this.#highlightDiv, ["pointerover", "pointerleave"]);
+338     this.enableEditing();
+339 
+340     return div;
+341   }
+342 
+343   pointerover() {
+344     this.parent.drawLayer.addClass(this.#outlineId, "hovered");
+345   }
+346 
+347   pointerleave() {
+348     this.parent.drawLayer.removeClass(this.#outlineId, "hovered");
+349   }
+350 
+351   /** @inheritdoc */
+352   select() {
+353     super.select();
+354     this.parent?.drawLayer.removeClass(this.#outlineId, "hovered");
+355     this.parent?.drawLayer.addClass(this.#outlineId, "selected");
+356   }
+357 
+358   /** @inheritdoc */
+359   unselect() {
+360     super.unselect();
+361     this.parent?.drawLayer.removeClass(this.#outlineId, "selected");
+362   }
+363 
+364   #serializeBoxes() {
+365     const [pageWidth, pageHeight] = this.pageDimensions;
+366     const boxes = this.#boxes;
+367     const quadPoints = new Array(boxes.length * 8);
+368     let i = 0;
+369     for (const { x, y, width, height } of boxes) {
+370       const sx = x * pageWidth;
+371       const sy = (1 - y - height) * pageHeight;
+372       // The specifications say that the rectangle should start from the bottom
+373       // left corner and go counter-clockwise.
+374       // But when opening the file in Adobe Acrobat it appears that this isn't
+375       // correct hence the 4th and 6th numbers are just swapped.
+376       quadPoints[i] = quadPoints[i + 4] = sx;
+377       quadPoints[i + 1] = quadPoints[i + 3] = sy;
+378       quadPoints[i + 2] = quadPoints[i + 6] = sx + width * pageWidth;
+379       quadPoints[i + 5] = quadPoints[i + 7] = sy + height * pageHeight;
+380       i += 8;
+381     }
+382     return quadPoints;
+383   }
+384 
+385   #serializeOutlines() {
+386     const [pageWidth, pageHeight] = this.pageDimensions;
+387     const width = this.width * pageWidth;
+388     const height = this.height * pageHeight;
+389     const tx = this.x * pageWidth;
+390     const ty = (1 - this.y - this.height) * pageHeight;
+391     const outlines = [];
+392     for (const outline of this.#highlightOutlines.outlines) {
+393       const points = new Array(outline.length);
+394       for (let i = 0; i < outline.length; i += 2) {
+395         points[i] = tx + outline[i] * width;
+396         points[i + 1] = ty + (1 - outline[i + 1]) * height;
+397       }
+398       outlines.push(points);
+399     }
+400     return outlines;
+401   }
+402 
+403   /** @inheritdoc */
+404   static deserialize(data, parent, uiManager) {
+405     const editor = super.deserialize(data, parent, uiManager);
+406 
+407     const { rect, color, quadPoints } = data;
+408     editor.color = Util.makeHexColor(...color);
+409     editor.#opacity = data.opacity;
+410 
+411     const [pageWidth, pageHeight] = editor.pageDimensions;
+412     editor.width = (rect[2] - rect[0]) / pageWidth;
+413     editor.height = (rect[3] - rect[1]) / pageHeight;
+414     const boxes = (editor.#boxes = []);
+415     for (let i = 0; i < quadPoints.length; i += 8) {
+416       boxes.push({
+417         x: quadPoints[4] / pageWidth,
+418         y: 1 - quadPoints[i + 5] / pageHeight,
+419         width: (quadPoints[i + 2] - quadPoints[i]) / pageWidth,
+420         height: (quadPoints[i + 5] - quadPoints[i + 1]) / pageHeight,
+421       });
+422     }
+423     editor.#createOutlines();
+424 
+425     return editor;
+426   }
+427 
+428   /** @inheritdoc */
+429   serialize(isForCopying = false) {
+430     // It doesn't make sense to copy/paste a highlight annotation.
+431     if (this.isEmpty() || isForCopying) {
+432       return null;
+433     }
+434 
+435     const rect = this.getRect(0, 0);
+436     const color = AnnotationEditor._colorManager.convert(this.color);
+437 
+438     return {
+439       annotationType: AnnotationEditorType.HIGHLIGHT,
+440       color,
+441       opacity: this.#opacity,
+442       quadPoints: this.#serializeBoxes(),
+443       outlines: this.#serializeOutlines(),
+444       pageIndex: this.pageIndex,
+445       rect,
+446       rotation: 0,
+447       structTreeParentId: this._structTreeParentId,
+448     };
+449   }
+450 
+451   static canCreateNewEmptyEditor() {
+452     return false;
+453   }
+454 }
+455 
+456 export { HighlightEditor };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/pdf_spec.js
+/* Copyright 2023 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  AbortException,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationMode,
+  CMapCompressionType,
+  createValidAbsoluteUrl,
+  FeatureTest,
+  ImageKind,
+  InvalidPDFException,
+  isNodeJS,
+  MissingPDFException,
+  normalizeUnicode,
+  OPS,
+  PasswordResponses,
+  PermissionFlag,
+  PromiseCapability,
+  shadow,
+  UnexpectedResponseException,
+  Util,
+  VerbosityLevel,
+} from "../../src/shared/util.js";
+import {
+  build,
+  getDocument,
+  PDFDataRangeTransport,
+  PDFWorker,
+  version,
+} from "../../src/display/api.js";
+import {
+  DOMSVGFactory,
+  fetchData,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getXfaPageViewport,
+  isDataScheme,
+  isPdfFile,
+  noContextMenu,
+  PDFDateString,
+  PixelsPerInch,
+  RenderingCancelledException,
+  setLayerDimensions,
+} from "../../src/display/display_utils.js";
+import {
+  renderTextLayer,
+  updateTextLayer,
+} from "../../src/display/text_layer.js";
+import { AnnotationEditorLayer } from "../../src/display/editor/annotation_editor_layer.js";
+import { AnnotationEditorUIManager } from "../../src/display/editor/tools.js";
+import { AnnotationLayer } from "../../src/display/annotation_layer.js";
+import { ColorPicker } from "../../src/display/editor/color_picker.js";
+import { DrawLayer } from "../../src/display/draw_layer.js";
+import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
+import { Outliner } from "../../src/display/editor/outliner.js";
+import { XfaLayer } from "../../src/display/xfa_layer.js";
+const expectedAPI = Object.freeze({
+  AbortException,
+  AnnotationEditorLayer,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationEditorUIManager,
+  AnnotationLayer,
+  AnnotationMode,
+  build,
+  CMapCompressionType,
+  ColorPicker,
+  createValidAbsoluteUrl,
+  DOMSVGFactory,
+  DrawLayer,
+  FeatureTest,
+  fetchData,
+  getDocument,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getXfaPageViewport,
+  GlobalWorkerOptions,
+  ImageKind,
+  InvalidPDFException,
+  isDataScheme,
+  isPdfFile,
+  MissingPDFException,
+  noContextMenu,
+  normalizeUnicode,
+  OPS,
+  Outliner,
+  PasswordResponses,
+  PDFDataRangeTransport,
+  PDFDateString,
+  PDFWorker,
+  PermissionFlag,
+  PixelsPerInch,
+  PromiseCapability,
+  RenderingCancelledException,
+  renderTextLayer,
+  setLayerDimensions,
+  shadow,
+  UnexpectedResponseException,
+  updateTextLayer,
+  Util,
+  VerbosityLevel,
+  version,
+  XfaLayer,
+});
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. You can use the PDF file for testing as follows:
+const { getDocument } = await import('../../src/display/api.js');
+const { buildGetDocumentParams } = await import('./test_utils.js');
+const loadingTask = getDocument(buildGetDocumentParams('bug1872721.pdf'))
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

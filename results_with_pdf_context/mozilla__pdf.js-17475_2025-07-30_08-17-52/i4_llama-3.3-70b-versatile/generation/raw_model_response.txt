@@ -1,0 +1,58 @@
+```javascript
+it("should make highlight visible when saving/printing a cropped pdf", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const { PDFPageView } = await import('../../web/pdf_page_view.js');
+  const { PDFViewer } = await import('../../web/pdf_viewer.js');
+  const { Util } = await import('../../shared/util.js');
+  const loadingTask = getDocument(buildGetDocumentParams('bug1872721.pdf'));
+  const pdfViewer = new PDFViewer({
+    container: document.createElement('div'),
+    viewer: document.createElement('div'),
+    renderInteractiveForms: false,
+  });
+  const pdfDoc = await loadingTask.promise;
+  const pdfPage = await pdfDoc.getPage(1);
+  const pageView = new PDFPageView({
+    container: document.createElement('div'),
+    id: 1,
+    scale: 1,
+    renderingQueue: pdfViewer.renderingQueue,
+    viewport: pdfPage.getViewport({ scale: 1 }),
+    useDocumentColors: false,
+  });
+  const annotationEditor = new (await import('./highlight.js')).HighlightEditor({
+    annotation: {
+      subtype: 'Highlight',
+      rect: [10, 10, 50, 50],
+      color: [1, 0, 0],
+      opacity: 1,
+    },
+    pageIndex: 0,
+    pageView: pageView,
+  });
+  const expectedQuadPoints = annotationEditor.serialize().quadPoints;
+  const actualQuadPoints = annotationEditor.serialize().quadPoints;
+  await pdfPage.render({
+    canvasContext: null,
+    viewport: pageView.viewport,
+    renderInteractiveForms: false,
+    annotationEditor,
+  });
+  const highlightEditor = new (await import('./highlight.js')).HighlightEditor({
+    annotation: {
+      subtype: 'Highlight',
+      rect: [10, 10, 50, 50],
+      color: [1, 0, 0],
+      opacity: 1,
+    },
+    pageIndex: 0,
+    pageView: pageView,
+  });
+  const rect = [10, 10, 50, 50];
+  const quadPoints = highlightEditor.#serializeBoxes(rect);
+  const expectedVisibility = true;
+  const actualVisibility = quadPoints.some((point) => point > 0);
+  expect(actualVisibility).toBe(expectedVisibility);
+});
+```

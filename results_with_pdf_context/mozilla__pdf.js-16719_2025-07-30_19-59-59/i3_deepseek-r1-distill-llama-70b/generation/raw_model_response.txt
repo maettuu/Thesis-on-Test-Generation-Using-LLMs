@@ -1,0 +1,67 @@
+<think>
+Okay, I need to write a regression test for the issue where pressing the Delete key should delete the selected element when editing a PDF. The patch adds "mac+Delete" to the list of keyboard shortcuts, so the test should ensure that this works correctly on macOS.
+
+First, I'll look at the existing test file to see what's available. The test file already imports several modules, including AnnotationEditorUIManager from the correct path. I can use that.
+
+I'll create a test block using `it("...", async () => {...})`. The test should simulate selecting an annotation and pressing Delete on both non-mac and mac systems.
+
+I'll set up a mock PDF document and create an instance of AnnotationEditorUIManager. Then, I'll create a sample annotation, add it to the storage, and select it.
+
+To test the Delete functionality, I'll simulate keydown events for both 'Delete' and 'meta+Delete' (since 'meta' is the macOS command key). I'll check if the annotation is deleted from the storage after each event.
+
+I'll structure the test to check both cases: non-mac and mac. For each case, I'll set the platform using FeatureTest.platform.isMac and then trigger the keydown event. After each trigger, I'll assert that the annotation is removed from the storage.
+
+Finally, I'll make sure the test is self-contained and only uses the provided imports without adding new dependencies.
+</think>
+
+```javascript
+it("should delete selected annotation when pressing Delete key", async () => {
+  const { AnnotationEditorUIManager, Annotation } = await import("../../src/display/editor/tools.js");
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  
+  const pdfDocument = {
+    annotationStorage: new Map(),
+    filterFactory: {},
+  };
+
+  const annotation = AnnotationFactory.create(AnnotationType.UNDERLINE, {
+    color: [1, 0, 0],
+    page: 1,
+    quads: [[0, 0, 10, 10]],
+  });
+
+  pdfDocument.annotationStorage.setValue(annotation.id, annotation);
+
+  const manager = new AnnotationEditorUIManager({}, {}, pdfDocument, {});
+
+  manager.updateMode(AnnotationEditorType.UNDERLINE);
+
+  const editor = manager.getEditor(annotation.id);
+  manager.setSelected(editor);
+
+  // Test non-mac Delete
+  {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Delete',
+      bubbles: true,
+      cancelable: true,
+    });
+    FeatureTest.platform.isMac = false;
+    manager.keydown(event);
+    expect(pdfDocument.annotationStorage.has(annotation.id)).toBe(false);
+  }
+
+  // Test mac Delete
+  {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Delete',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    FeatureTest.platform.isMac = true;
+    manager.keydown(event);
+    expect(pdfDocument.annotationStorage.has(annotation.id)).toBe(false);
+  }
+});
+```

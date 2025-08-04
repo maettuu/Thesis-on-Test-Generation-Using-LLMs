@@ -1,0 +1,40 @@
+<think>
+Okay, I need to write a test that verifies the patch fixes the issue where large images in PDFs aren't rendered by PDF.js but are by other renderers like Atril. The issue seems to be related to how JPX images are handled.
+
+First, I'll look at the provided code changes. The patch modifies several files, but the key changes are in jpx.js and jpx_stream.js. It looks like they're replacing the internal JPX decoder with OpenJPEG, which is a more robust library. The new decode function in jpx.js uses OpenJPEG WASM, which should handle more complex images correctly.
+
+So, the test should load a PDF with a large JPX image and check if it's rendered properly. Before the patch, this image wasn't showing up, but after, it should.
+
+I'll structure the test using Jest. I'll need to import the necessary modules like PDFDocument and PDFPage from pdf.js. Then, I'll fetch the example PDF file provided in the issue. I'll create a document, load the first page, and render it.
+
+The crucial part is to check if the image is present. Since we can't visually inspect, I'll check the rendered canvas for non-transparent pixels. If the image was rendered, there should be some non-transparent pixels; otherwise, the canvas would be blank.
+
+I'll write an async function to load the PDF, render the page, and then check the canvas data. The test will fail before the patch because the image isn't rendered, so the canvas would be transparent. After the patch, the canvas should have image data, making the test pass.
+
+I need to ensure the test is self-contained and doesn't rely on external dependencies beyond what's provided. Also, I'll make sure to handle any potential errors during loading or rendering.
+
+So, the test will fetch the PDF, render the first page, get the canvas data, and assert that there are non-transparent pixels, indicating the image was rendered correctly.
+</think>
+
+```javascript
+it("should render large JPX images", async () => {
+  const { PDFDocument, PDFPage } = await import("../../src/display/api.js");
+  const examplePdf = await fetch("https://github.com/mozilla/pdf.js/files/13391396/example.pdf");
+  const pdf = await PDFDocument.load(await examplePdf.blob());
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const renderTask = page.render({
+    canvasContext: canvas.getContext("2d"),
+    viewport,
+  });
+  await renderTask.promise;
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  const hasImage = data.some((value) => value < 255);
+  expect(hasImage).toBe(true);
+});
+```

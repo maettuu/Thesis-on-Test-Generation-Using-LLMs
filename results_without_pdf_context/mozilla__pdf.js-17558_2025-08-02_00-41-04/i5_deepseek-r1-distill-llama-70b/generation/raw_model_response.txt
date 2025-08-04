@@ -1,0 +1,76 @@
+<think>
+Okay, I need to write a regression test for the issue where emojis aren't shown in PDFs. The patch provided modifies several files, so I should figure out what changes were made and how to test them effectively.
+
+Looking at the patch, the main changes are in `annotation.js`, `core_utils.js`, and `default_appearance.js`. The problem was that emojis, which are Unicode characters, weren't rendering correctly in PDFs. The patch removes the `FakeUnicodeFont.toUnicodeStream` and changes how fonts are handled, which probably affects how Unicode characters are processed.
+
+I think the test should create a PDF with an emoji and check if it's rendered correctly. I'll use `PDFDocument` from `pdf-lib` to create a simple PDF. Then, I'll use `pdfjs` to load the PDF and render the page to check if the emoji appears.
+
+I'll structure the test using Jest. I'll create a PDF in memory with a free text annotation containing an emoji. Then, I'll load this PDF into `pdfjs` and render the first page. I'll extract the text from the page and check if the emoji is present.
+
+I need to import the necessary modules. Since the test runs in Node.js, I'll use `pdf-lib` for creating the PDF and `pdfjs` for reading it. I'll also use `stream` and `buffer` for handling the PDF data.
+
+The test will have these steps:
+1. Create a PDF with an emoji using `PDFDocument`.
+2. Save the PDF to a buffer.
+3. Load the PDF buffer into `pdfjs` using `PDFDocumentLoadingTask`.
+4. Get the first page and render it.
+5. Extract the text from the page.
+6. Assert that the text includes the emoji.
+
+I should make sure that the test is self-contained and doesn't rely on external files. Also, I'll need to handle asynchronous operations properly with `async/await`.
+
+Potential issues to consider:
+- The PDF creation might not include the correct fonts for emojis.
+- The rendering in `pdfjs` might not capture the text correctly.
+- The text extraction might not work as expected, so I'll use `TextLayer` to get the text.
+
+I'll write the test, ensuring that all steps are correctly implemented and that the assertions are accurate. This should verify that after the patch, emojis are correctly displayed in PDFs.
+</think>
+
+```javascript
+it("should render emojis in PDFs correctly", async () => {
+  const { PDFDocument } = await import("pdf-lib");
+  const { PDFDocumentLoadingTask, PDFPageProxy, TextLayer } = await import("../../src/display/api.js");
+  const { stream } = await import("stream");
+  const { Buffer } = await import("buffer");
+
+  // Create a PDF with an emoji
+  const pdfDoc = new PDFDocument();
+  const page = pdfDoc.addPage();
+  const annotation = new PDFAnnotation();
+  annotation.setFreeText(new PDFFreeText({
+    text: "👻",
+    x: 100,
+    y: 100,
+  }));
+  page.addAnnotation(annotation);
+  
+  // Save PDF to buffer
+  const pdfBuffer = await new Promise((resolve) => {
+    const chunks = [];
+    const pdfStream = pdfDoc.pipe(stream.PassThrough());
+    pdfStream.on("data", (chunk) => chunks.push(chunk));
+    pdfStream.on("end", () => resolve(Buffer.concat(chunks)));
+    pdfDoc.end();
+  });
+
+  // Load PDF into pdfjs
+  const loadingTask = PDFDocumentLoadingTask.fromBuffer(pdfBuffer);
+  const pdf = await loadingTask.run();
+  const pageProxy = (await pdf.getPage(1));
+  const textLayer = new TextLayer({
+    pageIndex: 0,
+    container: document.createElement("div"),
+  });
+
+  // Render page and extract text
+  await pageProxy.render({
+    viewport: pageProxy.getViewport({ scale: 1 }),
+    spreadMode: "none",
+    renderInteractiveForms: false,
+  });
+  const text = await textLayer.getTextContent();
+
+  expect(text.items[0].str).toContain("👻");
+});
+```

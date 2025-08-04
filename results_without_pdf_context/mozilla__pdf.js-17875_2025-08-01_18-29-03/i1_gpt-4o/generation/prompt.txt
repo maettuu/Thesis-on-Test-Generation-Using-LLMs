@@ -1,0 +1,708 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+JBIG2 text segments with reference corner on the right do not render correctly
+Attach (recommended) or Link to PDF file here:
+
+[symbol-bottomleft.pdf](https://github.com/mozilla/pdf.js/files/14846132/symbol-bottomleft.pdf)
+[symbol-topright.pdf](https://github.com/mozilla/pdf.js/files/14846133/symbol-topright.pdf)
+[symbol-bottomright.pdf](https://github.com/mozilla/pdf.js/files/14846134/symbol-bottomright.pdf)
+
+Configuration:
+- Web browser and its version: Firefox 124.0.2
+- Operating system and its version: macOS 13.5.2
+- PDF.js version: Whatever ships with that Firefox
+- Is a browser extension: Whatever is the default Firefox setup
+
+Steps to reproduce the problem:
+1. Open each of the three PDFs above
+
+What is the expected behavior? (add screenshot)
+
+<img width="1143" alt="image" src="https://github.com/mozilla/pdf.js/assets/3487/d7277bde-de62-47b5-8b7f-97a892d01fe2">
+
+The should all look identical, like symbol-bottomleft.pdf looks in Firefox, and like all three look in Chrome. `mutool extract` (which I believe uses jbig2dec for jbig2 decoding) also produces output like Chrome for all three (…albeit with an unrelated warning).
+
+What went wrong? (add screenshot)
+
+The two with the reference corner on the right look compressed in the x direction:
+
+<img width="1143" alt="image" src="https://github.com/mozilla/pdf.js/assets/3487/3957a60a-2930-4712-8d5a-ede46830236f">
+
+(I made these files myself while writing a JBIG2 decoder. I'm reasonably confident that the files and Chrome and jbig2dec and my decoder are correct, but it's possible the files are wrong instead.)
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/jbig2.js b/src/core/jbig2.js
+--- a/src/core/jbig2.js
++++ b/src/core/jbig2.js
+@@ -865,6 +865,20 @@ function decodeTextRegion(
+           decodingContext
+         );
+       }
++
++      let increment = 0;
++      if (!transposed) {
++        if (referenceCorner > 1) {
++          currentS += symbolWidth - 1;
++        } else {
++          increment = symbolWidth - 1;
++        }
++      } else if (!(referenceCorner & 1)) {
++        currentS += symbolHeight - 1;
++      } else {
++        increment = symbolHeight - 1;
++      }
++
+       const offsetT = t - (referenceCorner & 1 ? 0 : symbolHeight - 1);
+       const offsetS = currentS - (referenceCorner & 2 ? symbolWidth - 1 : 0);
+       let s2, t2, symbolRow;
+@@ -896,7 +910,6 @@ function decodeTextRegion(
+               );
+           }
+         }
+-        currentS += symbolHeight - 1;
+       } else {
+         for (t2 = 0; t2 < symbolHeight; t2++) {
+           row = bitmap[offsetT + t2];
+@@ -921,7 +934,6 @@ function decodeTextRegion(
+               );
+           }
+         }
+-        currentS += symbolWidth - 1;
+       }
+       i++;
+       const deltaS = huffman
+@@ -930,7 +942,7 @@ function decodeTextRegion(
+       if (deltaS === null) {
+         break; // OOB
+       }
+-      currentS += deltaS + dsOffset;
++      currentS += increment + deltaS + dsOffset;
+     } while (true);
+   }
+   return bitmap;
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.24.3
+- @babel/preset-env: ^7.24.3
+- @babel/runtime: ^7.24.1
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @jazzer.js/core: ^2.1.0
+- autoprefixer: ^10.4.19
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001600
+- canvas: ^2.11.2
+- core-js: ^3.36.1
+- cross-env: ^7.0.3
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.0.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.7.1
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^51.0.1
+- globals: ^15.0.0
+- gulp: ^4.0.2
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d: ^0.1.2
+- pngjs: ^7.0.0
+- postcss: ^8.4.38
+- postcss-dark-theme-class: ^1.2.1
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.2
+- postcss-nesting: ^12.1.0
+- prettier: ^3.2.5
+- puppeteer: ^22.6.1
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.3.1
+- stylelint-prettier: ^5.0.0
+- terser-webpack-plugin: ^5.3.10
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.4.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.91.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/jbig2.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { BaseException, shadow } from "../shared/util.js";
+17 import { log2, readInt8, readUint16, readUint32 } from "./core_utils.js";
+18 import { ArithmeticDecoder } from "./arithmetic_decoder.js";
+19 import { CCITTFaxDecoder } from "./ccitt.js";
+20 
+27 // Utility data structures
+36 
+55 const MAX_INT_32 = 2 ** 31 - 1;
+56 const MIN_INT_32 = -(2 ** 31);
+57 
+58 // Annex A. Arithmetic Integer Decoding Procedure
+59 // A.2 Procedure for decoding values
+101 
+102 // A.3 The IAID decoding procedure
+116 
+117 // 7.3 Segment types
+118 const SegmentTypes = [
+119   "SymbolDictionary",
+120   null,
+121   null,
+122   null,
+123   "IntermediateTextRegion",
+124   null,
+125   "ImmediateTextRegion",
+126   "ImmediateLosslessTextRegion",
+127   null,
+128   null,
+129   null,
+130   null,
+131   null,
+132   null,
+133   null,
+134   null,
+135   "PatternDictionary",
+136   null,
+137   null,
+138   null,
+139   "IntermediateHalftoneRegion",
+140   null,
+141   "ImmediateHalftoneRegion",
+142   "ImmediateLosslessHalftoneRegion",
+143   null,
+144   null,
+145   null,
+146   null,
+147   null,
+148   null,
+149   null,
+150   null,
+151   null,
+152   null,
+153   null,
+154   null,
+155   "IntermediateGenericRegion",
+156   null,
+157   "ImmediateGenericRegion",
+158   "ImmediateLosslessGenericRegion",
+159   "IntermediateGenericRefinementRegion",
+160   null,
+161   "ImmediateGenericRefinementRegion",
+162   "ImmediateLosslessGenericRefinementRegion",
+163   null,
+164   null,
+165   null,
+166   null,
+167   "PageInformation",
+168   "EndOfPage",
+169   "EndOfStripe",
+170   "EndOfFile",
+171   "Profiles",
+172   "Tables",
+173   null,
+174   null,
+175   null,
+176   null,
+177   null,
+178   null,
+179   null,
+180   null,
+181   "Extension",
+182 ];
+183 
+184 const CodingTemplates = [
+185   [
+186     { x: -1, y: -2 },
+187     { x: 0, y: -2 },
+188     { x: 1, y: -2 },
+189     { x: -2, y: -1 },
+190     { x: -1, y: -1 },
+191     { x: 0, y: -1 },
+192     { x: 1, y: -1 },
+193     { x: 2, y: -1 },
+194     { x: -4, y: 0 },
+195     { x: -3, y: 0 },
+196     { x: -2, y: 0 },
+197     { x: -1, y: 0 },
+198   ],
+199   [
+200     { x: -1, y: -2 },
+201     { x: 0, y: -2 },
+202     { x: 1, y: -2 },
+203     { x: 2, y: -2 },
+204     { x: -2, y: -1 },
+205     { x: -1, y: -1 },
+206     { x: 0, y: -1 },
+207     { x: 1, y: -1 },
+208     { x: 2, y: -1 },
+209     { x: -3, y: 0 },
+210     { x: -2, y: 0 },
+211     { x: -1, y: 0 },
+212   ],
+213   [
+214     { x: -1, y: -2 },
+215     { x: 0, y: -2 },
+216     { x: 1, y: -2 },
+217     { x: -2, y: -1 },
+218     { x: -1, y: -1 },
+219     { x: 0, y: -1 },
+220     { x: 1, y: -1 },
+221     { x: -2, y: 0 },
+222     { x: -1, y: 0 },
+223   ],
+224   [
+225     { x: -3, y: -1 },
+226     { x: -2, y: -1 },
+227     { x: -1, y: -1 },
+228     { x: 0, y: -1 },
+229     { x: 1, y: -1 },
+230     { x: -4, y: 0 },
+231     { x: -3, y: 0 },
+232     { x: -2, y: 0 },
+233     { x: -1, y: 0 },
+234   ],
+235 ];
+236 
+237 const RefinementTemplates = [
+238   {
+239     coding: [
+240       { x: 0, y: -1 },
+241       { x: 1, y: -1 },
+242       { x: -1, y: 0 },
+243     ],
+244     reference: [
+245       { x: 0, y: -1 },
+246       { x: 1, y: -1 },
+247       { x: -1, y: 0 },
+248       { x: 0, y: 0 },
+249       { x: 1, y: 0 },
+250       { x: -1, y: 1 },
+251       { x: 0, y: 1 },
+252       { x: 1, y: 1 },
+253     ],
+254   },
+255   {
+256     coding: [
+257       { x: -1, y: -1 },
+258       { x: 0, y: -1 },
+259       { x: 1, y: -1 },
+260       { x: -1, y: 0 },
+261     ],
+262     reference: [
+263       { x: 0, y: -1 },
+264       { x: -1, y: 0 },
+265       { x: 0, y: 0 },
+266       { x: 1, y: 0 },
+267       { x: 0, y: 1 },
+268       { x: 1, y: 1 },
+269     ],
+270   },
+271 ];
+272 
+273 // See 6.2.5.7 Decoding the bitmap.
+274 const ReusedContexts = [
+275   0x9b25, // 10011 0110010 0101
+276   0x0795, // 0011 110010 101
+277   0x00e5, // 001 11001 01
+278   0x0195, // 011001 0101
+279 ];
+280 
+281 const RefinementReusedContexts = [
+282   0x0020, // '000' + '0' (coding) + '00010000' + '0' (reference)
+283   0x0008, // '0000' + '001000'
+284 ];
+285 
+329 // 6.2 Generic Region Decoding Procedure
+491 
+492 // 6.3.2 Generic Refinement Region Decoding Procedure
+576 
+577 // 6.5.5 Decoding the symbol dictionary
+772 
+773 function decodeTextRegion(
+774   huffman,
+775   refinement,
+776   width,
+777   height,
+778   defaultPixelValue,
+779   numberOfSymbolInstances,
+780   stripSize,
+781   inputSymbols,
+782   symbolCodeLength,
+783   transposed,
+784   dsOffset,
+785   referenceCorner,
+786   combinationOperator,
+787   huffmanTables,
+788   refinementTemplateIndex,
+789   refinementAt,
+790   decodingContext,
+791   logStripSize,
+792   huffmanInput
+793 ) {
+794   if (huffman && refinement) {
+795     throw new Jbig2Error("refinement with Huffman is not supported");
+796   }
+797 
+798   // Prepare bitmap
+799   const bitmap = [];
+800   let i, row;
+801   for (i = 0; i < height; i++) {
+802     row = new Uint8Array(width);
+803     if (defaultPixelValue) {
+804       for (let j = 0; j < width; j++) {
+805         row[j] = defaultPixelValue;
+806       }
+807     }
+808     bitmap.push(row);
+809   }
+810 
+811   const decoder = decodingContext.decoder;
+812   const contextCache = decodingContext.contextCache;
+813 
+814   let stripT = huffman
+815     ? -huffmanTables.tableDeltaT.decode(huffmanInput)
+816     : -decodeInteger(contextCache, "IADT", decoder); // 6.4.6
+817   let firstS = 0;
+818   i = 0;
+819   while (i < numberOfSymbolInstances) {
+820     const deltaT = huffman
+821       ? huffmanTables.tableDeltaT.decode(huffmanInput)
+822       : decodeInteger(contextCache, "IADT", decoder); // 6.4.6
+823     stripT += deltaT;
+824 
+825     const deltaFirstS = huffman
+826       ? huffmanTables.tableFirstS.decode(huffmanInput)
+827       : decodeInteger(contextCache, "IAFS", decoder); // 6.4.7
+828     firstS += deltaFirstS;
+829     let currentS = firstS;
+830     do {
+831       let currentT = 0; // 6.4.9
+832       if (stripSize > 1) {
+833         currentT = huffman
+834           ? huffmanInput.readBits(logStripSize)
+835           : decodeInteger(contextCache, "IAIT", decoder);
+836       }
+837       const t = stripSize * stripT + currentT;
+838       const symbolId = huffman
+839         ? huffmanTables.symbolIDTable.decode(huffmanInput)
+840         : decodeIAID(contextCache, decoder, symbolCodeLength);
+841       const applyRefinement =
+842         refinement &&
+843         (huffman
+844           ? huffmanInput.readBit()
+845           : decodeInteger(contextCache, "IARI", decoder));
+846       let symbolBitmap = inputSymbols[symbolId];
+847       let symbolWidth = symbolBitmap[0].length;
+848       let symbolHeight = symbolBitmap.length;
+849       if (applyRefinement) {
+850         const rdw = decodeInteger(contextCache, "IARDW", decoder); // 6.4.11.1
+851         const rdh = decodeInteger(contextCache, "IARDH", decoder); // 6.4.11.2
+852         const rdx = decodeInteger(contextCache, "IARDX", decoder); // 6.4.11.3
+853         const rdy = decodeInteger(contextCache, "IARDY", decoder); // 6.4.11.4
+854         symbolWidth += rdw;
+855         symbolHeight += rdh;
+856         symbolBitmap = decodeRefinement(
+857           symbolWidth,
+858           symbolHeight,
+859           refinementTemplateIndex,
+860           symbolBitmap,
+861           (rdw >> 1) + rdx,
+862           (rdh >> 1) + rdy,
+863           false,
+864           refinementAt,
+865           decodingContext
+866         );
+867       }
+868       const offsetT = t - (referenceCorner & 1 ? 0 : symbolHeight - 1);
+869       const offsetS = currentS - (referenceCorner & 2 ? symbolWidth - 1 : 0);
+870       let s2, t2, symbolRow;
+871       if (transposed) {
+872         // Place Symbol Bitmap from T1,S1
+873         for (s2 = 0; s2 < symbolHeight; s2++) {
+874           row = bitmap[offsetS + s2];
+875           if (!row) {
+876             continue;
+877           }
+878           symbolRow = symbolBitmap[s2];
+879           // To ignore Parts of Symbol bitmap which goes
+880           // outside bitmap region
+881           const maxWidth = Math.min(width - offsetT, symbolWidth);
+882           switch (combinationOperator) {
+883             case 0: // OR
+884               for (t2 = 0; t2 < maxWidth; t2++) {
+885                 row[offsetT + t2] |= symbolRow[t2];
+886               }
+887               break;
+888             case 2: // XOR
+889               for (t2 = 0; t2 < maxWidth; t2++) {
+890                 row[offsetT + t2] ^= symbolRow[t2];
+891               }
+892               break;
+893             default:
+894               throw new Jbig2Error(
+895                 `operator ${combinationOperator} is not supported`
+896               );
+897           }
+898         }
+899         currentS += symbolHeight - 1;
+900       } else {
+901         for (t2 = 0; t2 < symbolHeight; t2++) {
+902           row = bitmap[offsetT + t2];
+903           if (!row) {
+904             continue;
+905           }
+906           symbolRow = symbolBitmap[t2];
+907           switch (combinationOperator) {
+908             case 0: // OR
+909               for (s2 = 0; s2 < symbolWidth; s2++) {
+910                 row[offsetS + s2] |= symbolRow[s2];
+911               }
+912               break;
+913             case 2: // XOR
+914               for (s2 = 0; s2 < symbolWidth; s2++) {
+915                 row[offsetS + s2] ^= symbolRow[s2];
+916               }
+917               break;
+918             default:
+919               throw new Jbig2Error(
+920                 `operator ${combinationOperator} is not supported`
+921               );
+922           }
+923         }
+924         currentS += symbolWidth - 1;
+925       }
+926       i++;
+927       const deltaS = huffman
+928         ? huffmanTables.tableDeltaS.decode(huffmanInput)
+929         : decodeInteger(contextCache, "IADS", decoder); // 6.4.8
+930       if (deltaS === null) {
+931         break; // OOB
+932       }
+933       currentS += deltaS + dsOffset;
+934     } while (true);
+935   }
+936   return bitmap;
+937 }
+938 
+1272 // 7.4.1 Region segment information field
+1282 const RegionSegmentInformationFieldLength = 17;
+1283 
+1979 const standardTablesCache = {};
+1980 
+2583 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/api_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  AnnotationEditorType,
+  AnnotationMode,
+  AnnotationType,
+  ImageKind,
+  InvalidPDFException,
+  isNodeJS,
+  MissingPDFException,
+  objectSize,
+  OPS,
+  PasswordException,
+  PasswordResponses,
+  PermissionFlag,
+  UnknownErrorException,
+} from "../../src/shared/util.js";
+import {
+  buildGetDocumentParams,
+  CMAP_URL,
+  createTemporaryNodeServer,
+  DefaultFileReaderFactory,
+  TEST_PDFS_PATH,
+} from "./test_utils.js";
+import {
+  DefaultCanvasFactory,
+  getDocument,
+  PDFDataRangeTransport,
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  PDFWorker,
+  PDFWorkerUtil,
+  RenderTask,
+} from "../../src/display/api.js";
+import {
+  PageViewport,
+  RenderingCancelledException,
+  StatTimer,
+} from "../../src/display/display_utils.js";
+import { AutoPrintRegExp } from "../../web/ui_utils.js";
+import { GlobalImageCache } from "../../src/core/image_utils.js";
+import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
+import { Metadata } from "../../src/display/metadata.js";
+const WORKER_SRC = "../../build/generic/build/pdf.worker.mjs";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

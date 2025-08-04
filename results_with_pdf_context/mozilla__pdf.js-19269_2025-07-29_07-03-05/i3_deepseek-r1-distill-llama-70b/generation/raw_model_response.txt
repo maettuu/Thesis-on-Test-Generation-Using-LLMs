@@ -1,0 +1,78 @@
+<think>
+Okay, I need to write a test that verifies the fix for the issue where the top and bottom images are not displayed in the PDF. The patch seems to address this by modifying how images are handled in the evaluator and operator list. 
+
+First, I should understand what the patch does. Looking at the provided code, the evaluator.js and operator_list.js files were modified. The main changes involve adding a new parameter 'hasMask' to the addImageOps function and adjusting how the operator list handles this parameter by adding save and restore operations around the image operations when a mask is present.
+
+So, the problem before the patch was that images with masks (like top and bottom images) weren't being rendered correctly. The patch ensures that when an image has a mask (like SMask or Mask), the operator list correctly wraps the image operations with save and restore, ensuring the mask is applied properly.
+
+Now, I need to create a test that fails before the patch and passes after. The test should generate a PDF with such images and check if they are displayed correctly.
+
+I'll start by setting up a test PDF. Since I can't create a PDF from scratch, I'll simulate the necessary operations. I'll create a PDF document with a page that includes an image with a mask. Then, I'll use the PartialEvaluator to process the page and check if the generated operator list includes the correct operations, including the save and restore when a mask is present.
+
+I'll structure the test as follows:
+1. Create a mock XRef to simulate the PDF structure.
+2. Set up a PartialEvaluator with the necessary dependencies.
+3. Create a mock image and mask.
+4. Add the image and mask to the operator list.
+5. After applying the patch, the operator list should include save and restore operations around the image operations when a mask is present.
+
+In the test, I'll check the generated operator list for the presence of OPS.save and OPS.restore operations when handling an image with a mask. Before the patch, these operations might be missing, causing the images not to display correctly. After the patch, these operations should be present.
+
+I'll write the test using Jest, importing the necessary modules. I'll use async/await for any asynchronous operations, like initializing the evaluator. The test will create a sample image and mask, process them, and then verify the operator list.
+
+I'll also need to mock the handler and other dependencies to isolate the test. The test will fail before the patch because the save/restore operations are missing, and pass after because they are added.
+
+Finally, I'll write the test code, ensuring it's self-contained and only uses the provided imports. I'll make sure to handle any dependencies correctly and use async functions where necessary.
+</think>
+
+```javascript
+it("should correctly render images with masks", async () => {
+  const { XRefMock, createIdFactory } = await import("./test_utils.js");
+  const xref = new XRefMock();
+  const handler = {
+    send: jest.fn(),
+    sendWithPromise: jest.fn(),
+  };
+  const idFactory = createIdFactory();
+  
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler,
+    pageIndex: 0,
+    idFactory,
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options: DefaultPartialEvaluatorOptions,
+  });
+
+  const operatorList = new OperatorList();
+  const imageRef = "123";
+  const maskRef = "456";
+
+  // Mock image data
+  const imageData = {
+    objId: imageRef,
+    width: 100,
+    height: 100,
+    data: new Uint8Array(100 * 100 * 4),
+  };
+
+  // Mock mask data
+  const maskData = {
+    objId: maskRef,
+    width: 100,
+    height: 100,
+    data: new Uint8Array(100 * 100 * 4),
+  };
+
+  // Add image operations with mask
+  operatorList.addImageOps(OPS.paintImageXObject, [imageData], undefined, true);
+
+  // Verify the operator list includes save and restore operations
+  expect(operatorList.fnArray).toContain(OPS.save);
+  expect(operatorList.fnArray).toContain(OPS.restore);
+});
+```

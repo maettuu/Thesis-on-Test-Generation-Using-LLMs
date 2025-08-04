@@ -1,0 +1,58 @@
+it("should support highlighting both text and images", async () => {
+  const { PDFDocument } = await import("../../src/core/pdf_document.js");
+  const { getDocument } = await import("../../src/display/api.js");
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+  const { DOMSVGFactory } = await import("../../src/display/display_utils.js");
+  const { shadow } = await import("../../src/shared/util.js");
+
+  const pdf = await getDocument({
+    data: new Uint8Array(await (await fetch("test.pdf")).arrayBuffer()),
+    cMapLoader: () => Promise.resolve(new Uint8Array()),
+  });
+
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const div = document.createElement("div");
+  const uiManager = new (class {
+    get mode() { return "highlight"; }
+    get selectedAnnotation() { return null; }
+    addLayer() {}
+    unselectAll() {}
+    registerEditorType() {}
+  });
+
+  const drawLayer = new DrawLayer({ pageIndex: 0 });
+  drawLayer._svgFactory = new DOMSVGFactory();
+
+  const editorLayer = new AnnotationEditorLayer({
+    uiManager,
+    pageIndex: 0,
+    div,
+    viewport,
+    drawLayer,
+    textLayer: null,
+  });
+
+  const highlightEditor = new HighlightEditor({
+    color: "#ff0000",
+    opacity: 0.5,
+    parent: editorLayer,
+  });
+
+  const checkHighlight = (x, y, width, height) => {
+    const highlight = editorLayer.drawLayer.highlight(
+      { box: { x, y, width, height }, free: true },
+      "#ff0000",
+      0.5,
+      true
+    );
+    return highlight && highlight.id;
+  };
+
+  const textHighlight = checkHighlight(0.1, 0.1, 0.2, 0.1);
+  const imageHighlight = checkHighlight(0.3, 0.4, 0.2, 0.1);
+
+  expect(textHighlight).toBeTruthy();
+  expect(imageHighlight).toBeTruthy();
+});

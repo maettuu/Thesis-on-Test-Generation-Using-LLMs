@@ -1,0 +1,40 @@
+it("should fix the xref table with correct generation numbers", async () => {
+  const { XRef } = await import("../../src/core/xref.js");
+  const { Ref } = await import("../../src/core/primitives.js");
+  const { BaseStream } = await import("../../src/core/base_stream.js");
+  const { Parser } = await import("../../src/core/parser.js");
+  const { Lexer } = await import("../../src/core/parser.js");
+
+  const mockStream = new BaseStream();
+  const mockPdfManager = {};
+  const xref = new XRef(mockStream, mockPdfManager);
+
+  const mockXRefEntry = { offset: 0, gen: 1 };
+  const mockRef = Ref.get(1, 0);
+  const mockObjStmStream = {
+    dict: {
+      get: (key) => {
+        if (key === "First") return 0;
+        if (key === "N") return 2;
+      },
+    },
+    start: 0,
+    makeSubStream: () => new BaseStream(),
+  };
+
+  xref.entries[1] = { offset: 0, gen: 0 };
+  xref.fetch = () => mockObjStmStream;
+
+  const parser = new Parser({
+    lexer: new Lexer(mockObjStmStream),
+    xref,
+    allowStreams: true,
+  });
+
+  parser.getObj = () => 1;
+
+  const expected = 1;
+  const actual = xref.fetchCompressed(mockRef, mockXRefEntry);
+
+  expect(actual).toBe(expected);
+});

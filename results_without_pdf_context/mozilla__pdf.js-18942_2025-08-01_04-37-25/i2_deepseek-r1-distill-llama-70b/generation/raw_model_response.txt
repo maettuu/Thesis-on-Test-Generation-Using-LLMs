@@ -1,0 +1,49 @@
+<think>
+Okay, I need to write a regression test for the issue where a PDF file causes a TypeError because the font file isn't a Stream but a Dict. The patch is supposed to handle this by falling back to a standard font when the font file isn't a Stream. 
+
+First, I'll start by understanding the problem. The user provided a PDF that triggers this error. The test should fail before the patch and pass after. So, the test will load the problem PDF and check if the text is rendered correctly.
+
+I'll structure the test using Jest. The test will attempt to load the PDF and check for any errors during rendering. If the patch is correct, no error should occur after it's applied.
+
+I'll need to import the necessary modules, like PDFDocument and PDFPage, from pdf.js. Then, I'll set up a mock for console.error to catch any warnings. 
+
+In the test, I'll fetch the PDF file, create a PDFDocument, and try to render the first page. If the code before the patch throws an error, the test should catch it and fail. After the patch, it should render without issues.
+
+I'll use a try-catch block to handle any errors during loading or rendering. If an error occurs, the test will fail. If everything works, the test passes.
+
+I also need to ensure that the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll make sure to only use the specified imports and keep the test focused on the specific issue.
+
+Finally, I'll write the test in a way that it's clear and concise, ensuring that it accurately reflects the expected behavior after the patch.
+</think>
+
+```javascript
+it("should handle non-stream font files by falling back to standard fonts", async () => {
+  const { PDFDocument, PDFPage } = await import("../../src/display/api.js");
+  const originalConsoleError = console.error;
+  const error = await new Promise(resolve => {
+    const mockConsoleError = (message) => {
+      if (message.includes("loadFont - translateFont failed")) {
+        resolve(new Error(message));
+      }
+    };
+    console.error = mockConsoleError;
+    fetchMock.doMock("https://example.com/21_10_2024_FAMI.INVERSION.SAS_901060703_inicial.pdf", {
+      body: new ArrayBuffer(1024),
+      headers: {
+        "content-type": "application/pdf"
+      }
+    });
+    const pdf = new PDFDocument({
+      data: new Uint8Array(new ArrayBuffer(1024)),
+      fingerprint: "test-pdf"
+    });
+    pdf.getPage(1).then(page => {
+      page.render({
+        canvasContext: {getContext: () => ({})},
+        viewport: page.getViewport({scale: 1})
+      });
+    });
+  });
+  expect(error).toBeUndefined();
+});
+```

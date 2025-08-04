@@ -1,0 +1,697 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: Adding a `<base href>` tag to a page containing a pdfjs viewer breaks transparancy filters in Firefox.
+### Attach (recommended) or Link to PDF file
+
+https://github.com/mozilla/pdf.js/files/11229069/test.pdf
+
+### Web browser and its version
+
+Firefox 127.0.2
+
+### Operating system and its version
+
+Mac and Windows
+
+### PDF.js version
+
+4.5 (master)
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+0. Running local copy of pdfjs using `npx gulp server`
+1. Add `<base href="." />` to `viewer.html`
+2. Open test.pdf
+
+### What is the expected behavior?
+
+The PDF should render the same regardless of `<base href>`
+
+![image](https://github.com/mozilla/pdf.js/assets/509946/89db74a1-c056-41de-b39a-1b236521ad49)
+
+
+### What went wrong?
+
+When rendering a pdf in Firefox when a `<base href>` is defined the drop shadow is not rendered correctly.
+
+![image](https://github.com/mozilla/pdf.js/assets/509946/257400c3-2662-4f8c-ab12-b59c430daf41)
+
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+This issue was discovered and discussed here: https://github.com/stephanrauh/ngx-extended-pdf-viewer/issues/2363
+
+We tested accross multiple browsers, OSs, sites, and PDFs.  The issue was eventually narrowed down to pdfjs v4.3-v4.5 in Firefox when the site defines a `<base href>`.  Many SPAs require a base href to be defined.  This issue was not seen in other browsers nor in pdfjs v.4.2.  It was seen in Firefox regardless of OS.
+
+Additional note: Relatively certain this issue is SVG IRI references in `display_utils.js`.
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/display_utils.js b/src/display/display_utils.js
+--- a/src/display/display_utils.js
++++ b/src/display/display_utils.js
+@@ -49,6 +49,8 @@ class PixelsPerInch {
+  * does the magic for us.
+  */
+ class DOMFilterFactory extends BaseFilterFactory {
++  #baseUrl;
++
+   #_cache;
+ 
+   #_defs;
+@@ -121,6 +123,25 @@ class DOMFilterFactory extends BaseFilterFactory {
+     return [bufferR.join(","), bufferG.join(","), bufferB.join(",")];
+   }
+ 
++  #createUrl(id) {
++    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
++      if (this.#baseUrl === undefined) {
++        const url = this.#document.URL;
++        if (url === this.#document.baseURI) {
++          // No `<base>`-element present, hence a relative URL should work.
++          this.#baseUrl = "";
++        } else if (isDataScheme(url)) {
++          warn('#createUrl: ignore "data:"-URL for performance reasons.');
++          this.#baseUrl = "";
++        } else {
++          this.#baseUrl = url.split("#", 1)[0];
++        }
++      }
++      return `url(${this.#baseUrl}#${id})`;
++    }
++    return `url(${id})`;
++  }
++
+   addFilter(maps) {
+     if (!maps) {
+       return "none";
+@@ -146,7 +167,7 @@ class DOMFilterFactory extends BaseFilterFactory {
+     //  https://www.w3.org/TR/SVG11/filters.html#feComponentTransferElement
+ 
+     const id = `g_${this.#docId}_transfer_map_${this.#id++}`;
+-    const url = `url(#${id})`;
++    const url = this.#createUrl(id);
+     this.#cache.set(maps, url);
+     this.#cache.set(key, url);
+ 
+@@ -232,7 +253,7 @@ class DOMFilterFactory extends BaseFilterFactory {
+       filter
+     );
+ 
+-    info.url = `url(#${id})`;
++    info.url = this.#createUrl(id);
+     return info.url;
+   }
+ 
+@@ -254,7 +275,7 @@ class DOMFilterFactory extends BaseFilterFactory {
+     }
+ 
+     const id = `g_${this.#docId}_alpha_map_${this.#id++}`;
+-    const url = `url(#${id})`;
++    const url = this.#createUrl(id);
+     this.#cache.set(map, url);
+     this.#cache.set(key, url);
+ 
+@@ -287,7 +308,7 @@ class DOMFilterFactory extends BaseFilterFactory {
+     }
+ 
+     const id = `g_${this.#docId}_luminosity_map_${this.#id++}`;
+-    const url = `url(#${id})`;
++    const url = this.#createUrl(id);
+     this.#cache.set(map, url);
+     this.#cache.set(key, url);
+ 
+@@ -389,7 +410,7 @@ class DOMFilterFactory extends BaseFilterFactory {
+       filter
+     );
+ 
+-    info.url = `url(#${id})`;
++    info.url = this.#createUrl(id);
+     return info.url;
+   }
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.24.7
+- @babel/preset-env: ^7.24.7
+- @babel/runtime: ^7.24.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.19
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001639
+- canvas: ^2.11.2
+- core-js: ^3.37.1
+- cross-env: ^7.0.3
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.1
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.2.0
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.7.4
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^54.0.0
+- globals: ^15.8.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.9.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.3
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.1
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.39
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^7.0.1
+- postcss-nesting: ^12.1.5
+- prettier: ^3.3.2
+- puppeteer: ^22.12.1
+- streamqueue: ^1.1.2
+- stylelint: ^16.6.1
+- stylelint-prettier: ^5.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.5.3
+- vinyl: ^3.0.0
+- webpack: ^5.92.1
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/display_utils.js
+1 /* Copyright 2015 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   BaseCanvasFactory,
+18   BaseCMapReaderFactory,
+19   BaseFilterFactory,
+20   BaseStandardFontDataFactory,
+21   BaseSVGFactory,
+22 } from "./base_factory.js";
+23 import {
+24   BaseException,
+25   FeatureTest,
+26   shadow,
+27   stringToBytes,
+28   Util,
+29   warn,
+30 } from "../shared/util.js";
+31 
+32 const SVG_NS = "http://www.w3.org/2000/svg";
+33 
+42 /**
+43  * FilterFactory aims to create some SVG filters we can use when drawing an
+44  * image (or whatever) on a canvas.
+45  * Filters aren't applied with ctx.putImageData because it just overwrites the
+46  * underlying pixels.
+47  * With these filters, it's possible for example to apply some transfer maps on
+48  * an image without the need to apply them on the pixel arrays: the renderer
+49  * does the magic for us.
+50  */
+51 class DOMFilterFactory extends BaseFilterFactory {
+52   #_cache;
+53 
+54   #_defs;
+55 
+56   #docId;
+57 
+58   #document;
+59 
+60   #_hcmCache;
+61 
+62   #id = 0;
+63 
+64   constructor({ docId, ownerDocument = globalThis.document } = {}) {
+65     super();
+66     this.#docId = docId;
+67     this.#document = ownerDocument;
+68   }
+69 
+124   addFilter(maps) {
+125     if (!maps) {
+126       return "none";
+127     }
+128 
+129     // When a page is zoomed the page is re-drawn but the maps are likely
+130     // the same.
+131     let value = this.#cache.get(maps);
+132     if (value) {
+133       return value;
+134     }
+135 
+136     const [tableR, tableG, tableB] = this.#createTables(maps);
+137     const key = maps.length === 1 ? tableR : `${tableR}${tableG}${tableB}`;
+138 
+139     value = this.#cache.get(key);
+140     if (value) {
+141       this.#cache.set(maps, value);
+142       return value;
+143     }
+144 
+145     // We create a SVG filter: feComponentTransferElement
+146     //  https://www.w3.org/TR/SVG11/filters.html#feComponentTransferElement
+147 
+148     const id = `g_${this.#docId}_transfer_map_${this.#id++}`;
+149     const url = `url(#${id})`;
+150     this.#cache.set(maps, url);
+151     this.#cache.set(key, url);
+152 
+153     const filter = this.#createFilter(id);
+154     this.#addTransferMapConversion(tableR, tableG, tableB, filter);
+155 
+156     return url;
+157   }
+158 
+159   addHCMFilter(fgColor, bgColor) {
+160     const key = `${fgColor}-${bgColor}`;
+161     const filterName = "base";
+162     let info = this.#hcmCache.get(filterName);
+163     if (info?.key === key) {
+164       return info.url;
+165     }
+166 
+167     if (info) {
+168       info.filter?.remove();
+169       info.key = key;
+170       info.url = "none";
+171       info.filter = null;
+172     } else {
+173       info = {
+174         key,
+175         url: "none",
+176         filter: null,
+177       };
+178       this.#hcmCache.set(filterName, info);
+179     }
+180 
+181     if (!fgColor || !bgColor) {
+182       return info.url;
+183     }
+184 
+185     const fgRGB = this.#getRGB(fgColor);
+186     fgColor = Util.makeHexColor(...fgRGB);
+187     const bgRGB = this.#getRGB(bgColor);
+188     bgColor = Util.makeHexColor(...bgRGB);
+189     this.#defs.style.color = "";
+190 
+191     if (
+192       (fgColor === "#000000" && bgColor === "#ffffff") ||
+193       fgColor === bgColor
+194     ) {
+195       return info.url;
+196     }
+197 
+198     // https://developer.mozilla.org/en-US/docs/Web/Accessibility/Understanding_Colors_and_Luminance
+199     //
+200     // Relative luminance:
+201     // https://www.w3.org/TR/WCAG20/#relativeluminancedef
+202     //
+203     // We compute the rounded luminance of the default background color.
+204     // Then for every color in the pdf, if its rounded luminance is the
+205     // same as the background one then it's replaced by the new
+206     // background color else by the foreground one.
+207     const map = new Array(256);
+208     for (let i = 0; i <= 255; i++) {
+209       const x = i / 255;
+210       map[i] = x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+211     }
+212     const table = map.join(",");
+213 
+214     const id = `g_${this.#docId}_hcm_filter`;
+215     const filter = (info.filter = this.#createFilter(id));
+216     this.#addTransferMapConversion(table, table, table, filter);
+217     this.#addGrayConversion(filter);
+218 
+219     const getSteps = (c, n) => {
+220       const start = fgRGB[c] / 255;
+221       const end = bgRGB[c] / 255;
+222       const arr = new Array(n + 1);
+223       for (let i = 0; i <= n; i++) {
+224         arr[i] = start + (i / n) * (end - start);
+225       }
+226       return arr.join(",");
+227     };
+228     this.#addTransferMapConversion(
+229       getSteps(0, 5),
+230       getSteps(1, 5),
+231       getSteps(2, 5),
+232       filter
+233     );
+234 
+235     info.url = `url(#${id})`;
+236     return info.url;
+237   }
+238 
+239   addAlphaFilter(map) {
+240     // When a page is zoomed the page is re-drawn but the maps are likely
+241     // the same.
+242     let value = this.#cache.get(map);
+243     if (value) {
+244       return value;
+245     }
+246 
+247     const [tableA] = this.#createTables([map]);
+248     const key = `alpha_${tableA}`;
+249 
+250     value = this.#cache.get(key);
+251     if (value) {
+252       this.#cache.set(map, value);
+253       return value;
+254     }
+255 
+256     const id = `g_${this.#docId}_alpha_map_${this.#id++}`;
+257     const url = `url(#${id})`;
+258     this.#cache.set(map, url);
+259     this.#cache.set(key, url);
+260 
+261     const filter = this.#createFilter(id);
+262     this.#addTransferMapAlphaConversion(tableA, filter);
+263 
+264     return url;
+265   }
+266 
+267   addLuminosityFilter(map) {
+268     // When a page is zoomed the page is re-drawn but the maps are likely
+269     // the same.
+270     let value = this.#cache.get(map || "luminosity");
+271     if (value) {
+272       return value;
+273     }
+274 
+275     let tableA, key;
+276     if (map) {
+277       [tableA] = this.#createTables([map]);
+278       key = `luminosity_${tableA}`;
+279     } else {
+280       key = "luminosity";
+281     }
+282 
+283     value = this.#cache.get(key);
+284     if (value) {
+285       this.#cache.set(map, value);
+286       return value;
+287     }
+288 
+289     const id = `g_${this.#docId}_luminosity_map_${this.#id++}`;
+290     const url = `url(#${id})`;
+291     this.#cache.set(map, url);
+292     this.#cache.set(key, url);
+293 
+294     const filter = this.#createFilter(id);
+295     this.#addLuminosityConversion(filter);
+296     if (map) {
+297       this.#addTransferMapAlphaConversion(tableA, filter);
+298     }
+299 
+300     return url;
+301   }
+302 
+303   addHighlightHCMFilter(filterName, fgColor, bgColor, newFgColor, newBgColor) {
+304     const key = `${fgColor}-${bgColor}-${newFgColor}-${newBgColor}`;
+305     let info = this.#hcmCache.get(filterName);
+306     if (info?.key === key) {
+307       return info.url;
+308     }
+309 
+310     if (info) {
+311       info.filter?.remove();
+312       info.key = key;
+313       info.url = "none";
+314       info.filter = null;
+315     } else {
+316       info = {
+317         key,
+318         url: "none",
+319         filter: null,
+320       };
+321       this.#hcmCache.set(filterName, info);
+322     }
+323 
+324     if (!fgColor || !bgColor) {
+325       return info.url;
+326     }
+327 
+328     const [fgRGB, bgRGB] = [fgColor, bgColor].map(this.#getRGB.bind(this));
+329     let fgGray = Math.round(
+330       0.2126 * fgRGB[0] + 0.7152 * fgRGB[1] + 0.0722 * fgRGB[2]
+331     );
+332     let bgGray = Math.round(
+333       0.2126 * bgRGB[0] + 0.7152 * bgRGB[1] + 0.0722 * bgRGB[2]
+334     );
+335     let [newFgRGB, newBgRGB] = [newFgColor, newBgColor].map(
+336       this.#getRGB.bind(this)
+337     );
+338     if (bgGray < fgGray) {
+339       [fgGray, bgGray, newFgRGB, newBgRGB] = [
+340         bgGray,
+341         fgGray,
+342         newBgRGB,
+343         newFgRGB,
+344       ];
+345     }
+346     this.#defs.style.color = "";
+347 
+348     // Now we can create the filters to highlight some canvas parts.
+349     // The colors in the pdf will almost be Canvas and CanvasText, hence we
+350     // want to filter them to finally get Highlight and HighlightText.
+351     // Since we're in HCM the background color and the foreground color should
+352     // be really different when converted to grayscale (if they're not then it
+353     // means that we've a poor contrast). Once the canvas colors are converted
+354     // to grayscale we can easily map them on their new colors.
+355     // The grayscale step is important because if we've something like:
+356     //   fgColor = #FF....
+357     //   bgColor = #FF....
+358     //   then we are enable to map the red component on the new red components
+359     //   which can be different.
+360 
+361     const getSteps = (fg, bg, n) => {
+362       const arr = new Array(256);
+363       const step = (bgGray - fgGray) / n;
+364       const newStart = fg / 255;
+365       const newStep = (bg - fg) / (255 * n);
+366       let prev = 0;
+367       for (let i = 0; i <= n; i++) {
+368         const k = Math.round(fgGray + i * step);
+369         const value = newStart + i * newStep;
+370         for (let j = prev; j <= k; j++) {
+371           arr[j] = value;
+372         }
+373         prev = k + 1;
+374       }
+375       for (let i = prev; i < 256; i++) {
+376         arr[i] = arr[prev - 1];
+377       }
+378       return arr.join(",");
+379     };
+380 
+381     const id = `g_${this.#docId}_hcm_${filterName}_filter`;
+382     const filter = (info.filter = this.#createFilter(id));
+383 
+384     this.#addGrayConversion(filter);
+385     this.#addTransferMapConversion(
+386       getSteps(newFgRGB[0], newBgRGB[0], 5),
+387       getSteps(newFgRGB[1], newBgRGB[1], 5),
+388       getSteps(newFgRGB[2], newBgRGB[2], 5),
+389       filter
+390     );
+391 
+392     info.url = `url(#${id})`;
+393     return info.url;
+394   }
+395 
+477 }
+478 
+914 // Deprecated API function -- display regardless of the `verbosity` setting.
+918 
+919 let pdfDateStringRegex;
+920 
+1103 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/display_utils_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { bytesToString, isNodeJS } from "../../src/shared/util.js";
+import {
+  DOMCanvasFactory,
+  DOMSVGFactory,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  isValidFetchUrl,
+  PDFDateString,
+} from "../../src/display/display_utils.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

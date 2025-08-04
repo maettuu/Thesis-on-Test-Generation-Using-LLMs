@@ -1,0 +1,61 @@
+<think>
+Okay, I need to write a regression test for the issue where a warning appears in the console when printing a PDF with an added annotation. The warning is "Warning: Unknown field name, falling back to empty field name." 
+
+First, I should understand the problem. From the issue description, it seems that the warning occurs because the code is trying to collect annotations in a way that triggers this warning when it shouldn't. The patch restores the `collectFields` parameter, which probably affects how annotations are processed during printing.
+
+So, the test should simulate adding an annotation, printing it, and checking that no such warning is logged. The test must fail before the patch (when the warning is present) and pass after (when the warning is gone).
+
+I'll structure the test as follows:
+
+1. Import necessary modules, like `PDFDocument` and `AnnotationFactory`.
+2. Create a sample PDF with a page and an annotation.
+3. Add an annotation to the page, like a text annotation.
+4. Simulate the printing process, which should trigger the code path that caused the warning.
+5. Check the console for the warning message.
+6. Assert that the warning does not appear after the patch.
+
+I'll use a try-catch block to capture any warnings. If the warning is thrown, the test fails. After applying the patch, the test should pass because the warning is resolved.
+
+I need to ensure the test is self-contained and doesn't rely on external files, so I'll create the PDF in memory. I'll also mock or use the necessary PDF.js components to add the annotation and trigger the printing process.
+
+Finally, I'll write the test using Jest syntax, making sure to import modules dynamically and handle any asynchronous operations properly.
+</think>
+
+```javascript
+it("should not warn about unknown field names when printing annotations", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+  
+  let warningThrown = false;
+  
+  const originalWarn = console.warn;
+  console.warn = (message) => {
+    if (message.includes("Unknown field name")) {
+      warningThrown = true;
+    }
+    originalWarn(message);
+  };
+  
+  const annotation = new TextAnnotation({
+    xref: pdf.xref,
+    ref: pdf.ref,
+    dict: {
+      get: () => "Test Annotation"
+    },
+    annotationGlobals: {
+      pdfManager: pdf.pdfManager,
+      acroForm: pdf.acroForm
+    },
+    idFactory: pdf.idFactory,
+    collectFields: true,
+    pageRef: page.ref
+  });
+  
+  await pdf.print();
+  
+  expect(warningThrown).toBe(false);
+});
+```

@@ -1,0 +1,46 @@
+<think>
+Alright, I need to create a regression test for the bug where PDF text is rendered incorrectly. The patch provided updates the standard_fonts.js file to include GillSansMT fonts mapped to Helvetica. So, the test should check if these fonts are correctly substituted after the patch.
+
+First, I'll look at the existing test file, test/unit/api_spec.js. It imports necessary modules and sets up a test environment. I can reuse some of these imports, like buildGetDocumentParams, createTemporaryNodeServer, and PDFDataRangeTransport.
+
+The test should open a PDF that uses GillSansMT fonts. Since I don't have the exact file, I'll assume it's in the test PDFs directory. I'll create a temporary server to host this file.
+
+Next, I'll set up the PDF document using getDocument and render a page. After rendering, I'll extract the text from the page.
+
+The expected behavior is that the text should be correct. For example, if the PDF has the text "Hello World", the extracted text should match that. Before the patch, the text might be garbled, but after, it should be correct.
+
+I'll write an async test block that sets up the document, renders the page, extracts the text, and compares it to the expected value. If the patch works, the test should pass.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll structure it to import necessary modules, set up the server, load the document, render the page, extract text, and assert the result.
+
+Finally, I'll ensure the test fails without the patch and passes with it, confirming the bug is resolved.
+</think>
+
+```javascript
+it("should correctly render GillSansMT fonts as Helvetica", async () => {
+  const { buildGetDocumentParams, createTemporaryNodeServer } = await import("./test_utils.js");
+  const { PDFDataRangeTransport, getDocument } = await import("../../src/display/api.js");
+  const { PageViewport } = await import("../../src/display/display_utils.js");
+  const { GlobalImageCache } = await import("../../src/core/image_utils.js");
+
+  const server = createTemporaryNodeServer();
+  const pdfPath = `${TEST_PDFS_PATH}/gill_sans_mt.pdf`;
+  const params = buildGetDocumentParams(pdfPath, new PDFDataRangeTransport());
+  
+  const doc = await getDocument(params);
+  const page = await doc.getPage(1);
+  const viewport = new PageViewport(page, PageViewport.SCALE_TO_FIT, 1);
+  
+  await page.render({
+    viewport,
+    canvasContext: new GlobalImageCache(),
+    continueRendering: () => true,
+  });
+  
+  const textContent = await page.getTextContent();
+  const expectedText = "Hello World";
+  const actualText = textContent.items.map(item => item.str).join("");
+  
+  expect(actualText).toBe(expectedText);
+});
+```

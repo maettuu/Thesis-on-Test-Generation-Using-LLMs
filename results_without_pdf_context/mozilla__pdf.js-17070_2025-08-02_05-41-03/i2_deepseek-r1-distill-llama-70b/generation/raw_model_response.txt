@@ -1,0 +1,61 @@
+<think>
+Okay, so I need to write a regression test for the issue where elements like comments and sticky notes aren't displayed in the PDF viewer after the patch was applied. The user provided a patch that modifies the `annotation.js` file, adjusting the `noHTML` flags for various annotation types. 
+
+First, I should understand what the patch does. It looks like the patch sets `noHTML` to `false` for several annotation classes like `PopupAnnotation`, `TextAnnotation`, `LineAnnotation`, etc. This is because if an annotation has its own canvas (`hasOwnCanvas` is true), it needs an HTML container to render it, so `noHTML` should be false to ensure the HTML is generated.
+
+The test needs to fail before the patch and pass after. So, I'll create a test that checks if the `noHTML` flag is correctly set to false for these annotations when they have their own canvas.
+
+I'll start by importing the necessary modules. Since the test is in Node.js, I'll use dynamic imports for compatibility. I'll import `Annotation` and `AnnotationFactory` from their respective paths.
+
+Next, I'll set up a fake PDF document with a page. I'll create a mock `XRef` object to handle cross-references. Then, I'll create instances of each annotation type that should have `noHTML` set to false. For each annotation, I'll assert that `noHTML` is indeed false.
+
+I'll loop through each annotation type, create an instance, and check the `noHTML` property. If any of them don't have `noHTML` as false, the test will fail, indicating the issue isn't resolved.
+
+After the patch, running this test should pass because all the specified annotations will have `noHTML` set correctly. This ensures that the HTML elements are rendered, and the comments and sticky notes are displayed as expected.
+
+I need to make sure the test is self-contained and doesn't rely on external files or complex setups. Using mocks for `XRef` and creating minimal annotation instances should suffice.
+
+So, the test will create each relevant annotation, check their `noHTML` flags, and ensure they're all false. This directly tests the changes made in the patch, ensuring the regression issue is fixed.
+</think>
+
+```javascript
+it("should correctly set noHTML flag for annotations with hasOwnCanvas", async () => {
+  const { Annotation, AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { XRef } = await import("../../src/core/primitives.js");
+
+  // Setup fake PDF document with one page
+  const xref = new XRef();
+  const pdfDocument = {
+    getCatalog: () => ({
+      getPages: () => ({
+        getKids: () => [{}],
+        getLength: () => 1,
+      }),
+    }),
+  };
+
+  // Test each annotation type that should have noHTML: false
+  const annotations = [
+    { type: AnnotationFactory.Type.TEXT, hasOwnCanvas: true },
+    { type: AnnotationFactory.Type.POPUP, hasOwnCanvas: false },
+    { type: AnnotationFactory.Type.FREETEXT, hasOwnCanvas: true },
+    { type: AnnotationFactory.Type.LINE, hasOwnCanvas: true },
+    { type: AnnotationFactory.Type.SQUARE, hasOwnCanvas: true },
+    { type: AnnotationFactory.Type.POLYLINE, hasOwnCanvas: true },
+    { type: AnnotationFactory.Type.STAMP, hasOwnCanvas: true },
+    { type: AnnotationFactory.Type.FILEATTACHMENT, hasOwnCanvas: true },
+  ];
+
+  for (const { type, hasOwnCanvas } of annotations) {
+    const annotation = new AnnotationFactory({
+      type,
+      xref,
+      pdfDocument,
+      dict: {},
+      params: { hasOwnCanvas },
+    }).create();
+
+    expect(annotation.noHTML).toBe(false);
+  }
+});
+```

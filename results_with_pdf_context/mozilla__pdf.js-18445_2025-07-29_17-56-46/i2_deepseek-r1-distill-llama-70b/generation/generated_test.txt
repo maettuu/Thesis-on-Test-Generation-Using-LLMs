@@ -1,0 +1,44 @@
+it("should not throw when restoring state with an activeSMask set", async () => {
+  const { CanvasGraphics } = await import("../../src/display/canvas.js");
+  // Create a fake canvas context.
+  let graphics;
+  const fakeCtx = {
+    canvas: { width: 500, height: 500 },
+    restore: () => {
+      // In pre-patch, if activeSMask is not cleared, this would call its save() method.
+      if (graphics.current.activeSMask) {
+        graphics.current.activeSMask.save();
+      }
+    },
+    save: () => {},
+    setTransform: () => {},
+    drawImage: () => {}
+  };
+  // Minimal dummy canvasFactory.
+  const canvasFactory = { create: () => fakeCtx };
+  // Instantiate CanvasGraphics.
+  graphics = new CanvasGraphics(
+    fakeCtx,
+    /* commonObjs */ {},
+    /* objs */ {},
+    canvasFactory,
+    /* filterFactory */ null,
+    { optionalContentConfig: {} },
+    /* annotationCanvasMap */ new Map(),
+    /* pageColors */ null
+  );
+  // Simulate an open graphics state and an activeSMask that would cause an error if used.
+  graphics.stateStack.push({});
+  graphics.current.activeSMask = {
+    save: () => {
+      throw new Error("activeSMask.save called");
+    }
+  };
+  // Calling restore() in a loop should clear activeSMask (patch behavior) so that fakeCtx.restore()
+  // does not attempt to call its save() method.
+  expect(() => {
+    while (graphics.stateStack.length > 0) {
+      graphics.restore();
+    }
+  }).not.toThrow();
+});

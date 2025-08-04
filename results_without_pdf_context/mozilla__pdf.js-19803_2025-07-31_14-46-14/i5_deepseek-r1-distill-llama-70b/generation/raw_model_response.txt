@@ -1,0 +1,35 @@
+<think>
+Okay, I need to write a regression test for the issue where circular references in Form XObjects cause an endless loop in PDF.js. The user provided a patch, and I need to ensure the test fails before the patch and passes after.
+
+First, I'll start by understanding the problem. The PDF in question has two Form XObjects that reference each other, creating a circular dependency. Before the patch, this would cause the viewer to hang indefinitely. After the patch, it should handle this gracefully, perhaps by ignoring the circular reference and throwing an error.
+
+Looking at the patch, I see that in `evaluator.js`, they added checks for circular references using `seenRefs`. When a circular reference is detected, it throws an error. So, the test should check if this error is correctly thrown when loading such a PDF.
+
+I'll structure the test using Jest. The test will try to load the problematic PDF. Before the patch, this should result in a timeout or infinite loop, but with the patch, it should throw a specific error.
+
+I'll need to import the necessary modules. Since the test runs in Node.js, I'll use dynamic imports. The `PDFDocument` from `pdfjs-lib` will be used to load the PDF. The `fetch` function is required to get the PDF file, so I'll import it from `node-fetch`.
+
+In the test, I'll set up a `jest.setTimeout` to a reasonable time, say 10 seconds. Then, I'll try to load the PDF. If the patch is correct, it should throw an error with the message about circular references. I'll use a try-catch block to catch this error and assert that it's the expected one.
+
+I also need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. The PDF file is attached, so I'll assume it's available at a specific path, perhaps using `TEST_PDFS_PATH` from `test_utils.js`.
+
+Putting it all together, the test will attempt to load the PDF and check for the specific error. Before the patch, this would hang, but after, it should throw the error, making the test pass.
+</think>
+
+```javascript
+it("should throw on circular Form XObjects", async () => {
+  const { PDFDocument } = await import("../../web/pdf_document.js");
+  const { fetch } = await import("node-fetch");
+  const { TEST_PDFS_PATH } = await import("./test_utils.js");
+
+  jest.setTimeout(10000);
+
+  const pdfPath = `${TEST_PDFS_PATH}/evil_xobjects.pdf`;
+  try {
+    await PDFDocument.load(await fetch(pdfPath).then(res => res.blob()));
+    throw new Error("Expected circular reference error");
+  } catch (error) {
+    expect(error.message).toContain("ignoring circular reference");
+  }
+});
+```

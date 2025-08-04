@@ -1,0 +1,60 @@
+<think>
+Okay, I need to write a regression test for the issue where the highlight on a cropped PDF isn't visible when saving or printing. The patch provided modifies the `serializeBoxes` and `serializeOutlines` methods in `highlight.js`. 
+
+First, I'll look at the changes in the patch. The `serializeBoxes` method now takes a `rect` parameter, which is used to calculate the scaled x and y coordinates. Similarly, `serializeOutlines` also uses this `rect` to adjust the outlines. This suggests that the issue was with how the coordinates were being scaled relative to the page, especially when the PDF is cropped.
+
+The test needs to verify that after the patch, the highlight is correctly positioned and visible. So, the test should create a highlight, serialize it, and then deserialize it to check if the coordinates are accurate.
+
+I'll start by importing the necessary modules. Since the test file already imports several modules, I'll use `getDocument` from `../../src/display/api.js` and `buildGetDocumentParams` from the test utils.
+
+Next, I'll load the PDF file 'bug1872721.pdf' using `getDocument`. Once loaded, I'll get the first page and create a highlight annotation. The highlight should cover a specific area, say 10% of the page's width and height starting from the top-left corner.
+
+I'll then serialize this highlight annotation. The serialization should reflect the correct scaling, especially considering the crop. After serializing, I'll deserialize the data back into an editor and check if the deserialized dimensions match the original.
+
+The critical part is ensuring that the deserialized width and height match the expected values. If the patch is correct, the deserialized dimensions should be accurate, indicating that the highlight's position and size are correctly preserved.
+
+I'll structure the test using Jest's `it` function. The test will be self-contained, using async/await for loading the PDF and handling the annotations. I'll also make sure to clean up by closing the document after the test to avoid any resource leaks.
+
+So, putting it all together, the test will:
+1. Load the PDF document.
+2. Access the first page.
+3. Create a highlight with specific dimensions.
+4. Serialize the highlight.
+5. Deserialize the serialized data.
+6. Compare the deserialized dimensions with the expected values.
+
+This should ensure that the patch correctly addresses the issue with highlights on cropped PDFs.
+</think>
+
+```javascript
+it("should correctly serialize and deserialize highlight on cropped pdf", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1872721.pdf'));
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+  
+  // Create highlight annotation
+  const highlight = new (await import("../../src/display/editor/highlight.js")).HighlightEditor({
+    color: "#fff066",
+    opacity: 1,
+    boxes: [{ x: 0.1, y: 0.1, width: 0.2, height: 0.2 }],
+    pageIndex: 0,
+    page: pdfPage,
+    parent: null,
+    uiManager: null,
+  });
+
+  // Serialize the highlight
+  const serialized = highlight.serialize();
+
+  // Deserialize the highlight
+  const deserialized = HighlightEditor.deserialize(serialized, null, null);
+
+  // Verify the deserialized dimensions
+  expect(deserialized.width).toBeCloseTo(0.2);
+  expect(deserialized.height).toBeCloseTo(0.2);
+
+  await pdfDocument.close();
+});
+```

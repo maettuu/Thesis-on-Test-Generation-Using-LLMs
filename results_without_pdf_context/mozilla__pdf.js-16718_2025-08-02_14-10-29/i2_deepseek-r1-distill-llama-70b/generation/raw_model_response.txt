@@ -1,0 +1,58 @@
+<think>
+Okay, I need to write a regression test for the issue where PDF annotations aren't saved on certain PDFs. The patch provided makes some changes to the worker.js, writer.js, and xref.js files. 
+
+First, I should understand what the patch does. From the patch, I see that in worker.js, they added a check for linearization and modified how startXRef is determined. In writer.js, they updated the condition in updateAcroform to include hasXfaDatasetsEntry. In xref.js, they introduced a new variable #firstXRefStmPos and modified the lastXRefStreamPos getter.
+
+The issue was that when saving a PDF with annotations, the AcroForm dictionary wasn't being correctly updated, especially in cases where the XRef stream handling was different. The patch ensures that the AcroForm is only updated when necessary, preventing unnecessary changes which might cause issues.
+
+To write a test, I need to create a scenario where the annotations are saved correctly after the patch but failed before. I'll use a sample PDF that had the problem. I'll load the PDF, add an annotation, save it, and check if the annotations are present.
+
+I'll structure the test using Jest. I'll import the necessary modules like PDFDocument, Annotation, etc. I'll load the PDF, create an annotation, save the document, and then reload it to check if the annotation exists.
+
+I have to make sure the test is self-contained and only uses the provided imports. I'll use dynamic imports for compatibility. The test will fail before the patch because the annotations aren't saved, and pass after the patch is applied.
+
+So, the test will:
+1. Load a PDF file.
+2. Create an annotation and add it to the first page.
+3. Save the document with the new annotation.
+4. Reload the saved document and check if the annotation exists.
+
+This should validate that the patch fixes the issue.
+</think>
+
+```javascript
+it("should correctly save annotations when AcroForm needs appearances", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Annotation, AnnotationBorderStyle } = await import("../../src/core/annotation.js");
+  const { writeDict } = await import("../../src/core/writer.js");
+
+  // Create a simple PDF with one page
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+  
+  // Create a test annotation
+  const rect = [100, 100, 200, 200];
+  const annotation = new Annotation({
+    type: "Highlight",
+    rect,
+    page: 0,
+    color: "#FF0000",
+    border: new AnnotationBorderStyle({ width: 2 }),
+  });
+
+  // Save the document
+  const saveResult = await pdf.save({
+    annotations: [annotation],
+    flags: 3, // Save with annotations
+  });
+
+  // Reload the saved document
+  const loadedPdf = await PDFDocument.load(saveResult.bytes);
+
+  // Check if the annotation was correctly saved
+  const [firstPage] = await loadedPdf.getPages();
+  const annotations = await firstPage.getAnnotations();
+
+  expect(annotations.length).toBe(1);
+});
+```

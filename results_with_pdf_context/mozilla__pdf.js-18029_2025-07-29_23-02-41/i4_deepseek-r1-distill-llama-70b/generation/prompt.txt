@@ -1,0 +1,5149 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Slow rendering of PDF files with smask
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/base_factory.js b/src/display/base_factory.js
+--- a/src/display/base_factory.js
++++ b/src/display/base_factory.js
+@@ -30,6 +30,14 @@ class BaseFilterFactory {
+     return "none";
+   }
+ 
++  addAlphaFilter(map) {
++    return "none";
++  }
++
++  addLuminosityFilter(map) {
++    return "none";
++  }
++
+   addHighlightHCMFilter(filterName, fgColor, bgColor, newFgColor, newBgColor) {
+     return "none";
+   }
+
+diff --git a/src/display/canvas.js b/src/display/canvas.js
+--- a/src/display/canvas.js
++++ b/src/display/canvas.js
+@@ -796,122 +796,6 @@ function resetCtxToDefault(ctx) {
+   }
+ }
+ 
+-function composeSMaskBackdrop(bytes, r0, g0, b0) {
+-  const length = bytes.length;
+-  for (let i = 3; i < length; i += 4) {
+-    const alpha = bytes[i];
+-    if (alpha === 0) {
+-      bytes[i - 3] = r0;
+-      bytes[i - 2] = g0;
+-      bytes[i - 1] = b0;
+-    } else if (alpha < 255) {
+-      const alpha_ = 255 - alpha;
+-      bytes[i - 3] = (bytes[i - 3] * alpha + r0 * alpha_) >> 8;
+-      bytes[i - 2] = (bytes[i - 2] * alpha + g0 * alpha_) >> 8;
+-      bytes[i - 1] = (bytes[i - 1] * alpha + b0 * alpha_) >> 8;
+-    }
+-  }
+-}
+-
+-function composeSMaskAlpha(maskData, layerData, transferMap) {
+-  const length = maskData.length;
+-  const scale = 1 / 255;
+-  for (let i = 3; i < length; i += 4) {
+-    const alpha = transferMap ? transferMap[maskData[i]] : maskData[i];
+-    layerData[i] = (layerData[i] * alpha * scale) | 0;
+-  }
+-}
+-
+-function composeSMaskLuminosity(maskData, layerData, transferMap) {
+-  const length = maskData.length;
+-  for (let i = 3; i < length; i += 4) {
+-    const y =
+-      maskData[i - 3] * 77 + // * 0.3 / 255 * 0x10000
+-      maskData[i - 2] * 152 + // * 0.59 ....
+-      maskData[i - 1] * 28; // * 0.11 ....
+-    layerData[i] = transferMap
+-      ? (layerData[i] * transferMap[y >> 8]) >> 8
+-      : (layerData[i] * y) >> 16;
+-  }
+-}
+-
+-function genericComposeSMask(
+-  maskCtx,
+-  layerCtx,
+-  width,
+-  height,
+-  subtype,
+-  backdrop,
+-  transferMap,
+-  layerOffsetX,
+-  layerOffsetY,
+-  maskOffsetX,
+-  maskOffsetY
+-) {
+-  const hasBackdrop = !!backdrop;
+-  const r0 = hasBackdrop ? backdrop[0] : 0;
+-  const g0 = hasBackdrop ? backdrop[1] : 0;
+-  const b0 = hasBackdrop ? backdrop[2] : 0;
+-
+-  const composeFn =
+-    subtype === "Luminosity" ? composeSMaskLuminosity : composeSMaskAlpha;
+-
+-  // processing image in chunks to save memory
+-  const PIXELS_TO_PROCESS = 1048576;
+-  const chunkSize = Math.min(height, Math.ceil(PIXELS_TO_PROCESS / width));
+-  for (let row = 0; row < height; row += chunkSize) {
+-    const chunkHeight = Math.min(chunkSize, height - row);
+-    const maskData = maskCtx.getImageData(
+-      layerOffsetX - maskOffsetX,
+-      row + (layerOffsetY - maskOffsetY),
+-      width,
+-      chunkHeight
+-    );
+-    const layerData = layerCtx.getImageData(
+-      layerOffsetX,
+-      row + layerOffsetY,
+-      width,
+-      chunkHeight
+-    );
+-
+-    if (hasBackdrop) {
+-      composeSMaskBackdrop(maskData.data, r0, g0, b0);
+-    }
+-    composeFn(maskData.data, layerData.data, transferMap);
+-
+-    layerCtx.putImageData(layerData, layerOffsetX, row + layerOffsetY);
+-  }
+-}
+-
+-function composeSMask(ctx, smask, layerCtx, layerBox) {
+-  const layerOffsetX = layerBox[0];
+-  const layerOffsetY = layerBox[1];
+-  const layerWidth = layerBox[2] - layerOffsetX;
+-  const layerHeight = layerBox[3] - layerOffsetY;
+-  if (layerWidth === 0 || layerHeight === 0) {
+-    return;
+-  }
+-  genericComposeSMask(
+-    smask.context,
+-    layerCtx,
+-    layerWidth,
+-    layerHeight,
+-    smask.subtype,
+-    smask.backdrop,
+-    smask.transferMap,
+-    layerOffsetX,
+-    layerOffsetY,
+-    smask.offsetX,
+-    smask.offsetY
+-  );
+-  ctx.save();
+-  ctx.globalAlpha = 1;
+-  ctx.globalCompositeOperation = "source-over";
+-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+-  ctx.drawImage(layerCtx.canvas, 0, 0);
+-  ctx.restore();
+-}
+-
+ function getImageSmoothingEnabled(transform, interpolate) {
+   // In section 8.9.5.3 of the PDF spec, it's mentioned that the interpolate
+   // flag should be used when the image is upscaled.
+@@ -1556,7 +1440,7 @@ class CanvasGraphics {
+     const smask = this.current.activeSMask;
+     const suspendedCtx = this.suspendedCtx;
+ 
+-    composeSMask(suspendedCtx, smask, this.ctx, dirtyBox);
++    this.composeSMask(suspendedCtx, smask, this.ctx, dirtyBox);
+     // Whatever was drawn has been moved to the suspended canvas, now clear it
+     // out of the current canvas.
+     this.ctx.save();
+@@ -1565,6 +1449,117 @@ class CanvasGraphics {
+     this.ctx.restore();
+   }
+ 
++  composeSMask(ctx, smask, layerCtx, layerBox) {
++    const layerOffsetX = layerBox[0];
++    const layerOffsetY = layerBox[1];
++    const layerWidth = layerBox[2] - layerOffsetX;
++    const layerHeight = layerBox[3] - layerOffsetY;
++    if (layerWidth === 0 || layerHeight === 0) {
++      return;
++    }
++    this.genericComposeSMask(
++      smask.context,
++      layerCtx,
++      layerWidth,
++      layerHeight,
++      smask.subtype,
++      smask.backdrop,
++      smask.transferMap,
++      layerOffsetX,
++      layerOffsetY,
++      smask.offsetX,
++      smask.offsetY
++    );
++    ctx.save();
++    ctx.globalAlpha = 1;
++    ctx.globalCompositeOperation = "source-over";
++    ctx.setTransform(1, 0, 0, 1, 0, 0);
++    ctx.drawImage(layerCtx.canvas, 0, 0);
++    ctx.restore();
++  }
++
++  genericComposeSMask(
++    maskCtx,
++    layerCtx,
++    width,
++    height,
++    subtype,
++    backdrop,
++    transferMap,
++    layerOffsetX,
++    layerOffsetY,
++    maskOffsetX,
++    maskOffsetY
++  ) {
++    let maskCanvas = maskCtx.canvas;
++    let maskX = layerOffsetX - maskOffsetX;
++    let maskY = layerOffsetY - maskOffsetY;
++
++    if (backdrop) {
++      if (
++        maskX < 0 ||
++        maskY < 0 ||
++        maskX + width > maskCanvas.width ||
++        maskY + height > maskCanvas.height
++      ) {
++        const canvas = this.cachedCanvases.getCanvas(
++          "maskExtension",
++          width,
++          height
++        );
++        const ctx = canvas.context;
++        ctx.drawImage(maskCanvas, -maskX, -maskY);
++        if (backdrop.some(c => c !== 0)) {
++          ctx.globalCompositeOperation = "destination-atop";
++          ctx.fillStyle = Util.makeHexColor(...backdrop);
++          ctx.fillRect(0, 0, width, height);
++          ctx.globalCompositeOperation = "source-over";
++        }
++
++        maskCanvas = canvas.canvas;
++        maskX = maskY = 0;
++      } else if (backdrop.some(c => c !== 0)) {
++        maskCtx.save();
++        maskCtx.globalAlpha = 1;
++        maskCtx.setTransform(1, 0, 0, 1, 0, 0);
++        const clip = new Path2D();
++        clip.rect(maskX, maskY, width, height);
++        maskCtx.clip(clip);
++        maskCtx.globalCompositeOperation = "destination-atop";
++        maskCtx.fillStyle = Util.makeHexColor(...backdrop);
++        maskCtx.fillRect(maskX, maskY, width, height);
++        maskCtx.restore();
++      }
++    }
++
++    layerCtx.save();
++    layerCtx.globalAlpha = 1;
++    layerCtx.setTransform(1, 0, 0, 1, 0, 0);
++
++    if (subtype === "Alpha" && transferMap) {
++      layerCtx.filter = this.filterFactory.addAlphaFilter(transferMap);
++    } else if (subtype === "Luminosity") {
++      layerCtx.filter = this.filterFactory.addLuminosityFilter(transferMap);
++    }
++
++    const clip = new Path2D();
++    clip.rect(layerOffsetX, layerOffsetY, width, height);
++    layerCtx.clip(clip);
++    layerCtx.globalCompositeOperation = "destination-in";
++    layerCtx.drawImage(
++      maskCanvas,
++      maskX,
++      maskY,
++      width,
++      height,
++      layerOffsetX,
++      layerOffsetY,
++      width,
++      height
++    );
++    layerCtx.restore();
++  }
++
+   save() {
+     if (this.inSMaskMode) {
+       // SMask mode may be turned on/off causing us to lose graphics state.
+
+diff --git a/src/display/display_utils.js b/src/display/display_utils.js
+--- a/src/display/display_utils.js
++++ b/src/display/display_utils.js
+@@ -97,6 +97,30 @@ class DOMFilterFactory extends BaseFilterFactory {
+     return this.#_defs;
+   }
+ 
++  #createTables(maps) {
++    if (maps.length === 1) {
++      const mapR = maps[0];
++      const buffer = new Array(256);
++      for (let i = 0; i < 256; i++) {
++        buffer[i] = mapR[i] / 255;
++      }
++
++      const table = buffer.join(",");
++      return [table, table, table];
++    }
++
++    const [mapR, mapG, mapB] = maps;
++    const bufferR = new Array(256);
++    const bufferG = new Array(256);
++    const bufferB = new Array(256);
++    for (let i = 0; i < 256; i++) {
++      bufferR[i] = mapR[i] / 255;
++      bufferG[i] = mapG[i] / 255;
++      bufferB[i] = mapB[i] / 255;
++    }
++    return [bufferR.join(","), bufferG.join(","), bufferB.join(",")];
++  }
++
+   addFilter(maps) {
+     if (!maps) {
+       return "none";
+@@ -109,29 +133,8 @@ class DOMFilterFactory extends BaseFilterFactory {
+       return value;
+     }
+ 
+-    let tableR, tableG, tableB, key;
+-    if (maps.length === 1) {
+-      const mapR = maps[0];
+-      const buffer = new Array(256);
+-      for (let i = 0; i < 256; i++) {
+-        buffer[i] = mapR[i] / 255;
+-      }
+-      key = tableR = tableG = tableB = buffer.join(",");
+-    } else {
+-      const [mapR, mapG, mapB] = maps;
+-      const bufferR = new Array(256);
+-      const bufferG = new Array(256);
+-      const bufferB = new Array(256);
+-      for (let i = 0; i < 256; i++) {
+-        bufferR[i] = mapR[i] / 255;
+-        bufferG[i] = mapG[i] / 255;
+-        bufferB[i] = mapB[i] / 255;
+-      }
+-      tableR = bufferR.join(",");
+-      tableG = bufferG.join(",");
+-      tableB = bufferB.join(",");
+-      key = `${tableR}${tableG}${tableB}`;
+-    }
++    const [tableR, tableG, tableB] = this.#createTables(maps);
++    const key = maps.length === 1 ? tableR : `${tableR}${tableG}${tableB}`;
+ 
+     value = this.#cache.get(key);
+     if (value) {
+@@ -233,6 +236,70 @@ class DOMFilterFactory extends BaseFilterFactory {
+     return info.url;
+   }
+ 
++  addAlphaFilter(map) {
++    // When a page is zoomed the page is re-drawn but the maps are likely
++    // the same.
++    let value = this.#cache.get(map);
++    if (value) {
++      return value;
++    }
++
++    const [tableA] = this.#createTables([map]);
++    const key = `alpha_${tableA}`;
++
++    value = this.#cache.get(key);
++    if (value) {
++      this.#cache.set(map, value);
++      return value;
++    }
++
++    const id = `g_${this.#docId}_alpha_map_${this.#id++}`;
++    const url = `url(#${id})`;
++    this.#cache.set(map, url);
++    this.#cache.set(key, url);
++
++    const filter = this.#createFilter(id);
++    this.#addTransferMapAlphaConversion(tableA, filter);
++
++    return url;
++  }
++
++  addLuminosityFilter(map) {
++    // When a page is zoomed the page is re-drawn but the maps are likely
++    // the same.
++    let value = this.#cache.get(map || "luminosity");
++    if (value) {
++      return value;
++    }
++
++    let tableA, key;
++    if (map) {
++      [tableA] = this.#createTables([map]);
++      key = `luminosity_${tableA}`;
++    } else {
++      key = "luminosity";
++    }
++
++    value = this.#cache.get(key);
++    if (value) {
++      this.#cache.set(map, value);
++      return value;
++    }
++
++    const id = `g_${this.#docId}_luminosity_map_${this.#id++}`;
++    const url = `url(#${id})`;
++    this.#cache.set(map, url);
++    this.#cache.set(key, url);
++
++    const filter = this.#createFilter(id);
++    this.#addLuminosityConversion(filter);
++    if (map) {
++      this.#addTransferMapAlphaConversion(tableA, filter);
++    }
++
++    return url;
++  }
++
+   addHighlightHCMFilter(filterName, fgColor, bgColor, newFgColor, newBgColor) {
+     const key = `${fgColor}-${bgColor}-${newFgColor}-${newBgColor}`;
+     let info = this.#hcmCache.get(filterName);
+@@ -341,6 +408,19 @@ class DOMFilterFactory extends BaseFilterFactory {
+     this.#id = 0;
+   }
+ 
++  #addLuminosityConversion(filter) {
++    const feColorMatrix = this.#document.createElementNS(
++      SVG_NS,
++      "feColorMatrix"
++    );
++    feColorMatrix.setAttribute("type", "matrix");
++    feColorMatrix.setAttribute(
++      "values",
++      "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.3 0.59 0.11 0 0"
++    );
++    filter.append(feColorMatrix);
++  }
++
+   #addGrayConversion(filter) {
+     const feColorMatrix = this.#document.createElementNS(
+       SVG_NS,
+@@ -381,6 +461,15 @@ class DOMFilterFactory extends BaseFilterFactory {
+     this.#appendFeFunc(feComponentTransfer, "feFuncB", bTable);
+   }
+ 
++  #addTransferMapAlphaConversion(aTable, filter) {
++    const feComponentTransfer = this.#document.createElementNS(
++      SVG_NS,
++      "feComponentTransfer"
++    );
++    filter.append(feComponentTransfer);
++    this.#appendFeFunc(feComponentTransfer, "feFuncA", aTable);
++  }
++
+   #getRGB(color) {
+     this.#defs.style.color = color;
+     return getRGB(getComputedStyle(this.#defs).getPropertyValue("color"));
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.24.4
+- @babel/preset-env: ^7.24.4
+- @babel/runtime: ^7.24.4
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @jazzer.js/core: ^2.1.0
+- autoprefixer: ^10.4.19
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001614
+- canvas: ^2.11.2
+- core-js: ^3.37.0
+- cross-env: ^7.0.3
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.1
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.7.3
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^52.0.0
+- globals: ^15.1.0
+- gulp: ^4.0.2
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- needle: ^3.3.1
+- path2d: ^0.2.0
+- pngjs: ^7.0.0
+- postcss: ^8.4.38
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^7.0.0
+- postcss-nesting: ^12.1.2
+- prettier: ^3.2.5
+- puppeteer: ^22.7.1
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.4.0
+- stylelint-prettier: ^5.0.0
+- terser-webpack-plugin: ^5.3.10
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.4.5
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.91.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/base_factory.js
+1 /* Copyright 2015 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { CMapCompressionType, unreachable } from "../shared/util.js";
+17 
+18 class BaseFilterFactory {
+19   constructor() {
+20     if (this.constructor === BaseFilterFactory) {
+21       unreachable("Cannot initialize BaseFilterFactory.");
+22     }
+23   }
+24 
+25   addFilter(maps) {
+26     return "none";
+27   }
+28 
+29   addHCMFilter(fgColor, bgColor) {
+30     return "none";
+31   }
+32 
+33   addHighlightHCMFilter(filterName, fgColor, bgColor, newFgColor, newBgColor) {
+34     return "none";
+35   }
+36 
+37   destroy(keepHCM = false) {}
+38 }
+39 
+40 class BaseCanvasFactory {
+41   constructor() {
+42     if (this.constructor === BaseCanvasFactory) {
+43       unreachable("Cannot initialize BaseCanvasFactory.");
+44     }
+45   }
+46 
+47   create(width, height) {
+48     if (width <= 0 || height <= 0) {
+49       throw new Error("Invalid canvas size");
+50     }
+51     const canvas = this._createCanvas(width, height);
+52     return {
+53       canvas,
+54       context: canvas.getContext("2d"),
+55     };
+56   }
+57 
+58   reset(canvasAndContext, width, height) {
+59     if (!canvasAndContext.canvas) {
+60       throw new Error("Canvas is not specified");
+61     }
+62     if (width <= 0 || height <= 0) {
+63       throw new Error("Invalid canvas size");
+64     }
+65     canvasAndContext.canvas.width = width;
+66     canvasAndContext.canvas.height = height;
+67   }
+68 
+69   destroy(canvasAndContext) {
+70     if (!canvasAndContext.canvas) {
+71       throw new Error("Canvas is not specified");
+72     }
+73     // Zeroing the width and height cause Firefox to release graphics
+74     // resources immediately, which can greatly reduce memory consumption.
+75     canvasAndContext.canvas.width = 0;
+76     canvasAndContext.canvas.height = 0;
+77     canvasAndContext.canvas = null;
+78     canvasAndContext.context = null;
+79   }
+80 
+81   /**
+82    * @ignore
+83    */
+84   _createCanvas(width, height) {
+85     unreachable("Abstract method `_createCanvas` called.");
+86   }
+87 }
+88 
+89 class BaseCMapReaderFactory {
+90   constructor({ baseUrl = null, isCompressed = true }) {
+91     if (this.constructor === BaseCMapReaderFactory) {
+92       unreachable("Cannot initialize BaseCMapReaderFactory.");
+93     }
+94     this.baseUrl = baseUrl;
+95     this.isCompressed = isCompressed;
+96   }
+97 
+98   async fetch({ name }) {
+99     if (!this.baseUrl) {
+100       throw new Error(
+101         'The CMap "baseUrl" parameter must be specified, ensure that ' +
+102           'the "cMapUrl" and "cMapPacked" API parameters are provided.'
+103       );
+104     }
+105     if (!name) {
+106       throw new Error("CMap name must be specified.");
+107     }
+108     const url = this.baseUrl + name + (this.isCompressed ? ".bcmap" : "");
+109     const compressionType = this.isCompressed
+110       ? CMapCompressionType.BINARY
+111       : CMapCompressionType.NONE;
+112 
+113     return this._fetchData(url, compressionType).catch(reason => {
+114       throw new Error(
+115         `Unable to load ${this.isCompressed ? "binary " : ""}CMap at: ${url}`
+116       );
+117     });
+118   }
+119 
+120   /**
+121    * @ignore
+122    */
+123   _fetchData(url, compressionType) {
+124     unreachable("Abstract method `_fetchData` called.");
+125   }
+126 }
+127 
+128 class BaseStandardFontDataFactory {
+129   constructor({ baseUrl = null }) {
+130     if (this.constructor === BaseStandardFontDataFactory) {
+131       unreachable("Cannot initialize BaseStandardFontDataFactory.");
+132     }
+133     this.baseUrl = baseUrl;
+134   }
+135 
+136   async fetch({ filename }) {
+137     if (!this.baseUrl) {
+138       throw new Error(
+139         'The standard font "baseUrl" parameter must be specified, ensure that ' +
+140           'the "standardFontDataUrl" API parameter is provided.'
+141       );
+142     }
+143     if (!filename) {
+144       throw new Error("Font filename must be specified.");
+145     }
+146     const url = `${this.baseUrl}${filename}`;
+147 
+148     return this._fetchData(url).catch(reason => {
+149       throw new Error(`Unable to load font data at: ${url}`);
+150     });
+151   }
+152 
+153   /**
+154    * @ignore
+155    */
+156   _fetchData(url) {
+157     unreachable("Abstract method `_fetchData` called.");
+158   }
+159 }
+160 
+161 class BaseSVGFactory {
+162   constructor() {
+163     if (this.constructor === BaseSVGFactory) {
+164       unreachable("Cannot initialize BaseSVGFactory.");
+165     }
+166   }
+167 
+168   create(width, height, skipDimensions = false) {
+169     if (width <= 0 || height <= 0) {
+170       throw new Error("Invalid SVG dimensions");
+171     }
+172     const svg = this._createSVG("svg:svg");
+173     svg.setAttribute("version", "1.1");
+174 
+175     if (!skipDimensions) {
+176       svg.setAttribute("width", `${width}px`);
+177       svg.setAttribute("height", `${height}px`);
+178     }
+179 
+180     svg.setAttribute("preserveAspectRatio", "none");
+181     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+182 
+183     return svg;
+184   }
+185 
+186   createElement(type) {
+187     if (typeof type !== "string") {
+188       throw new Error("Invalid SVG element type");
+189     }
+190     return this._createSVG(type);
+191   }
+192 
+193   /**
+194    * @ignore
+195    */
+196   _createSVG(type) {
+197     unreachable("Abstract method `_createSVG` called.");
+198   }
+199 }
+200 
+201 export {
+202   BaseCanvasFactory,
+203   BaseCMapReaderFactory,
+204   BaseFilterFactory,
+205   BaseStandardFontDataFactory,
+206   BaseSVGFactory,
+207 };
+File:
+src/display/canvas.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   FeatureTest,
+18   FONT_IDENTITY_MATRIX,
+19   IDENTITY_MATRIX,
+20   ImageKind,
+21   info,
+22   isNodeJS,
+23   OPS,
+24   shadow,
+25   TextRenderingMode,
+26   unreachable,
+27   Util,
+28   warn,
+29 } from "../shared/util.js";
+30 import {
+31   getCurrentTransform,
+32   getCurrentTransformInverse,
+33   PixelsPerInch,
+34 } from "./display_utils.js";
+35 import {
+36   getShadingPattern,
+37   PathType,
+38   TilingPattern,
+39 } from "./pattern_helper.js";
+40 import { convertBlackAndWhiteToRGBA } from "../shared/image_utils.js";
+41 
+42 // <canvas> contexts store most of the state we need natively.
+43 // However, PDF needs a bit more state, which we store here.
+44 // Minimal font size that would be used during canvas fillText operations.
+45 const MIN_FONT_SIZE = 16;
+46 // Maximum font size that would be used during canvas fillText operations.
+47 const MAX_FONT_SIZE = 100;
+48 const MAX_GROUP_SIZE = 4096;
+49 
+50 // Defines the time the `executeOperatorList`-method is going to be executing
+51 // before it stops and schedules a continue of execution.
+52 const EXECUTION_TIME = 15; // ms
+53 // Defines the number of steps before checking the execution time.
+54 const EXECUTION_STEPS = 10;
+55 
+56 // To disable Type3 compilation, set the value to `-1`.
+57 const MAX_SIZE_TO_COMPILE = 1000;
+58 
+59 const FULL_CHUNK_HEIGHT = 16;
+60 
+61 /**
+62  * Overrides certain methods on a 2d ctx so that when they are called they
+63  * will also call the same method on the destCtx. The methods that are
+64  * overridden are all the transformation state modifiers, path creation, and
+65  * save/restore. We only forward these specific methods because they are the
+66  * only state modifiers that we cannot copy over when we switch contexts.
+67  *
+68  * To remove mirroring call `ctx._removeMirroring()`.
+69  *
+70  * @param {Object} ctx - The 2d canvas context that will duplicate its calls on
+71  *   the destCtx.
+72  * @param {Object} destCtx - The 2d canvas context that will receive the
+73  *   forwarded calls.
+74  */
+75 function mirrorContextOperations(ctx, destCtx) {
+76   if (ctx._removeMirroring) {
+77     throw new Error("Context is already forwarding operations.");
+78   }
+79   ctx.__originalSave = ctx.save;
+80   ctx.__originalRestore = ctx.restore;
+81   ctx.__originalRotate = ctx.rotate;
+82   ctx.__originalScale = ctx.scale;
+83   ctx.__originalTranslate = ctx.translate;
+84   ctx.__originalTransform = ctx.transform;
+85   ctx.__originalSetTransform = ctx.setTransform;
+86   ctx.__originalResetTransform = ctx.resetTransform;
+87   ctx.__originalClip = ctx.clip;
+88   ctx.__originalMoveTo = ctx.moveTo;
+89   ctx.__originalLineTo = ctx.lineTo;
+90   ctx.__originalBezierCurveTo = ctx.bezierCurveTo;
+91   ctx.__originalRect = ctx.rect;
+92   ctx.__originalClosePath = ctx.closePath;
+93   ctx.__originalBeginPath = ctx.beginPath;
+94 
+95   ctx._removeMirroring = () => {
+96     ctx.save = ctx.__originalSave;
+97     ctx.restore = ctx.__originalRestore;
+98     ctx.rotate = ctx.__originalRotate;
+99     ctx.scale = ctx.__originalScale;
+100     ctx.translate = ctx.__originalTranslate;
+101     ctx.transform = ctx.__originalTransform;
+102     ctx.setTransform = ctx.__originalSetTransform;
+103     ctx.resetTransform = ctx.__originalResetTransform;
+104 
+105     ctx.clip = ctx.__originalClip;
+106     ctx.moveTo = ctx.__originalMoveTo;
+107     ctx.lineTo = ctx.__originalLineTo;
+108     ctx.bezierCurveTo = ctx.__originalBezierCurveTo;
+109     ctx.rect = ctx.__originalRect;
+110     ctx.closePath = ctx.__originalClosePath;
+111     ctx.beginPath = ctx.__originalBeginPath;
+112     delete ctx._removeMirroring;
+113   };
+114 
+115   ctx.save = function ctxSave() {
+116     destCtx.save();
+117     this.__originalSave();
+118   };
+119 
+120   ctx.restore = function ctxRestore() {
+121     destCtx.restore();
+122     this.__originalRestore();
+123   };
+124 
+125   ctx.translate = function ctxTranslate(x, y) {
+126     destCtx.translate(x, y);
+127     this.__originalTranslate(x, y);
+128   };
+129 
+130   ctx.scale = function ctxScale(x, y) {
+131     destCtx.scale(x, y);
+132     this.__originalScale(x, y);
+133   };
+134 
+135   ctx.transform = function ctxTransform(a, b, c, d, e, f) {
+136     destCtx.transform(a, b, c, d, e, f);
+137     this.__originalTransform(a, b, c, d, e, f);
+138   };
+139 
+140   ctx.setTransform = function ctxSetTransform(a, b, c, d, e, f) {
+141     destCtx.setTransform(a, b, c, d, e, f);
+142     this.__originalSetTransform(a, b, c, d, e, f);
+143   };
+144 
+145   ctx.resetTransform = function ctxResetTransform() {
+146     destCtx.resetTransform();
+147     this.__originalResetTransform();
+148   };
+149 
+150   ctx.rotate = function ctxRotate(angle) {
+151     destCtx.rotate(angle);
+152     this.__originalRotate(angle);
+153   };
+154 
+155   ctx.clip = function ctxRotate(rule) {
+156     destCtx.clip(rule);
+157     this.__originalClip(rule);
+158   };
+159 
+160   ctx.moveTo = function (x, y) {
+161     destCtx.moveTo(x, y);
+162     this.__originalMoveTo(x, y);
+163   };
+164 
+165   ctx.lineTo = function (x, y) {
+166     destCtx.lineTo(x, y);
+167     this.__originalLineTo(x, y);
+168   };
+169 
+170   ctx.bezierCurveTo = function (cp1x, cp1y, cp2x, cp2y, x, y) {
+171     destCtx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y);
+172     this.__originalBezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y);
+173   };
+174 
+175   ctx.rect = function (x, y, width, height) {
+176     destCtx.rect(x, y, width, height);
+177     this.__originalRect(x, y, width, height);
+178   };
+179 
+180   ctx.closePath = function () {
+181     destCtx.closePath();
+182     this.__originalClosePath();
+183   };
+184 
+185   ctx.beginPath = function () {
+186     destCtx.beginPath();
+187     this.__originalBeginPath();
+188   };
+189 }
+190 
+191 class CachedCanvases {
+192   constructor(canvasFactory) {
+193     this.canvasFactory = canvasFactory;
+194     this.cache = Object.create(null);
+195   }
+196 
+197   getCanvas(id, width, height) {
+198     let canvasEntry;
+199     if (this.cache[id] !== undefined) {
+200       canvasEntry = this.cache[id];
+201       this.canvasFactory.reset(canvasEntry, width, height);
+202     } else {
+203       canvasEntry = this.canvasFactory.create(width, height);
+204       this.cache[id] = canvasEntry;
+205     }
+206     return canvasEntry;
+207   }
+208 
+209   delete(id) {
+210     delete this.cache[id];
+211   }
+212 
+213   clear() {
+214     for (const id in this.cache) {
+215       const canvasEntry = this.cache[id];
+216       this.canvasFactory.destroy(canvasEntry);
+217       delete this.cache[id];
+218     }
+219   }
+220 }
+221 
+222 function drawImageAtIntegerCoords(
+223   ctx,
+224   srcImg,
+225   srcX,
+226   srcY,
+227   srcW,
+228   srcH,
+229   destX,
+230   destY,
+231   destW,
+232   destH
+233 ) {
+234   const [a, b, c, d, tx, ty] = getCurrentTransform(ctx);
+235   if (b === 0 && c === 0) {
+236     // top-left corner is at (X, Y) and
+237     // bottom-right one is at (X + width, Y + height).
+238 
+239     // If leftX is 4.321 then it's rounded to 4.
+240     // If width is 10.432 then it's rounded to 11 because
+241     // rightX = leftX + width = 14.753 which is rounded to 15
+242     // so after rounding the total width is 11 (15 - 4).
+243     // It's why we can't just floor/ceil uniformly, it just depends
+244     // on the values we've.
+245 
+246     const tlX = destX * a + tx;
+247     const rTlX = Math.round(tlX);
+248     const tlY = destY * d + ty;
+249     const rTlY = Math.round(tlY);
+250     const brX = (destX + destW) * a + tx;
+251 
+252     // Some pdf contains images with 1x1 images so in case of 0-width after
+253     // scaling we must fallback on 1 to be sure there is something.
+254     const rWidth = Math.abs(Math.round(brX) - rTlX) || 1;
+255     const brY = (destY + destH) * d + ty;
+256     const rHeight = Math.abs(Math.round(brY) - rTlY) || 1;
+257 
+258     // We must apply a transformation in order to apply it on the image itself.
+259     // For example if a == 1 && d == -1, it means that the image itself is
+260     // mirrored w.r.t. the x-axis.
+261     ctx.setTransform(Math.sign(a), 0, 0, Math.sign(d), rTlX, rTlY);
+262     ctx.drawImage(srcImg, srcX, srcY, srcW, srcH, 0, 0, rWidth, rHeight);
+263     ctx.setTransform(a, b, c, d, tx, ty);
+264 
+265     return [rWidth, rHeight];
+266   }
+267 
+268   if (a === 0 && d === 0) {
+269     // This path is taken in issue9462.pdf (page 3).
+270     const tlX = destY * c + tx;
+271     const rTlX = Math.round(tlX);
+272     const tlY = destX * b + ty;
+273     const rTlY = Math.round(tlY);
+274     const brX = (destY + destH) * c + tx;
+275     const rWidth = Math.abs(Math.round(brX) - rTlX) || 1;
+276     const brY = (destX + destW) * b + ty;
+277     const rHeight = Math.abs(Math.round(brY) - rTlY) || 1;
+278 
+279     ctx.setTransform(0, Math.sign(b), Math.sign(c), 0, rTlX, rTlY);
+280     ctx.drawImage(srcImg, srcX, srcY, srcW, srcH, 0, 0, rHeight, rWidth);
+281     ctx.setTransform(a, b, c, d, tx, ty);
+282 
+283     return [rHeight, rWidth];
+284   }
+285 
+286   // Not a scale matrix so let the render handle the case without rounding.
+287   ctx.drawImage(srcImg, srcX, srcY, srcW, srcH, destX, destY, destW, destH);
+288 
+289   const scaleX = Math.hypot(a, b);
+290   const scaleY = Math.hypot(c, d);
+291   return [scaleX * destW, scaleY * destH];
+292 }
+293 
+294 function compileType3Glyph(imgData) {
+295   const { width, height } = imgData;
+296   if (width > MAX_SIZE_TO_COMPILE || height > MAX_SIZE_TO_COMPILE) {
+297     return null;
+298   }
+299 
+300   const POINT_TO_PROCESS_LIMIT = 1000;
+301   const POINT_TYPES = new Uint8Array([
+302     0, 2, 4, 0, 1, 0, 5, 4, 8, 10, 0, 8, 0, 2, 1, 0,
+303   ]);
+304 
+305   const width1 = width + 1;
+306   let points = new Uint8Array(width1 * (height + 1));
+307   let i, j, j0;
+308 
+309   // decodes bit-packed mask data
+310   const lineSize = (width + 7) & ~7;
+311   let data = new Uint8Array(lineSize * height),
+312     pos = 0;
+313   for (const elem of imgData.data) {
+314     let mask = 128;
+315     while (mask > 0) {
+316       data[pos++] = elem & mask ? 0 : 255;
+317       mask >>= 1;
+318     }
+319   }
+320 
+321   // finding interesting points: every point is located between mask pixels,
+322   // so there will be points of the (width + 1)x(height + 1) grid. Every point
+323   // will have flags assigned based on neighboring mask pixels:
+324   //   4 | 8
+325   //   --P--
+326   //   2 | 1
+327   // We are interested only in points with the flags:
+328   //   - outside corners: 1, 2, 4, 8;
+329   //   - inside corners: 7, 11, 13, 14;
+330   //   - and, intersections: 5, 10.
+331   let count = 0;
+332   pos = 0;
+333   if (data[pos] !== 0) {
+334     points[0] = 1;
+335     ++count;
+336   }
+337   for (j = 1; j < width; j++) {
+338     if (data[pos] !== data[pos + 1]) {
+339       points[j] = data[pos] ? 2 : 1;
+340       ++count;
+341     }
+342     pos++;
+343   }
+344   if (data[pos] !== 0) {
+345     points[j] = 2;
+346     ++count;
+347   }
+348   for (i = 1; i < height; i++) {
+349     pos = i * lineSize;
+350     j0 = i * width1;
+351     if (data[pos - lineSize] !== data[pos]) {
+352       points[j0] = data[pos] ? 1 : 8;
+353       ++count;
+354     }
+355     // 'sum' is the position of the current pixel configuration in the 'TYPES'
+356     // array (in order 8-1-2-4, so we can use '>>2' to shift the column).
+357     let sum = (data[pos] ? 4 : 0) + (data[pos - lineSize] ? 8 : 0);
+358     for (j = 1; j < width; j++) {
+359       sum =
+360         (sum >> 2) +
+361         (data[pos + 1] ? 4 : 0) +
+362         (data[pos - lineSize + 1] ? 8 : 0);
+363       if (POINT_TYPES[sum]) {
+364         points[j0 + j] = POINT_TYPES[sum];
+365         ++count;
+366       }
+367       pos++;
+368     }
+369     if (data[pos - lineSize] !== data[pos]) {
+370       points[j0 + j] = data[pos] ? 2 : 4;
+371       ++count;
+372     }
+373 
+374     if (count > POINT_TO_PROCESS_LIMIT) {
+375       return null;
+376     }
+377   }
+378 
+379   pos = lineSize * (height - 1);
+380   j0 = i * width1;
+381   if (data[pos] !== 0) {
+382     points[j0] = 8;
+383     ++count;
+384   }
+385   for (j = 1; j < width; j++) {
+386     if (data[pos] !== data[pos + 1]) {
+387       points[j0 + j] = data[pos] ? 4 : 8;
+388       ++count;
+389     }
+390     pos++;
+391   }
+392   if (data[pos] !== 0) {
+393     points[j0 + j] = 4;
+394     ++count;
+395   }
+396   if (count > POINT_TO_PROCESS_LIMIT) {
+397     return null;
+398   }
+399 
+400   // building outlines
+401   const steps = new Int32Array([0, width1, -1, 0, -width1, 0, 0, 0, 1]);
+402   const path = new Path2D();
+403 
+404   for (i = 0; count && i <= height; i++) {
+405     let p = i * width1;
+406     const end = p + width;
+407     while (p < end && !points[p]) {
+408       p++;
+409     }
+410     if (p === end) {
+411       continue;
+412     }
+413     path.moveTo(p % width1, i);
+414 
+415     const p0 = p;
+416     let type = points[p];
+417     do {
+418       const step = steps[type];
+419       do {
+420         p += step;
+421       } while (!points[p]);
+422 
+423       const pp = points[p];
+424       if (pp !== 5 && pp !== 10) {
+425         // set new direction
+426         type = pp;
+427         // delete mark
+428         points[p] = 0;
+429       } else {
+430         // type is 5 or 10, ie, a crossing
+431         // set new direction
+432         type = pp & ((0x33 * type) >> 4);
+433         // set new type for "future hit"
+434         points[p] &= (type >> 2) | (type << 2);
+435       }
+436       path.lineTo(p % width1, (p / width1) | 0);
+437 
+438       if (!points[p]) {
+439         --count;
+440       }
+441     } while (p0 !== p);
+442     --i;
+443   }
+444 
+445   // Immediately release the, potentially large, `Uint8Array`s after parsing.
+446   data = null;
+447   points = null;
+448 
+449   const drawOutline = function (c) {
+450     c.save();
+451     // the path shall be painted in [0..1]x[0..1] space
+452     c.scale(1 / width, -1 / height);
+453     c.translate(0, -height);
+454     c.fill(path);
+455     c.beginPath();
+456     c.restore();
+457   };
+458 
+459   return drawOutline;
+460 }
+461 
+462 class CanvasExtraState {
+463   constructor(width, height) {
+464     // Are soft masks and alpha values shapes or opacities?
+465     this.alphaIsShape = false;
+466     this.fontSize = 0;
+467     this.fontSizeScale = 1;
+468     this.textMatrix = IDENTITY_MATRIX;
+469     this.textMatrixScale = 1;
+470     this.fontMatrix = FONT_IDENTITY_MATRIX;
+471     this.leading = 0;
+472     // Current point (in user coordinates)
+473     this.x = 0;
+474     this.y = 0;
+475     // Start of text line (in text coordinates)
+476     this.lineX = 0;
+477     this.lineY = 0;
+478     // Character and word spacing
+479     this.charSpacing = 0;
+480     this.wordSpacing = 0;
+481     this.textHScale = 1;
+482     this.textRenderingMode = TextRenderingMode.FILL;
+483     this.textRise = 0;
+484     // Default fore and background colors
+485     this.fillColor = "#000000";
+486     this.strokeColor = "#000000";
+487     this.patternFill = false;
+488     // Note: fill alpha applies to all non-stroking operations
+489     this.fillAlpha = 1;
+490     this.strokeAlpha = 1;
+491     this.lineWidth = 1;
+492     this.activeSMask = null;
+493     this.transferMaps = "none";
+494 
+495     this.startNewPathAndClipBox([0, 0, width, height]);
+496   }
+497 
+498   clone() {
+499     const clone = Object.create(this);
+500     clone.clipBox = this.clipBox.slice();
+501     return clone;
+502   }
+503 
+504   setCurrentPoint(x, y) {
+505     this.x = x;
+506     this.y = y;
+507   }
+508 
+509   updatePathMinMax(transform, x, y) {
+510     [x, y] = Util.applyTransform([x, y], transform);
+511     this.minX = Math.min(this.minX, x);
+512     this.minY = Math.min(this.minY, y);
+513     this.maxX = Math.max(this.maxX, x);
+514     this.maxY = Math.max(this.maxY, y);
+515   }
+516 
+517   updateRectMinMax(transform, rect) {
+518     const p1 = Util.applyTransform(rect, transform);
+519     const p2 = Util.applyTransform(rect.slice(2), transform);
+520     const p3 = Util.applyTransform([rect[0], rect[3]], transform);
+521     const p4 = Util.applyTransform([rect[2], rect[1]], transform);
+522 
+523     this.minX = Math.min(this.minX, p1[0], p2[0], p3[0], p4[0]);
+524     this.minY = Math.min(this.minY, p1[1], p2[1], p3[1], p4[1]);
+525     this.maxX = Math.max(this.maxX, p1[0], p2[0], p3[0], p4[0]);
+526     this.maxY = Math.max(this.maxY, p1[1], p2[1], p3[1], p4[1]);
+527   }
+528 
+529   updateScalingPathMinMax(transform, minMax) {
+530     Util.scaleMinMax(transform, minMax);
+531     this.minX = Math.min(this.minX, minMax[0]);
+532     this.minY = Math.min(this.minY, minMax[1]);
+533     this.maxX = Math.max(this.maxX, minMax[2]);
+534     this.maxY = Math.max(this.maxY, minMax[3]);
+535   }
+536 
+537   updateCurvePathMinMax(transform, x0, y0, x1, y1, x2, y2, x3, y3, minMax) {
+538     const box = Util.bezierBoundingBox(x0, y0, x1, y1, x2, y2, x3, y3, minMax);
+539     if (minMax) {
+540       return;
+541     }
+542     this.updateRectMinMax(transform, box);
+543   }
+544 
+545   getPathBoundingBox(pathType = PathType.FILL, transform = null) {
+546     const box = [this.minX, this.minY, this.maxX, this.maxY];
+547     if (pathType === PathType.STROKE) {
+548       if (!transform) {
+549         unreachable("Stroke bounding box must include transform.");
+550       }
+551       // Stroked paths can be outside of the path bounding box by 1/2 the line
+552       // width.
+553       const scale = Util.singularValueDecompose2dScale(transform);
+554       const xStrokePad = (scale[0] * this.lineWidth) / 2;
+555       const yStrokePad = (scale[1] * this.lineWidth) / 2;
+556       box[0] -= xStrokePad;
+557       box[1] -= yStrokePad;
+558       box[2] += xStrokePad;
+559       box[3] += yStrokePad;
+560     }
+561     return box;
+562   }
+563 
+564   updateClipFromPath() {
+565     const intersect = Util.intersect(this.clipBox, this.getPathBoundingBox());
+566     this.startNewPathAndClipBox(intersect || [0, 0, 0, 0]);
+567   }
+568 
+569   isEmptyClip() {
+570     return this.minX === Infinity;
+571   }
+572 
+573   startNewPathAndClipBox(box) {
+574     this.clipBox = box;
+575     this.minX = Infinity;
+576     this.minY = Infinity;
+577     this.maxX = 0;
+578     this.maxY = 0;
+579   }
+580 
+581   getClippedPathBoundingBox(pathType = PathType.FILL, transform = null) {
+582     return Util.intersect(
+583       this.clipBox,
+584       this.getPathBoundingBox(pathType, transform)
+585     );
+586   }
+587 }
+588 
+589 function putBinaryImageData(ctx, imgData) {
+590   if (typeof ImageData !== "undefined" && imgData instanceof ImageData) {
+591     ctx.putImageData(imgData, 0, 0);
+592     return;
+593   }
+594 
+595   // Put the image data to the canvas in chunks, rather than putting the
+596   // whole image at once.  This saves JS memory, because the ImageData object
+597   // is smaller. It also possibly saves C++ memory within the implementation
+598   // of putImageData(). (E.g. in Firefox we make two short-lived copies of
+599   // the data passed to putImageData()). |n| shouldn't be too small, however,
+600   // because too many putImageData() calls will slow things down.
+601   //
+602   // Note: as written, if the last chunk is partial, the putImageData() call
+603   // will (conceptually) put pixels past the bounds of the canvas.  But
+604   // that's ok; any such pixels are ignored.
+605 
+606   const height = imgData.height,
+607     width = imgData.width;
+608   const partialChunkHeight = height % FULL_CHUNK_HEIGHT;
+609   const fullChunks = (height - partialChunkHeight) / FULL_CHUNK_HEIGHT;
+610   const totalChunks = partialChunkHeight === 0 ? fullChunks : fullChunks + 1;
+611 
+612   const chunkImgData = ctx.createImageData(width, FULL_CHUNK_HEIGHT);
+613   let srcPos = 0,
+614     destPos;
+615   const src = imgData.data;
+616   const dest = chunkImgData.data;
+617   let i, j, thisChunkHeight, elemsInThisChunk;
+618 
+619   // There are multiple forms in which the pixel data can be passed, and
+620   // imgData.kind tells us which one this is.
+621   if (imgData.kind === ImageKind.GRAYSCALE_1BPP) {
+622     // Grayscale, 1 bit per pixel (i.e. black-and-white).
+623     const srcLength = src.byteLength;
+624     const dest32 = new Uint32Array(dest.buffer, 0, dest.byteLength >> 2);
+625     const dest32DataLength = dest32.length;
+626     const fullSrcDiff = (width + 7) >> 3;
+627     const white = 0xffffffff;
+628     const black = FeatureTest.isLittleEndian ? 0xff000000 : 0x000000ff;
+629 
+630     for (i = 0; i < totalChunks; i++) {
+631       thisChunkHeight = i < fullChunks ? FULL_CHUNK_HEIGHT : partialChunkHeight;
+632       destPos = 0;
+633       for (j = 0; j < thisChunkHeight; j++) {
+634         const srcDiff = srcLength - srcPos;
+635         let k = 0;
+636         const kEnd = srcDiff > fullSrcDiff ? width : srcDiff * 8 - 7;
+637         const kEndUnrolled = kEnd & ~7;
+638         let mask = 0;
+639         let srcByte = 0;
+640         for (; k < kEndUnrolled; k += 8) {
+641           srcByte = src[srcPos++];
+642           dest32[destPos++] = srcByte & 128 ? white : black;
+643           dest32[destPos++] = srcByte & 64 ? white : black;
+644           dest32[destPos++] = srcByte & 32 ? white : black;
+645           dest32[destPos++] = srcByte & 16 ? white : black;
+646           dest32[destPos++] = srcByte & 8 ? white : black;
+647           dest32[destPos++] = srcByte & 4 ? white : black;
+648           dest32[destPos++] = srcByte & 2 ? white : black;
+649           dest32[destPos++] = srcByte & 1 ? white : black;
+650         }
+651         for (; k < kEnd; k++) {
+652           if (mask === 0) {
+653             srcByte = src[srcPos++];
+654             mask = 128;
+655           }
+656 
+657           dest32[destPos++] = srcByte & mask ? white : black;
+658           mask >>= 1;
+659         }
+660       }
+661       // We ran out of input. Make all remaining pixels transparent.
+662       while (destPos < dest32DataLength) {
+663         dest32[destPos++] = 0;
+664       }
+665 
+666       ctx.putImageData(chunkImgData, 0, i * FULL_CHUNK_HEIGHT);
+667     }
+668   } else if (imgData.kind === ImageKind.RGBA_32BPP) {
+669     // RGBA, 32-bits per pixel.
+670     j = 0;
+671     elemsInThisChunk = width * FULL_CHUNK_HEIGHT * 4;
+672     for (i = 0; i < fullChunks; i++) {
+673       dest.set(src.subarray(srcPos, srcPos + elemsInThisChunk));
+674       srcPos += elemsInThisChunk;
+675 
+676       ctx.putImageData(chunkImgData, 0, j);
+677       j += FULL_CHUNK_HEIGHT;
+678     }
+679     if (i < totalChunks) {
+680       elemsInThisChunk = width * partialChunkHeight * 4;
+681       dest.set(src.subarray(srcPos, srcPos + elemsInThisChunk));
+682 
+683       ctx.putImageData(chunkImgData, 0, j);
+684     }
+685   } else if (imgData.kind === ImageKind.RGB_24BPP) {
+686     // RGB, 24-bits per pixel.
+687     thisChunkHeight = FULL_CHUNK_HEIGHT;
+688     elemsInThisChunk = width * thisChunkHeight;
+689     for (i = 0; i < totalChunks; i++) {
+690       if (i >= fullChunks) {
+691         thisChunkHeight = partialChunkHeight;
+692         elemsInThisChunk = width * thisChunkHeight;
+693       }
+694 
+695       destPos = 0;
+696       for (j = elemsInThisChunk; j--; ) {
+697         dest[destPos++] = src[srcPos++];
+698         dest[destPos++] = src[srcPos++];
+699         dest[destPos++] = src[srcPos++];
+700         dest[destPos++] = 255;
+701       }
+702 
+703       ctx.putImageData(chunkImgData, 0, i * FULL_CHUNK_HEIGHT);
+704     }
+705   } else {
+706     throw new Error(`bad image kind: ${imgData.kind}`);
+707   }
+708 }
+709 
+710 function putBinaryImageMask(ctx, imgData) {
+711   if (imgData.bitmap) {
+712     // The bitmap has been created in the worker.
+713     ctx.drawImage(imgData.bitmap, 0, 0);
+714     return;
+715   }
+716 
+717   // Slow path: OffscreenCanvas isn't available in the worker.
+718   const height = imgData.height,
+719     width = imgData.width;
+720   const partialChunkHeight = height % FULL_CHUNK_HEIGHT;
+721   const fullChunks = (height - partialChunkHeight) / FULL_CHUNK_HEIGHT;
+722   const totalChunks = partialChunkHeight === 0 ? fullChunks : fullChunks + 1;
+723 
+724   const chunkImgData = ctx.createImageData(width, FULL_CHUNK_HEIGHT);
+725   let srcPos = 0;
+726   const src = imgData.data;
+727   const dest = chunkImgData.data;
+728 
+729   for (let i = 0; i < totalChunks; i++) {
+730     const thisChunkHeight =
+731       i < fullChunks ? FULL_CHUNK_HEIGHT : partialChunkHeight;
+732 
+733     // Expand the mask so it can be used by the canvas.  Any required
+734     // inversion has already been handled.
+735 
+736     ({ srcPos } = convertBlackAndWhiteToRGBA({
+737       src,
+738       srcPos,
+739       dest,
+740       width,
+741       height: thisChunkHeight,
+742       nonBlackColor: 0,
+743     }));
+744 
+745     ctx.putImageData(chunkImgData, 0, i * FULL_CHUNK_HEIGHT);
+746   }
+747 }
+748 
+749 function copyCtxState(sourceCtx, destCtx) {
+750   const properties = [
+751     "strokeStyle",
+752     "fillStyle",
+753     "fillRule",
+754     "globalAlpha",
+755     "lineWidth",
+756     "lineCap",
+757     "lineJoin",
+758     "miterLimit",
+759     "globalCompositeOperation",
+760     "font",
+761     "filter",
+762   ];
+763   for (const property of properties) {
+764     if (sourceCtx[property] !== undefined) {
+765       destCtx[property] = sourceCtx[property];
+766     }
+767   }
+768   if (sourceCtx.setLineDash !== undefined) {
+769     destCtx.setLineDash(sourceCtx.getLineDash());
+770     destCtx.lineDashOffset = sourceCtx.lineDashOffset;
+771   }
+772 }
+773 
+774 function resetCtxToDefault(ctx) {
+775   ctx.strokeStyle = ctx.fillStyle = "#000000";
+776   ctx.fillRule = "nonzero";
+777   ctx.globalAlpha = 1;
+778   ctx.lineWidth = 1;
+779   ctx.lineCap = "butt";
+780   ctx.lineJoin = "miter";
+781   ctx.miterLimit = 10;
+782   ctx.globalCompositeOperation = "source-over";
+783   ctx.font = "10px sans-serif";
+784   if (ctx.setLineDash !== undefined) {
+785     ctx.setLineDash([]);
+786     ctx.lineDashOffset = 0;
+787   }
+788   if (
+789     (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+790     !isNodeJS
+791   ) {
+792     const { filter } = ctx;
+793     if (filter !== "none" && filter !== "") {
+794       ctx.filter = "none";
+795     }
+796   }
+797 }
+798 
+799 function composeSMaskBackdrop(bytes, r0, g0, b0) {
+800   const length = bytes.length;
+801   for (let i = 3; i < length; i += 4) {
+802     const alpha = bytes[i];
+803     if (alpha === 0) {
+804       bytes[i - 3] = r0;
+805       bytes[i - 2] = g0;
+806       bytes[i - 1] = b0;
+807     } else if (alpha < 255) {
+808       const alpha_ = 255 - alpha;
+809       bytes[i - 3] = (bytes[i - 3] * alpha + r0 * alpha_) >> 8;
+810       bytes[i - 2] = (bytes[i - 2] * alpha + g0 * alpha_) >> 8;
+811       bytes[i - 1] = (bytes[i - 1] * alpha + b0 * alpha_) >> 8;
+812     }
+813   }
+814 }
+815 
+816 function composeSMaskAlpha(maskData, layerData, transferMap) {
+817   const length = maskData.length;
+818   const scale = 1 / 255;
+819   for (let i = 3; i < length; i += 4) {
+820     const alpha = transferMap ? transferMap[maskData[i]] : maskData[i];
+821     layerData[i] = (layerData[i] * alpha * scale) | 0;
+822   }
+823 }
+824 
+825 function composeSMaskLuminosity(maskData, layerData, transferMap) {
+826   const length = maskData.length;
+827   for (let i = 3; i < length; i += 4) {
+828     const y =
+829       maskData[i - 3] * 77 + // * 0.3 / 255 * 0x10000
+830       maskData[i - 2] * 152 + // * 0.59 ....
+831       maskData[i - 1] * 28; // * 0.11 ....
+832     layerData[i] = transferMap
+833       ? (layerData[i] * transferMap[y >> 8]) >> 8
+834       : (layerData[i] * y) >> 16;
+835   }
+836 }
+837 
+838 function genericComposeSMask(
+839   maskCtx,
+840   layerCtx,
+841   width,
+842   height,
+843   subtype,
+844   backdrop,
+845   transferMap,
+846   layerOffsetX,
+847   layerOffsetY,
+848   maskOffsetX,
+849   maskOffsetY
+850 ) {
+851   const hasBackdrop = !!backdrop;
+852   const r0 = hasBackdrop ? backdrop[0] : 0;
+853   const g0 = hasBackdrop ? backdrop[1] : 0;
+854   const b0 = hasBackdrop ? backdrop[2] : 0;
+855 
+856   const composeFn =
+857     subtype === "Luminosity" ? composeSMaskLuminosity : composeSMaskAlpha;
+858 
+859   // processing image in chunks to save memory
+860   const PIXELS_TO_PROCESS = 1048576;
+861   const chunkSize = Math.min(height, Math.ceil(PIXELS_TO_PROCESS / width));
+862   for (let row = 0; row < height; row += chunkSize) {
+863     const chunkHeight = Math.min(chunkSize, height - row);
+864     const maskData = maskCtx.getImageData(
+865       layerOffsetX - maskOffsetX,
+866       row + (layerOffsetY - maskOffsetY),
+867       width,
+868       chunkHeight
+869     );
+870     const layerData = layerCtx.getImageData(
+871       layerOffsetX,
+872       row + layerOffsetY,
+873       width,
+874       chunkHeight
+875     );
+876 
+877     if (hasBackdrop) {
+878       composeSMaskBackdrop(maskData.data, r0, g0, b0);
+879     }
+880     composeFn(maskData.data, layerData.data, transferMap);
+881 
+882     layerCtx.putImageData(layerData, layerOffsetX, row + layerOffsetY);
+883   }
+884 }
+885 
+886 function composeSMask(ctx, smask, layerCtx, layerBox) {
+887   const layerOffsetX = layerBox[0];
+888   const layerOffsetY = layerBox[1];
+889   const layerWidth = layerBox[2] - layerOffsetX;
+890   const layerHeight = layerBox[3] - layerOffsetY;
+891   if (layerWidth === 0 || layerHeight === 0) {
+892     return;
+893   }
+894   genericComposeSMask(
+895     smask.context,
+896     layerCtx,
+897     layerWidth,
+898     layerHeight,
+899     smask.subtype,
+900     smask.backdrop,
+901     smask.transferMap,
+902     layerOffsetX,
+903     layerOffsetY,
+904     smask.offsetX,
+905     smask.offsetY
+906   );
+907   ctx.save();
+908   ctx.globalAlpha = 1;
+909   ctx.globalCompositeOperation = "source-over";
+910   ctx.setTransform(1, 0, 0, 1, 0, 0);
+911   ctx.drawImage(layerCtx.canvas, 0, 0);
+912   ctx.restore();
+913 }
+914 
+915 function getImageSmoothingEnabled(transform, interpolate) {
+916   // In section 8.9.5.3 of the PDF spec, it's mentioned that the interpolate
+917   // flag should be used when the image is upscaled.
+918   // In Firefox, smoothing is always used when downscaling images (bug 1360415).
+919 
+920   if (interpolate) {
+921     return true;
+922   }
+923 
+924   const scale = Util.singularValueDecompose2dScale(transform);
+925   // Round to a 32bit float so that `<=` check below will pass for numbers that
+926   // are very close, but not exactly the same 64bit floats.
+927   scale[0] = Math.fround(scale[0]);
+928   scale[1] = Math.fround(scale[1]);
+929   const actualScale = Math.fround(
+930     (globalThis.devicePixelRatio || 1) * PixelsPerInch.PDF_TO_CSS_UNITS
+931   );
+932   return scale[0] <= actualScale && scale[1] <= actualScale;
+933 }
+934 
+935 const LINE_CAP_STYLES = ["butt", "round", "square"];
+936 const LINE_JOIN_STYLES = ["miter", "round", "bevel"];
+937 const NORMAL_CLIP = {};
+938 const EO_CLIP = {};
+939 
+940 class CanvasGraphics {
+941   constructor(
+942     canvasCtx,
+943     commonObjs,
+944     objs,
+945     canvasFactory,
+946     filterFactory,
+947     { optionalContentConfig, markedContentStack = null },
+948     annotationCanvasMap,
+949     pageColors
+950   ) {
+951     this.ctx = canvasCtx;
+952     this.current = new CanvasExtraState(
+953       this.ctx.canvas.width,
+954       this.ctx.canvas.height
+955     );
+956     this.stateStack = [];
+957     this.pendingClip = null;
+958     this.pendingEOFill = false;
+959     this.res = null;
+960     this.xobjs = null;
+961     this.commonObjs = commonObjs;
+962     this.objs = objs;
+963     this.canvasFactory = canvasFactory;
+964     this.filterFactory = filterFactory;
+965     this.groupStack = [];
+966     this.processingType3 = null;
+967     // Patterns are painted relative to the initial page/form transform, see
+968     // PDF spec 8.7.2 NOTE 1.
+969     this.baseTransform = null;
+970     this.baseTransformStack = [];
+971     this.groupLevel = 0;
+972     this.smaskStack = [];
+973     this.smaskCounter = 0;
+974     this.tempSMask = null;
+975     this.suspendedCtx = null;
+976     this.contentVisible = true;
+977     this.markedContentStack = markedContentStack || [];
+978     this.optionalContentConfig = optionalContentConfig;
+979     this.cachedCanvases = new CachedCanvases(this.canvasFactory);
+980     this.cachedPatterns = new Map();
+981     this.annotationCanvasMap = annotationCanvasMap;
+982     this.viewportScale = 1;
+983     this.outputScaleX = 1;
+984     this.outputScaleY = 1;
+985     this.pageColors = pageColors;
+986 
+987     this._cachedScaleForStroking = [-1, 0];
+988     this._cachedGetSinglePixelWidth = null;
+989     this._cachedBitmapsMap = new Map();
+990   }
+991 
+992   getObject(data, fallback = null) {
+993     if (typeof data === "string") {
+994       return data.startsWith("g_")
+995         ? this.commonObjs.get(data)
+996         : this.objs.get(data);
+997     }
+998     return fallback;
+999   }
+1000 
+1001   beginDrawing({
+1002     transform,
+1003     viewport,
+1004     transparency = false,
+1005     background = null,
+1006   }) {
+1007     // For pdfs that use blend modes we have to clear the canvas else certain
+1008     // blend modes can look wrong since we'd be blending with a white
+1009     // backdrop. The problem with a transparent backdrop though is we then
+1010     // don't get sub pixel anti aliasing on text, creating temporary
+1011     // transparent canvas when we have blend modes.
+1012     const width = this.ctx.canvas.width;
+1013     const height = this.ctx.canvas.height;
+1014 
+1015     const savedFillStyle = this.ctx.fillStyle;
+1016     this.ctx.fillStyle = background || "#ffffff";
+1017     this.ctx.fillRect(0, 0, width, height);
+1018     this.ctx.fillStyle = savedFillStyle;
+1019 
+1020     if (transparency) {
+1021       const transparentCanvas = this.cachedCanvases.getCanvas(
+1022         "transparent",
+1023         width,
+1024         height
+1025       );
+1026       this.compositeCtx = this.ctx;
+1027       this.transparentCanvas = transparentCanvas.canvas;
+1028       this.ctx = transparentCanvas.context;
+1029       this.ctx.save();
+1030       // The transform can be applied before rendering, transferring it to
+1031       // the new canvas.
+1032       this.ctx.transform(...getCurrentTransform(this.compositeCtx));
+1033     }
+1034 
+1035     this.ctx.save();
+1036     resetCtxToDefault(this.ctx);
+1037     if (transform) {
+1038       this.ctx.transform(...transform);
+1039       this.outputScaleX = transform[0];
+1040       this.outputScaleY = transform[0];
+1041     }
+1042     this.ctx.transform(...viewport.transform);
+1043     this.viewportScale = viewport.scale;
+1044 
+1045     this.baseTransform = getCurrentTransform(this.ctx);
+1046   }
+1047 
+1048   executeOperatorList(
+1049     operatorList,
+1050     executionStartIdx,
+1051     continueCallback,
+1052     stepper
+1053   ) {
+1054     const argsArray = operatorList.argsArray;
+1055     const fnArray = operatorList.fnArray;
+1056     let i = executionStartIdx || 0;
+1057     const argsArrayLen = argsArray.length;
+1058 
+1059     // Sometimes the OperatorList to execute is empty.
+1060     if (argsArrayLen === i) {
+1061       return i;
+1062     }
+1063 
+1064     const chunkOperations =
+1065       argsArrayLen - i > EXECUTION_STEPS &&
+1066       typeof continueCallback === "function";
+1067     const endTime = chunkOperations ? Date.now() + EXECUTION_TIME : 0;
+1068     let steps = 0;
+1069 
+1070     const commonObjs = this.commonObjs;
+1071     const objs = this.objs;
+1072     let fnId;
+1073 
+1074     while (true) {
+1075       if (stepper !== undefined && i === stepper.nextBreakPoint) {
+1076         stepper.breakIt(i, continueCallback);
+1077         return i;
+1078       }
+1079 
+1080       fnId = fnArray[i];
+1081 
+1082       if (fnId !== OPS.dependency) {
+1083         // eslint-disable-next-line prefer-spread
+1084         this[fnId].apply(this, argsArray[i]);
+1085       } else {
+1086         for (const depObjId of argsArray[i]) {
+1087           const objsPool = depObjId.startsWith("g_") ? commonObjs : objs;
+1088 
+1089           // If the promise isn't resolved yet, add the continueCallback
+1090           // to the promise and bail out.
+1091           if (!objsPool.has(depObjId)) {
+1092             objsPool.get(depObjId, continueCallback);
+1093             return i;
+1094           }
+1095         }
+1096       }
+1097 
+1098       i++;
+1099 
+1100       // If the entire operatorList was executed, stop as were done.
+1101       if (i === argsArrayLen) {
+1102         return i;
+1103       }
+1104 
+1105       // If the execution took longer then a certain amount of time and
+1106       // `continueCallback` is specified, interrupt the execution.
+1107       if (chunkOperations && ++steps > EXECUTION_STEPS) {
+1108         if (Date.now() > endTime) {
+1109           continueCallback();
+1110           return i;
+1111         }
+1112         steps = 0;
+1113       }
+1114 
+1115       // If the operatorList isn't executed completely yet OR the execution
+1116       // time was short enough, do another execution round.
+1117     }
+1118   }
+1119 
+1120   #restoreInitialState() {
+1121     // Finishing all opened operations such as SMask group painting.
+1122     while (this.stateStack.length || this.inSMaskMode) {
+1123       this.restore();
+1124     }
+1125 
+1126     this.ctx.restore();
+1127 
+1128     if (this.transparentCanvas) {
+1129       this.ctx = this.compositeCtx;
+1130       this.ctx.save();
+1131       this.ctx.setTransform(1, 0, 0, 1, 0, 0); // Avoid apply transform twice
+1132       this.ctx.drawImage(this.transparentCanvas, 0, 0);
+1133       this.ctx.restore();
+1134       this.transparentCanvas = null;
+1135     }
+1136   }
+1137 
+1138   endDrawing() {
+1139     this.#restoreInitialState();
+1140 
+1141     this.cachedCanvases.clear();
+1142     this.cachedPatterns.clear();
+1143 
+1144     for (const cache of this._cachedBitmapsMap.values()) {
+1145       for (const canvas of cache.values()) {
+1146         if (
+1147           typeof HTMLCanvasElement !== "undefined" &&
+1148           canvas instanceof HTMLCanvasElement
+1149         ) {
+1150           canvas.width = canvas.height = 0;
+1151         }
+1152       }
+1153       cache.clear();
+1154     }
+1155     this._cachedBitmapsMap.clear();
+1156     this.#drawFilter();
+1157   }
+1158 
+1159   #drawFilter() {
+1160     if (this.pageColors) {
+1161       const hcmFilterId = this.filterFactory.addHCMFilter(
+1162         this.pageColors.foreground,
+1163         this.pageColors.background
+1164       );
+1165       if (hcmFilterId !== "none") {
+1166         const savedFilter = this.ctx.filter;
+1167         this.ctx.filter = hcmFilterId;
+1168         this.ctx.drawImage(this.ctx.canvas, 0, 0);
+1169         this.ctx.filter = savedFilter;
+1170       }
+1171     }
+1172   }
+1173 
+1174   _scaleImage(img, inverseTransform) {
+1175     // Vertical or horizontal scaling shall not be more than 2 to not lose the
+1176     // pixels during drawImage operation, painting on the temporary canvas(es)
+1177     // that are twice smaller in size.
+1178     const width = img.width;
+1179     const height = img.height;
+1180     let widthScale = Math.max(
+1181       Math.hypot(inverseTransform[0], inverseTransform[1]),
+1182       1
+1183     );
+1184     let heightScale = Math.max(
+1185       Math.hypot(inverseTransform[2], inverseTransform[3]),
+1186       1
+1187     );
+1188 
+1189     let paintWidth = width,
+1190       paintHeight = height;
+1191     let tmpCanvasId = "prescale1";
+1192     let tmpCanvas, tmpCtx;
+1193     while (
+1194       (widthScale > 2 && paintWidth > 1) ||
+1195       (heightScale > 2 && paintHeight > 1)
+1196     ) {
+1197       let newWidth = paintWidth,
+1198         newHeight = paintHeight;
+1199       if (widthScale > 2 && paintWidth > 1) {
+1200         // See bug 1820511 (Windows specific bug).
+1201         // TODO: once the above bug is fixed we could revert to:
+1202         // newWidth = Math.ceil(paintWidth / 2);
+1203         newWidth =
+1204           paintWidth >= 16384
+1205             ? Math.floor(paintWidth / 2) - 1 || 1
+1206             : Math.ceil(paintWidth / 2);
+1207         widthScale /= paintWidth / newWidth;
+1208       }
+1209       if (heightScale > 2 && paintHeight > 1) {
+1210         // TODO: see the comment above.
+1211         newHeight =
+1212           paintHeight >= 16384
+1213             ? Math.floor(paintHeight / 2) - 1 || 1
+1214             : Math.ceil(paintHeight) / 2;
+1215         heightScale /= paintHeight / newHeight;
+1216       }
+1217       tmpCanvas = this.cachedCanvases.getCanvas(
+1218         tmpCanvasId,
+1219         newWidth,
+1220         newHeight
+1221       );
+1222       tmpCtx = tmpCanvas.context;
+1223       tmpCtx.clearRect(0, 0, newWidth, newHeight);
+1224       tmpCtx.drawImage(
+1225         img,
+1226         0,
+1227         0,
+1228         paintWidth,
+1229         paintHeight,
+1230         0,
+1231         0,
+1232         newWidth,
+1233         newHeight
+1234       );
+1235       img = tmpCanvas.canvas;
+1236       paintWidth = newWidth;
+1237       paintHeight = newHeight;
+1238       tmpCanvasId = tmpCanvasId === "prescale1" ? "prescale2" : "prescale1";
+1239     }
+1240     return {
+1241       img,
+1242       paintWidth,
+1243       paintHeight,
+1244     };
+1245   }
+1246 
+1247   _createMaskCanvas(img) {
+1248     const ctx = this.ctx;
+1249     const { width, height } = img;
+1250     const fillColor = this.current.fillColor;
+1251     const isPatternFill = this.current.patternFill;
+1252     const currentTransform = getCurrentTransform(ctx);
+1253 
+1254     let cache, cacheKey, scaled, maskCanvas;
+1255     if ((img.bitmap || img.data) && img.count > 1) {
+1256       const mainKey = img.bitmap || img.data.buffer;
+1257       // We're reusing the same image several times, so we can cache it.
+1258       // In case we've a pattern fill we just keep the scaled version of
+1259       // the image.
+1260       // Only the scaling part matters, the translation part is just used
+1261       // to compute offsets (but not when filling patterns see #15573).
+1262       // TODO: handle the case of a pattern fill if it's possible.
+1263       cacheKey = JSON.stringify(
+1264         isPatternFill
+1265           ? currentTransform
+1266           : [currentTransform.slice(0, 4), fillColor]
+1267       );
+1268 
+1269       cache = this._cachedBitmapsMap.get(mainKey);
+1270       if (!cache) {
+1271         cache = new Map();
+1272         this._cachedBitmapsMap.set(mainKey, cache);
+1273       }
+1274       const cachedImage = cache.get(cacheKey);
+1275       if (cachedImage && !isPatternFill) {
+1276         const offsetX = Math.round(
+1277           Math.min(currentTransform[0], currentTransform[2]) +
+1278             currentTransform[4]
+1279         );
+1280         const offsetY = Math.round(
+1281           Math.min(currentTransform[1], currentTransform[3]) +
+1282             currentTransform[5]
+1283         );
+1284         return {
+1285           canvas: cachedImage,
+1286           offsetX,
+1287           offsetY,
+1288         };
+1289       }
+1290       scaled = cachedImage;
+1291     }
+1292 
+1293     if (!scaled) {
+1294       maskCanvas = this.cachedCanvases.getCanvas("maskCanvas", width, height);
+1295       putBinaryImageMask(maskCanvas.context, img);
+1296     }
+1297 
+1298     // Create the mask canvas at the size it will be drawn at and also set
+1299     // its transform to match the current transform so if there are any
+1300     // patterns applied they will be applied relative to the correct
+1301     // transform.
+1302 
+1303     let maskToCanvas = Util.transform(currentTransform, [
+1304       1 / width,
+1305       0,
+1306       0,
+1307       -1 / height,
+1308       0,
+1309       0,
+1310     ]);
+1311     maskToCanvas = Util.transform(maskToCanvas, [1, 0, 0, 1, 0, -height]);
+1312     const [minX, minY, maxX, maxY] = Util.getAxialAlignedBoundingBox(
+1313       [0, 0, width, height],
+1314       maskToCanvas
+1315     );
+1316     const drawnWidth = Math.round(maxX - minX) || 1;
+1317     const drawnHeight = Math.round(maxY - minY) || 1;
+1318     const fillCanvas = this.cachedCanvases.getCanvas(
+1319       "fillCanvas",
+1320       drawnWidth,
+1321       drawnHeight
+1322     );
+1323     const fillCtx = fillCanvas.context;
+1324 
+1325     // The offset will be the top-left cordinate mask.
+1326     // If objToCanvas is [a,b,c,d,e,f] then:
+1327     //   - offsetX = min(a, c) + e
+1328     //   - offsetY = min(b, d) + f
+1329     const offsetX = minX;
+1330     const offsetY = minY;
+1331     fillCtx.translate(-offsetX, -offsetY);
+1332     fillCtx.transform(...maskToCanvas);
+1333 
+1334     if (!scaled) {
+1335       // Pre-scale if needed to improve image smoothing.
+1336       scaled = this._scaleImage(
+1337         maskCanvas.canvas,
+1338         getCurrentTransformInverse(fillCtx)
+1339       );
+1340       scaled = scaled.img;
+1341       if (cache && isPatternFill) {
+1342         cache.set(cacheKey, scaled);
+1343       }
+1344     }
+1345 
+1346     fillCtx.imageSmoothingEnabled = getImageSmoothingEnabled(
+1347       getCurrentTransform(fillCtx),
+1348       img.interpolate
+1349     );
+1350 
+1351     drawImageAtIntegerCoords(
+1352       fillCtx,
+1353       scaled,
+1354       0,
+1355       0,
+1356       scaled.width,
+1357       scaled.height,
+1358       0,
+1359       0,
+1360       width,
+1361       height
+1362     );
+1363     fillCtx.globalCompositeOperation = "source-in";
+1364 
+1365     const inverse = Util.transform(getCurrentTransformInverse(fillCtx), [
+1366       1,
+1367       0,
+1368       0,
+1369       1,
+1370       -offsetX,
+1371       -offsetY,
+1372     ]);
+1373     fillCtx.fillStyle = isPatternFill
+1374       ? fillColor.getPattern(ctx, this, inverse, PathType.FILL)
+1375       : fillColor;
+1376 
+1377     fillCtx.fillRect(0, 0, width, height);
+1378 
+1379     if (cache && !isPatternFill) {
+1380       // The fill canvas is put in the cache associated to the mask image
+1381       // so we must remove from the cached canvas: it mustn't be used again.
+1382       this.cachedCanvases.delete("fillCanvas");
+1383       cache.set(cacheKey, fillCanvas.canvas);
+1384     }
+1385 
+1386     // Round the offsets to avoid drawing fractional pixels.
+1387     return {
+1388       canvas: fillCanvas.canvas,
+1389       offsetX: Math.round(offsetX),
+1390       offsetY: Math.round(offsetY),
+1391     };
+1392   }
+1393 
+1394   // Graphics state
+1395   setLineWidth(width) {
+1396     if (width !== this.current.lineWidth) {
+1397       this._cachedScaleForStroking[0] = -1;
+1398     }
+1399     this.current.lineWidth = width;
+1400     this.ctx.lineWidth = width;
+1401   }
+1402 
+1403   setLineCap(style) {
+1404     this.ctx.lineCap = LINE_CAP_STYLES[style];
+1405   }
+1406 
+1407   setLineJoin(style) {
+1408     this.ctx.lineJoin = LINE_JOIN_STYLES[style];
+1409   }
+1410 
+1411   setMiterLimit(limit) {
+1412     this.ctx.miterLimit = limit;
+1413   }
+1414 
+1415   setDash(dashArray, dashPhase) {
+1416     const ctx = this.ctx;
+1417     if (ctx.setLineDash !== undefined) {
+1418       ctx.setLineDash(dashArray);
+1419       ctx.lineDashOffset = dashPhase;
+1420     }
+1421   }
+1422 
+1423   setRenderingIntent(intent) {
+1424     // This operation is ignored since we haven't found a use case for it yet.
+1425   }
+1426 
+1427   setFlatness(flatness) {
+1428     // This operation is ignored since we haven't found a use case for it yet.
+1429   }
+1430 
+1431   setGState(states) {
+1432     for (const [key, value] of states) {
+1433       switch (key) {
+1434         case "LW":
+1435           this.setLineWidth(value);
+1436           break;
+1437         case "LC":
+1438           this.setLineCap(value);
+1439           break;
+1440         case "LJ":
+1441           this.setLineJoin(value);
+1442           break;
+1443         case "ML":
+1444           this.setMiterLimit(value);
+1445           break;
+1446         case "D":
+1447           this.setDash(value[0], value[1]);
+1448           break;
+1449         case "RI":
+1450           this.setRenderingIntent(value);
+1451           break;
+1452         case "FL":
+1453           this.setFlatness(value);
+1454           break;
+1455         case "Font":
+1456           this.setFont(value[0], value[1]);
+1457           break;
+1458         case "CA":
+1459           this.current.strokeAlpha = value;
+1460           break;
+1461         case "ca":
+1462           this.current.fillAlpha = value;
+1463           this.ctx.globalAlpha = value;
+1464           break;
+1465         case "BM":
+1466           this.ctx.globalCompositeOperation = value;
+1467           break;
+1468         case "SMask":
+1469           this.current.activeSMask = value ? this.tempSMask : null;
+1470           this.tempSMask = null;
+1471           this.checkSMaskState();
+1472           break;
+1473         case "TR":
+1474           this.ctx.filter = this.current.transferMaps =
+1475             this.filterFactory.addFilter(value);
+1476           break;
+1477       }
+1478     }
+1479   }
+1480 
+1481   get inSMaskMode() {
+1482     return !!this.suspendedCtx;
+1483   }
+1484 
+1485   checkSMaskState() {
+1486     const inSMaskMode = this.inSMaskMode;
+1487     if (this.current.activeSMask && !inSMaskMode) {
+1488       this.beginSMaskMode();
+1489     } else if (!this.current.activeSMask && inSMaskMode) {
+1490       this.endSMaskMode();
+1491     }
+1492     // Else, the state is okay and nothing needs to be done.
+1493   }
+1494 
+1495   /**
+1496    * Soft mask mode takes the current main drawing canvas and replaces it with
+1497    * a temporary canvas. Any drawing operations that happen on the temporary
+1498    * canvas need to be composed with the main canvas that was suspended (see
+1499    * `compose()`). The temporary canvas also duplicates many of its operations
+1500    * on the suspended canvas to keep them in sync, so that when the soft mask
+1501    * mode ends any clipping paths or transformations will still be active and in
+1502    * the right order on the canvas' graphics state stack.
+1503    */
+1504   beginSMaskMode() {
+1505     if (this.inSMaskMode) {
+1506       throw new Error("beginSMaskMode called while already in smask mode");
+1507     }
+1508     const drawnWidth = this.ctx.canvas.width;
+1509     const drawnHeight = this.ctx.canvas.height;
+1510     const cacheId = "smaskGroupAt" + this.groupLevel;
+1511     const scratchCanvas = this.cachedCanvases.getCanvas(
+1512       cacheId,
+1513       drawnWidth,
+1514       drawnHeight
+1515     );
+1516     this.suspendedCtx = this.ctx;
+1517     this.ctx = scratchCanvas.context;
+1518     const ctx = this.ctx;
+1519     ctx.setTransform(...getCurrentTransform(this.suspendedCtx));
+1520     copyCtxState(this.suspendedCtx, ctx);
+1521     mirrorContextOperations(ctx, this.suspendedCtx);
+1522 
+1523     this.setGState([
+1524       ["BM", "source-over"],
+1525       ["ca", 1],
+1526       ["CA", 1],
+1527     ]);
+1528   }
+1529 
+1530   endSMaskMode() {
+1531     if (!this.inSMaskMode) {
+1532       throw new Error("endSMaskMode called while not in smask mode");
+1533     }
+1534     // The soft mask is done, now restore the suspended canvas as the main
+1535     // drawing canvas.
+1536     this.ctx._removeMirroring();
+1537     copyCtxState(this.ctx, this.suspendedCtx);
+1538     this.ctx = this.suspendedCtx;
+1539 
+1540     this.suspendedCtx = null;
+1541   }
+1542 
+1543   compose(dirtyBox) {
+1544     if (!this.current.activeSMask) {
+1545       return;
+1546     }
+1547 
+1548     if (!dirtyBox) {
+1549       dirtyBox = [0, 0, this.ctx.canvas.width, this.ctx.canvas.height];
+1550     } else {
+1551       dirtyBox[0] = Math.floor(dirtyBox[0]);
+1552       dirtyBox[1] = Math.floor(dirtyBox[1]);
+1553       dirtyBox[2] = Math.ceil(dirtyBox[2]);
+1554       dirtyBox[3] = Math.ceil(dirtyBox[3]);
+1555     }
+1556     const smask = this.current.activeSMask;
+1557     const suspendedCtx = this.suspendedCtx;
+1558 
+1559     composeSMask(suspendedCtx, smask, this.ctx, dirtyBox);
+1560     // Whatever was drawn has been moved to the suspended canvas, now clear it
+1561     // out of the current canvas.
+1562     this.ctx.save();
+1563     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+1564     this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+1565     this.ctx.restore();
+1566   }
+1567 
+1568   save() {
+1569     if (this.inSMaskMode) {
+1570       // SMask mode may be turned on/off causing us to lose graphics state.
+1571       // Copy the temporary canvas state to the main(suspended) canvas to keep
+1572       // it in sync.
+1573       copyCtxState(this.ctx, this.suspendedCtx);
+1574       // Don't bother calling save on the temporary canvas since state is not
+1575       // saved there.
+1576       this.suspendedCtx.save();
+1577     } else {
+1578       this.ctx.save();
+1579     }
+1580     const old = this.current;
+1581     this.stateStack.push(old);
+1582     this.current = old.clone();
+1583   }
+1584 
+1585   restore() {
+1586     if (this.stateStack.length === 0 && this.inSMaskMode) {
+1587       this.endSMaskMode();
+1588     }
+1589     if (this.stateStack.length !== 0) {
+1590       this.current = this.stateStack.pop();
+1591       if (this.inSMaskMode) {
+1592         // Graphics state is stored on the main(suspended) canvas. Restore its
+1593         // state then copy it over to the temporary canvas.
+1594         this.suspendedCtx.restore();
+1595         copyCtxState(this.suspendedCtx, this.ctx);
+1596       } else {
+1597         this.ctx.restore();
+1598       }
+1599       this.checkSMaskState();
+1600 
+1601       // Ensure that the clipping path is reset (fixes issue6413.pdf).
+1602       this.pendingClip = null;
+1603 
+1604       this._cachedScaleForStroking[0] = -1;
+1605       this._cachedGetSinglePixelWidth = null;
+1606     }
+1607   }
+1608 
+1609   transform(a, b, c, d, e, f) {
+1610     this.ctx.transform(a, b, c, d, e, f);
+1611 
+1612     this._cachedScaleForStroking[0] = -1;
+1613     this._cachedGetSinglePixelWidth = null;
+1614   }
+1615 
+1616   // Path
+1617   constructPath(ops, args, minMax) {
+1618     const ctx = this.ctx;
+1619     const current = this.current;
+1620     let x = current.x,
+1621       y = current.y;
+1622     let startX, startY;
+1623     const currentTransform = getCurrentTransform(ctx);
+1624 
+1625     // Most of the time the current transform is a scaling matrix
+1626     // so we don't need to transform points before computing min/max:
+1627     // we can compute min/max first and then smartly "apply" the
+1628     // transform (see Util.scaleMinMax).
+1629     // For rectangle, moveTo and lineTo, min/max are computed in the
+1630     // worker (see evaluator.js).
+1631     const isScalingMatrix =
+1632       (currentTransform[0] === 0 && currentTransform[3] === 0) ||
+1633       (currentTransform[1] === 0 && currentTransform[2] === 0);
+1634     const minMaxForBezier = isScalingMatrix ? minMax.slice(0) : null;
+1635 
+1636     for (let i = 0, j = 0, ii = ops.length; i < ii; i++) {
+1637       switch (ops[i] | 0) {
+1638         case OPS.rectangle:
+1639           x = args[j++];
+1640           y = args[j++];
+1641           const width = args[j++];
+1642           const height = args[j++];
+1643 
+1644           const xw = x + width;
+1645           const yh = y + height;
+1646           ctx.moveTo(x, y);
+1647           if (width === 0 || height === 0) {
+1648             ctx.lineTo(xw, yh);
+1649           } else {
+1650             ctx.lineTo(xw, y);
+1651             ctx.lineTo(xw, yh);
+1652             ctx.lineTo(x, yh);
+1653           }
+1654           if (!isScalingMatrix) {
+1655             current.updateRectMinMax(currentTransform, [x, y, xw, yh]);
+1656           }
+1657           ctx.closePath();
+1658           break;
+1659         case OPS.moveTo:
+1660           x = args[j++];
+1661           y = args[j++];
+1662           ctx.moveTo(x, y);
+1663           if (!isScalingMatrix) {
+1664             current.updatePathMinMax(currentTransform, x, y);
+1665           }
+1666           break;
+1667         case OPS.lineTo:
+1668           x = args[j++];
+1669           y = args[j++];
+1670           ctx.lineTo(x, y);
+1671           if (!isScalingMatrix) {
+1672             current.updatePathMinMax(currentTransform, x, y);
+1673           }
+1674           break;
+1675         case OPS.curveTo:
+1676           startX = x;
+1677           startY = y;
+1678           x = args[j + 4];
+1679           y = args[j + 5];
+1680           ctx.bezierCurveTo(
+1681             args[j],
+1682             args[j + 1],
+1683             args[j + 2],
+1684             args[j + 3],
+1685             x,
+1686             y
+1687           );
+1688           current.updateCurvePathMinMax(
+1689             currentTransform,
+1690             startX,
+1691             startY,
+1692             args[j],
+1693             args[j + 1],
+1694             args[j + 2],
+1695             args[j + 3],
+1696             x,
+1697             y,
+1698             minMaxForBezier
+1699           );
+1700           j += 6;
+1701           break;
+1702         case OPS.curveTo2:
+1703           startX = x;
+1704           startY = y;
+1705           ctx.bezierCurveTo(
+1706             x,
+1707             y,
+1708             args[j],
+1709             args[j + 1],
+1710             args[j + 2],
+1711             args[j + 3]
+1712           );
+1713           current.updateCurvePathMinMax(
+1714             currentTransform,
+1715             startX,
+1716             startY,
+1717             x,
+1718             y,
+1719             args[j],
+1720             args[j + 1],
+1721             args[j + 2],
+1722             args[j + 3],
+1723             minMaxForBezier
+1724           );
+1725           x = args[j + 2];
+1726           y = args[j + 3];
+1727           j += 4;
+1728           break;
+1729         case OPS.curveTo3:
+1730           startX = x;
+1731           startY = y;
+1732           x = args[j + 2];
+1733           y = args[j + 3];
+1734           ctx.bezierCurveTo(args[j], args[j + 1], x, y, x, y);
+1735           current.updateCurvePathMinMax(
+1736             currentTransform,
+1737             startX,
+1738             startY,
+1739             args[j],
+1740             args[j + 1],
+1741             x,
+1742             y,
+1743             x,
+1744             y,
+1745             minMaxForBezier
+1746           );
+1747           j += 4;
+1748           break;
+1749         case OPS.closePath:
+1750           ctx.closePath();
+1751           break;
+1752       }
+1753     }
+1754 
+1755     if (isScalingMatrix) {
+1756       current.updateScalingPathMinMax(currentTransform, minMaxForBezier);
+1757     }
+1758 
+1759     current.setCurrentPoint(x, y);
+1760   }
+1761 
+1762   closePath() {
+1763     this.ctx.closePath();
+1764   }
+1765 
+1766   stroke(consumePath = true) {
+1767     const ctx = this.ctx;
+1768     const strokeColor = this.current.strokeColor;
+1769     // For stroke we want to temporarily change the global alpha to the
+1770     // stroking alpha.
+1771     ctx.globalAlpha = this.current.strokeAlpha;
+1772     if (this.contentVisible) {
+1773       if (typeof strokeColor === "object" && strokeColor?.getPattern) {
+1774         ctx.save();
+1775         ctx.strokeStyle = strokeColor.getPattern(
+1776           ctx,
+1777           this,
+1778           getCurrentTransformInverse(ctx),
+1779           PathType.STROKE
+1780         );
+1781         this.rescaleAndStroke(/* saveRestore */ false);
+1782         ctx.restore();
+1783       } else {
+1784         this.rescaleAndStroke(/* saveRestore */ true);
+1785       }
+1786     }
+1787     if (consumePath) {
+1788       this.consumePath(this.current.getClippedPathBoundingBox());
+1789     }
+1790     // Restore the global alpha to the fill alpha
+1791     ctx.globalAlpha = this.current.fillAlpha;
+1792   }
+1793 
+1794   closeStroke() {
+1795     this.closePath();
+1796     this.stroke();
+1797   }
+1798 
+1799   fill(consumePath = true) {
+1800     const ctx = this.ctx;
+1801     const fillColor = this.current.fillColor;
+1802     const isPatternFill = this.current.patternFill;
+1803     let needRestore = false;
+1804 
+1805     if (isPatternFill) {
+1806       ctx.save();
+1807       ctx.fillStyle = fillColor.getPattern(
+1808         ctx,
+1809         this,
+1810         getCurrentTransformInverse(ctx),
+1811         PathType.FILL
+1812       );
+1813       needRestore = true;
+1814     }
+1815 
+1816     const intersect = this.current.getClippedPathBoundingBox();
+1817     if (this.contentVisible && intersect !== null) {
+1818       if (this.pendingEOFill) {
+1819         ctx.fill("evenodd");
+1820         this.pendingEOFill = false;
+1821       } else {
+1822         ctx.fill();
+1823       }
+1824     }
+1825 
+1826     if (needRestore) {
+1827       ctx.restore();
+1828     }
+1829     if (consumePath) {
+1830       this.consumePath(intersect);
+1831     }
+1832   }
+1833 
+1834   eoFill() {
+1835     this.pendingEOFill = true;
+1836     this.fill();
+1837   }
+1838 
+1839   fillStroke() {
+1840     this.fill(false);
+1841     this.stroke(false);
+1842 
+1843     this.consumePath();
+1844   }
+1845 
+1846   eoFillStroke() {
+1847     this.pendingEOFill = true;
+1848     this.fillStroke();
+1849   }
+1850 
+1851   closeFillStroke() {
+1852     this.closePath();
+1853     this.fillStroke();
+1854   }
+1855 
+1856   closeEOFillStroke() {
+1857     this.pendingEOFill = true;
+1858     this.closePath();
+1859     this.fillStroke();
+1860   }
+1861 
+1862   endPath() {
+1863     this.consumePath();
+1864   }
+1865 
+1866   // Clipping
+1867   clip() {
+1868     this.pendingClip = NORMAL_CLIP;
+1869   }
+1870 
+1871   eoClip() {
+1872     this.pendingClip = EO_CLIP;
+1873   }
+1874 
+1875   // Text
+1876   beginText() {
+1877     this.current.textMatrix = IDENTITY_MATRIX;
+1878     this.current.textMatrixScale = 1;
+1879     this.current.x = this.current.lineX = 0;
+1880     this.current.y = this.current.lineY = 0;
+1881   }
+1882 
+1883   endText() {
+1884     const paths = this.pendingTextPaths;
+1885     const ctx = this.ctx;
+1886     if (paths === undefined) {
+1887       ctx.beginPath();
+1888       return;
+1889     }
+1890 
+1891     ctx.save();
+1892     ctx.beginPath();
+1893     for (const path of paths) {
+1894       ctx.setTransform(...path.transform);
+1895       ctx.translate(path.x, path.y);
+1896       path.addToPath(ctx, path.fontSize);
+1897     }
+1898     ctx.restore();
+1899     ctx.clip();
+1900     ctx.beginPath();
+1901     delete this.pendingTextPaths;
+1902   }
+1903 
+1904   setCharSpacing(spacing) {
+1905     this.current.charSpacing = spacing;
+1906   }
+1907 
+1908   setWordSpacing(spacing) {
+1909     this.current.wordSpacing = spacing;
+1910   }
+1911 
+1912   setHScale(scale) {
+1913     this.current.textHScale = scale / 100;
+1914   }
+1915 
+1916   setLeading(leading) {
+1917     this.current.leading = -leading;
+1918   }
+1919 
+1920   setFont(fontRefName, size) {
+1921     const fontObj = this.commonObjs.get(fontRefName);
+1922     const current = this.current;
+1923 
+1924     if (!fontObj) {
+1925       throw new Error(`Can't find font for ${fontRefName}`);
+1926     }
+1927     current.fontMatrix = fontObj.fontMatrix || FONT_IDENTITY_MATRIX;
+1928 
+1929     // A valid matrix needs all main diagonal elements to be non-zero
+1930     // This also ensures we bypass FF bugzilla bug #719844.
+1931     if (current.fontMatrix[0] === 0 || current.fontMatrix[3] === 0) {
+1932       warn("Invalid font matrix for font " + fontRefName);
+1933     }
+1934 
+1935     // The spec for Tf (setFont) says that 'size' specifies the font 'scale',
+1936     // and in some docs this can be negative (inverted x-y axes).
+1937     if (size < 0) {
+1938       size = -size;
+1939       current.fontDirection = -1;
+1940     } else {
+1941       current.fontDirection = 1;
+1942     }
+1943 
+1944     this.current.font = fontObj;
+1945     this.current.fontSize = size;
+1946 
+1947     if (fontObj.isType3Font) {
+1948       return; // we don't need ctx.font for Type3 fonts
+1949     }
+1950 
+1951     const name = fontObj.loadedName || "sans-serif";
+1952     const typeface =
+1953       fontObj.systemFontInfo?.css || `"${name}", ${fontObj.fallbackName}`;
+1954 
+1955     let bold = "normal";
+1956     if (fontObj.black) {
+1957       bold = "900";
+1958     } else if (fontObj.bold) {
+1959       bold = "bold";
+1960     }
+1961     const italic = fontObj.italic ? "italic" : "normal";
+1962 
+1963     // Some font backends cannot handle fonts below certain size.
+1964     // Keeping the font at minimal size and using the fontSizeScale to change
+1965     // the current transformation matrix before the fillText/strokeText.
+1966     // See https://bugzilla.mozilla.org/show_bug.cgi?id=726227
+1967     let browserFontSize = size;
+1968     if (size < MIN_FONT_SIZE) {
+1969       browserFontSize = MIN_FONT_SIZE;
+1970     } else if (size > MAX_FONT_SIZE) {
+1971       browserFontSize = MAX_FONT_SIZE;
+1972     }
+1973     this.current.fontSizeScale = size / browserFontSize;
+1974 
+1975     this.ctx.font = `${italic} ${bold} ${browserFontSize}px ${typeface}`;
+1976   }
+1977 
+1978   setTextRenderingMode(mode) {
+1979     this.current.textRenderingMode = mode;
+1980   }
+1981 
+1982   setTextRise(rise) {
+1983     this.current.textRise = rise;
+1984   }
+1985 
+1986   moveText(x, y) {
+1987     this.current.x = this.current.lineX += x;
+1988     this.current.y = this.current.lineY += y;
+1989   }
+1990 
+1991   setLeadingMoveText(x, y) {
+1992     this.setLeading(-y);
+1993     this.moveText(x, y);
+1994   }
+1995 
+1996   setTextMatrix(a, b, c, d, e, f) {
+1997     this.current.textMatrix = [a, b, c, d, e, f];
+1998     this.current.textMatrixScale = Math.hypot(a, b);
+1999 
+2000     this.current.x = this.current.lineX = 0;
+2001     this.current.y = this.current.lineY = 0;
+2002   }
+2003 
+2004   nextLine() {
+2005     this.moveText(0, this.current.leading);
+2006   }
+2007 
+2008   paintChar(character, x, y, patternTransform) {
+2009     const ctx = this.ctx;
+2010     const current = this.current;
+2011     const font = current.font;
+2012     const textRenderingMode = current.textRenderingMode;
+2013     const fontSize = current.fontSize / current.fontSizeScale;
+2014     const fillStrokeMode =
+2015       textRenderingMode & TextRenderingMode.FILL_STROKE_MASK;
+2016     const isAddToPathSet = !!(
+2017       textRenderingMode & TextRenderingMode.ADD_TO_PATH_FLAG
+2018     );
+2019     const patternFill = current.patternFill && !font.missingFile;
+2020 
+2021     let addToPath;
+2022     if (font.disableFontFace || isAddToPathSet || patternFill) {
+2023       addToPath = font.getPathGenerator(this.commonObjs, character);
+2024     }
+2025 
+2026     if (font.disableFontFace || patternFill) {
+2027       ctx.save();
+2028       ctx.translate(x, y);
+2029       ctx.beginPath();
+2030       addToPath(ctx, fontSize);
+2031       if (patternTransform) {
+2032         ctx.setTransform(...patternTransform);
+2033       }
+2034       if (
+2035         fillStrokeMode === TextRenderingMode.FILL ||
+2036         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2037       ) {
+2038         ctx.fill();
+2039       }
+2040       if (
+2041         fillStrokeMode === TextRenderingMode.STROKE ||
+2042         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2043       ) {
+2044         ctx.stroke();
+2045       }
+2046       ctx.restore();
+2047     } else {
+2048       if (
+2049         fillStrokeMode === TextRenderingMode.FILL ||
+2050         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2051       ) {
+2052         ctx.fillText(character, x, y);
+2053       }
+2054       if (
+2055         fillStrokeMode === TextRenderingMode.STROKE ||
+2056         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2057       ) {
+2058         ctx.strokeText(character, x, y);
+2059       }
+2060     }
+2061 
+2062     if (isAddToPathSet) {
+2063       const paths = (this.pendingTextPaths ||= []);
+2064       paths.push({
+2065         transform: getCurrentTransform(ctx),
+2066         x,
+2067         y,
+2068         fontSize,
+2069         addToPath,
+2070       });
+2071     }
+2072   }
+2073 
+2074   get isFontSubpixelAAEnabled() {
+2075     // Checks if anti-aliasing is enabled when scaled text is painted.
+2076     // On Windows GDI scaled fonts looks bad.
+2077     const { context: ctx } = this.cachedCanvases.getCanvas(
+2078       "isFontSubpixelAAEnabled",
+2079       10,
+2080       10
+2081     );
+2082     ctx.scale(1.5, 1);
+2083     ctx.fillText("I", 0, 10);
+2084     const data = ctx.getImageData(0, 0, 10, 10).data;
+2085     let enabled = false;
+2086     for (let i = 3; i < data.length; i += 4) {
+2087       if (data[i] > 0 && data[i] < 255) {
+2088         enabled = true;
+2089         break;
+2090       }
+2091     }
+2092     return shadow(this, "isFontSubpixelAAEnabled", enabled);
+2093   }
+2094 
+2095   showText(glyphs) {
+2096     const current = this.current;
+2097     const font = current.font;
+2098     if (font.isType3Font) {
+2099       return this.showType3Text(glyphs);
+2100     }
+2101 
+2102     const fontSize = current.fontSize;
+2103     if (fontSize === 0) {
+2104       return undefined;
+2105     }
+2106 
+2107     const ctx = this.ctx;
+2108     const fontSizeScale = current.fontSizeScale;
+2109     const charSpacing = current.charSpacing;
+2110     const wordSpacing = current.wordSpacing;
+2111     const fontDirection = current.fontDirection;
+2112     const textHScale = current.textHScale * fontDirection;
+2113     const glyphsLength = glyphs.length;
+2114     const vertical = font.vertical;
+2115     const spacingDir = vertical ? 1 : -1;
+2116     const defaultVMetrics = font.defaultVMetrics;
+2117     const widthAdvanceScale = fontSize * current.fontMatrix[0];
+2118 
+2119     const simpleFillText =
+2120       current.textRenderingMode === TextRenderingMode.FILL &&
+2121       !font.disableFontFace &&
+2122       !current.patternFill;
+2123 
+2124     ctx.save();
+2125     ctx.transform(...current.textMatrix);
+2126     ctx.translate(current.x, current.y + current.textRise);
+2127 
+2128     if (fontDirection > 0) {
+2129       ctx.scale(textHScale, -1);
+2130     } else {
+2131       ctx.scale(textHScale, 1);
+2132     }
+2133 
+2134     let patternTransform;
+2135     if (current.patternFill) {
+2136       ctx.save();
+2137       const pattern = current.fillColor.getPattern(
+2138         ctx,
+2139         this,
+2140         getCurrentTransformInverse(ctx),
+2141         PathType.FILL
+2142       );
+2143       patternTransform = getCurrentTransform(ctx);
+2144       ctx.restore();
+2145       ctx.fillStyle = pattern;
+2146     }
+2147 
+2148     let lineWidth = current.lineWidth;
+2149     const scale = current.textMatrixScale;
+2150     if (scale === 0 || lineWidth === 0) {
+2151       const fillStrokeMode =
+2152         current.textRenderingMode & TextRenderingMode.FILL_STROKE_MASK;
+2153       if (
+2154         fillStrokeMode === TextRenderingMode.STROKE ||
+2155         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2156       ) {
+2157         lineWidth = this.getSinglePixelWidth();
+2158       }
+2159     } else {
+2160       lineWidth /= scale;
+2161     }
+2162 
+2163     if (fontSizeScale !== 1.0) {
+2164       ctx.scale(fontSizeScale, fontSizeScale);
+2165       lineWidth /= fontSizeScale;
+2166     }
+2167 
+2168     ctx.lineWidth = lineWidth;
+2169 
+2170     if (font.isInvalidPDFjsFont) {
+2171       const chars = [];
+2172       let width = 0;
+2173       for (const glyph of glyphs) {
+2174         chars.push(glyph.unicode);
+2175         width += glyph.width;
+2176       }
+2177       ctx.fillText(chars.join(""), 0, 0);
+2178       current.x += width * widthAdvanceScale * textHScale;
+2179       ctx.restore();
+2180       this.compose();
+2181 
+2182       return undefined;
+2183     }
+2184 
+2185     let x = 0,
+2186       i;
+2187     for (i = 0; i < glyphsLength; ++i) {
+2188       const glyph = glyphs[i];
+2189       if (typeof glyph === "number") {
+2190         x += (spacingDir * glyph * fontSize) / 1000;
+2191         continue;
+2192       }
+2193 
+2194       let restoreNeeded = false;
+2195       const spacing = (glyph.isSpace ? wordSpacing : 0) + charSpacing;
+2196       const character = glyph.fontChar;
+2197       const accent = glyph.accent;
+2198       let scaledX, scaledY;
+2199       let width = glyph.width;
+2200       if (vertical) {
+2201         const vmetric = glyph.vmetric || defaultVMetrics;
+2202         const vx =
+2203           -(glyph.vmetric ? vmetric[1] : width * 0.5) * widthAdvanceScale;
+2204         const vy = vmetric[2] * widthAdvanceScale;
+2205 
+2206         width = vmetric ? -vmetric[0] : width;
+2207         scaledX = vx / fontSizeScale;
+2208         scaledY = (x + vy) / fontSizeScale;
+2209       } else {
+2210         scaledX = x / fontSizeScale;
+2211         scaledY = 0;
+2212       }
+2213 
+2214       if (font.remeasure && width > 0) {
+2215         // Some standard fonts may not have the exact width: rescale per
+2216         // character if measured width is greater than expected glyph width
+2217         // and subpixel-aa is enabled, otherwise just center the glyph.
+2218         const measuredWidth =
+2219           ((ctx.measureText(character).width * 1000) / fontSize) *
+2220           fontSizeScale;
+2221         if (width < measuredWidth && this.isFontSubpixelAAEnabled) {
+2222           const characterScaleX = width / measuredWidth;
+2223           restoreNeeded = true;
+2224           ctx.save();
+2225           ctx.scale(characterScaleX, 1);
+2226           scaledX /= characterScaleX;
+2227         } else if (width !== measuredWidth) {
+2228           scaledX +=
+2229             (((width - measuredWidth) / 2000) * fontSize) / fontSizeScale;
+2230         }
+2231       }
+2232 
+2233       // Only attempt to draw the glyph if it is actually in the embedded font
+2234       // file or if there isn't a font file so the fallback font is shown.
+2235       if (this.contentVisible && (glyph.isInFont || font.missingFile)) {
+2236         if (simpleFillText && !accent) {
+2237           // common case
+2238           ctx.fillText(character, scaledX, scaledY);
+2239         } else {
+2240           this.paintChar(character, scaledX, scaledY, patternTransform);
+2241           if (accent) {
+2242             const scaledAccentX =
+2243               scaledX + (fontSize * accent.offset.x) / fontSizeScale;
+2244             const scaledAccentY =
+2245               scaledY - (fontSize * accent.offset.y) / fontSizeScale;
+2246             this.paintChar(
+2247               accent.fontChar,
+2248               scaledAccentX,
+2249               scaledAccentY,
+2250               patternTransform
+2251             );
+2252           }
+2253         }
+2254       }
+2255 
+2256       const charWidth = vertical
+2257         ? width * widthAdvanceScale - spacing * fontDirection
+2258         : width * widthAdvanceScale + spacing * fontDirection;
+2259       x += charWidth;
+2260 
+2261       if (restoreNeeded) {
+2262         ctx.restore();
+2263       }
+2264     }
+2265     if (vertical) {
+2266       current.y -= x;
+2267     } else {
+2268       current.x += x * textHScale;
+2269     }
+2270     ctx.restore();
+2271     this.compose();
+2272 
+2273     return undefined;
+2274   }
+2275 
+2276   showType3Text(glyphs) {
+2277     // Type3 fonts - each glyph is a "mini-PDF"
+2278     const ctx = this.ctx;
+2279     const current = this.current;
+2280     const font = current.font;
+2281     const fontSize = current.fontSize;
+2282     const fontDirection = current.fontDirection;
+2283     const spacingDir = font.vertical ? 1 : -1;
+2284     const charSpacing = current.charSpacing;
+2285     const wordSpacing = current.wordSpacing;
+2286     const textHScale = current.textHScale * fontDirection;
+2287     const fontMatrix = current.fontMatrix || FONT_IDENTITY_MATRIX;
+2288     const glyphsLength = glyphs.length;
+2289     const isTextInvisible =
+2290       current.textRenderingMode === TextRenderingMode.INVISIBLE;
+2291     let i, glyph, width, spacingLength;
+2292 
+2293     if (isTextInvisible || fontSize === 0) {
+2294       return;
+2295     }
+2296     this._cachedScaleForStroking[0] = -1;
+2297     this._cachedGetSinglePixelWidth = null;
+2298 
+2299     ctx.save();
+2300     ctx.transform(...current.textMatrix);
+2301     ctx.translate(current.x, current.y);
+2302 
+2303     ctx.scale(textHScale, fontDirection);
+2304 
+2305     for (i = 0; i < glyphsLength; ++i) {
+2306       glyph = glyphs[i];
+2307       if (typeof glyph === "number") {
+2308         spacingLength = (spacingDir * glyph * fontSize) / 1000;
+2309         this.ctx.translate(spacingLength, 0);
+2310         current.x += spacingLength * textHScale;
+2311         continue;
+2312       }
+2313 
+2314       const spacing = (glyph.isSpace ? wordSpacing : 0) + charSpacing;
+2315       const operatorList = font.charProcOperatorList[glyph.operatorListId];
+2316       if (!operatorList) {
+2317         warn(`Type3 character "${glyph.operatorListId}" is not available.`);
+2318         continue;
+2319       }
+2320       if (this.contentVisible) {
+2321         this.processingType3 = glyph;
+2322         this.save();
+2323         ctx.scale(fontSize, fontSize);
+2324         ctx.transform(...fontMatrix);
+2325         this.executeOperatorList(operatorList);
+2326         this.restore();
+2327       }
+2328 
+2329       const transformed = Util.applyTransform([glyph.width, 0], fontMatrix);
+2330       width = transformed[0] * fontSize + spacing;
+2331 
+2332       ctx.translate(width, 0);
+2333       current.x += width * textHScale;
+2334     }
+2335     ctx.restore();
+2336     this.processingType3 = null;
+2337   }
+2338 
+2339   // Type3 fonts
+2340   setCharWidth(xWidth, yWidth) {
+2341     // We can safely ignore this since the width should be the same
+2342     // as the width in the Widths array.
+2343   }
+2344 
+2345   setCharWidthAndBounds(xWidth, yWidth, llx, lly, urx, ury) {
+2346     this.ctx.rect(llx, lly, urx - llx, ury - lly);
+2347     this.ctx.clip();
+2348     this.endPath();
+2349   }
+2350 
+2351   // Color
+2352   getColorN_Pattern(IR) {
+2353     let pattern;
+2354     if (IR[0] === "TilingPattern") {
+2355       const color = IR[1];
+2356       const baseTransform = this.baseTransform || getCurrentTransform(this.ctx);
+2357       const canvasGraphicsFactory = {
+2358         createCanvasGraphics: ctx =>
+2359           new CanvasGraphics(
+2360             ctx,
+2361             this.commonObjs,
+2362             this.objs,
+2363             this.canvasFactory,
+2364             this.filterFactory,
+2365             {
+2366               optionalContentConfig: this.optionalContentConfig,
+2367               markedContentStack: this.markedContentStack,
+2368             }
+2369           ),
+2370       };
+2371       pattern = new TilingPattern(
+2372         IR,
+2373         color,
+2374         this.ctx,
+2375         canvasGraphicsFactory,
+2376         baseTransform
+2377       );
+2378     } else {
+2379       pattern = this._getPattern(IR[1], IR[2]);
+2380     }
+2381     return pattern;
+2382   }
+2383 
+2384   setStrokeColorN() {
+2385     this.current.strokeColor = this.getColorN_Pattern(arguments);
+2386   }
+2387 
+2388   setFillColorN() {
+2389     this.current.fillColor = this.getColorN_Pattern(arguments);
+2390     this.current.patternFill = true;
+2391   }
+2392 
+2393   setStrokeRGBColor(r, g, b) {
+2394     const color = Util.makeHexColor(r, g, b);
+2395     this.ctx.strokeStyle = color;
+2396     this.current.strokeColor = color;
+2397   }
+2398 
+2399   setFillRGBColor(r, g, b) {
+2400     const color = Util.makeHexColor(r, g, b);
+2401     this.ctx.fillStyle = color;
+2402     this.current.fillColor = color;
+2403     this.current.patternFill = false;
+2404   }
+2405 
+2406   _getPattern(objId, matrix = null) {
+2407     let pattern;
+2408     if (this.cachedPatterns.has(objId)) {
+2409       pattern = this.cachedPatterns.get(objId);
+2410     } else {
+2411       pattern = getShadingPattern(this.getObject(objId));
+2412       this.cachedPatterns.set(objId, pattern);
+2413     }
+2414     if (matrix) {
+2415       pattern.matrix = matrix;
+2416     }
+2417     return pattern;
+2418   }
+2419 
+2420   shadingFill(objId) {
+2421     if (!this.contentVisible) {
+2422       return;
+2423     }
+2424     const ctx = this.ctx;
+2425 
+2426     this.save();
+2427     const pattern = this._getPattern(objId);
+2428     ctx.fillStyle = pattern.getPattern(
+2429       ctx,
+2430       this,
+2431       getCurrentTransformInverse(ctx),
+2432       PathType.SHADING
+2433     );
+2434 
+2435     const inv = getCurrentTransformInverse(ctx);
+2436     if (inv) {
+2437       const { width, height } = ctx.canvas;
+2438       const [x0, y0, x1, y1] = Util.getAxialAlignedBoundingBox(
+2439         [0, 0, width, height],
+2440         inv
+2441       );
+2442 
+2443       this.ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+2444     } else {
+2445       // HACK to draw the gradient onto an infinite rectangle.
+2446       // PDF gradients are drawn across the entire image while
+2447       // Canvas only allows gradients to be drawn in a rectangle
+2448       // The following bug should allow us to remove this.
+2449       // https://bugzilla.mozilla.org/show_bug.cgi?id=664884
+2450 
+2451       this.ctx.fillRect(-1e10, -1e10, 2e10, 2e10);
+2452     }
+2453 
+2454     this.compose(this.current.getClippedPathBoundingBox());
+2455     this.restore();
+2456   }
+2457 
+2458   // Images
+2459   beginInlineImage() {
+2460     unreachable("Should not call beginInlineImage");
+2461   }
+2462 
+2463   beginImageData() {
+2464     unreachable("Should not call beginImageData");
+2465   }
+2466 
+2467   paintFormXObjectBegin(matrix, bbox) {
+2468     if (!this.contentVisible) {
+2469       return;
+2470     }
+2471     this.save();
+2472     this.baseTransformStack.push(this.baseTransform);
+2473 
+2474     if (Array.isArray(matrix) && matrix.length === 6) {
+2475       this.transform(...matrix);
+2476     }
+2477 
+2478     this.baseTransform = getCurrentTransform(this.ctx);
+2479 
+2480     if (bbox) {
+2481       const width = bbox[2] - bbox[0];
+2482       const height = bbox[3] - bbox[1];
+2483       this.ctx.rect(bbox[0], bbox[1], width, height);
+2484       this.current.updateRectMinMax(getCurrentTransform(this.ctx), bbox);
+2485       this.clip();
+2486       this.endPath();
+2487     }
+2488   }
+2489 
+2490   paintFormXObjectEnd() {
+2491     if (!this.contentVisible) {
+2492       return;
+2493     }
+2494     this.restore();
+2495     this.baseTransform = this.baseTransformStack.pop();
+2496   }
+2497 
+2498   beginGroup(group) {
+2499     if (!this.contentVisible) {
+2500       return;
+2501     }
+2502 
+2503     this.save();
+2504     // If there's an active soft mask we don't want it enabled for the group, so
+2505     // clear it out. The mask and suspended canvas will be restored in endGroup.
+2506     if (this.inSMaskMode) {
+2507       this.endSMaskMode();
+2508       this.current.activeSMask = null;
+2509     }
+2510 
+2511     const currentCtx = this.ctx;
+2512     // TODO non-isolated groups - according to Rik at adobe non-isolated
+2513     // group results aren't usually that different and they even have tools
+2514     // that ignore this setting. Notes from Rik on implementing:
+2515     // - When you encounter an transparency group, create a new canvas with
+2516     // the dimensions of the bbox
+2517     // - copy the content from the previous canvas to the new canvas
+2518     // - draw as usual
+2519     // - remove the backdrop alpha:
+2520     // alphaNew = 1 - (1 - alpha)/(1 - alphaBackdrop) with 'alpha' the alpha
+2521     // value of your transparency group and 'alphaBackdrop' the alpha of the
+2522     // backdrop
+2523     // - remove background color:
+2524     // colorNew = color - alphaNew *colorBackdrop /(1 - alphaNew)
+2525     if (!group.isolated) {
+2526       info("TODO: Support non-isolated groups.");
+2527     }
+2528 
+2529     // TODO knockout - supposedly possible with the clever use of compositing
+2530     // modes.
+2531     if (group.knockout) {
+2532       warn("Knockout groups not supported.");
+2533     }
+2534 
+2535     const currentTransform = getCurrentTransform(currentCtx);
+2536     if (group.matrix) {
+2537       currentCtx.transform(...group.matrix);
+2538     }
+2539     if (!group.bbox) {
+2540       throw new Error("Bounding box is required.");
+2541     }
+2542 
+2543     // Based on the current transform figure out how big the bounding box
+2544     // will actually be.
+2545     let bounds = Util.getAxialAlignedBoundingBox(
+2546       group.bbox,
+2547       getCurrentTransform(currentCtx)
+2548     );
+2549     // Clip the bounding box to the current canvas.
+2550     const canvasBounds = [
+2551       0,
+2552       0,
+2553       currentCtx.canvas.width,
+2554       currentCtx.canvas.height,
+2555     ];
+2556     bounds = Util.intersect(bounds, canvasBounds) || [0, 0, 0, 0];
+2557     // Use ceil in case we're between sizes so we don't create canvas that is
+2558     // too small and make the canvas at least 1x1 pixels.
+2559     const offsetX = Math.floor(bounds[0]);
+2560     const offsetY = Math.floor(bounds[1]);
+2561     let drawnWidth = Math.max(Math.ceil(bounds[2]) - offsetX, 1);
+2562     let drawnHeight = Math.max(Math.ceil(bounds[3]) - offsetY, 1);
+2563     let scaleX = 1,
+2564       scaleY = 1;
+2565     if (drawnWidth > MAX_GROUP_SIZE) {
+2566       scaleX = drawnWidth / MAX_GROUP_SIZE;
+2567       drawnWidth = MAX_GROUP_SIZE;
+2568     }
+2569     if (drawnHeight > MAX_GROUP_SIZE) {
+2570       scaleY = drawnHeight / MAX_GROUP_SIZE;
+2571       drawnHeight = MAX_GROUP_SIZE;
+2572     }
+2573 
+2574     this.current.startNewPathAndClipBox([0, 0, drawnWidth, drawnHeight]);
+2575 
+2576     let cacheId = "groupAt" + this.groupLevel;
+2577     if (group.smask) {
+2578       // Using two cache entries is case if masks are used one after another.
+2579       cacheId += "_smask_" + (this.smaskCounter++ % 2);
+2580     }
+2581     const scratchCanvas = this.cachedCanvases.getCanvas(
+2582       cacheId,
+2583       drawnWidth,
+2584       drawnHeight
+2585     );
+2586     const groupCtx = scratchCanvas.context;
+2587 
+2588     // Since we created a new canvas that is just the size of the bounding box
+2589     // we have to translate the group ctx.
+2590     groupCtx.scale(1 / scaleX, 1 / scaleY);
+2591     groupCtx.translate(-offsetX, -offsetY);
+2592     groupCtx.transform(...currentTransform);
+2593 
+2594     if (group.smask) {
+2595       // Saving state and cached mask to be used in setGState.
+2596       this.smaskStack.push({
+2597         canvas: scratchCanvas.canvas,
+2598         context: groupCtx,
+2599         offsetX,
+2600         offsetY,
+2601         scaleX,
+2602         scaleY,
+2603         subtype: group.smask.subtype,
+2604         backdrop: group.smask.backdrop,
+2605         transferMap: group.smask.transferMap || null,
+2606         startTransformInverse: null, // used during suspend operation
+2607       });
+2608     } else {
+2609       // Setup the current ctx so when the group is popped we draw it at the
+2610       // right location.
+2611       currentCtx.setTransform(1, 0, 0, 1, 0, 0);
+2612       currentCtx.translate(offsetX, offsetY);
+2613       currentCtx.scale(scaleX, scaleY);
+2614       currentCtx.save();
+2615     }
+2616     // The transparency group inherits all off the current graphics state
+2617     // except the blend mode, soft mask, and alpha constants.
+2618     copyCtxState(currentCtx, groupCtx);
+2619     this.ctx = groupCtx;
+2620     this.setGState([
+2621       ["BM", "source-over"],
+2622       ["ca", 1],
+2623       ["CA", 1],
+2624     ]);
+2625     this.groupStack.push(currentCtx);
+2626     this.groupLevel++;
+2627   }
+2628 
+2629   endGroup(group) {
+2630     if (!this.contentVisible) {
+2631       return;
+2632     }
+2633     this.groupLevel--;
+2634     const groupCtx = this.ctx;
+2635     const ctx = this.groupStack.pop();
+2636     this.ctx = ctx;
+2637     // Turn off image smoothing to avoid sub pixel interpolation which can
+2638     // look kind of blurry for some pdfs.
+2639     this.ctx.imageSmoothingEnabled = false;
+2640 
+2641     if (group.smask) {
+2642       this.tempSMask = this.smaskStack.pop();
+2643       this.restore();
+2644     } else {
+2645       this.ctx.restore();
+2646       const currentMtx = getCurrentTransform(this.ctx);
+2647       this.restore();
+2648       this.ctx.save();
+2649       this.ctx.setTransform(...currentMtx);
+2650       const dirtyBox = Util.getAxialAlignedBoundingBox(
+2651         [0, 0, groupCtx.canvas.width, groupCtx.canvas.height],
+2652         currentMtx
+2653       );
+2654       this.ctx.drawImage(groupCtx.canvas, 0, 0);
+2655       this.ctx.restore();
+2656       this.compose(dirtyBox);
+2657     }
+2658   }
+2659 
+2660   beginAnnotation(id, rect, transform, matrix, hasOwnCanvas) {
+2661     // The annotations are drawn just after the page content.
+2662     // The page content drawing can potentially have set a transform,
+2663     // a clipping path, whatever...
+2664     // So in order to have something clean, we restore the initial state.
+2665     this.#restoreInitialState();
+2666     resetCtxToDefault(this.ctx);
+2667 
+2668     this.ctx.save();
+2669     this.save();
+2670 
+2671     if (this.baseTransform) {
+2672       this.ctx.setTransform(...this.baseTransform);
+2673     }
+2674 
+2675     if (Array.isArray(rect) && rect.length === 4) {
+2676       const width = rect[2] - rect[0];
+2677       const height = rect[3] - rect[1];
+2678 
+2679       if (hasOwnCanvas && this.annotationCanvasMap) {
+2680         transform = transform.slice();
+2681         transform[4] -= rect[0];
+2682         transform[5] -= rect[1];
+2683 
+2684         rect = rect.slice();
+2685         rect[0] = rect[1] = 0;
+2686         rect[2] = width;
+2687         rect[3] = height;
+2688 
+2689         const [scaleX, scaleY] = Util.singularValueDecompose2dScale(
+2690           getCurrentTransform(this.ctx)
+2691         );
+2692         const { viewportScale } = this;
+2693         const canvasWidth = Math.ceil(
+2694           width * this.outputScaleX * viewportScale
+2695         );
+2696         const canvasHeight = Math.ceil(
+2697           height * this.outputScaleY * viewportScale
+2698         );
+2699 
+2700         this.annotationCanvas = this.canvasFactory.create(
+2701           canvasWidth,
+2702           canvasHeight
+2703         );
+2704         const { canvas, context } = this.annotationCanvas;
+2705         this.annotationCanvasMap.set(id, canvas);
+2706         this.annotationCanvas.savedCtx = this.ctx;
+2707         this.ctx = context;
+2708         this.ctx.save();
+2709         this.ctx.setTransform(scaleX, 0, 0, -scaleY, 0, height * scaleY);
+2710 
+2711         resetCtxToDefault(this.ctx);
+2712       } else {
+2713         resetCtxToDefault(this.ctx);
+2714 
+2715         this.ctx.rect(rect[0], rect[1], width, height);
+2716         this.ctx.clip();
+2717         this.endPath();
+2718       }
+2719     }
+2720 
+2721     this.current = new CanvasExtraState(
+2722       this.ctx.canvas.width,
+2723       this.ctx.canvas.height
+2724     );
+2725 
+2726     this.transform(...transform);
+2727     this.transform(...matrix);
+2728   }
+2729 
+2730   endAnnotation() {
+2731     if (this.annotationCanvas) {
+2732       this.ctx.restore();
+2733       this.#drawFilter();
+2734 
+2735       this.ctx = this.annotationCanvas.savedCtx;
+2736       delete this.annotationCanvas.savedCtx;
+2737       delete this.annotationCanvas;
+2738     }
+2739   }
+2740 
+2741   paintImageMaskXObject(img) {
+2742     if (!this.contentVisible) {
+2743       return;
+2744     }
+2745     const count = img.count;
+2746     img = this.getObject(img.data, img);
+2747     img.count = count;
+2748 
+2749     const ctx = this.ctx;
+2750     const glyph = this.processingType3;
+2751 
+2752     if (glyph) {
+2753       if (glyph.compiled === undefined) {
+2754         glyph.compiled = compileType3Glyph(img);
+2755       }
+2756 
+2757       if (glyph.compiled) {
+2758         glyph.compiled(ctx);
+2759         return;
+2760       }
+2761     }
+2762     const mask = this._createMaskCanvas(img);
+2763     const maskCanvas = mask.canvas;
+2764 
+2765     ctx.save();
+2766     // The mask is drawn with the transform applied. Reset the current
+2767     // transform to draw to the identity.
+2768     ctx.setTransform(1, 0, 0, 1, 0, 0);
+2769     ctx.drawImage(maskCanvas, mask.offsetX, mask.offsetY);
+2770     ctx.restore();
+2771     this.compose();
+2772   }
+2773 
+2774   paintImageMaskXObjectRepeat(
+2775     img,
+2776     scaleX,
+2777     skewX = 0,
+2778     skewY = 0,
+2779     scaleY,
+2780     positions
+2781   ) {
+2782     if (!this.contentVisible) {
+2783       return;
+2784     }
+2785 
+2786     img = this.getObject(img.data, img);
+2787 
+2788     const ctx = this.ctx;
+2789     ctx.save();
+2790     const currentTransform = getCurrentTransform(ctx);
+2791     ctx.transform(scaleX, skewX, skewY, scaleY, 0, 0);
+2792     const mask = this._createMaskCanvas(img);
+2793 
+2794     ctx.setTransform(
+2795       1,
+2796       0,
+2797       0,
+2798       1,
+2799       mask.offsetX - currentTransform[4],
+2800       mask.offsetY - currentTransform[5]
+2801     );
+2802     for (let i = 0, ii = positions.length; i < ii; i += 2) {
+2803       const trans = Util.transform(currentTransform, [
+2804         scaleX,
+2805         skewX,
+2806         skewY,
+2807         scaleY,
+2808         positions[i],
+2809         positions[i + 1],
+2810       ]);
+2811 
+2812       const [x, y] = Util.applyTransform([0, 0], trans);
+2813       ctx.drawImage(mask.canvas, x, y);
+2814     }
+2815     ctx.restore();
+2816     this.compose();
+2817   }
+2818 
+2819   paintImageMaskXObjectGroup(images) {
+2820     if (!this.contentVisible) {
+2821       return;
+2822     }
+2823     const ctx = this.ctx;
+2824 
+2825     const fillColor = this.current.fillColor;
+2826     const isPatternFill = this.current.patternFill;
+2827 
+2828     for (const image of images) {
+2829       const { data, width, height, transform } = image;
+2830 
+2831       const maskCanvas = this.cachedCanvases.getCanvas(
+2832         "maskCanvas",
+2833         width,
+2834         height
+2835       );
+2836       const maskCtx = maskCanvas.context;
+2837       maskCtx.save();
+2838 
+2839       const img = this.getObject(data, image);
+2840       putBinaryImageMask(maskCtx, img);
+2841 
+2842       maskCtx.globalCompositeOperation = "source-in";
+2843 
+2844       maskCtx.fillStyle = isPatternFill
+2845         ? fillColor.getPattern(
+2846             maskCtx,
+2847             this,
+2848             getCurrentTransformInverse(ctx),
+2849             PathType.FILL
+2850           )
+2851         : fillColor;
+2852       maskCtx.fillRect(0, 0, width, height);
+2853 
+2854       maskCtx.restore();
+2855 
+2856       ctx.save();
+2857       ctx.transform(...transform);
+2858       ctx.scale(1, -1);
+2859       drawImageAtIntegerCoords(
+2860         ctx,
+2861         maskCanvas.canvas,
+2862         0,
+2863         0,
+2864         width,
+2865         height,
+2866         0,
+2867         -1,
+2868         1,
+2869         1
+2870       );
+2871       ctx.restore();
+2872     }
+2873     this.compose();
+2874   }
+2875 
+2876   paintImageXObject(objId) {
+2877     if (!this.contentVisible) {
+2878       return;
+2879     }
+2880     const imgData = this.getObject(objId);
+2881     if (!imgData) {
+2882       warn("Dependent image isn't ready yet");
+2883       return;
+2884     }
+2885 
+2886     this.paintInlineImageXObject(imgData);
+2887   }
+2888 
+2889   paintImageXObjectRepeat(objId, scaleX, scaleY, positions) {
+2890     if (!this.contentVisible) {
+2891       return;
+2892     }
+2893     const imgData = this.getObject(objId);
+2894     if (!imgData) {
+2895       warn("Dependent image isn't ready yet");
+2896       return;
+2897     }
+2898 
+2899     const width = imgData.width;
+2900     const height = imgData.height;
+2901     const map = [];
+2902     for (let i = 0, ii = positions.length; i < ii; i += 2) {
+2903       map.push({
+2904         transform: [scaleX, 0, 0, scaleY, positions[i], positions[i + 1]],
+2905         x: 0,
+2906         y: 0,
+2907         w: width,
+2908         h: height,
+2909       });
+2910     }
+2911     this.paintInlineImageXObjectGroup(imgData, map);
+2912   }
+2913 
+2914   applyTransferMapsToCanvas(ctx) {
+2915     if (this.current.transferMaps !== "none") {
+2916       ctx.filter = this.current.transferMaps;
+2917       ctx.drawImage(ctx.canvas, 0, 0);
+2918       ctx.filter = "none";
+2919     }
+2920     return ctx.canvas;
+2921   }
+2922 
+2923   applyTransferMapsToBitmap(imgData) {
+2924     if (this.current.transferMaps === "none") {
+2925       return imgData.bitmap;
+2926     }
+2927     const { bitmap, width, height } = imgData;
+2928     const tmpCanvas = this.cachedCanvases.getCanvas(
+2929       "inlineImage",
+2930       width,
+2931       height
+2932     );
+2933     const tmpCtx = tmpCanvas.context;
+2934     tmpCtx.filter = this.current.transferMaps;
+2935     tmpCtx.drawImage(bitmap, 0, 0);
+2936     tmpCtx.filter = "none";
+2937 
+2938     return tmpCanvas.canvas;
+2939   }
+2940 
+2941   paintInlineImageXObject(imgData) {
+2942     if (!this.contentVisible) {
+2943       return;
+2944     }
+2945     const width = imgData.width;
+2946     const height = imgData.height;
+2947     const ctx = this.ctx;
+2948 
+2949     this.save();
+2950 
+2951     if (
+2952       (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+2953       !isNodeJS
+2954     ) {
+2955       // The filter, if any, will be applied in applyTransferMapsToBitmap.
+2956       // It must be applied to the image before rescaling else some artifacts
+2957       // could appear.
+2958       // The final restore will reset it to its value.
+2959       const { filter } = ctx;
+2960       if (filter !== "none" && filter !== "") {
+2961         ctx.filter = "none";
+2962       }
+2963     }
+2964 
+2965     // scale the image to the unit square
+2966     ctx.scale(1 / width, -1 / height);
+2967 
+2968     let imgToPaint;
+2969     if (imgData.bitmap) {
+2970       imgToPaint = this.applyTransferMapsToBitmap(imgData);
+2971     } else if (
+2972       (typeof HTMLElement === "function" && imgData instanceof HTMLElement) ||
+2973       !imgData.data
+2974     ) {
+2975       // typeof check is needed due to node.js support, see issue #8489
+2976       imgToPaint = imgData;
+2977     } else {
+2978       const tmpCanvas = this.cachedCanvases.getCanvas(
+2979         "inlineImage",
+2980         width,
+2981         height
+2982       );
+2983       const tmpCtx = tmpCanvas.context;
+2984       putBinaryImageData(tmpCtx, imgData);
+2985       imgToPaint = this.applyTransferMapsToCanvas(tmpCtx);
+2986     }
+2987 
+2988     const scaled = this._scaleImage(
+2989       imgToPaint,
+2990       getCurrentTransformInverse(ctx)
+2991     );
+2992     ctx.imageSmoothingEnabled = getImageSmoothingEnabled(
+2993       getCurrentTransform(ctx),
+2994       imgData.interpolate
+2995     );
+2996 
+2997     drawImageAtIntegerCoords(
+2998       ctx,
+2999       scaled.img,
+3000       0,
+3001       0,
+3002       scaled.paintWidth,
+3003       scaled.paintHeight,
+3004       0,
+3005       -height,
+3006       width,
+3007       height
+3008     );
+3009     this.compose();
+3010     this.restore();
+3011   }
+3012 
+3013   paintInlineImageXObjectGroup(imgData, map) {
+3014     if (!this.contentVisible) {
+3015       return;
+3016     }
+3017     const ctx = this.ctx;
+3018     let imgToPaint;
+3019     if (imgData.bitmap) {
+3020       imgToPaint = imgData.bitmap;
+3021     } else {
+3022       const w = imgData.width;
+3023       const h = imgData.height;
+3024 
+3025       const tmpCanvas = this.cachedCanvases.getCanvas("inlineImage", w, h);
+3026       const tmpCtx = tmpCanvas.context;
+3027       putBinaryImageData(tmpCtx, imgData);
+3028       imgToPaint = this.applyTransferMapsToCanvas(tmpCtx);
+3029     }
+3030 
+3031     for (const entry of map) {
+3032       ctx.save();
+3033       ctx.transform(...entry.transform);
+3034       ctx.scale(1, -1);
+3035       drawImageAtIntegerCoords(
+3036         ctx,
+3037         imgToPaint,
+3038         entry.x,
+3039         entry.y,
+3040         entry.w,
+3041         entry.h,
+3042         0,
+3043         -1,
+3044         1,
+3045         1
+3046       );
+3047       ctx.restore();
+3048     }
+3049     this.compose();
+3050   }
+3051 
+3052   paintSolidColorImageMask() {
+3053     if (!this.contentVisible) {
+3054       return;
+3055     }
+3056     this.ctx.fillRect(0, 0, 1, 1);
+3057     this.compose();
+3058   }
+3059 
+3060   // Marked content
+3061 
+3062   markPoint(tag) {
+3063     // TODO Marked content.
+3064   }
+3065 
+3066   markPointProps(tag, properties) {
+3067     // TODO Marked content.
+3068   }
+3069 
+3070   beginMarkedContent(tag) {
+3071     this.markedContentStack.push({
+3072       visible: true,
+3073     });
+3074   }
+3075 
+3076   beginMarkedContentProps(tag, properties) {
+3077     if (tag === "OC") {
+3078       this.markedContentStack.push({
+3079         visible: this.optionalContentConfig.isVisible(properties),
+3080       });
+3081     } else {
+3082       this.markedContentStack.push({
+3083         visible: true,
+3084       });
+3085     }
+3086     this.contentVisible = this.isContentVisible();
+3087   }
+3088 
+3089   endMarkedContent() {
+3090     this.markedContentStack.pop();
+3091     this.contentVisible = this.isContentVisible();
+3092   }
+3093 
+3094   // Compatibility
+3095 
+3096   beginCompat() {
+3097     // TODO ignore undefined operators (should we do that anyway?)
+3098   }
+3099 
+3100   endCompat() {
+3101     // TODO stop ignoring undefined operators
+3102   }
+3103 
+3104   // Helper functions
+3105 
+3106   consumePath(clipBox) {
+3107     const isEmpty = this.current.isEmptyClip();
+3108     if (this.pendingClip) {
+3109       this.current.updateClipFromPath();
+3110     }
+3111     if (!this.pendingClip) {
+3112       this.compose(clipBox);
+3113     }
+3114     const ctx = this.ctx;
+3115     if (this.pendingClip) {
+3116       if (!isEmpty) {
+3117         if (this.pendingClip === EO_CLIP) {
+3118           ctx.clip("evenodd");
+3119         } else {
+3120           ctx.clip();
+3121         }
+3122       }
+3123       this.pendingClip = null;
+3124     }
+3125     this.current.startNewPathAndClipBox(this.current.clipBox);
+3126     ctx.beginPath();
+3127   }
+3128 
+3129   getSinglePixelWidth() {
+3130     if (!this._cachedGetSinglePixelWidth) {
+3131       const m = getCurrentTransform(this.ctx);
+3132       if (m[1] === 0 && m[2] === 0) {
+3133         // Fast path
+3134         this._cachedGetSinglePixelWidth =
+3135           1 / Math.min(Math.abs(m[0]), Math.abs(m[3]));
+3136       } else {
+3137         const absDet = Math.abs(m[0] * m[3] - m[2] * m[1]);
+3138         const normX = Math.hypot(m[0], m[2]);
+3139         const normY = Math.hypot(m[1], m[3]);
+3140         this._cachedGetSinglePixelWidth = Math.max(normX, normY) / absDet;
+3141       }
+3142     }
+3143     return this._cachedGetSinglePixelWidth;
+3144   }
+3145 
+3146   getScaleForStroking() {
+3147     // A pixel has thicknessX = thicknessY = 1;
+3148     // A transformed pixel is a parallelogram and the thicknesses
+3149     // corresponds to the heights.
+3150     // The goal of this function is to rescale before setting the
+3151     // lineWidth in order to have both thicknesses greater or equal
+3152     // to 1 after transform.
+3153     if (this._cachedScaleForStroking[0] === -1) {
+3154       const { lineWidth } = this.current;
+3155       const { a, b, c, d } = this.ctx.getTransform();
+3156       let scaleX, scaleY;
+3157 
+3158       if (b === 0 && c === 0) {
+3159         // Fast path
+3160         const normX = Math.abs(a);
+3161         const normY = Math.abs(d);
+3162         if (normX === normY) {
+3163           if (lineWidth === 0) {
+3164             scaleX = scaleY = 1 / normX;
+3165           } else {
+3166             const scaledLineWidth = normX * lineWidth;
+3167             scaleX = scaleY = scaledLineWidth < 1 ? 1 / scaledLineWidth : 1;
+3168           }
+3169         } else if (lineWidth === 0) {
+3170           scaleX = 1 / normX;
+3171           scaleY = 1 / normY;
+3172         } else {
+3173           const scaledXLineWidth = normX * lineWidth;
+3174           const scaledYLineWidth = normY * lineWidth;
+3175           scaleX = scaledXLineWidth < 1 ? 1 / scaledXLineWidth : 1;
+3176           scaleY = scaledYLineWidth < 1 ? 1 / scaledYLineWidth : 1;
+3177         }
+3178       } else {
+3179         // A pixel (base (x, y)) is transformed by M into a parallelogram:
+3180         //  - its area is |det(M)|;
+3181         //  - heightY (orthogonal to Mx) has a length: |det(M)| / norm(Mx);
+3182         //  - heightX (orthogonal to My) has a length: |det(M)| / norm(My).
+3183         // heightX and heightY are the thicknesses of the transformed pixel
+3184         // and they must be both greater or equal to 1.
+3185         const absDet = Math.abs(a * d - b * c);
+3186         const normX = Math.hypot(a, b);
+3187         const normY = Math.hypot(c, d);
+3188         if (lineWidth === 0) {
+3189           scaleX = normY / absDet;
+3190           scaleY = normX / absDet;
+3191         } else {
+3192           const baseArea = lineWidth * absDet;
+3193           scaleX = normY > baseArea ? normY / baseArea : 1;
+3194           scaleY = normX > baseArea ? normX / baseArea : 1;
+3195         }
+3196       }
+3197       this._cachedScaleForStroking[0] = scaleX;
+3198       this._cachedScaleForStroking[1] = scaleY;
+3199     }
+3200     return this._cachedScaleForStroking;
+3201   }
+3202 
+3203   // Rescale before stroking in order to have a final lineWidth
+3204   // with both thicknesses greater or equal to 1.
+3205   rescaleAndStroke(saveRestore) {
+3206     const { ctx } = this;
+3207     const { lineWidth } = this.current;
+3208     const [scaleX, scaleY] = this.getScaleForStroking();
+3209 
+3210     ctx.lineWidth = lineWidth || 1;
+3211 
+3212     if (scaleX === 1 && scaleY === 1) {
+3213       ctx.stroke();
+3214       return;
+3215     }
+3216 
+3217     const dashes = ctx.getLineDash();
+3218     if (saveRestore) {
+3219       ctx.save();
+3220     }
+3221 
+3222     ctx.scale(scaleX, scaleY);
+3223 
+3224     // How the dashed line is rendered depends on the current transform...
+3225     // so we added a rescale to handle too thin lines and consequently
+3226     // the way the line is dashed will be modified.
+3227     // If scaleX === scaleY, the dashed lines will be rendered correctly
+3228     // else we'll have some bugs (but only with too thin lines).
+3229     // Here we take the max... why not taking the min... or something else.
+3230     // Anyway, as said it's buggy when scaleX !== scaleY.
+3231     if (dashes.length > 0) {
+3232       const scale = Math.max(scaleX, scaleY);
+3233       ctx.setLineDash(dashes.map(x => x / scale));
+3234       ctx.lineDashOffset /= scale;
+3235     }
+3236 
+3237     ctx.stroke();
+3238 
+3239     if (saveRestore) {
+3240       ctx.restore();
+3241     }
+3242   }
+3243 
+3244   isContentVisible() {
+3245     for (let i = this.markedContentStack.length - 1; i >= 0; i--) {
+3246       if (!this.markedContentStack[i].visible) {
+3247         return false;
+3248       }
+3249     }
+3250     return true;
+3251   }
+3252 }
+3253 
+3254 for (const op in OPS) {
+3255   if (CanvasGraphics.prototype[op] !== undefined) {
+3256     CanvasGraphics.prototype[OPS[op]] = CanvasGraphics.prototype[op];
+3257   }
+3258 }
+3259 
+3260 export { CanvasGraphics };
+File:
+src/display/display_utils.js
+1 /* Copyright 2015 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   BaseCanvasFactory,
+18   BaseCMapReaderFactory,
+19   BaseFilterFactory,
+20   BaseStandardFontDataFactory,
+21   BaseSVGFactory,
+22 } from "./base_factory.js";
+23 import {
+24   BaseException,
+25   FeatureTest,
+26   shadow,
+27   stringToBytes,
+28   Util,
+29   warn,
+30 } from "../shared/util.js";
+31 
+32 const SVG_NS = "http://www.w3.org/2000/svg";
+33 
+34 class PixelsPerInch {
+35   static CSS = 96.0;
+36 
+37   static PDF = 72.0;
+38 
+39   static PDF_TO_CSS_UNITS = this.CSS / this.PDF;
+40 }
+41 
+42 /**
+43  * FilterFactory aims to create some SVG filters we can use when drawing an
+44  * image (or whatever) on a canvas.
+45  * Filters aren't applied with ctx.putImageData because it just overwrites the
+46  * underlying pixels.
+47  * With these filters, it's possible for example to apply some transfer maps on
+48  * an image without the need to apply them on the pixel arrays: the renderer
+49  * does the magic for us.
+50  */
+51 class DOMFilterFactory extends BaseFilterFactory {
+52   #_cache;
+53 
+54   #_defs;
+55 
+56   #docId;
+57 
+58   #document;
+59 
+60   #_hcmCache;
+61 
+62   #id = 0;
+63 
+64   constructor({ docId, ownerDocument = globalThis.document } = {}) {
+65     super();
+66     this.#docId = docId;
+67     this.#document = ownerDocument;
+68   }
+69 
+70   get #cache() {
+71     return (this.#_cache ||= new Map());
+72   }
+73 
+74   get #hcmCache() {
+75     return (this.#_hcmCache ||= new Map());
+76   }
+77 
+78   get #defs() {
+79     if (!this.#_defs) {
+80       const div = this.#document.createElement("div");
+81       const { style } = div;
+82       style.visibility = "hidden";
+83       style.contain = "strict";
+84       style.width = style.height = 0;
+85       style.position = "absolute";
+86       style.top = style.left = 0;
+87       style.zIndex = -1;
+88 
+89       const svg = this.#document.createElementNS(SVG_NS, "svg");
+90       svg.setAttribute("width", 0);
+91       svg.setAttribute("height", 0);
+92       this.#_defs = this.#document.createElementNS(SVG_NS, "defs");
+93       div.append(svg);
+94       svg.append(this.#_defs);
+95       this.#document.body.append(div);
+96     }
+97     return this.#_defs;
+98   }
+99 
+100   addFilter(maps) {
+101     if (!maps) {
+102       return "none";
+103     }
+104 
+105     // When a page is zoomed the page is re-drawn but the maps are likely
+106     // the same.
+107     let value = this.#cache.get(maps);
+108     if (value) {
+109       return value;
+110     }
+111 
+112     let tableR, tableG, tableB, key;
+113     if (maps.length === 1) {
+114       const mapR = maps[0];
+115       const buffer = new Array(256);
+116       for (let i = 0; i < 256; i++) {
+117         buffer[i] = mapR[i] / 255;
+118       }
+119       key = tableR = tableG = tableB = buffer.join(",");
+120     } else {
+121       const [mapR, mapG, mapB] = maps;
+122       const bufferR = new Array(256);
+123       const bufferG = new Array(256);
+124       const bufferB = new Array(256);
+125       for (let i = 0; i < 256; i++) {
+126         bufferR[i] = mapR[i] / 255;
+127         bufferG[i] = mapG[i] / 255;
+128         bufferB[i] = mapB[i] / 255;
+129       }
+130       tableR = bufferR.join(",");
+131       tableG = bufferG.join(",");
+132       tableB = bufferB.join(",");
+133       key = `${tableR}${tableG}${tableB}`;
+134     }
+135 
+136     value = this.#cache.get(key);
+137     if (value) {
+138       this.#cache.set(maps, value);
+139       return value;
+140     }
+141 
+142     // We create a SVG filter: feComponentTransferElement
+143     //  https://www.w3.org/TR/SVG11/filters.html#feComponentTransferElement
+144 
+145     const id = `g_${this.#docId}_transfer_map_${this.#id++}`;
+146     const url = `url(#${id})`;
+147     this.#cache.set(maps, url);
+148     this.#cache.set(key, url);
+149 
+150     const filter = this.#createFilter(id);
+151     this.#addTransferMapConversion(tableR, tableG, tableB, filter);
+152 
+153     return url;
+154   }
+155 
+156   addHCMFilter(fgColor, bgColor) {
+157     const key = `${fgColor}-${bgColor}`;
+158     const filterName = "base";
+159     let info = this.#hcmCache.get(filterName);
+160     if (info?.key === key) {
+161       return info.url;
+162     }
+163 
+164     if (info) {
+165       info.filter?.remove();
+166       info.key = key;
+167       info.url = "none";
+168       info.filter = null;
+169     } else {
+170       info = {
+171         key,
+172         url: "none",
+173         filter: null,
+174       };
+175       this.#hcmCache.set(filterName, info);
+176     }
+177 
+178     if (!fgColor || !bgColor) {
+179       return info.url;
+180     }
+181 
+182     const fgRGB = this.#getRGB(fgColor);
+183     fgColor = Util.makeHexColor(...fgRGB);
+184     const bgRGB = this.#getRGB(bgColor);
+185     bgColor = Util.makeHexColor(...bgRGB);
+186     this.#defs.style.color = "";
+187 
+188     if (
+189       (fgColor === "#000000" && bgColor === "#ffffff") ||
+190       fgColor === bgColor
+191     ) {
+192       return info.url;
+193     }
+194 
+195     // https://developer.mozilla.org/en-US/docs/Web/Accessibility/Understanding_Colors_and_Luminance
+196     //
+197     // Relative luminance:
+198     // https://www.w3.org/TR/WCAG20/#relativeluminancedef
+199     //
+200     // We compute the rounded luminance of the default background color.
+201     // Then for every color in the pdf, if its rounded luminance is the
+202     // same as the background one then it's replaced by the new
+203     // background color else by the foreground one.
+204     const map = new Array(256);
+205     for (let i = 0; i <= 255; i++) {
+206       const x = i / 255;
+207       map[i] = x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+208     }
+209     const table = map.join(",");
+210 
+211     const id = `g_${this.#docId}_hcm_filter`;
+212     const filter = (info.filter = this.#createFilter(id));
+213     this.#addTransferMapConversion(table, table, table, filter);
+214     this.#addGrayConversion(filter);
+215 
+216     const getSteps = (c, n) => {
+217       const start = fgRGB[c] / 255;
+218       const end = bgRGB[c] / 255;
+219       const arr = new Array(n + 1);
+220       for (let i = 0; i <= n; i++) {
+221         arr[i] = start + (i / n) * (end - start);
+222       }
+223       return arr.join(",");
+224     };
+225     this.#addTransferMapConversion(
+226       getSteps(0, 5),
+227       getSteps(1, 5),
+228       getSteps(2, 5),
+229       filter
+230     );
+231 
+232     info.url = `url(#${id})`;
+233     return info.url;
+234   }
+235 
+236   addHighlightHCMFilter(filterName, fgColor, bgColor, newFgColor, newBgColor) {
+237     const key = `${fgColor}-${bgColor}-${newFgColor}-${newBgColor}`;
+238     let info = this.#hcmCache.get(filterName);
+239     if (info?.key === key) {
+240       return info.url;
+241     }
+242 
+243     if (info) {
+244       info.filter?.remove();
+245       info.key = key;
+246       info.url = "none";
+247       info.filter = null;
+248     } else {
+249       info = {
+250         key,
+251         url: "none",
+252         filter: null,
+253       };
+254       this.#hcmCache.set(filterName, info);
+255     }
+256 
+257     if (!fgColor || !bgColor) {
+258       return info.url;
+259     }
+260 
+261     const [fgRGB, bgRGB] = [fgColor, bgColor].map(this.#getRGB.bind(this));
+262     let fgGray = Math.round(
+263       0.2126 * fgRGB[0] + 0.7152 * fgRGB[1] + 0.0722 * fgRGB[2]
+264     );
+265     let bgGray = Math.round(
+266       0.2126 * bgRGB[0] + 0.7152 * bgRGB[1] + 0.0722 * bgRGB[2]
+267     );
+268     let [newFgRGB, newBgRGB] = [newFgColor, newBgColor].map(
+269       this.#getRGB.bind(this)
+270     );
+271     if (bgGray < fgGray) {
+272       [fgGray, bgGray, newFgRGB, newBgRGB] = [
+273         bgGray,
+274         fgGray,
+275         newBgRGB,
+276         newFgRGB,
+277       ];
+278     }
+279     this.#defs.style.color = "";
+280 
+281     // Now we can create the filters to highlight some canvas parts.
+282     // The colors in the pdf will almost be Canvas and CanvasText, hence we
+283     // want to filter them to finally get Highlight and HighlightText.
+284     // Since we're in HCM the background color and the foreground color should
+285     // be really different when converted to grayscale (if they're not then it
+286     // means that we've a poor contrast). Once the canvas colors are converted
+287     // to grayscale we can easily map them on their new colors.
+288     // The grayscale step is important because if we've something like:
+289     //   fgColor = #FF....
+290     //   bgColor = #FF....
+291     //   then we are enable to map the red component on the new red components
+292     //   which can be different.
+293 
+294     const getSteps = (fg, bg, n) => {
+295       const arr = new Array(256);
+296       const step = (bgGray - fgGray) / n;
+297       const newStart = fg / 255;
+298       const newStep = (bg - fg) / (255 * n);
+299       let prev = 0;
+300       for (let i = 0; i <= n; i++) {
+301         const k = Math.round(fgGray + i * step);
+302         const value = newStart + i * newStep;
+303         for (let j = prev; j <= k; j++) {
+304           arr[j] = value;
+305         }
+306         prev = k + 1;
+307       }
+308       for (let i = prev; i < 256; i++) {
+309         arr[i] = arr[prev - 1];
+310       }
+311       return arr.join(",");
+312     };
+313 
+314     const id = `g_${this.#docId}_hcm_${filterName}_filter`;
+315     const filter = (info.filter = this.#createFilter(id));
+316 
+317     this.#addGrayConversion(filter);
+318     this.#addTransferMapConversion(
+319       getSteps(newFgRGB[0], newBgRGB[0], 5),
+320       getSteps(newFgRGB[1], newBgRGB[1], 5),
+321       getSteps(newFgRGB[2], newBgRGB[2], 5),
+322       filter
+323     );
+324 
+325     info.url = `url(#${id})`;
+326     return info.url;
+327   }
+328 
+329   destroy(keepHCM = false) {
+330     if (keepHCM && this.#hcmCache.size !== 0) {
+331       return;
+332     }
+333     if (this.#_defs) {
+334       this.#_defs.parentNode.parentNode.remove();
+335       this.#_defs = null;
+336     }
+337     if (this.#_cache) {
+338       this.#_cache.clear();
+339       this.#_cache = null;
+340     }
+341     this.#id = 0;
+342   }
+343 
+344   #addGrayConversion(filter) {
+345     const feColorMatrix = this.#document.createElementNS(
+346       SVG_NS,
+347       "feColorMatrix"
+348     );
+349     feColorMatrix.setAttribute("type", "matrix");
+350     feColorMatrix.setAttribute(
+351       "values",
+352       "0.2126 0.7152 0.0722 0 0 0.2126 0.7152 0.0722 0 0 0.2126 0.7152 0.0722 0 0 0 0 0 1 0"
+353     );
+354     filter.append(feColorMatrix);
+355   }
+356 
+357   #createFilter(id) {
+358     const filter = this.#document.createElementNS(SVG_NS, "filter");
+359     filter.setAttribute("color-interpolation-filters", "sRGB");
+360     filter.setAttribute("id", id);
+361     this.#defs.append(filter);
+362 
+363     return filter;
+364   }
+365 
+366   #appendFeFunc(feComponentTransfer, func, table) {
+367     const feFunc = this.#document.createElementNS(SVG_NS, func);
+368     feFunc.setAttribute("type", "discrete");
+369     feFunc.setAttribute("tableValues", table);
+370     feComponentTransfer.append(feFunc);
+371   }
+372 
+373   #addTransferMapConversion(rTable, gTable, bTable, filter) {
+374     const feComponentTransfer = this.#document.createElementNS(
+375       SVG_NS,
+376       "feComponentTransfer"
+377     );
+378     filter.append(feComponentTransfer);
+379     this.#appendFeFunc(feComponentTransfer, "feFuncR", rTable);
+380     this.#appendFeFunc(feComponentTransfer, "feFuncG", gTable);
+381     this.#appendFeFunc(feComponentTransfer, "feFuncB", bTable);
+382   }
+383 
+384   #getRGB(color) {
+385     this.#defs.style.color = color;
+386     return getRGB(getComputedStyle(this.#defs).getPropertyValue("color"));
+387   }
+388 }
+389 
+390 class DOMCanvasFactory extends BaseCanvasFactory {
+391   constructor({ ownerDocument = globalThis.document } = {}) {
+392     super();
+393     this._document = ownerDocument;
+394   }
+395 
+396   /**
+397    * @ignore
+398    */
+399   _createCanvas(width, height) {
+400     const canvas = this._document.createElement("canvas");
+401     canvas.width = width;
+402     canvas.height = height;
+403     return canvas;
+404   }
+405 }
+406 
+407 async function fetchData(url, type = "text") {
+408   if (
+409     (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+410     isValidFetchUrl(url, document.baseURI)
+411   ) {
+412     const response = await fetch(url);
+413     if (!response.ok) {
+414       throw new Error(response.statusText);
+415     }
+416     switch (type) {
+417       case "arraybuffer":
+418         return response.arrayBuffer();
+419       case "blob":
+420         return response.blob();
+421       case "json":
+422         return response.json();
+423     }
+424     return response.text();
+425   }
+426 
+427   // The Fetch API is not supported.
+428   return new Promise((resolve, reject) => {
+429     const request = new XMLHttpRequest();
+430     request.open("GET", url, /* async = */ true);
+431     request.responseType = type;
+432 
+433     request.onreadystatechange = () => {
+434       if (request.readyState !== XMLHttpRequest.DONE) {
+435         return;
+436       }
+437       if (request.status === 200 || request.status === 0) {
+438         switch (type) {
+439           case "arraybuffer":
+440           case "blob":
+441           case "json":
+442             resolve(request.response);
+443             return;
+444         }
+445         resolve(request.responseText);
+446         return;
+447       }
+448       reject(new Error(request.statusText));
+449     };
+450 
+451     request.send(null);
+452   });
+453 }
+454 
+455 class DOMCMapReaderFactory extends BaseCMapReaderFactory {
+456   /**
+457    * @ignore
+458    */
+459   _fetchData(url, compressionType) {
+460     return fetchData(
+461       url,
+462       /* type = */ this.isCompressed ? "arraybuffer" : "text"
+463     ).then(data => ({
+464       cMapData:
+465         data instanceof ArrayBuffer
+466           ? new Uint8Array(data)
+467           : stringToBytes(data),
+468       compressionType,
+469     }));
+470   }
+471 }
+472 
+473 class DOMStandardFontDataFactory extends BaseStandardFontDataFactory {
+474   /**
+475    * @ignore
+476    */
+477   _fetchData(url) {
+478     return fetchData(url, /* type = */ "arraybuffer").then(
+479       data => new Uint8Array(data)
+480     );
+481   }
+482 }
+483 
+484 class DOMSVGFactory extends BaseSVGFactory {
+485   /**
+486    * @ignore
+487    */
+488   _createSVG(type) {
+489     return document.createElementNS(SVG_NS, type);
+490   }
+491 }
+492 
+493 /**
+494  * @typedef {Object} PageViewportParameters
+495  * @property {Array<number>} viewBox - The xMin, yMin, xMax and
+496  *   yMax coordinates.
+497  * @property {number} scale - The scale of the viewport.
+498  * @property {number} rotation - The rotation, in degrees, of the viewport.
+499  * @property {number} [offsetX] - The horizontal, i.e. x-axis, offset. The
+500  *   default value is `0`.
+501  * @property {number} [offsetY] - The vertical, i.e. y-axis, offset. The
+502  *   default value is `0`.
+503  * @property {boolean} [dontFlip] - If true, the y-axis will not be flipped.
+504  *   The default value is `false`.
+505  */
+506 
+507 /**
+508  * @typedef {Object} PageViewportCloneParameters
+509  * @property {number} [scale] - The scale, overriding the one in the cloned
+510  *   viewport. The default value is `this.scale`.
+511  * @property {number} [rotation] - The rotation, in degrees, overriding the one
+512  *   in the cloned viewport. The default value is `this.rotation`.
+513  * @property {number} [offsetX] - The horizontal, i.e. x-axis, offset.
+514  *   The default value is `this.offsetX`.
+515  * @property {number} [offsetY] - The vertical, i.e. y-axis, offset.
+516  *   The default value is `this.offsetY`.
+517  * @property {boolean} [dontFlip] - If true, the x-axis will not be flipped.
+518  *   The default value is `false`.
+519  */
+520 
+521 /**
+522  * PDF page viewport created based on scale, rotation and offset.
+523  */
+524 class PageViewport {
+525   /**
+526    * @param {PageViewportParameters}
+527    */
+528   constructor({
+529     viewBox,
+530     scale,
+531     rotation,
+532     offsetX = 0,
+533     offsetY = 0,
+534     dontFlip = false,
+535   }) {
+536     this.viewBox = viewBox;
+537     this.scale = scale;
+538     this.rotation = rotation;
+539     this.offsetX = offsetX;
+540     this.offsetY = offsetY;
+541 
+542     // creating transform to convert pdf coordinate system to the normal
+543     // canvas like coordinates taking in account scale and rotation
+544     const centerX = (viewBox[2] + viewBox[0]) / 2;
+545     const centerY = (viewBox[3] + viewBox[1]) / 2;
+546     let rotateA, rotateB, rotateC, rotateD;
+547     // Normalize the rotation, by clamping it to the [0, 360) range.
+548     rotation %= 360;
+549     if (rotation < 0) {
+550       rotation += 360;
+551     }
+552     switch (rotation) {
+553       case 180:
+554         rotateA = -1;
+555         rotateB = 0;
+556         rotateC = 0;
+557         rotateD = 1;
+558         break;
+559       case 90:
+560         rotateA = 0;
+561         rotateB = 1;
+562         rotateC = 1;
+563         rotateD = 0;
+564         break;
+565       case 270:
+566         rotateA = 0;
+567         rotateB = -1;
+568         rotateC = -1;
+569         rotateD = 0;
+570         break;
+571       case 0:
+572         rotateA = 1;
+573         rotateB = 0;
+574         rotateC = 0;
+575         rotateD = -1;
+576         break;
+577       default:
+578         throw new Error(
+579           "PageViewport: Invalid rotation, must be a multiple of 90 degrees."
+580         );
+581     }
+582 
+583     if (dontFlip) {
+584       rotateC = -rotateC;
+585       rotateD = -rotateD;
+586     }
+587 
+588     let offsetCanvasX, offsetCanvasY;
+589     let width, height;
+590     if (rotateA === 0) {
+591       offsetCanvasX = Math.abs(centerY - viewBox[1]) * scale + offsetX;
+592       offsetCanvasY = Math.abs(centerX - viewBox[0]) * scale + offsetY;
+593       width = (viewBox[3] - viewBox[1]) * scale;
+594       height = (viewBox[2] - viewBox[0]) * scale;
+595     } else {
+596       offsetCanvasX = Math.abs(centerX - viewBox[0]) * scale + offsetX;
+597       offsetCanvasY = Math.abs(centerY - viewBox[1]) * scale + offsetY;
+598       width = (viewBox[2] - viewBox[0]) * scale;
+599       height = (viewBox[3] - viewBox[1]) * scale;
+600     }
+601     // creating transform for the following operations:
+602     // translate(-centerX, -centerY), rotate and flip vertically,
+603     // scale, and translate(offsetCanvasX, offsetCanvasY)
+604     this.transform = [
+605       rotateA * scale,
+606       rotateB * scale,
+607       rotateC * scale,
+608       rotateD * scale,
+609       offsetCanvasX - rotateA * scale * centerX - rotateC * scale * centerY,
+610       offsetCanvasY - rotateB * scale * centerX - rotateD * scale * centerY,
+611     ];
+612 
+613     this.width = width;
+614     this.height = height;
+615   }
+616 
+617   /**
+618    * The original, un-scaled, viewport dimensions.
+619    * @type {Object}
+620    */
+621   get rawDims() {
+622     const { viewBox } = this;
+623     return shadow(this, "rawDims", {
+624       pageWidth: viewBox[2] - viewBox[0],
+625       pageHeight: viewBox[3] - viewBox[1],
+626       pageX: viewBox[0],
+627       pageY: viewBox[1],
+628     });
+629   }
+630 
+631   /**
+632    * Clones viewport, with optional additional properties.
+633    * @param {PageViewportCloneParameters} [params]
+634    * @returns {PageViewport} Cloned viewport.
+635    */
+636   clone({
+637     scale = this.scale,
+638     rotation = this.rotation,
+639     offsetX = this.offsetX,
+640     offsetY = this.offsetY,
+641     dontFlip = false,
+642   } = {}) {
+643     return new PageViewport({
+644       viewBox: this.viewBox.slice(),
+645       scale,
+646       rotation,
+647       offsetX,
+648       offsetY,
+649       dontFlip,
+650     });
+651   }
+652 
+653   /**
+654    * Converts PDF point to the viewport coordinates. For examples, useful for
+655    * converting PDF location into canvas pixel coordinates.
+656    * @param {number} x - The x-coordinate.
+657    * @param {number} y - The y-coordinate.
+658    * @returns {Array} Array containing `x`- and `y`-coordinates of the
+659    *   point in the viewport coordinate space.
+660    * @see {@link convertToPdfPoint}
+661    * @see {@link convertToViewportRectangle}
+662    */
+663   convertToViewportPoint(x, y) {
+664     return Util.applyTransform([x, y], this.transform);
+665   }
+666 
+667   /**
+668    * Converts PDF rectangle to the viewport coordinates.
+669    * @param {Array} rect - The xMin, yMin, xMax and yMax coordinates.
+670    * @returns {Array} Array containing corresponding coordinates of the
+671    *   rectangle in the viewport coordinate space.
+672    * @see {@link convertToViewportPoint}
+673    */
+674   convertToViewportRectangle(rect) {
+675     const topLeft = Util.applyTransform([rect[0], rect[1]], this.transform);
+676     const bottomRight = Util.applyTransform([rect[2], rect[3]], this.transform);
+677     return [topLeft[0], topLeft[1], bottomRight[0], bottomRight[1]];
+678   }
+679 
+680   /**
+681    * Converts viewport coordinates to the PDF location. For examples, useful
+682    * for converting canvas pixel location into PDF one.
+683    * @param {number} x - The x-coordinate.
+684    * @param {number} y - The y-coordinate.
+685    * @returns {Array} Array containing `x`- and `y`-coordinates of the
+686    *   point in the PDF coordinate space.
+687    * @see {@link convertToViewportPoint}
+688    */
+689   convertToPdfPoint(x, y) {
+690     return Util.applyInverseTransform([x, y], this.transform);
+691   }
+692 }
+693 
+694 class RenderingCancelledException extends BaseException {
+695   constructor(msg, extraDelay = 0) {
+696     super(msg, "RenderingCancelledException");
+697     this.extraDelay = extraDelay;
+698   }
+699 }
+700 
+701 function isDataScheme(url) {
+702   const ii = url.length;
+703   let i = 0;
+704   while (i < ii && url[i].trim() === "") {
+705     i++;
+706   }
+707   return url.substring(i, i + 5).toLowerCase() === "data:";
+708 }
+709 
+710 function isPdfFile(filename) {
+711   return typeof filename === "string" && /\.pdf$/i.test(filename);
+712 }
+713 
+714 /**
+715  * Gets the filename from a given URL.
+716  * @param {string} url
+717  * @param {boolean} [onlyStripPath]
+718  * @returns {string}
+719  */
+720 function getFilenameFromUrl(url, onlyStripPath = false) {
+721   if (!onlyStripPath) {
+722     [url] = url.split(/[#?]/, 1);
+723   }
+724   return url.substring(url.lastIndexOf("/") + 1);
+725 }
+726 
+727 /**
+728  * Returns the filename or guessed filename from the url (see issue 3455).
+729  * @param {string} url - The original PDF location.
+730  * @param {string} defaultFilename - The value returned if the filename is
+731  *   unknown, or the protocol is unsupported.
+732  * @returns {string} Guessed PDF filename.
+733  */
+734 function getPdfFilenameFromUrl(url, defaultFilename = "document.pdf") {
+735   if (typeof url !== "string") {
+736     return defaultFilename;
+737   }
+738   if (isDataScheme(url)) {
+739     warn('getPdfFilenameFromUrl: ignore "data:"-URL for performance reasons.');
+740     return defaultFilename;
+741   }
+742   const reURI = /^(?:(?:[^:]+:)?\/\/[^/]+)?([^?#]*)(\?[^#]*)?(#.*)?$/;
+743   //              SCHEME        HOST        1.PATH  2.QUERY   3.REF
+744   // Pattern to get last matching NAME.pdf
+745   const reFilename = /[^/?#=]+\.pdf\b(?!.*\.pdf\b)/i;
+746   const splitURI = reURI.exec(url);
+747   let suggestedFilename =
+748     reFilename.exec(splitURI[1]) ||
+749     reFilename.exec(splitURI[2]) ||
+750     reFilename.exec(splitURI[3]);
+751   if (suggestedFilename) {
+752     suggestedFilename = suggestedFilename[0];
+753     if (suggestedFilename.includes("%")) {
+754       // URL-encoded %2Fpath%2Fto%2Ffile.pdf should be file.pdf
+755       try {
+756         suggestedFilename = reFilename.exec(
+757           decodeURIComponent(suggestedFilename)
+758         )[0];
+759       } catch {
+760         // Possible (extremely rare) errors:
+761         // URIError "Malformed URI", e.g. for "%AA.pdf"
+762         // TypeError "null has no properties", e.g. for "%2F.pdf"
+763       }
+764     }
+765   }
+766   return suggestedFilename || defaultFilename;
+767 }
+768 
+769 class StatTimer {
+770   started = Object.create(null);
+771 
+772   times = [];
+773 
+774   time(name) {
+775     if (name in this.started) {
+776       warn(`Timer is already running for ${name}`);
+777     }
+778     this.started[name] = Date.now();
+779   }
+780 
+781   timeEnd(name) {
+782     if (!(name in this.started)) {
+783       warn(`Timer has not been started for ${name}`);
+784     }
+785     this.times.push({
+786       name,
+787       start: this.started[name],
+788       end: Date.now(),
+789     });
+790     // Remove timer from started so it can be called again.
+791     delete this.started[name];
+792   }
+793 
+794   toString() {
+795     // Find the longest name for padding purposes.
+796     const outBuf = [];
+797     let longest = 0;
+798     for (const { name } of this.times) {
+799       longest = Math.max(name.length, longest);
+800     }
+801     for (const { name, start, end } of this.times) {
+802       outBuf.push(`${name.padEnd(longest)} ${end - start}ms\n`);
+803     }
+804     return outBuf.join("");
+805   }
+806 }
+807 
+808 function isValidFetchUrl(url, baseUrl) {
+809   if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+810     throw new Error("Not implemented: isValidFetchUrl");
+811   }
+812   try {
+813     const { protocol } = baseUrl ? new URL(url, baseUrl) : new URL(url);
+814     // The Fetch API only supports the http/https protocols, and not file/ftp.
+815     return protocol === "http:" || protocol === "https:";
+816   } catch {
+817     return false; // `new URL()` will throw on incorrect data.
+818   }
+819 }
+820 
+821 /**
+822  * Event handler to suppress context menu.
+823  */
+824 function noContextMenu(e) {
+825   e.preventDefault();
+826 }
+827 
+828 // Deprecated API function -- display regardless of the `verbosity` setting.
+829 function deprecated(details) {
+830   console.log("Deprecated API usage: " + details);
+831 }
+832 
+833 let pdfDateStringRegex;
+834 
+835 class PDFDateString {
+836   /**
+837    * Convert a PDF date string to a JavaScript `Date` object.
+838    *
+839    * The PDF date string format is described in section 7.9.4 of the official
+840    * PDF 32000-1:2008 specification. However, in the PDF 1.7 reference (sixth
+841    * edition) Adobe describes the same format including a trailing apostrophe.
+842    * This syntax in incorrect, but Adobe Acrobat creates PDF files that contain
+843    * them. We ignore all apostrophes as they are not necessary for date parsing.
+844    *
+845    * Moreover, Adobe Acrobat doesn't handle changing the date to universal time
+846    * and doesn't use the user's time zone (effectively ignoring the HH' and mm'
+847    * parts of the date string).
+848    *
+849    * @param {string} input
+850    * @returns {Date|null}
+851    */
+852   static toDateObject(input) {
+853     if (!input || typeof input !== "string") {
+854       return null;
+855     }
+856 
+857     // Lazily initialize the regular expression.
+858     pdfDateStringRegex ||= new RegExp(
+859       "^D:" + // Prefix (required)
+860         "(\\d{4})" + // Year (required)
+861         "(\\d{2})?" + // Month (optional)
+862         "(\\d{2})?" + // Day (optional)
+863         "(\\d{2})?" + // Hour (optional)
+864         "(\\d{2})?" + // Minute (optional)
+865         "(\\d{2})?" + // Second (optional)
+866         "([Z|+|-])?" + // Universal time relation (optional)
+867         "(\\d{2})?" + // Offset hour (optional)
+868         "'?" + // Splitting apostrophe (optional)
+869         "(\\d{2})?" + // Offset minute (optional)
+870         "'?" // Trailing apostrophe (optional)
+871     );
+872 
+873     // Optional fields that don't satisfy the requirements from the regular
+874     // expression (such as incorrect digit counts or numbers that are out of
+875     // range) will fall back the defaults from the specification.
+876     const matches = pdfDateStringRegex.exec(input);
+877     if (!matches) {
+878       return null;
+879     }
+880 
+881     // JavaScript's `Date` object expects the month to be between 0 and 11
+882     // instead of 1 and 12, so we have to correct for that.
+883     const year = parseInt(matches[1], 10);
+884     let month = parseInt(matches[2], 10);
+885     month = month >= 1 && month <= 12 ? month - 1 : 0;
+886     let day = parseInt(matches[3], 10);
+887     day = day >= 1 && day <= 31 ? day : 1;
+888     let hour = parseInt(matches[4], 10);
+889     hour = hour >= 0 && hour <= 23 ? hour : 0;
+890     let minute = parseInt(matches[5], 10);
+891     minute = minute >= 0 && minute <= 59 ? minute : 0;
+892     let second = parseInt(matches[6], 10);
+893     second = second >= 0 && second <= 59 ? second : 0;
+894     const universalTimeRelation = matches[7] || "Z";
+895     let offsetHour = parseInt(matches[8], 10);
+896     offsetHour = offsetHour >= 0 && offsetHour <= 23 ? offsetHour : 0;
+897     let offsetMinute = parseInt(matches[9], 10) || 0;
+898     offsetMinute = offsetMinute >= 0 && offsetMinute <= 59 ? offsetMinute : 0;
+899 
+900     // Universal time relation 'Z' means that the local time is equal to the
+901     // universal time, whereas the relations '+'/'-' indicate that the local
+902     // time is later respectively earlier than the universal time. Every date
+903     // is normalized to universal time.
+904     if (universalTimeRelation === "-") {
+905       hour += offsetHour;
+906       minute += offsetMinute;
+907     } else if (universalTimeRelation === "+") {
+908       hour -= offsetHour;
+909       minute -= offsetMinute;
+910     }
+911 
+912     return new Date(Date.UTC(year, month, day, hour, minute, second));
+913   }
+914 }
+915 
+916 /**
+917  * NOTE: This is (mostly) intended to support printing of XFA forms.
+918  */
+919 function getXfaPageViewport(xfaPage, { scale = 1, rotation = 0 }) {
+920   const { width, height } = xfaPage.attributes.style;
+921   const viewBox = [0, 0, parseInt(width), parseInt(height)];
+922 
+923   return new PageViewport({
+924     viewBox,
+925     scale,
+926     rotation,
+927   });
+928 }
+929 
+930 function getRGB(color) {
+931   if (color.startsWith("#")) {
+932     const colorRGB = parseInt(color.slice(1), 16);
+933     return [
+934       (colorRGB & 0xff0000) >> 16,
+935       (colorRGB & 0x00ff00) >> 8,
+936       colorRGB & 0x0000ff,
+937     ];
+938   }
+939 
+940   if (color.startsWith("rgb(")) {
+941     // getComputedStyle(...).color returns a `rgb(R, G, B)` color.
+942     return color
+943       .slice(/* "rgb(".length */ 4, -1) // Strip out "rgb(" and ")".
+944       .split(",")
+945       .map(x => parseInt(x));
+946   }
+947 
+948   if (color.startsWith("rgba(")) {
+949     return color
+950       .slice(/* "rgba(".length */ 5, -1) // Strip out "rgba(" and ")".
+951       .split(",")
+952       .map(x => parseInt(x))
+953       .slice(0, 3);
+954   }
+955 
+956   warn(`Not a valid color format: "${color}"`);
+957   return [0, 0, 0];
+958 }
+959 
+960 function getColorValues(colors) {
+961   const span = document.createElement("span");
+962   span.style.visibility = "hidden";
+963   document.body.append(span);
+964   for (const name of colors.keys()) {
+965     span.style.color = name;
+966     const computedColor = window.getComputedStyle(span).color;
+967     colors.set(name, getRGB(computedColor));
+968   }
+969   span.remove();
+970 }
+971 
+972 function getCurrentTransform(ctx) {
+973   const { a, b, c, d, e, f } = ctx.getTransform();
+974   return [a, b, c, d, e, f];
+975 }
+976 
+977 function getCurrentTransformInverse(ctx) {
+978   const { a, b, c, d, e, f } = ctx.getTransform().invertSelf();
+979   return [a, b, c, d, e, f];
+980 }
+981 
+982 /**
+983  * @param {HTMLDivElement} div
+984  * @param {PageViewport} viewport
+985  * @param {boolean} mustFlip
+986  * @param {boolean} mustRotate
+987  */
+988 function setLayerDimensions(
+989   div,
+990   viewport,
+991   mustFlip = false,
+992   mustRotate = true
+993 ) {
+994   if (viewport instanceof PageViewport) {
+995     const { pageWidth, pageHeight } = viewport.rawDims;
+996     const { style } = div;
+997     const useRound = FeatureTest.isCSSRoundSupported;
+998 
+999     const w = `var(--scale-factor) * ${pageWidth}px`,
+1000       h = `var(--scale-factor) * ${pageHeight}px`;
+1001     const widthStr = useRound ? `round(${w}, 1px)` : `calc(${w})`,
+1002       heightStr = useRound ? `round(${h}, 1px)` : `calc(${h})`;
+1003 
+1004     if (!mustFlip || viewport.rotation % 180 === 0) {
+1005       style.width = widthStr;
+1006       style.height = heightStr;
+1007     } else {
+1008       style.width = heightStr;
+1009       style.height = widthStr;
+1010     }
+1011   }
+1012 
+1013   if (mustRotate) {
+1014     div.setAttribute("data-main-rotation", viewport.rotation);
+1015   }
+1016 }
+1017 
+1018 export {
+1019   deprecated,
+1020   DOMCanvasFactory,
+1021   DOMCMapReaderFactory,
+1022   DOMFilterFactory,
+1023   DOMStandardFontDataFactory,
+1024   DOMSVGFactory,
+1025   fetchData,
+1026   getColorValues,
+1027   getCurrentTransform,
+1028   getCurrentTransformInverse,
+1029   getFilenameFromUrl,
+1030   getPdfFilenameFromUrl,
+1031   getRGB,
+1032   getXfaPageViewport,
+1033   isDataScheme,
+1034   isPdfFile,
+1035   isValidFetchUrl,
+1036   noContextMenu,
+1037   PageViewport,
+1038   PDFDateString,
+1039   PixelsPerInch,
+1040   RenderingCancelledException,
+1041   setLayerDimensions,
+1042   StatTimer,
+1043 };
+</code>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

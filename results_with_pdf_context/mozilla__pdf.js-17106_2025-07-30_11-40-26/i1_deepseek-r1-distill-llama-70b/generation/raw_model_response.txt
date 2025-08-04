@@ -1,0 +1,56 @@
+<think>
+Okay, I need to write a regression test for the issue where memory usage balloons when scrolling through a PDF. The patch provided is in the WorkerTransport class, specifically adding a check to release ImageBitmap data after cleanup. 
+
+First, I should understand the problem. The issue is that when scrolling through a PDF, the memory usage increases over time, which shouldn't happen. The patch is meant to fix this by ensuring that ImageBitmap data is released properly after cleanup.
+
+Looking at the patch, it adds a condition in the WorkerTransport's handling of objects. If the pageProxy's _intentStates size is zero, it closes the ImageBitmap. This should prevent storing large image data unnecessarily, thus reducing memory usage.
+
+Now, to write a test that fails before the patch and passes after. The test should simulate scrolling through a PDF and check memory usage.
+
+I'll start by importing the necessary modules. I'll need to use getDocument from display/api.js and GlobalImageCache from core/image_utils.js. I'll also need to use the TEST_PDFS_PATH from test_utils.js for a sample PDF.
+
+I'll create an async test function. Inside, I'll set up a document using getDocument with a sample PDF. Then, I'll create a GlobalImageCache instance to track images.
+
+Next, I'll render multiple pages. The idea is to simulate scrolling by rendering each page and then trying to collect garbage to see if the images are properly released. I'll use a loop to render, say, 10 pages.
+
+After rendering each page, I'll check the size of the GlobalImageCache. If the patch is effective, the cache size should not grow indefinitely. But in the buggy version, it should keep increasing.
+
+I'll add a step to collect garbage and then log the cache size. In the buggy version, the cache size should remain high, causing the test to fail. After the patch, the cache size should be manageable, so the test should pass.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll structure the test to create a document, render pages, and check the cache size after each render.
+
+Finally, I'll write the test using the it function, ensuring it's concise and to the point. The test should fail before the patch because the cache size doesn't decrease, and pass after because the ImageBitmaps are released, keeping memory usage in check.
+</think>
+
+```javascript
+it("should prevent memory ballooning when scrolling through PDF", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { GlobalImageCache } = await import("../../src/core/image_utils.js");
+  const { TEST_PDFS_PATH } = await import("./test_utils.js");
+
+  // Use a PDF with many images to test memory usage
+  const pdfPath = `${TEST_PDFS_PATH}/image-pdf.pdf`;
+  const params = buildGetDocumentParams(pdfPath, null, null, WORKER_SRC);
+  const doc = await getDocument(params);
+  const cache = new GlobalImageCache();
+
+  // Simulate scrolling by rendering multiple pages
+  for (let i = 0; i < 10; i++) {
+    const page = await doc.getPage(i + 1);
+    await page.render({
+      canvasContext: { getContext: () => ({} ) },
+      viewport: page.getViewport({ scale: 1 }),
+    });
+  }
+
+  // Verify that image data is properly released
+  await new Promise(resolve => setTimeout(resolve, 1000)); // Give cleanup time
+  global.gc(); // Force garbage collection
+
+  // In the buggy version, the cache size would remain large
+  const expectedCacheSize = 0;
+  const actualCacheSize = Object.keys(cache._cache).length;
+
+  assert.strictEqual(actualCacheSize, expectedCacheSize);
+});
+```

@@ -1,0 +1,56 @@
+it("should render transparency filters correctly with base href", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { DOMCanvasFactory } = await import("../../src/display/display_utils.js");
+
+  // Create a test HTML structure with <base href>
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <base href=".">
+    </head>
+    <body>
+    </body>
+    </html>
+  `;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const canvas = doc.createElement("canvas");
+  doc.body.appendChild(canvas);
+
+  // Create a new PDF document with the test PDF
+  const pdf = await PDFDocument.create(
+    await fetch("test.pdf").then(res => res.arrayBuffer())
+  );
+
+  // Get the first page
+  const page = await pdf.getPage(1);
+
+  // Set up rendering
+  const viewport = page.getViewPort({ scale: 1 });
+  const canvasFactory = new DOMCanvasFactory();
+  const canvasRender = canvasFactory.createCanvas(viewport.width, viewport.height);
+  const ctx = canvasRender.getContext("2d");
+
+  // Render the page
+  await page.render({
+    canvasContext: ctx,
+    viewport,
+    enableWebGL: false,
+  });
+
+  // Check for expected transparency effect
+  const expectedAlpha = 128;
+  const actualImageData = ctx.getImageData(0, 0, canvasRender.width, canvasRender.height);
+  const alphaFound = actualImageData.data.some((value, index) => {
+    if (index % 4 === 3) { // Alpha channel
+      return value === expectedAlpha;
+    }
+    return false;
+  });
+
+  expect(alphaFound).toBe(true);
+
+  // Cleanup
+  await pdf.close();
+});

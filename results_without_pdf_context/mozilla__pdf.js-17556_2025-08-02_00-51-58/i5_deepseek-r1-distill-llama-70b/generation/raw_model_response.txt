@@ -1,0 +1,38 @@
+<think>
+Okay, I need to write a regression test for the issue where the PDF.js library incorrectly treats JavaScript object default properties like `toString` as valid PDF operators. The test should fail before the patch and pass after it's applied.
+
+First, I'll start by understanding the problem. The issue arises because the `opMap` in `evaluator.js` uses a regular JavaScript object, which includes inherited properties like `toString`. When the parser encounters a token like `toString`, it incorrectly identifies it as a valid operator because it exists in the `opMap`. This leads to errors later on.
+
+The patch changes `opMap` to use `Object.create(null)`, which creates an object without the default prototype. This way, only explicitly defined properties are present, so `toString` won't be considered a valid operator anymore.
+
+Now, to write the test. I'll use Jest since it's a common testing framework, and the example provided uses `it` blocks. The test should load a PDF that includes the `toString` token in a stream. Before the patch, this should cause an error, but after the patch, it should be ignored, and no error should occur.
+
+I'll structure the test as follows:
+1. Import the necessary modules, like `PDFDocument` and `getDocument` from `../../src/display/api.js` to handle PDF loading.
+2. Use `fetch` to get the test PDF file, which includes the problematic `toString` token.
+3. Load the PDF using `PDFDocument.load` and wrap it in a promise to handle asynchronous operations.
+4. Since the issue causes an exception during parsing, the test will check if this exception is thrown. Before the patch, the test should fail because the exception is thrown. After the patch, the exception shouldn't occur, so the test should pass.
+
+Wait, actually, the test needs to verify that the issue is resolved. So, the test should expect that loading the PDF does not throw an error after the patch. Therefore, in the test, I'll await the loading of the PDF and expect no exceptions. If an exception is thrown, the test fails, indicating the issue isn't resolved.
+
+I need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll use dynamic imports as specified, ensuring compatibility with Node.js.
+
+Putting it all together, the test will load the PDF and check if it can be parsed without errors. If it can, the test passes, indicating the patch worked. If not, the test fails, showing the issue remains.
+
+I should also handle any potential errors during fetching or parsing, but since the test is designed to fail when the exception is thrown, I don't need to add extra error handling beyond the `await` and the expectation.
+
+So, the test will look something like this: load the PDF, and if it loads without throwing an exception, the test passes. Before the patch, the exception would be thrown, causing the test to fail. After the patch, no exception, so the test passes.
+</think>
+
+```javascript
+it("should ignore invalid operator tokens that are default object properties", async () => {
+  const { PDFDocument, getDocument } = await import("../../src/display/api.js");
+  const pdfData = await fetch("../../test/pdfs/hello.pdf").then(res => res.arrayBuffer());
+  const pdf = await PDFDocument.load(pdfData);
+  await getDocument({
+    data: pdfData,
+    cMapLoader: null,
+    rangeLoader: null,
+  });
+});
+```

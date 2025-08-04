@@ -1,0 +1,61 @@
+<think>
+Okay, I need to write a test that verifies the patch fixes the issue where a TypeError occurs when using annotations on a PDF, especially on touch devices. The error is "TypeError: null is not an object (evaluating 'this.#touchMoveAC.abort')". 
+
+First, I should understand the problem. The user reported that when drawing or zooming, the error occurs, causing the annotation functionality to break. The patch modifies two files: tools.js and touch_manager.js. 
+
+Looking at the patch, in tools.js, the line added is this.#currentDrawingSession?.commitOrRemove();. This suggests that before switching modes, any ongoing drawing session is committed or removed, which might prevent the touch manager from being in an inconsistent state.
+
+In touch_manager.js, the patch adds a check to see if this.#touchMoveAC exists before calling abort() and setting it to null. This prevents calling abort on a null object, which was causing the TypeError.
+
+So, the test should simulate the scenario where the touch manager's touchMoveAC is null when touch events are handled. The test should ensure that after the patch, the code doesn't throw an error.
+
+I'll write a test that creates a TouchManager instance, simulates touch events, and checks that no error is thrown. The test should create a container, set up the touch manager, and then trigger touch events that would previously cause the error.
+
+I'll structure the test using Jest. I'll import the necessary modules, create a container element, and set up the TouchManager. Then, I'll simulate touch events: touchstart, touchmove, and touchend. I'll use async/await to handle the events and ensure that no error is thrown during the process.
+
+The key is to ensure that after applying the patch, the touch manager doesn't attempt to call abort() on a null #touchMoveAC. So, the test should not throw an error when these events are simulated.
+
+I'll also need to handle the event listeners correctly, adding and removing them as needed to prevent any leaks or interference.
+
+Finally, the test will assert that no error was thrown during the touch event handling, confirming that the patch resolves the issue.
+</think>
+
+```javascript
+it("should handle touch events without error", async () => {
+  const { TouchManager } = await import("../../src/display/touch_manager.js");
+  const container = document.createElement("div");
+  const touchManager = new TouchManager({
+    container,
+    signal: new AbortController().signal,
+  });
+
+  // Simulate touch events
+  const touchStartEvent = new TouchEvent("touchstart", {
+    touches: [new Touch({ identifier: 1, target: container }), new Touch({ identifier: 2, target: container })],
+    touchType: "direct",
+  });
+
+  const touchMoveEvent = new TouchEvent("touchmove", {
+    touches: [new Touch({ identifier: 1, target: container }), new Touch({ identifier: 2, target: container })],
+    touchType: "direct",
+  });
+
+  const touchEndEvent = new TouchEvent("touchend", {
+    touches: [new Touch({ identifier: 1, target: container }), new Touch({ identifier: 2, target: container })],
+    touchType: "direct",
+  });
+
+  // Handle events
+  await Promise.resolve();
+  container.dispatchEvent(touchStartEvent);
+  await Promise.resolve();
+  container.dispatchEvent(touchMoveEvent);
+  await Promise.resolve();
+  container.dispatchEvent(touchEndEvent);
+
+  // Check for errors
+  expect(() => {
+    touchManager.destroy();
+  }).not.toThrow();
+});
+```

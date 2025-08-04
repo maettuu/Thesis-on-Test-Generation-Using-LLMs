@@ -1,0 +1,81 @@
+<think>
+Okay, I need to write a regression test for the patch that fixes the slow rendering of poster PDFs in Firefox. The patch changes how the filter is set in the canvas context. Let me think about how to approach this.
+
+First, I'll look at the patch. It modifies two functions: resetCtxToDefault and paintInlineImageXObject. In both cases, instead of unconditionally setting ctx.filter to "none", they now check if the filter is not "none" or empty before setting it. This should reduce unnecessary operations, which was causing performance issues.
+
+So, the test needs to verify that setting the filter is done correctly. Before the patch, every time these functions were called, the filter was set to "none" regardless of its current value. After the patch, it should only set it if it's not already "none" or empty.
+
+I'll create a test that mocks the canvas context and checks how many times ctx.filter is set. The test should simulate both scenarios: when the filter is already "none" and when it's something else.
+
+I'll use Jest to mock the context. I'll create a mock ctx object with a filter property and a setFilter function that tracks how many times it's called.
+
+In the test, I'll import the necessary functions. Then, I'll initialize the CanvasGraphics instance with the mock context. I'll call the functions that trigger the filter setting, like resetCtxToDefault and paintInlineImageXObject.
+
+I'll have two cases:
+1. When ctx.filter is "none" already. The patch should not change it, so setFilter shouldn't be called.
+2. When ctx.filter is something else, like "blur(5px)". The patch should set it to "none", so setFilter should be called once.
+
+I'll also need to simulate the other variables and functions used in these methods, like isNodeJS, which I'll set to false since the behavior differs there.
+
+After running these cases, I'll check the number of times setFilter was called. If it's as expected, the test passes.
+
+I need to make sure all imports are correct and that the test is self-contained without external dependencies. Also, the test should only focus on the filter setting behavior and not introduce any other variables.
+
+Finally, I'll write the test using async/await since some imports are dynamic. I'll structure it with Jest's it function and use expect to assert the number of calls.
+</think>
+
+```javascript
+it("should not set filter unnecessarily", async () => {
+  const { Util } = await import("../../src/shared/util.js");
+  const { CanvasGraphics } = await import("../../src/display/canvas.js");
+
+  class MockCanvasContext {
+    constructor() {
+      this.filter = "none";
+      this.setFilterCalls = 0;
+    }
+
+    setFilter(value) {
+      this.setFilterCalls++;
+      this.filter = value;
+    }
+
+    save() {}
+    restore() {}
+    scale() {}
+    imageSmoothingEnabled = false;
+    fillText() {}
+    drawImage() {}
+    compose() {}
+  }
+
+  // Test setup
+  const ctx = new MockCanvasContext();
+  const canvasGraphics = new CanvasGraphics(
+    ctx,
+    {},
+    {},
+    () => ctx,
+    () => {},
+    {},
+    {},
+    {}
+  );
+
+  // Test resetCtxToDefault behavior
+  ctx.filter = "none";
+  Util.isNodeJS = false;
+  resetCtxToDefault(ctx);
+  expect(ctx.setFilterCalls).toBe(0);
+
+  // Test paintInlineImageXObject behavior
+  ctx.filter = "blur(5px)";
+  const imgData = { width: 10, height: 10 };
+  canvasGraphics.paintInlineImageXObject(imgData);
+  expect(ctx.setFilterCalls).toBe(1);
+
+  ctx.filter = "none";
+  canvasGraphics.paintInlineImageXObject(imgData);
+  expect(ctx.setFilterCalls).toBe(1);
+});
+```

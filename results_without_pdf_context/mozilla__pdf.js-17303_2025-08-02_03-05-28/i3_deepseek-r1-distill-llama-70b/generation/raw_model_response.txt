@@ -1,0 +1,54 @@
+<think>
+Okay, I need to write a test for the JpegImage.parse function to ensure that it doesn't throw a TypeError when given an incomplete JPEG. The issue was that the code was trying to access frame.samplesPerLine, but frame was undefined because the image data didn't have the necessary markers.
+
+First, I'll look at the existing test file, test/unit/api_spec.js, to see what imports are available. I can reuse imports like assert from '../../src/shared/util.js' and JpegImage from '../../src/core/jpg.js'.
+
+The test should create a minimal JPEG buffer that's missing the EOI marker. I'll construct a buffer that starts with 0xffd8 (SOI) and includes some data but doesn't end properly, causing the parser to fail before the patch.
+
+In the test, I'll wrap the parse call in a try-catch block. Before the patch, this should throw a TypeError. After the patch, it should throw a JpegError instead because of the added check for frame.
+
+I'll structure the test with two cases: one without the patch (expecting a TypeError) and one with the patch (expecting a JpegError). But since the test should run in both scenarios, I'll use async/await and try-catch to handle the exceptions.
+
+I'll import JpegImage and assert dynamically to avoid any issues with the test setup. The test will be self-contained, using only the necessary imports and not relying on any external dependencies beyond what's provided.
+
+Finally, I'll write the test case using it() and ensure it correctly catches the expected errors, verifying that the patch resolves the issue.
+</think>
+
+```javascript
+it("should handle incomplete JPEG without EOI marker", async () => {
+  const { JpegImage } = await import("../../src/core/jpg.js");
+  const { assert } = await import("../../src/shared/util.js");
+
+  // Minimal JPEG data without EOI marker to trigger the issue
+  const jpegBuffer = Buffer.from([
+    0xff, 0xd8, // SOI
+    0xff, 0xe0, // APP0
+    0x00, 0x10, // Length
+    0x4a, 0x46, 0x49, 0x46, 0x00, // JFIF\0
+    0x01, 0x01, 0x00, 0x00, // Version
+    0x00, 0x00, 0xff, 0xff, // Density units, etc.
+    0xff, 0xc0, // SOF0
+    0x00, 0x11, // Length
+    0x08, 0x00, // Precision
+    0x80, 0x00, // SOF Lines
+    0x01, 0x03, // Components
+    0x01, 0x22, 0x00, // Component 1
+    0xff, 0xc4, // DHT
+    0x00, 0x14, // Length
+    0x00, 0x01, // HC
+    0x00, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, // Data
+    0xff, 0xda, // SOS
+    0x00, 0x0c, // Length
+    0x00, 0x01, // Components
+    0x00, 0x3f, 0x00, // Data
+    0xff
+  ].join(','), 'hex');
+
+  try {
+    await new JpegImage().parse(jpegBuffer);
+    assert(false, "Expected JpegError to be thrown");
+  } catch (error) {
+    assert(error instanceof JpegError, "Expected JpegError, got " + error.name);
+  }
+});
+```

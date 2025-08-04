@@ -1,0 +1,42 @@
+```javascript
+it("should render PDF with correct transparency filters in Firefox when <base href> is present", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { DOMCanvasFactory } = await import("../../src/display/display_utils.js");
+  const { PDFPageView } = await import("../../web/pdf_page_view.js");
+  const { AppOptions } = await import("../../web/app_options.js");
+
+  AppOptions.set("workerSrc", "../../build/pdf.worker.js");
+
+  const loadingTask = getDocument("https://github.com/mozilla/pdf.js/files/11229069/test.pdf");
+  const pdfDocument = await loadingTask.promise;
+  const page = await pdfDocument.getPage(1);
+
+  const canvasFactory = new DOMCanvasFactory();
+  const viewport = page.getViewport({ scale: 1.0 });
+  const canvasAndContext = canvasFactory.create(viewport.width, viewport.height);
+  const renderContext = {
+    canvasContext: canvasAndContext.context,
+    viewport,
+  };
+
+  const pageView = new PDFPageView({
+    container: document.createElement("div"),
+    id: 1,
+    scale: 1.0,
+    defaultViewport: viewport,
+    canvasFactory,
+    renderingQueue: null,
+    textLayerFactory: null,
+    annotationLayerFactory: null,
+  });
+
+  pageView.setPdfPage(page);
+  await pageView.draw();
+
+  const expectedTransparency = "rgba(0, 0, 0, 0.5)"; // Example expected transparency color
+  const actualTransparency = canvasAndContext.context.getImageData(0, 0, 1, 1).data;
+  const actualTransparencyColor = `rgba(${actualTransparency[0]}, ${actualTransparency[1]}, ${actualTransparency[2]}, ${actualTransparency[3] / 255})`;
+
+  expect(actualTransparencyColor).toBe(expectedTransparency);
+});
+```

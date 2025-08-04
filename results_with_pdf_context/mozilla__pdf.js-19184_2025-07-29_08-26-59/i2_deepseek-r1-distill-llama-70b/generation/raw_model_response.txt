@@ -1,0 +1,53 @@
+<think>
+Okay, I need to write a regression test for the issue where Extension B characters in form fields aren't rendering correctly in the pdf.js viewer. The patch provided changes the way character codes are retrieved in the ToUnicodeMap class. 
+
+First, I should understand what the patch does. It looks like the patch replaces charCodeAt(0) with codePointAt(0) in the forEach method. This probably fixes an issue where multi-byte characters were being handled incorrectly, leading to incorrect rendering.
+
+So, the test needs to verify that after the patch, the correct Unicode code points are used when mapping characters. 
+
+I'll start by setting up the test structure. I'll use the provided PDF file, 'issue19182.pdf', which has the problematic form fields. I'll import the necessary modules: getDocument from the display API and buildGetDocumentParams from test_utils.
+
+Next, I'll load the PDF document using getDocument with the parameters built for the test file. Once the document is loaded, I'll get the first page and its form fields.
+
+I need to access the form field that contains the Extension B characters. I'll retrieve the XFA form, get the 'tf1' field, and then its value. The value is a string that should display the correct characters.
+
+Before the patch, this value might have been incorrect, perhaps showing '?' instead of the expected character. After the patch, it should display correctly.
+
+In the test, I'll create a function to check if a character is from Unicode Extension B. I'll loop through each character in the form field's value and ensure that each one is valid and not a replacement character.
+
+I'll use the test function to compare each character, ensuring that none of them are the replacement character (uFFFD). This will confirm that the patch correctly handles the Extension B characters.
+
+I should structure the test as an async function within an it block. The test will load the document, extract the form field value, and check each character. If any character is invalid, the test will fail, indicating the issue isn't resolved.
+
+Finally, I'll make sure the test is self-contained and only uses the provided imports without adding new dependencies. This way, the test will reliably fail before the patch and pass after it's applied.
+</think>
+
+```javascript
+it("should correctly render Extension B characters in form fields", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue19182.pdf'));
+  const pdfDoc = await loadingTask.promise;
+
+  const page = await pdfDoc.getPage(1);
+  const form = await page.getForm();
+  const xfa = form.getXFA();
+  const tf1 = await xfa.getField("tf1");
+  const value = await tf1.getValue();
+
+  const isExtensionB = (codePoint) => {
+    return codePoint >= 0x10000 && codePoint <= 0x10FFFF;
+  };
+
+  const expected = "𝄞";
+  const actual = value;
+
+  // Check each character in the string
+  for (const char of actual) {
+    const codePoint = char.codePointAt(0);
+    if (isExtensionB(codePoint)) {
+      expect(codePoint).not.toBe(0xFFFD); // Not replacement character
+    }
+  }
+});
+```

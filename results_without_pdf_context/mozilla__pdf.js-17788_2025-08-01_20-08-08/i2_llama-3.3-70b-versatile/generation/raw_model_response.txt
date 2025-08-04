@@ -1,0 +1,78 @@
+```javascript
+it("should read highlighted text during editing inside a PDF", async () => {
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { PDFViewer } = await import("../../web/pdf_viewer.js");
+  const { PDFDocumentLoadingTask } = await import("../../src/display/api.js");
+
+  const pdfDocument = await PDFDocumentLoadingTask.import({
+    cMapUrl: "../../src/core/cmap.js",
+    cMapPacked: true,
+    fontExtraProperties: {},
+    ignoreErrors: false,
+    isEvalSupported: false,
+    maxImageSize: 1024 * 1024 * 10,
+    onFetchStart: () => {},
+    onFetchEnd: () => {},
+    pdfBug: {},
+    verbosity: 0,
+  }, "../../web/test_files/annotation_test.pdf");
+
+  const pdfViewer = new PDFViewer({
+    container: document.createElement("div"),
+    eventBus: {
+      _on: () => {},
+      _off: () => {},
+      dispatch: () => {},
+    },
+    renderer: "canvas",
+    useOnlyCssZoom: false,
+  });
+
+  const annotationEditorUIManager = new AnnotationEditorUIManager(
+    document.createElement("div"),
+    pdfViewer,
+    null,
+    {
+      _on: () => {},
+      _off: () => {},
+      dispatch: () => {},
+    },
+    pdfDocument,
+    null,
+    null,
+    null
+  );
+
+  const page = await pdfDocument.getPage(1);
+  const textContent = await page.getTextContent();
+  const textLayer = pdfViewer.textLayerFactory.createTextLayer({
+    container: document.createElement("div"),
+    textContent,
+    viewport: page.getViewport({ scale: 1 }),
+  });
+
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  const range = document.createRange();
+  range.setStart(textLayer.textDivs[0], 0);
+  range.setEnd(textLayer.textDivs[0], 1);
+  selection.addRange(range);
+
+  annotationEditorUIManager.highlightSelection();
+
+  const highlightedText = await new Promise((resolve) => {
+    const intervalId = setInterval(() => {
+      const highlightedText = textLayer.textDivs[0].textContent;
+      if (highlightedText) {
+        clearInterval(intervalId);
+        resolve(highlightedText);
+      }
+    }, 100);
+  });
+
+  const expectedText = textLayer.textDivs[0].textContent;
+  expect(highlightedText).toBe(expectedText);
+});
+```

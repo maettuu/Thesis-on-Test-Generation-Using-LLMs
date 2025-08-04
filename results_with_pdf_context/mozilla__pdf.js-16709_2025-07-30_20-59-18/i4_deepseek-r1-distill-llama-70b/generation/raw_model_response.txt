@@ -1,0 +1,83 @@
+<think>
+Okay, I need to write a regression test for the issue where the redo shortcut doesn't work for images, text, or drawings in the PDF editor. The patch provided modifies the keyboard shortcuts in the tools.js file, so my test should target that change.
+
+First, I'll start by understanding the problem. Before the patch, the redo shortcut might not have included all necessary key combinations, especially for different operating systems. The patch adds more key combinations for redo, so the test should check if these now work correctly.
+
+I'll structure the test using Jest. The test should simulate adding an annotation, undoing it, and then redoing it using the new shortcuts. 
+
+I'll import the necessary modules, like AnnotationEditorUIManager and CommandManager. Then, I'll set up a test container and event bus. 
+
+Next, I'll initialize the AnnotationEditorUIManager and add a sample annotation, like a free text annotation. I'll trigger an 'editingaction' event to perform the 'add' action, which adds the annotation.
+
+After adding, I'll check that the annotation exists. Then, I'll trigger an 'undo' event to remove it and verify it's gone. 
+
+Now, for the redo part, I'll simulate the new key combinations. Since the patch includes both 'ctrl+shift+Z' and 'mac+meta+shift+Z', I'll test both. I'll create a KeyboardEvent for each and check if the annotation is restored after redo.
+
+I'll use async/await for the events to ensure proper execution order. Finally, I'll assert that the annotation is present after each redo attempt, ensuring the shortcuts work as expected.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll avoid any new dependencies and ensure the code runs in a Node.js environment by dynamically importing the necessary modules.
+
+Putting it all together, the test will verify that after the patch, redoing via the new shortcuts correctly restores the annotation, which wasn't possible before.
+</think>
+
+```javascript
+it("should redo an annotation using the new keyboard shortcuts", async () => {
+  const { AnnotationEditorUIManager, CommandManager } = await import("../../src/display/editor/tools.js");
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+  
+  const container = { addEventListener: jest.fn(), removeEventListener: jest.fn() };
+  const eventBus = { _on: jest.fn(), _off: jest.fn(), dispatch: jest.fn() };
+  const pdfDocument = { annotationStorage: {} };
+  const pageColors = {};
+
+  const manager = new AnnotationEditorUIManager(container, eventBus, pdfDocument, pageColors);
+  const commandManager = manager.#commandManager;
+
+  // Add a sample annotation
+  const layer = new AnnotationEditorLayer(0, container, pdfDocument, pageColors);
+  manager.addLayer(layer);
+  layer.enterEditMode();
+
+  // Simulate adding an annotation
+  const addEvent = new CustomEvent("editingaction", { detail: { name: "add" } });
+  await eventBus._on.mock.calls[0][1](addEvent);
+
+  // Verify annotation was added
+  expect(layer.editors.size).toBe(1);
+  const annotation = layer.editors.values().next().value;
+
+  // Undo the action
+  const undoEvent = new CustomEvent("editingaction", { detail: { name: "undo" } });
+  await eventBus._on.mock.calls[0][1](undoEvent);
+  expect(layer.editors.size).toBe(0);
+
+  // Test redo with new shortcuts
+  const redoEvent1 = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    keyCode: 90,
+    key: "z",
+    ctrlKey: true,
+    shiftKey: true,
+  });
+
+  const redoEvent2 = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    keyCode: 90,
+    key: "Z",
+    metaKey: true,
+    shiftKey: true,
+  });
+
+  // Test first redo
+  container.dispatchEvent(redoEvent1);
+  await new Promise(process.nextTick);
+  expect(layer.editors.size).toBe(1);
+
+  // Test second redo
+  container.dispatchEvent(redoEvent2);
+  await new Promise(process.nextTick);
+  expect(layer.editors.size).toBe(1);
+});
+```

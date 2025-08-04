@@ -1,0 +1,55 @@
+<think>
+Okay, so I need to write a regression test for the issue where certain PDFs using a rare RC4 encryption scheme weren't opening in the Firefox PDF Viewer. The user provided a patch that modifies the crypto.js file to handle shorter keys by extending them to 16 bytes. 
+
+First, I should understand what the patch does. The patch checks if the algorithm is 4 (RC4) and the key length is less than 16 bytes. If so, it extends the key by appending zero bytes to make it 16 bytes long. This should fix the issue where Acrobat could handle these cases, but pdf.js couldn't.
+
+Now, to write a test that fails before the patch and passes after. The test should simulate opening a PDF with a 40-bit or 48-bit key. I'll need to create a test PDF in memory, apply the encryption, and then attempt to read it using the pdf.js library.
+
+I'll structure the test using Jest. I'll import the necessary modules, create a sample PDF with the specific encryption settings, then try to load it. If the patch isn't applied, this should throw an error, but with the patch, it should load without issues.
+
+I'll set up the test by defining the PDF structure, including the encryption dictionary with the correct parameters (R=4, V=4, key length=40). Then, I'll create a PDF file with a simple page and apply the encryption. 
+
+In the test, I'll use the pdfjs-lib library to load the PDF. If the patch isn't applied, this should fail with an incorrect password error. After applying the patch, the same test should pass, indicating the PDF is read correctly.
+
+I'll make sure the test is self-contained, uses the correct imports, and only tests the specific behavior without relying on external files. This way, it's focused on verifying the fix provided by the patch.
+</think>
+
+```javascript
+it("should handle RC4 encryption with 40-bit key", async () => {
+  const { PDFDocument } = await import("../../web/pdf_document.js");
+  const { PDFParser } = await import("../../web/pdf_parser.js");
+  const { stringToBytes } = await import("../../src/core/core_utils.js");
+  const { ARCFourCipher } = await import("../../src/core/crypto.js");
+
+  // Create a sample PDF with RC4 encryption (R=4, V=4) with 40-bit key
+  const pdfData = new Uint8Array([
+    0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x30, 0x0a, 0x61, 0x75, 0x74, 0x68, 0x6f, 0x72, 0x20,
+    0x28, 0x6e, 0x6f, 0x6e, 0x65, 0x29, 0x0a, 0x44, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74,
+    0x3a, 0x20, 0x30, 0x30, 0x30, 0x0a, 0x45, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x69,
+    0x6f, 0x6e, 0x3a, 0x20, 0x52, 0x43, 0x34, 0x28, 0x52, 0x3d, 0x34, 0x2c, 0x56, 0x3d,
+    0x34, 0x2c, 0x4c, 0x3d, 0x34, 0x30, 0x0a, 0x4c, 0x65, 0x6e, 0x67, 0x74, 0x68,
+    0x3a, 0x20, 0x34, 0x30, 0x0a, 0x55, 0x2f, 0x4f, 0x20, 0x28, 0x4f, 0x77, 0x6e,
+    0x65, 0x72, 0x29, 0x3a, 0x20, 0x30, 0x30, 0x30, 0x0a, 0x50, 0x61, 0x67, 0x65,
+    0x73, 0x3a, 0x20, 0x30, 0x0a, 0x53, 0x75, 0x70, 0x70, 0x6c, 0x65, 0x72, 0x3a,
+    0x20, 0x22, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x57, 0x6f, 0x72, 0x6c,
+    0x64, 0x22, 0x0a, 0x2f, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x30
+  ]);
+
+  // Create an encrypted PDF
+  const encryptionKey = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+  const cipher = new ARCFourCipher(encryptionKey);
+  const encryptedContent = cipher.encryptBlock(pdfData.slice(0, 0x100));
+
+  // Load the PDF
+  const pdf = await PDFDocument.create({
+    data: pdfData,
+    password: "test",
+    length: pdfData.length
+  });
+
+  // Verify the content can be read
+  const page = await pdf.getPage(1);
+  const textContent = await page.getTextContent();
+  expect(textContent.items[0].str).toBe("Hello World");
+});
+```

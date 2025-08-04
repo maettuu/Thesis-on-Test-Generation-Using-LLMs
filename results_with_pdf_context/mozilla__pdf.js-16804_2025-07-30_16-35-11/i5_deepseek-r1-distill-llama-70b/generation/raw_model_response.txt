@@ -1,0 +1,51 @@
+<think>
+Okay, I need to write a regression test for the issue where embedded images are not being removed properly in PDF.js. The user provided a patch, so the test should fail before the patch and pass after.
+
+First, I'll look at the problem. The user mentioned that on page 2, a black pin is visible, but they want to see the image underneath. The patch modifies how fillAlpha is handled in annotations, especially for file attachments.
+
+So, the test should check if the fillAlpha is correctly applied, making the pin transparent. Before the patch, the pin was fully opaque, but after, it should be semi-transparent or invisible.
+
+I'll use the provided PDF file, issue16800.pdf. I'll need to get the document and navigate to page 2. Then, I'll check the annotations on that page.
+
+I'll import the necessary modules: getDocument from display/api.js and buildGetDocumentParams from test_utils.js.
+
+In the test, I'll load the PDF and get the first page (page 2 in the test, but index 0 in the array). Then, I'll render it and check for annotations.
+
+The key part is to check the opacity of the trigger element in the annotation. Before the patch, the opacity should be 1 (fully visible). After the patch, it should be less than 1, indicating the pin is transparent.
+
+I'll write an async function that does this. I'll use Jest's it function with the correct description. I'll make sure to await the loading of the document and page.
+
+I'll also need to ensure that the test correctly compares the expected and actual opacities. Using toBeLessThan(1) should suffice.
+
+I should structure the test so that it's self-contained and doesn't rely on any external variables. All imports are done dynamically for compatibility.
+
+Finally, I'll write the test code, making sure it's concise and only includes the necessary steps to verify the fix.
+</think>
+
+```javascript
+it("should make embedded images transparent when fillAlpha is set", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue16800.pdf'));
+  const { numPages, pages } = await loadingTask.promise;
+  
+  const page = await pages.open(0); // Open page 2 in the PDF (index 0)
+  const viewport = page.getViewport(1);
+  const annotationLayer = new AnnotationLayer({
+    container: document.createElement('div'),
+    page,
+    viewport,
+    renderInteractive: true
+  });
+  
+  await annotationLayer.render();
+  
+  const trigger = annotationLayer.#trigger;
+  const expectedOpacity = 0.5; // Based on the patch, fillAlpha should be set
+  
+  expect(trigger.style.filter).toBeDefined();
+  const actualOpacity = Number(trigger.style.filter.match(/\d+/)[0]) / 100;
+  
+  expect(actualOpacity).toBeLessThan(1);
+});
+```

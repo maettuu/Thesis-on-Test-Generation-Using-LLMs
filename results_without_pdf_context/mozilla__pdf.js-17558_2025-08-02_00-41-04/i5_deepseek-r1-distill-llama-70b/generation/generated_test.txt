@@ -1,0 +1,45 @@
+it("should render emojis in PDFs correctly", async () => {
+  const { PDFDocument } = await import("pdf-lib");
+  const { PDFDocumentLoadingTask, PDFPageProxy, TextLayer } = await import("../../src/display/api.js");
+  const { stream } = await import("stream");
+  const { Buffer } = await import("buffer");
+
+  // Create a PDF with an emoji
+  const pdfDoc = new PDFDocument();
+  const page = pdfDoc.addPage();
+  const annotation = new PDFAnnotation();
+  annotation.setFreeText(new PDFFreeText({
+    text: "👻",
+    x: 100,
+    y: 100,
+  }));
+  page.addAnnotation(annotation);
+
+  // Save PDF to buffer
+  const pdfBuffer = await new Promise((resolve) => {
+    const chunks = [];
+    const pdfStream = pdfDoc.pipe(stream.PassThrough());
+    pdfStream.on("data", (chunk) => chunks.push(chunk));
+    pdfStream.on("end", () => resolve(Buffer.concat(chunks)));
+    pdfDoc.end();
+  });
+
+  // Load PDF into pdfjs
+  const loadingTask = PDFDocumentLoadingTask.fromBuffer(pdfBuffer);
+  const pdf = await loadingTask.run();
+  const pageProxy = (await pdf.getPage(1));
+  const textLayer = new TextLayer({
+    pageIndex: 0,
+    container: document.createElement("div"),
+  });
+
+  // Render page and extract text
+  await pageProxy.render({
+    viewport: pageProxy.getViewport({ scale: 1 }),
+    spreadMode: "none",
+    renderInteractiveForms: false,
+  });
+  const text = await textLayer.getTextContent();
+
+  expect(text.items[0].str).toContain("👻");
+});

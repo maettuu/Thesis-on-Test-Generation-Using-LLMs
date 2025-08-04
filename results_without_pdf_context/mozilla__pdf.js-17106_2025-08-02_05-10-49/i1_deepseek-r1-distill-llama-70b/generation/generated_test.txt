@@ -1,0 +1,54 @@
+it("should release ImageBitmaps after cleanup to prevent memory ballooning", async () => {
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { createIdFactory } = await import("./test_utils.js");
+  const { GlobalImageCache } = await import("../../src/core/image_utils.js");
+
+  // Setup a PDF document with many pages to test scrolling
+  const pdfPath = `${TEST_PDFS_PATH}/large-pdf.pdf`;
+  const params = buildGetDocumentParams(pdfPath, DefaultFileReaderFactory);
+  const pdfDoc = await getDocument(params);
+  const transport = pdfDoc._transport;
+  const pageProxy = await pdfDoc.getPage(0);
+
+  // Track the number of ImageBitmaps created
+  const bitmaps = new Set();
+  const originalCreateImageBitmap = pageProxy.createImageBitmap.bind(pageProxy);
+
+  pageProxy.createImageBitmap = async (imageData) => {
+    const bitmap = await originalCreateImageBitmap(imageData);
+    bitmaps.add(bitmap);
+    return bitmap;
+  };
+
+  // Simulate scrolling through all pages
+  for (let i = 0; i < 10; i++) {
+    const page = await pdfDoc.getPage(i);
+    await page.render({
+      viewport: page.getViewport({ scale: 1 }),
+      canvasContext: new CanvasGraphics(),
+      renderInteractive: false,
+    });
+  }
+
+  // Force cleanup and GC
+  transport._intentStates.clear();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  if (globalThis.gc) {
+    globalThis.gc();
+  }
+
+  // Verify that all ImageBitmaps have been released
+  const releasedBitmaps = new Set();
+  transport.pageProxies.forEach(proxy => {
+    if (proxy._cleanupAfterRender) {
+      proxy._cleanupAfterRender();
+    }
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 100));
+  if (globalThis.gc) {
+    globalThis.gc();
+  }
+
+  expect(bitmaps.size).toBe(0);
+});

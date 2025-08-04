@@ -1,0 +1,59 @@
+it("should redo an annotation using the new keyboard shortcuts", async () => {
+  const { AnnotationEditorUIManager, CommandManager } = await import("../../src/display/editor/tools.js");
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+
+  const container = { addEventListener: jest.fn(), removeEventListener: jest.fn() };
+  const eventBus = { _on: jest.fn(), _off: jest.fn(), dispatch: jest.fn() };
+  const pdfDocument = { annotationStorage: {} };
+  const pageColors = {};
+
+  const manager = new AnnotationEditorUIManager(container, eventBus, pdfDocument, pageColors);
+  const commandManager = manager.#commandManager;
+
+  // Add a sample annotation
+  const layer = new AnnotationEditorLayer(0, container, pdfDocument, pageColors);
+  manager.addLayer(layer);
+  layer.enterEditMode();
+
+  // Simulate adding an annotation
+  const addEvent = new CustomEvent("editingaction", { detail: { name: "add" } });
+  await eventBus._on.mock.calls[0][1](addEvent);
+
+  // Verify annotation was added
+  expect(layer.editors.size).toBe(1);
+  const annotation = layer.editors.values().next().value;
+
+  // Undo the action
+  const undoEvent = new CustomEvent("editingaction", { detail: { name: "undo" } });
+  await eventBus._on.mock.calls[0][1](undoEvent);
+  expect(layer.editors.size).toBe(0);
+
+  // Test redo with new shortcuts
+  const redoEvent1 = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    keyCode: 90,
+    key: "z",
+    ctrlKey: true,
+    shiftKey: true,
+  });
+
+  const redoEvent2 = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    keyCode: 90,
+    key: "Z",
+    metaKey: true,
+    shiftKey: true,
+  });
+
+  // Test first redo
+  container.dispatchEvent(redoEvent1);
+  await new Promise(process.nextTick);
+  expect(layer.editors.size).toBe(1);
+
+  // Test second redo
+  container.dispatchEvent(redoEvent2);
+  await new Promise(process.nextTick);
+  expect(layer.editors.size).toBe(1);
+});

@@ -1,0 +1,39 @@
+<think>
+Okay, I need to write a regression test for the issue where some Russian characters aren't rendering correctly in PDF.js. The user provided a patch that modifies the standard_fonts.js file, adding several entries to the glyph map. My test should fail before the patch is applied and pass after.
+
+First, I'll look at the existing test file, test/unit/api_spec.js. It imports several modules, but I might need to add imports for getGlyphMapForStandardFonts and maybe others. Since the test is about glyph rendering, I'll probably need to interact with the PDF rendering code.
+
+I should create a test that loads a PDF containing the problematic Russian characters. Then, I'll check if the text is rendered correctly. The test will involve fetching the PDF, rendering it, and then checking the text content.
+
+I'll use the TestPdfsServer to serve the test PDF. I'll set up a PDFDocumentProxy and a PDFPageProxy to access the first page. After rendering, I'll extract the text and check for the expected Russian characters.
+
+Before the patch, the text extraction should fail to include the correct characters, but after the patch, it should include them. So, the test will compare the extracted text against an expected string.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll structure the test with async/await for proper asynchronous handling. The test will be named something like "should render Russian characters correctly".
+
+I should also handle any potential errors, like if the PDF fails to load or render. But since the focus is on the glyph map, the main check is the text content.
+
+So, putting it all together, the test will load the PDF, render the page, extract the text, and assert that the expected characters are present.
+</think>
+
+```javascript
+it("should render Russian characters correctly", async () => {
+  const server = new TestPdfsServer();
+  server.start();
+  const hostname = getCrossOriginHostname();
+  const pdfPath = `${hostname}${TEST_PDFS_PATH}/test.pdf`;
+  const loadingTask = PDFDocumentLoadingTask.fromURL(pdfPath);
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewPort({ scale: 1 });
+  const renderTask = page.render({
+    viewport,
+    enableWebGL: false,
+    enableCanvas: true,
+  });
+  await renderTask.promise;
+  const text = await page.getTextContent();
+  const expected = "Русский текст";
+  expect(text.items[0].str).toContain(expected);
+});
+```

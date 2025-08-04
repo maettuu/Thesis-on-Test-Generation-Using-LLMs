@@ -1,0 +1,48 @@
+it("should change mouse cursor when resizing from different edges", async () => {
+  const { PDFDocument, PDFViewer } = await import("../../src/display/api.js");
+  const { AnnotationEditor } = await import("../../src/display/editor/editor.js");
+  const { PDFPageProxy } = await import("../../src/display/display_utils.js");
+  const puppeteer = await import('puppeteer');
+
+  const browser = await puppeteer.launch();
+  const page = await browser.newPage();
+  const viewer = new PDFViewer({
+    container: page.contentFrame(),
+    viewerWidth: 800,
+    viewerHeight: 600,
+  });
+
+  // Load test PDF with image
+  const pdfDoc = await PDFDocument.load(await fetch('test.pdf'));
+  const pageProxy = await pdfDoc.getPage(1);
+  await viewer.setDocument(pdfDoc);
+  await pageProxy.render({});
+
+  // Add image annotation
+  const editor = new AnnotationEditor({
+    annotationElementId: "test-image",
+    uiManager: new AnnotationEditorUIManager(),
+    rotation: 0,
+    x: 100,
+    y: 100,
+    width: 200,
+    height: 150,
+  });
+
+  editor.select();
+  editor.makeResizable();
+
+  // Test top-left resize
+  await page.mouse.move(100, 100);
+  await page.mouse.down();
+  await page.mouse.move(150, 150);
+  await page.mouse.up();
+
+  const cursorStyle = await page.evaluate(() => {
+    return document.querySelector('.selectedEditor').style.cursor;
+  });
+
+  expect(cursorStyle).toBe('nwse-resize');
+
+  await browser.close();
+});

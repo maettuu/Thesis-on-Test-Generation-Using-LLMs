@@ -1,0 +1,38 @@
+it("should resolve the warning when printing a pdf with an added annotation", async () => {
+  const pdfManager = {
+    ensureCatalog: async (key) => {
+      if (key === "acroForm") {
+        return new Dict();
+      }
+      return null;
+    },
+    ensureDoc: async (key) => {
+      if (key === "xfaDatasets") {
+        return new Dict();
+      }
+      return null;
+    },
+    evaluatorOptions: {
+      isOffscreenCanvasSupported: true,
+    },
+  };
+
+  const annotationGlobals = await AnnotationFactory.createGlobals(pdfManager);
+  const xref = new XRefMock();
+  const idFactory = createIdFactory();
+  const ref = new Ref(1, 0);
+  const dict = new Dict();
+  dict.set("Subtype", Name.get("Widget"));
+  dict.set("FT", Name.get("Tx"));
+  dict.set("T", "Test");
+  dict.set("Rect", [0, 0, 100, 100]);
+  dict.set("P", new Ref(2, 0));
+  const pageIndex = await AnnotationFactory._getPageIndex(xref, ref, pdfManager);
+
+  const annotation = await AnnotationFactory.create(xref, ref, annotationGlobals, idFactory, true);
+  const consoleWarnSpy = jest.spyOn(console, "warn");
+
+  await AnnotationFactory.printNewAnnotations(annotationGlobals, { xref, options: {} }, new WorkerTask(), [annotation], {});
+
+  expect(consoleWarnSpy).not.toHaveBeenCalledWith("Unknown field name, falling back to empty field name.");
+});

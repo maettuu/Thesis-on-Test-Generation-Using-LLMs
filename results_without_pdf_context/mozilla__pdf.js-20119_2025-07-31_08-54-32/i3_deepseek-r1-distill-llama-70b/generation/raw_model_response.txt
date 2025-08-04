@@ -1,0 +1,68 @@
+<think>
+Okay, so I need to write a regression test for the issue where a context menu entry was added to highlight and comment selected text in a PDF. The patch provided makes some changes to the code, so the test should fail before the patch is applied and pass after.
+
+First, I'll look at the test file provided. It's test/unit/pdf_spec.js, and it imports various modules. I can reuse these imports as needed.
+
+The test should check if the context menu has the new options for highlighting and commenting. So, I'll need to simulate a selection in the PDF and then check if the context menu events are triggered correctly.
+
+I'll start by importing the necessary modules. Since I'm working with PDFs, I'll need to create a PDF document. The test uses build from '../../src/display/api.js' which is perfect for this.
+
+Next, I'll set up a sample PDF buffer. The example uses a simple PDF with "Hello, World!" which should be sufficient for testing the selection.
+
+I'll create the PDF document using await build(). Then, I'll get the first page and render it. I need to make sure the text is rendered so that I can select it.
+
+To simulate text selection, I'll create a Range object, select the text node, and collapse it. Then, I'll dispatch a 'selectionchange' event to trigger the selection.
+
+After that, I'll set up a mock event handler for the contextmenu event. I'll add a listener to the document to capture this event and check if the correct method is called.
+
+The patch adds two new methods: highlightSelection and commentSelection. So, in the test, I'll check if these methods are present and if they're called when the context menu is triggered.
+
+I'll dispatch a contextmenu event on the text layer and then check if the onContextMenu method was called with the correct actions: 'highlightSelection' and 'commentSelection'.
+
+Finally, I'll clean up by destroying the PDF document.
+
+So, putting it all together, the test will simulate selecting text, trigger the context menu, and verify that the new options are available and functional.
+</think>
+
+```javascript
+it("should add highlight and comment context menu options", async () => {
+  const { build } = await import("../../src/display/api.js");
+  const pdfBuffer = await import("../../src/core/pdf_buffer.js");
+  const pdfDocument = await build({
+    pdfBuffer,
+    cMapUrl: "",
+    isVerbose: false,
+  });
+  const page = await pdfDocument.getPage(1);
+  const textLayer = await page.getTextContent();
+  const div = document.createElement("div");
+  div.appendChild(textLayer.div);
+
+  const selection = document.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(textLayer.div.firstChild);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  document.dispatchEvent(new Event("selectionchange"));
+
+  const onContextMenu = jest.fn();
+  document.addEventListener("contextmenu", (e) => {
+    onContextMenu();
+  });
+
+  const contextMenuEvent = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+  });
+  textLayer.div.dispatchEvent(contextMenuEvent);
+
+  const expectedActions = ["highlightSelection", "commentSelection"];
+  const actualActions = onContextMenu.mock.calls;
+
+  expect(actualActions.length).toBe(1);
+  expect(actualActions[0][0]).toContain("highlightSelection");
+  expect(actualActions[0][0]).toContain("commentSelection");
+
+  await pdfDocument.destroy();
+});
+```

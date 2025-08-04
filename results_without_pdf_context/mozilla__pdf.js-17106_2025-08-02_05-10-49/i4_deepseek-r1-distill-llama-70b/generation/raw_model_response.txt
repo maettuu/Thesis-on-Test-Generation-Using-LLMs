@@ -1,0 +1,56 @@
+<think>
+Okay, I need to write a test that verifies the memory usage issue when scrolling through a PDF. The problem was that memory was ballooning, and the patch was supposed to fix it by releasing ImageBitmap data after cleanup.
+
+First, I should understand what the patch does. It adds a check in the WorkerTransport's obj method. If pageProxy's intentStates is empty, it closes the ImageBitmap. This should help in releasing memory when the cleanup runs.
+
+So, the test needs to ensure that after the patch, when a page is cleaned up, the ImageBitmaps are indeed released, thus preventing memory from increasing over time.
+
+I'll create a test that loads a PDF, renders a page, and then forces a cleanup. Before the patch, the memory would remain high, but after, it should drop.
+
+I'll use a PDF with a single page and a large image to make the effect noticeable. I'll check the memory usage before and after cleanup.
+
+I'll structure the test using Jest. I'll import the necessary modules like PDFDocument and PDFWorker. I'll load the PDF, get the page, render it, and then call cleanup. I'll take memory snapshots using process.memoryUsage().rss to compare.
+
+The test will fail before the patch because the memory doesn't drop, and pass after because the cleanup releases the data.
+
+I need to make sure the test is self-contained, uses only the provided imports, and is concise. I'll set up the PDF path, create the document, handle the page rendering, and check the memory after cleanup.
+
+I should also handle any potential errors and ensure the test doesn't have any flaky parts. Using async/await will make the test easier to read and maintain.
+</think>
+
+```javascript
+it("should release ImageBitmap data after cleanup", async () => {
+  const { PDFDocument, PDFWorker } = await import("../../src/display/api.js");
+  const pdfPath = `${TEST_PDFS_PATH}/large-image.pdf`;
+
+  // Create a new worker instance
+  const worker = new PDFWorker({ verbosity: 'error' });
+  const loadingTask = getDocument({ url: pdfPath, worker: worker });
+  
+  // Load the document and get the page
+  const pdfDoc = await loadingTask.promise;
+  const page = await pdfDoc.getPage(1);
+
+  // Render the page to force image loading
+  const { canvasContext } = await import("../../src/display/display_utils.js");
+  const canvas = new canvasContext();
+  const viewport = page.getViewport({ scale: 1 });
+  
+  await page.render({
+    canvasContext: canvas.getContext('2d'),
+    viewport: viewport
+  });
+
+  // Verify memory before cleanup
+  const beforeMemory = process.memoryUsage().rss;
+
+  // Perform cleanup
+  await pdfDoc.cleanup();
+
+  // Verify memory after cleanup
+  const afterMemory = process.memoryUsage().rss;
+  
+  // The memory should have decreased significantly after cleanup
+  expect(afterMemory).toBeLessThan(beforeMemory);
+});
+```

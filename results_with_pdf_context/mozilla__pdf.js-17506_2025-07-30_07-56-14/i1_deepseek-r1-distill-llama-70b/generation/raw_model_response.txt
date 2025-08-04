@@ -1,0 +1,64 @@
+<think>
+Okay, I need to create a regression test for the issue where highlighting images of text wasn't supported. The patch adds support for this, so the test should fail before the patch and pass after.
+
+First, I'll look at the provided files. The main changes are in draw_layer.js, annotation_editor_layer.js, highlight.js, and outliner.js. The patch introduces FreeOutliner and FreeHighlightOutline to handle free-form highlighting.
+
+I need to write a test that checks if free-form highlights are correctly handled. The test should create a highlight, draw it, and verify it's rendered properly.
+
+I'll start by importing the necessary modules. Since the test is in Node.js, I'll use dynamic imports for dependencies like PDFDocument and others.
+
+I'll set up a source PDF, perhaps using a sample image file. Then, I'll create a PDFDocument and get the first page. I'll set up the viewport and create instances of DrawLayer, AnnotationEditorLayer, and other necessary components.
+
+Next, I'll simulate a free-form highlight by creating an instance of FreeOutliner and using it to generate outlines. I'll add this to the draw layer and check if the SVG elements are created correctly.
+
+I'll also need to handle any UI events, like pointerdown and pointermove, to simulate the drawing process. After drawing, I'll check the SVG paths to ensure they match expectations.
+
+Finally, I'll compare the actual output with the expected structure to confirm that the highlight was applied correctly. This should cover both the functionality before and after the patch.
+</think>
+
+```javascript
+it("should support highlighting images of text", async () => {
+  const { PDFDocument } = await import("../../src/core/pdf_document.js");
+  const { PDFPage } = await import("../../src/core/pdf_page.js");
+  const { PDFWorker } = await import("../../src/display/api.js");
+  const { DOMSVGFactory } = await import("../../src/display/display_utils.js");
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+  const { DrawLayer } = await import("../../src/display/draw_layer.js");
+  const { Outliner } = await import("../../src/display/editor/outliner.js");
+
+  const source = await import("../../test/data/canvas.pdf");
+  const pdf = await PDFDocument.load(source.data);
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewPort({ scale: 1 });
+  const drawLayer = new DrawLayer({ pageIndex: 1 });
+  const annotationEditorLayer = new AnnotationEditorLayer({
+    uiManager: {},
+    pageIndex: 1,
+    div: document.createElement("div"),
+    accessibilityManager: {},
+    annotationLayer: {},
+    drawLayer,
+    textLayer: {},
+    viewport,
+  });
+
+  const freeOutliner = new Outliner.FreeOutliner(
+    { x: 0.1, y: 0.1 },
+    [0, 0, 1, 1],
+    1,
+    0.01
+  );
+
+  const highlight = drawLayer.highlight(
+    freeOutliner,
+    "#ff0000",
+    0.5,
+    true
+  );
+
+  const path = drawLayer._svgFactory.createElement("path");
+  path.setAttribute("d", freeOutliner.toSVGPath());
+
+  expect(path.getAttribute("d")).toBeTruthy();
+});
+```

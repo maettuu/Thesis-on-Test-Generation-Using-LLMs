@@ -1,0 +1,71 @@
+<think>
+Okay, I need to create a test for the patch that uses ImageDecoder to speed up decoding images in PDFs. The patch was applied to several files, but the main changes are in jpeg_stream.js and image.js. 
+
+First, I should understand what the patch does. It seems like the patch introduces a new method getTransferableImage in the BaseStream class, which is implemented in JpegStream. This method uses the ImageDecoder API to decode images more efficiently. 
+
+The test should check if this new method is correctly used and if it improves performance. Since it's a regression test, it should fail before the patch and pass after.
+
+I'll start by looking at the existing test file, primitives_spec.js. It imports some primitives and a StringStream, and uses XRefMock. I'll need to import the necessary modules for this test, like JpegStream, PDFImage, and maybe others.
+
+The test should create a scenario where a JPEG image is decoded. Before the patch, the old method was used, which was slower. After the patch, the new method using ImageDecoder should be used, making the test pass.
+
+I'll create a test that checks if the image is decoded using the new method. I'll mock the data and the XRef to simulate a PDF with a JPEG image. Then, I'll check if the getTransferableImage method is called and if the image is correctly decoded.
+
+I need to make sure the test is self-contained. I'll import the necessary modules and set up the mocks. The test will async/await for the decoding to complete and then compare the expected and actual results.
+
+So, the test will:
+
+1. Import the required modules.
+2. Set up a mock XRef and create a sample JPEG data stream.
+3. Create a JpegStream instance and a PDFImage instance.
+4. Check if the getTransferableImage method is available and used.
+5. Verify that the image data is correctly decoded.
+
+This way, the test will ensure that the patch correctly implements the ImageDecoder usage and improves decoding speed.
+</think>
+
+it("should use ImageDecoder for faster JPEG decoding", async () => {
+  const { JpegStream, PDFImage } = await import("../../src/core/jpeg_stream.js");
+  const { BaseStream } = await import("../../src/core/base_stream.js");
+  const xref = new XRefMock();
+  
+  // Mock JPEG data (simplified for testing)
+  const jpegData = new Uint8Array([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0xff, 0xfe, 0x00, 0x1c, 0x49, 0x44, 0x41, 0x54,
+    0x41, 0x54, 0x47, 0x41, 0x57, 0x45, 0x52, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xd9
+  ]);
+  
+  const stream = new JpegStream({
+    stream: new StringStream(jpegData),
+    maybeLength: jpegData.length,
+    params: {}
+  });
+  
+  const image = new PDFImage({
+    image: stream,
+    xref: xref,
+    res: null,
+    isInline: false,
+    pdfFunctionFactory: null,
+    localColorSpaceCache: null
+  });
+  
+  // Verify that getTransferableImage is available
+  expect(stream.getTransferableImage).toBeDefined();
+  
+  // Check if ImageDecoder is used
+  const useImageDecoder = await JpegStream.canUseImageDecoder;
+  expect(useImageDecoder).toBe(true);
+  
+  // Verify image decoding works
+  const decodedImage = await image.getImageData();
+  expect(decodedImage).toBeDefined();
+  
+  // Verify the image data matches expected dimensions
+  expect(decodedImage.width).toBe(1);
+  expect(decodedImage.height).toBe(1);
+});
+
+```

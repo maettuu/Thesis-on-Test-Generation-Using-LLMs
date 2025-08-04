@@ -1,0 +1,42 @@
+const { createCanvas } = require('canvas');
+const { PNG } = require('pngjs').PNG;
+const { JSDOM } = require('jsdom');
+const pdfjsLib = require('../../src/display/canvas.js');
+
+it("should fix pattern rendering with transform", async () => {
+  const pdfPath = require.resolve("../../test.pdf");
+  const expectedHash = "4e5b0eab2c1a4c0fbef7d9c0f4d0e1f2";
+
+  let container = new JSDOM().window.document.createElement("div");
+  const canvas = createCanvas(400, 400);
+  const ctx = canvas.getContext('2d');
+
+  const pdfDoc = await pdfjsLib.PDFDocumentLoadingTask.load(pdfPath);
+  const pdfPage = await pdfDoc.getPage(1);
+  const viewport = pdfPage.getViewBox({ scale: 1 });
+
+  await pdfPage.render({
+    canvasContext: ctx,
+    viewport: viewport,
+    enableWebGL: false,
+    useCanvasBGRA: true
+  });
+
+  const actualCanvas = createCanvas(400, 400);
+  const actualCtx = actualCanvas.getContext('2d');
+  actualCtx.drawImage(canvas, 0, 0);
+
+  const img = new PNG({
+    width: actualCanvas.width,
+    height: actualCanvas.height
+  });
+
+  const stream = img.pack().pipe(require('crypto').createHash('sha256'));
+  const hash = await new Promise((resolve, reject) => {
+    stream.on('finish', () => resolve(stream.read().toString('hex')));
+    stream.on('error', reject);
+    actualCanvas.createPNGStream().pipe(stream);
+  });
+
+  expect(hash).toBe(expectedHash);
+});

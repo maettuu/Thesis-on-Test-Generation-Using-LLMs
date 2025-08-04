@@ -1,0 +1,77 @@
+<think>
+Okay, I need to write a regression test for the issue where text isn't shown because the browser.display.use_document_fonts setting is disabled. The user provided a patch, and I have to make sure the test fails before the patch and passes after.
+
+First, I'll look at the existing test file, test/unit/annotation_spec.js. It imports several modules, but I might need others. The issue is about font rendering, so I'll probably need to create a PDF with specific fonts and test how it's rendered.
+
+I should create a test PDF that includes text using a font that might be problematic when document fonts are disabled. Maybe use a simple PDF with a single page and some text.
+
+In the test, I'll set browser.display.use_document_fonts to 0 using a mock. Then, I'll load the PDF and check if the text is rendered correctly. If the patch works, the text should be visible.
+
+I'll use the PDFDataLoader to load the PDF and get the first page. Then, I'll render it and check for the expected text in the rendered canvas.
+
+I need to make sure the test is self-contained, so I'll create a dummy PDF as a Uint8Array. The PDF should have a font that, when document fonts are disabled, would cause issues without the patch.
+
+I'll write the test using Jest's it block. I'll set up the mock for use_document_fonts, load the PDF, render the page, and then check if the canvas contains the expected text.
+
+I should also handle any potential issues, like the PDF loading correctly or the canvas rendering properly. If the patch is applied, the test should pass, meaning the text is visible.
+
+So, I'll structure the test by importing necessary modules, setting up the mock, creating the PDF, loading it, rendering, and then checking the result. This should cover the scenario and validate the patch's effectiveness.
+</think>
+
+```javascript
+it("should render text when browser.display.use_document_fonts is disabled", async () => {
+  const { PDFDataLoader } = await import("../../src/display/api.js");
+  const { PDFDocument } = await import("../../src/display/document.js");
+  const { PDFPage } = await import("../../src/display/document.js");
+  const { PDFViewer } = await import("../../src/web/pdf_viewer.js");
+  const { PDFRenderer } = await import("../../src/display/canvas.js");
+
+  // Create a minimal PDF with text
+  const pdfData = new Uint8Array([
+    0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x30, 0x0A, 0x25, 0x5E, 0x5E, 0x5E, 0x5E, 0x0A,
+    0x31, 0x20, 0x30, 0x20, 0x72, 0x65, 0x66, 0x0A, 0x34, 0x35, 0x30, 0x30, 0x39, 0x34, 0x0A,
+    0x32, 0x30, 0x20, 0x30, 0x20, 0x72, 0x65, 0x66, 0x0A, 0x34, 0x35, 0x30, 0x30, 0x39, 0x34, 0x0A,
+    0x38, 0x20, 0x30, 0x20, 0x72, 0x65, 0x66, 0x0A, 0x34, 0x35, 0x30, 0x30, 0x39, 0x34, 0x0A,
+    0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x30, 0x0A
+  ]);
+  
+  // Mock browser.display.use_document_fonts
+  const originalUseDocumentFonts = globalThis.navigator.browser.display.use_document_fonts;
+  globalThis.navigator.browser.display.use_document_fonts = () => 0;
+
+  try {
+    const loader = new PDFDataLoader({
+      data: pdfData,
+    });
+    const pdf = await PDFDocument.load(loader);
+    const page = await pdf.getPage(1);
+    const viewer = new PDFViewer();
+    const renderer = new PDFRenderer({
+      canvasCtx: {
+        save: () => {},
+        restore: () => {},
+        scale: () => {},
+        translate: () => {},
+        fillText: () => {},
+        strokeText: () => {},
+        measureText: () => ({ width: 0 }),
+        getTransform: () => new DOMMatrix(),
+        setTransform: () => {},
+      },
+    });
+
+    await page.startRendering({
+      viewport: page.getViewport({ scale: 1 }),
+      renderInteractive: false,
+    });
+
+    const canvas = renderer.canvasCtx;
+    const expectedText = "Test String";
+    const actualText = canvas.fillText;
+
+    expect(actualText).toBeTruthy();
+  } finally {
+    globalThis.navigator.browser.display.use_document_fonts = originalUseDocumentFonts;
+  }
+});
+```

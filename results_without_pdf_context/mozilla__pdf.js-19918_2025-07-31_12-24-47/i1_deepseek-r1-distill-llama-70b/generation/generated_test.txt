@@ -1,0 +1,44 @@
+it("should decode cmyk jpeg image using ImageDecoder", async () => {
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const { PDFDocumentProxy, PDFPageProxy } = await import("../../src/display/api.js");
+  const server = new TestPdfsServer();
+  try {
+    await server.start();
+    const cmykJpegUrl = server.url("cmyk.jpeg");
+    const response = await fetch(cmykJpegUrl);
+    const arrayBuffer = await response.arrayBuffer();
+    const data = new Uint8Array(arrayBuffer);
+
+    const transport = new PDFDataRangeTransport(data);
+    const loadingTask = PDFDocumentLoadingTask.create(transport);
+    const pdf = await PDFDocumentProxy.create({
+      loadingTask,
+      isDataLoaded: () => true,
+      isDisposed: false,
+      getProxies: () => ({
+        pages: [PDFPageProxy.create({})],
+      }),
+    });
+
+    const page = pdf.getPages()[0];
+    const viewport = page.getViewport({ scale: 1 });
+
+    let exceptionThrown = false;
+    try {
+      await page.render({
+        viewport,
+        renderOption: {
+          renderAnnotations: false,
+          renderForm: false,
+          useImageDecoder: true,
+        },
+      });
+    } catch (e) {
+      exceptionThrown = true;
+    }
+
+    assert.notOk(exceptionThrown, "Exception thrown when rendering CMYK JPEG");
+  } finally {
+    await server.stop();
+  }
+});

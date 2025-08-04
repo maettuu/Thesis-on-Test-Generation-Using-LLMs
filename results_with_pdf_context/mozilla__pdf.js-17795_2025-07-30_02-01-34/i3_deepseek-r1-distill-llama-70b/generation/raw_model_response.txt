@@ -1,0 +1,50 @@
+<think>
+Okay, I need to write a test that verifies the patch fixes the issue where only one image is rendered in the provided PDF. Let me think through the steps.
+
+First, I'll look at the issue details. The problem is that in the PDF, some inlined images are missing the closing 'EI' operator, causing only one image to be rendered. The patch adds error handling around the image processing code, so if an error occurs, it logs a warning but continues processing.
+
+I need to create a test that checks if all images are rendered correctly after the patch. The test should open the PDF, render it, and check that both images are present.
+
+I'll start by importing necessary modules. I'll need 'getDocument' from the display API and 'buildGetDocumentParams' from test_utils to load the PDF. I'll also need 'PDFPageProxy' to access the pages.
+
+In the test, I'll use Jest's 'it' function. I'll set up the PDF document using getDocument with the test file 'issue17794.pdf'. Then, I'll get the first page and render it.
+
+To check if both images are rendered, I'll need to examine the operator list after rendering. I'll create an OperatorList and use a custom sink to collect the 'paintInlineImageXObject' operations. Each call to this operation indicates an image being rendered.
+
+I'll set up the sink to count the number of image rendering operations. After rendering the page, I'll assert that the count is 2, meaning both images were processed correctly.
+
+I should also handle any potential errors during rendering, perhaps using a try-catch block to ensure the test fails if something goes wrong.
+
+Putting it all together, the test will load the PDF, render the page, and check that both images are rendered. This should pass after the patch is applied, as the error handling now allows the second image to be processed despite the missing 'EI' operator.
+</think>
+
+```javascript
+it("should correctly render inlined images without closing EI", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue17794.pdf'));
+  const { pdfDocument } = await loadingTask;
+  const page = await pdfDocument.getPage(1);
+  const operatorList = new OperatorList();
+  const imageRenderCount = { count: 0 };
+
+  // Create a sink to track image rendering operations
+  const sink = {
+    enqueue: (chunk, size) => {
+      if (chunk.items && chunk.items[0]?.fn === OPS.paintInlineImageXObject) {
+        imageRenderCount.count++;
+      }
+    },
+  };
+
+  // Render the page and collect operatorList
+  await page.render({
+    sink,
+    operatorList,
+    viewport: page.getViewport({ scale: 1 }),
+  });
+
+  // The PDF should contain two inlined images
+  expect(imageRenderCount.count).toBe(2);
+});
+```

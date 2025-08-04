@@ -1,0 +1,49 @@
+<think>
+Okay, I need to write a regression test for the issue where SVG images couldn't be resized horizontally or vertically in pdf.js. The patch provided adds a method to check if SVGs fit in the canvas without preserving the aspect ratio. 
+
+First, I should understand what the patch does. The new method _checkIfSVGFitsInCanvas creates an SVG, draws it on a canvas, and checks if the drawing was successful without preserving the aspect ratio. If it works, it appends a URL fragment to the SVG URL to remove the aspect ratio constraint.
+
+So, the test needs to verify that after the patch, resizing an SVG image doesn't maintain the aspect ratio. I'll create an SVG image, add it to the ImageManager, and then check its dimensions after resizing.
+
+I'll start by importing the necessary modules, like ImageManager and Util. Then, I'll create a test SVG image with a red rectangle. I'll use the ImageManager to load this SVG and wait for it to be ready.
+
+Next, I'll draw this image on a canvas. The canvas dimensions should be different from the SVG's default to test resizing. I'll create a canvas with a width of 100 and height of 50, which changes the aspect ratio.
+
+I'll draw the image on the canvas and then check the pixel color. If the aspect ratio wasn't preserved, the red color should cover the entire canvas, so the top-left pixel should be red. If it's not red, the aspect ratio was preserved, which would mean the test fails.
+
+This test should fail before the patch because the aspect ratio was preserved, and the resizing wouldn't cover the canvas correctly. After the patch, the aspect ratio isn't preserved, so the test should pass.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll structure the test with async/await to handle the image loading and drawing properly.
+</think>
+
+```javascript
+it("should resize SVG images without preserving aspect ratio", async () => {
+  const { ImageManager, Util } = await import("../../src/display/editor/tools.js");
+  const { stringToUTF8String } = await import("../../shared/util.js");
+
+  // Create a test SVG image
+  const svg = `<svg viewBox="0 0 100 100" width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" style="fill:red;"/>
+  </svg>`;
+
+  // Create an ImageManager instance
+  const imageManager = new ImageManager();
+
+  // Use the ImageManager to get the image data
+  const imageKey = `image_${Date.now()}`;
+  const imageData = await imageManager.#get(imageKey, svg);
+
+  // Create a canvas to draw the image
+  const canvas = new OffscreenCanvas(100, 50); // Resized canvas (changed aspect ratio)
+  const ctx = canvas.getContext("2d");
+
+  // Draw the image on the canvas
+  ctx.drawImage(imageData.bitmap, 0, 0, 100, 50);
+
+  // Check if the image filled the canvas without preserving aspect ratio
+  const pixels = ctx.getImageData(0, 0, 1, 1).data;
+  const isRed = pixels[0] === 255 && pixels[1] === 0 && pixels[2] === 0;
+
+  expect(isRed).toBe(true);
+});
+```

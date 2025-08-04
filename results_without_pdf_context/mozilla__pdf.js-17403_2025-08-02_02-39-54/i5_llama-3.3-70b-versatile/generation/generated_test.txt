@@ -1,0 +1,36 @@
+it("should render a PDF with many pages without slowing down", async () => {
+  const { PDFDocument, PDFPageProxy } = await import("../../src/display/api.js");
+  const { PDFFetchStream } = await import("../../src/display/fetch_stream.js");
+  const { MessageHandler } = await import("../../src/shared/message_handler.js");
+
+  const pdfUrl = "./test.pdf";
+  const pdfStream = new PDFFetchStream(pdfUrl);
+  const pdfDocument = await PDFDocument.load({ cMapUrl: "./cmap", cMapPacked: true, pdf: pdfStream });
+  const messageHandler = new MessageHandler("test", "test", {});
+
+  const pages = pdfDocument.numPages;
+  const pagePromises = [];
+
+  for (let i = 1; i <= pages; i++) {
+    const pagePromise = pdfDocument.getPage(i).then((page) => {
+      const pageProxy = new PDFPageProxy(page);
+      return pageProxy.render({
+        canvasContext: null,
+        viewport: pageProxy.getViewport({ scale: 1 }),
+        renderInteractiveForms: false,
+      });
+    });
+    pagePromises.push(pagePromise);
+  }
+
+  await Promise.all(pagePromises);
+  const startTime = Date.now();
+  await messageHandler._onComObjOnMessage({ data: { action: "GetOperatorList" } });
+  const endTime = Date.now();
+  const executionTime = endTime - startTime;
+
+  const { Util } = await import("../../src/shared/util.js");
+  const maxExecutionTime = Util.getVerbosityLevel() === 0 ? 1000 : 5000;
+
+  expect(executionTime).toBeLessThan(maxExecutionTime);
+});

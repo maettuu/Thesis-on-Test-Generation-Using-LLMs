@@ -1,0 +1,42 @@
+<think>
+Okay, I need to write a regression test for the issue where some Russian characters aren't rendering correctly in PDF.js. The user provided a patch that modifies the standard_fonts.js file by adding several entries to the glyph map. My task is to create a test that fails before the patch and passes after.
+
+First, I should understand the problem. The user mentioned that in Chrome, some Russian characters show as unknown letters, but they render correctly in Adobe Acrobat. This suggests that PDF.js isn't correctly mapping certain glyphs for these characters.
+
+Looking at the patch, it adds a range of entries to the glyph map in standard_fonts.js. These entries start at t[570] and go up to t[600], mapping to Unicode code points from 1040 to 1070. This indicates that the missing mappings were causing the incorrect rendering.
+
+To create an effective test, I need to ensure that the test checks for the presence of these glyphs. The test should load the provided PDF file, render it, and check if the expected text is displayed correctly.
+
+I'll structure the test using the existing test setup. The test will use the TestPdfsServer to serve the PDF and then use the getDocument method to load it. Once loaded, it will render the first page and extract the text.
+
+I should use the TextLayerBuilder to get the text content. If the glyphs are correctly mapped, the text should include the expected Russian characters. If not, the text might contain incorrect or missing characters.
+
+In the test, I'll compare the extracted text against the expected string. If the patch is applied, the extracted text should match, making the test pass. Without the patch, the text won't match, causing the test to fail.
+
+I'll write the test in the specified format, ensuring all necessary imports are included. The test will be self-contained and focus solely on verifying the glyph mappings for the Russian characters.
+</think>
+
+```javascript
+it("should correctly render Russian characters in PDFs", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const { TestPdfsServer } = await import('./test_utils.js');
+  const { TextLayerBuilder } = await import('../../src/display/text_layer_builder.js');
+  const { PDFDocumentProxy } = await import('../../src/display/api.js');
+  const { PDFPageProxy } = await import('../../src/display/api.js');
+
+  const server = new TestPdfsServer();
+  const loadingTask = getDocument(buildGetDocumentParams('issue19550.pdf'));
+  const doc = await loadingTask.promise;
+  const page = await doc.getPage(1);
+  const textLayer = new TextLayerBuilder({
+    textLayerDiv: document.createElement('div'),
+    page,
+  });
+  const textContent = await page.getTextContent();
+  const expectedText = "Русский текст";
+  const actualText = textContent.items.map(item => item.str).join('');
+  
+  expect(actualText).toContain(expectedText);
+});
+```

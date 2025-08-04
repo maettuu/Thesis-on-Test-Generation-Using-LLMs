@@ -1,0 +1,68 @@
+<think>
+Okay, I need to write a regression test for the issue where the font size slider in the text editor wasn't working smoothly. The patch introduced a small delay before moving the editor in the DOM to prevent UI blocking. 
+
+First, I should understand what the patch does. It adds a timeout to the moveInDOM method, so the editor doesn't move immediately. This should make the UI more responsive when changing the font size.
+
+Now, I need to create a test that fails before the patch and passes after. The test should simulate the scenario where moving the slider causes the editor to move in the DOM without blocking.
+
+I'll use the test_utils.js to mock the necessary dependencies. I'll create a test editor, simulate adding it to the DOM, and then trigger a font size change. 
+
+I'll set up a spy on the moveInDOM method to check if it's called correctly. Before the patch, moving the slider would call moveInDOM immediately, which might block the UI. After the patch, it should wait a bit before moving.
+
+In the test, I'll create an annotation editor, attach it to a mock parent, and then dispatch an input event on the font size slider. I'll use a promise to wait for the moveInDOM to be called after a short delay. If it's called within the expected time, the test passes.
+
+I need to make sure all dependencies are correctly imported and that the test is self-contained. I'll structure the test with Jest syntax, using async/await for the promises.
+
+So, the test will check that after applying the patch, moving the slider doesn't block the UI by ensuring moveInDOM is called after a small timeout. This should fix the issue where the slider was unresponsive before.
+</think>
+
+```javascript
+it("should not block UI when changing font size in editor", async () => {
+  const { AnnotationEditor } = await import("../../display/editor/editor.js");
+  const { XRefMock } = await import("./test_utils.js");
+
+  // Create a mock parent element and editor
+  const parent = {
+    moveEditorInDOM: jest.fn(),
+    pageIndex: 0,
+    viewport: {
+      rotation: 0,
+      get pageWidth() { return 100; },
+      get pageHeight() { return 100; },
+      get pageX() { return 0; },
+      get pageY() { return 0; }
+    }
+  };
+
+  const editor = new AnnotationEditor({
+    parent,
+    id: "test-editor",
+    uiManager: {},
+    isCentered: false,
+    name: "test"
+  });
+
+  // Initialize editor
+  editor.div = document.createElement("div");
+  document.body.appendChild(editor.div);
+
+  // Simulate font size change
+  const fontSizeSlider = document.createElement("input");
+  fontSizeSlider.type = "range";
+  fontSizeSlider.min = 8;
+  fontSizeSlider.max = 72;
+  fontSizeSlider.value = 12;
+  document.body.appendChild(fontSizeSlider);
+
+  // Spy on moveInDOM
+  const moveInDOMSpy = jest.spyOn(editor, "moveInDOM");
+
+  // Test that moveInDOM is not called synchronously
+  fontSizeSlider.dispatchEvent(new Event("input"));
+  
+  // Wait for async moveInDOM call
+  await new Promise(resolve => setTimeout(resolve, 10));
+
+  expect(moveInDOMSpy).toHaveBeenCalled();
+});
+```

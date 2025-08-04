@@ -1,0 +1,77 @@
+<think>
+Okay, I need to create a regression test for the issue where highlighting images of text wasn't supported. The patch adds support for both text and image highlighting, so the test should verify this functionality.
+
+First, I'll examine the existing test file provided. It imports necessary modules and sets up an expectedAPI object. I can use this structure to write my test.
+
+I'll start by setting up a PDF document with both text and image content. For this, I'll create a sample PDF using pdf-lib. The PDF should have a page with text and an image. I'll generate this PDF as a Blob and then use the fetch API to create a URL for it.
+
+Next, I'll use pdf.js to load this PDF document. I'll create a document instance and render the first page. Then, I'll set up the necessary UI components, like the AnnotationEditorLayer and the DrawLayer, to handle the highlighting.
+
+To test the highlighting, I'll simulate user interactions. I'll add event listeners to the text and image elements to capture pointerdown and pointerup events, which will trigger the highlighting.
+
+I'll check if the highlights are correctly applied to both text and image elements. This involves verifying that the highlight elements are added to the DOM after the events are triggered.
+
+Finally, I'll clean up by revoking the object URL and closing the PDF document to ensure no resources are leaked.
+
+The test should fail before the patch because image highlighting isn't supported, and after the patch, it should pass as both text and image highlights are correctly applied.
+</think>
+
+```javascript
+it("should highlight both text and image elements", async () => {
+  const { jsPDF } = await import("pdf-lib");
+  const pdf = new jsPDF();
+  pdf.setFontSize(20);
+  pdf.text("Highlight this text", 20, 50);
+  pdf.ellipse(20, 100, 50, 30);
+  pdf.save("test.pdf", undefined, "blob");
+  const blob = new Blob([pdf.output('blob')], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+
+  const pdfDocument = await getDocument(url);
+  const page = await pdfDocument.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const div = document.createElement("div");
+  div.style.width = `${viewport.width}px`;
+  div.style.height = `${viewport.height}px`;
+  document.body.appendChild(div);
+
+  const drawLayer = new DrawLayer({ pageIndex: 1 });
+  const annotationEditorLayer = new AnnotationEditorLayer({
+    uiManager: new AnnotationEditorUIManager(),
+    div,
+    drawLayer,
+    pageIndex: 1,
+    viewport,
+  });
+
+  annotationEditorLayer.updateToolbar(AnnotationEditorType.HIGHLIGHT);
+  annotationEditorLayer.updateMode();
+
+  const textHighlight = new Promise((resolve) => {
+    const textLayer = div.querySelector(".textLayer");
+    const textElement = textLayer.querySelector("div");
+    const imageElement = div.querySelector("canvas");
+
+    const handlePointerDown = (e) => {
+      e.preventDefault();
+      const pointerUp = (e) => {
+        e.preventDefault();
+        const highlights = div.querySelectorAll(".highlight");
+        expect(highlights).toHaveLength(2);
+        resolve();
+      };
+      imageElement.addEventListener("pointerup", pointerUp, { once: true });
+      textElement.addEventListener("pointerup", pointerUp, { once: true });
+    };
+
+    textElement.addEventListener("pointerdown", handlePointerDown, { once: true });
+    imageElement.addEventListener("pointerdown", handlePointerDown, { once: true });
+  });
+
+  await textHighlight;
+
+  URL.revokeObjectURL(url);
+  document.body.removeChild(div);
+  await pdfDocument.close();
+});
+```

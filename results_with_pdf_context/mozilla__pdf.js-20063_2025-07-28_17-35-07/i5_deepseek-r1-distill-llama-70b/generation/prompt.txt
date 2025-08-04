@@ -1,0 +1,304 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: PolygonAnnotation fill not rendered (only outline) in PDF.js web viewer, but works in Acrobat and Edge
+### Attach (recommended) or Link to PDF file
+
+[document.pdf](https://github.com/user-attachments/files/21099399/document.pdf)
+
+### Web browser and its version
+
+Edge-138.0.3351.65
+
+### Operating system and its version
+
+Win11- 26100.4349
+
+### PDF.js version
+
+5.3.93
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+1. Create a PDF with a PolygonAnnotation that has both a stroke and a fill color (libraries(https://github.com/highkite/pdfAnnotate)).(The pdf uploaded)
+2. Open the PDF in the PDF.js web viewer.
+3. Observe that only the polygon's outline is visible, with no fill.
+4. Open the same PDF in Acrobat or Edge and observe that the polygon is correctly filled.
+
+### What is the expected behavior?
+
+Expected behavior
+The polygon annotation should be rendered with both its outline and fill color, consistent with Acrobat and Edge.
+Acrobat:
+<img width="467" height="605" alt="Image" src="https://github.com/user-attachments/assets/4b1bc337-953e-44e6-8f54-6e105bf106da" />
+Edge:
+
+<img width="980" height="897" alt="Image" src="https://github.com/user-attachments/assets/bd55054d-fba3-42a1-a53f-4625de423d29" />
+
+### What went wrong?
+
+ When displaying a PDF containing PolygonAnnotation (with fill color) using the PDF.js web viewer, only the outline of the polygon is rendered. The fill color is missing. However, the same PDF displays correctly (with both fill and outline) in Adobe Acrobat and Microsoft Edge's built-in PDF viewer.
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+_No response_
+</issue>
+
+PDF File:
+<pdf>
+issue20062.pdf
+</pdf>
+
+Patch:
+<patch>
+diff --git a/src/core/annotation.js b/src/core/annotation.js
+--- a/src/core/annotation.js
++++ b/src/core/annotation.js
+@@ -2391,7 +2391,7 @@ class WidgetAnnotation extends Annotation {
+ 
+     if (encodingError && intent & RenderingIntentFlag.SAVE) {
+       // We don't have a way to render the field, so we just rely on the
+-      // /NeedAppearances trick to let the different software correctly render
++      // /NeedAppearances trick to let the different sofware correctly render
+       // this pdf.
+       return { needAppearances: true };
+     }
+@@ -4337,6 +4337,24 @@ class PolylineAnnotation extends MarkupAnnotation {
+       const strokeColor = this.color ? getPdfColorArray(this.color) : [0, 0, 0];
+       const strokeAlpha = dict.get("CA");
+ 
++      let fillColor = getRgbColor(dict.getArray("IC"), null);
++      if (fillColor) {
++        fillColor = getPdfColorArray(fillColor);
++      }
++
++      let operator;
++      if (fillColor) {
++        if (this.color) {
++          operator = fillColor.every((c, i) => c === strokeColor[i])
++            ? "f"
++            : "B";
++        } else {
++          operator = "f";
++        }
++      } else {
++        operator = "S";
++      }
++
+       const borderWidth = this.borderStyle.width || 1,
+         borderAdjust = 2 * borderWidth;
+ 
+@@ -4361,13 +4379,15 @@ class PolylineAnnotation extends MarkupAnnotation {
+         extra: `${borderWidth} w`,
+         strokeColor,
+         strokeAlpha,
++        fillColor,
++        fillAlpha: fillColor ? strokeAlpha : null,
+         pointsCallback: (buffer, points) => {
+           for (let i = 0, ii = vertices.length; i < ii; i += 2) {
+             buffer.push(
+               `${vertices[i]} ${vertices[i + 1]} ${i === 0 ? "m" : "l"}`
+             );
+           }
+-          buffer.push("S");
++          buffer.push(operator);
+           return [points[0], points[7], points[2], points[3]];
+         },
+       });
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.27.4
+- @babel/preset-env: ^7.27.2
+- @babel/runtime: ^7.27.6
+- @csstools/postcss-light-dark-function: ^2.0.9
+- @fluent/bundle: ^0.19.1
+- @fluent/dom: ^0.10.1
+- @metalsmith/layouts: ^3.0.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.71
+- @types/node: ^24.0.3
+- autoprefixer: ^10.4.21
+- babel-loader: ^10.0.0
+- caniuse-lite: ^1.0.30001724
+- core-js: ^3.43.0
+- eslint: ^9.29.0
+- eslint-plugin-import: ^2.32.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.15.0
+- eslint-plugin-prettier: ^5.5.0
+- eslint-plugin-unicorn: ^59.0.1
+- globals: ^16.2.0
+- gulp: ^5.0.1
+- gulp-cli: ^3.1.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.8.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.6
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.4
+- postcss-nesting: ^13.0.2
+- prettier: ^3.5.3
+- puppeteer: ^24.10.2
+- stylelint: ^16.21.0
+- stylelint-prettier: ^5.0.3
+- svglint: ^4.1.0
+- terser-webpack-plugin: ^5.3.14
+- tsc-alias: ^1.8.16
+- ttest: ^4.0.0
+- typescript: ^5.8.3
+- vinyl: ^3.0.1
+- webpack: ^5.99.9
+- webpack-stream: ^7.0.0
+- yargs: ^18.0.0
+
+Engines:
+- node: >=20.16.0 || >=22.3.0
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/calculate_md5.js`: calculateMD5
+- `../../src/core/calculate_sha256.js`: calculateSHA256
+- `../../src/core/calculate_sha_other.js`: calculateSHA384, calculateSHA512
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/colorspace_utils.js`: ColorSpaceUtils
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalColorSpaceCache, GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/api_utils.js`: LoopbackPort, isValidExplicitDest
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, DrawOPS, FeatureTest, FormatError, ImageKind, InvalidPDFException, MathClamp, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util, updateUrlHash
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. You can use the PDF file for testing as follows:
+const { getDocument } = await import('../../src/display/api.js');
+const { buildGetDocumentParams } = await import('./test_utils.js');
+const loadingTask = getDocument(buildGetDocumentParams('issue20062.pdf'))
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

@@ -1,0 +1,42 @@
+it("should correctly serialize highlight annotations after cropping", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1872721.pdf'));
+
+  const en = await loadingTask.promise;
+  const pdfDoc = await en.document;
+  const page = await pdfDoc.getPage(1);
+
+  // Create a new highlight annotation
+  const annotation = {
+    type: 'highlight',
+    color: [1, 1, 0, 0.5], // Yellow with 50% opacity
+    quadPoints: [
+      100, 100, 200, 100, 200, 200, 100, 200, 
+      100, 300, 200, 300, 200, 400, 100, 400
+    ],
+    page: 1
+  };
+
+  // Add annotation to the page
+  const annotations = await page.getAnnotations();
+  annotations.push(annotation);
+
+  // Render the page to apply the annotation
+  const viewport = page.getViewPort({ scale: 1 });
+  const renderTask = page.render({
+    viewport,
+    annotationMode: 'highlight',
+    enableWebGL: false
+  });
+
+  await renderTask.promise;
+
+  // Get the annotation editor data
+  const editor = new HighlightEditor(annotation, page, viewport);
+  const data = editor.getData();
+
+  // Verify the quadPoints and outlines are correctly serialized with rect
+  expect(data.quadPoints).toBeDefined();
+  expect(data.outlines).toBeDefined();
+});

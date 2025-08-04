@@ -1,0 +1,44 @@
+it("should handle getBits error gracefully in readBlock", async () => {
+  const { FlateStream } = await import("../../src/core/flate_stream.js");
+  const { Stream } = await import("../../src/core/stream.js");
+  const fakeStream = {
+    dict: {},
+    _headerCount: 0,
+    getByte() {
+      if (this._headerCount === 0) {
+        this._headerCount++;
+        return 0x08;
+      } else if (this._headerCount === 1) {
+        this._headerCount++;
+        return 0x1D;
+      }
+      return -1;
+    },
+    getBytes(n) {
+      return new Uint8Array(n);
+    },
+    peekByte() {
+      return -1;
+    }
+  };
+  const flateStream = new FlateStream(fakeStream, 0);
+  flateStream.getBits = function(n) {
+    if (n === 3 && !this._errorInjected) {
+      this._errorInjected = true;
+      throw new Error("Simulated getBits error");
+    }
+    return 0;
+  };
+  let errorCaught = false;
+  try {
+    flateStream.readBlock();
+  } catch (e) {
+    errorCaught = true;
+  }
+  if (errorCaught) {
+    throw new Error("readBlock did not handle getBits error gracefully");
+  }
+  if (!flateStream.eof) {
+    throw new Error("readBlock did not mark eof on getBits error");
+  }
+});

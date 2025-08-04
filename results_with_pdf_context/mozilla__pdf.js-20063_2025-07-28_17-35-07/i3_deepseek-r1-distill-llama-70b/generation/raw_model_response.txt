@@ -1,0 +1,64 @@
+<think>
+Okay, I need to write a test that checks if the PolygonAnnotation correctly renders both the outline and fill color in PDF.js. The user provided a patch that modifies the annotation.js file, so the test should pass after applying this patch and fail before.
+
+First, I'll start by understanding the issue. The problem is that when a PDF with a PolygonAnnotation having both stroke and fill colors is opened in PDF.js, only the outline is visible. But in Acrobat or Edge, both outline and fill are shown. So the test should verify that after the patch, the fill is rendered correctly.
+
+I'll use the provided test file as a base. I'll need to import the necessary modules, including getDocument from the display API to load the PDF. The test will load the specific PDF file, 'issue20062.pdf', which has the problematic annotation.
+
+Next, I'll set up the test structure. I'll create an async function within an 'it' block. Inside, I'll load the PDF document and get the first page. Then, I'll get the annotations from that page.
+
+I need to loop through the annotations to find the PolygonAnnotation. Once found, I'll check if the annotation has both a stroke and fill color. The 'dict' property of the annotation should have the 'IC' array for the fill color.
+
+I'll then render the annotation using the getOperatorList method, which should generate the correct drawing commands. I'll check the generated operators to see if both the stroke and fill are present.
+
+In the generated operators, I expect to find 're' for rectangle, 'f' for fill, and 'S' for stroke. If both 'f' and 'S' are present, it means the fill and outline are rendered correctly.
+
+I'll structure the test to load the PDF, find the annotation, render it, and then check the operator list. If the operators include both fill and stroke commands, the test passes.
+
+I should handle any potential errors, like if the annotation isn't found or if the operators don't include the expected commands. If any of these checks fail, the test will throw an error.
+
+Finally, I'll make sure the test is self-contained, using only the provided imports and the PDF file for testing. This way, it's clear that the patch resolves the issue when the test passes after the fix.
+</think>
+
+```javascript
+it("should render polygon annotation with both outline and fill", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue20062.pdf'));
+  
+  const doc = await loadingTask;
+  const page = await doc.getPage(0);
+  const annotations = await page.getAnnotations();
+  
+  const polygonAnnotation = annotations.find(annotation => 
+    annotation instanceof MarkupAnnotation && 
+    annotation.data.subtype === 'Polygon' &&
+    annotation.color &&
+    annotation.data.backgroundColor
+  );
+  
+  if (!polygonAnnotation) {
+    throw new Error("PolygonAnnotation with fill not found in PDF");
+  }
+  
+  const operatorList = await polygonAnnotation.getOperatorList({
+    task: new WorkerTask(),
+    evaluator: {
+      xref: new XRefMock(),
+      options: {
+        isOffscreenCanvasSupported: true,
+      },
+    },
+    intent: RenderingIntentFlag.DISPLAY,
+    annotationStorage: null,
+  });
+  
+  const ops = operatorList.opList.ops;
+  const hasFill = ops.some(op => op.cmd === 'f');
+  const hasStroke = ops.some(op => op.cmd === 'S');
+  
+  if (!hasFill || !hasStroke) {
+    throw new Error("PolygonAnnotation is missing fill or stroke in rendering");
+  }
+});
+```

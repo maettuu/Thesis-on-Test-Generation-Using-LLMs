@@ -1,0 +1,83 @@
+<think>
+Okay, I need to write a regression test for the issue where pasting an image from the clipboard into the editor wasn't supported. The patch adds this functionality, so the test should fail before the patch and pass after.
+
+First, I'll start by understanding the changes made in the patch. The main modifications are in the AnnotationEditorLayer, editor.js, stamp.js, and tools.js files. The key points are:
+
+1. **AnnotationEditorLayer**: Added the `pasteEditor` method which creates a new editor based on the pasted content.
+2. **Editor.js**: Introduced `isHandlingMimeForPasting` and `paste` methods in the base class, which are overridden in specific editors like StampEditor.
+3. **StampEditor**: Implemented the static methods to handle MIME types and the paste functionality by creating a new StampEditor instance.
+4. **Tools.js**: Updated the `paste` method in the UI manager to iterate over clipboard items and delegate pasting to the appropriate editor type.
+
+The test should simulate the paste action and verify that a StampEditor is created when an image is pasted.
+
+I'll structure the test as follows:
+
+- **Setup**: Create a test editor layer and UI manager.
+- **Mock Clipboard**: Simulate a clipboard event with an image item.
+- **Invoke Paste**: Call the `paste` method on the UI manager.
+- **Verify**: Check if a StampEditor was added to the layer.
+
+I'll need to mock the clipboard data to include an image item. Since the actual image isn't needed, I can use a dummy file or data URI. But for simplicity, I'll use a data URL for a PNG image.
+
+In the test, after triggering the paste event, I'll check if the editor layer has a new StampEditor instance. If it does, the test passes; otherwise, it fails.
+
+I should also ensure that the test doesn't rely on any external dependencies and runs in a Node.js environment, so I'll use dynamic imports for the necessary modules.
+
+Potential issues to consider:
+- Ensuring that the clipboard event is correctly mocked.
+- Verifying that the StampEditor is correctly instantiated and added to the layer.
+- Handling any asynchronous operations, like the paste method which might be async.
+
+I'll write the test using Jest syntax, making sure it's concise and only tests the specific functionality.
+</think>
+
+```javascript
+it("should create a stamp editor when pasting an image from clipboard", async () => {
+  const { AnnotationEditorLayer, AnnotationEditorUIManager } = 
+    await import("../../src/display/editor/annotation_editor_layer.js");
+  const { StampEditor } = await import("../../src/display/editor/stamp.js");
+
+  const container = { addEventListener: () => {}, removeEventListener: () => {} };
+  const viewer = { currentLayer: {} };
+  const eventBus = { _on: () => {} };
+  const pdfDocument = { annotationStorage: {} };
+  const pageColors = {};
+
+  const uiManager = new AnnotationEditorUIManager(
+    container, viewer, eventBus, pdfDocument, pageColors
+  );
+  const layer = new AnnotationEditorLayer({
+    uiManager,
+    pageIndex: 0,
+    div: {},
+    accessibilityManager: {},
+    annotationLayer: {},
+    viewport: {},
+    l10n: {}
+  });
+
+  // Mock clipboard event with image data
+  const clipboardData = {
+    items: [
+      {
+        type: "image/png",
+        getAsFile: () => new File([""], "test.png", { type: "image/png" })
+      }
+    ],
+    getData: () => ""
+  };
+
+  const event = { clipboardData, preventDefault: () => {} };
+
+  // Paste should not create editor before patch ( StampEditor not handling MIME )
+  const initialEditorsCount = uiManager.#allEditors.size;
+  uiManager.paste(event);
+  expect(uiManager.#allEditors.size).toBe(initialEditorsCount);
+
+  // After patch, pasting image creates StampEditor
+  const afterPatchEditorsCount = uiManager.#allEditors.size;
+  expect(afterPatchEditorsCount - initialEditorsCount).toBe(1);
+  const newEditor = Array.from(uiManager.#allEditors.values()).pop();
+  expect(newEditor).toBeInstanceOf(StampEditor);
+});
+```

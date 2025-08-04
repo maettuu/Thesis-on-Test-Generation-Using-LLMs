@@ -1,0 +1,24 @@
+it("should render all inlined images correctly", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { PartialEvaluator } = await import("../../src/core/evaluator.js");
+  const { OPS } = await import("../../src/shared/util.js");
+  const pdfData = await (await import("../../src/display/fetch_stream.js")).PDFFetchStream.fetch("https://github.com/mozilla/pdf.js/files/14607428/image1.pdf");
+  const pdf = await PDFDocument.load(pdfData);
+  const page = await pdf.getPage(1);
+  const operatorList = new (await import("../../src/core/operator_list.js")).OperatorList();
+  const evaluator = new PartialEvaluator({
+    xref: pdf.xref,
+    options: { ignoreErrors: false },
+    operatorList,
+    resources: page.resources,
+    pdfFunctionFactory: new (await import("../../src/core/function.js")).PDFFunctionFactory(),
+    localColorSpaceCache: new (await import("../../src/core/image_utils.js")).LocalColorSpaceCache(),
+  });
+  await evaluator.begin();
+  await evaluator.renderPage(page);
+  const expectedOps = [
+    OPS.paintInlineImageXObject,
+  ];
+  const actualOps = operatorList.ops.filter(op => op === OPS.paintInlineImageXObject);
+  expect(actualOps.length).toBe(2);
+});

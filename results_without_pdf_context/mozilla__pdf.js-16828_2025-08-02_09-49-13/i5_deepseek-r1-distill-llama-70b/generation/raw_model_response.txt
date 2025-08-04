@@ -1,0 +1,56 @@
+<think>
+Okay, I need to write a regression test for the issue where pasting an image from the clipboard into the editor wasn't supported. The patch adds functionality to handle this, so the test should fail before the patch and pass after.
+
+First, I'll structure the test using Jest. The test should simulate pasting an image and check if the editor correctly creates a stamp.
+
+I'll start by importing the necessary modules: AnnotationEditorLayer and StampEditor from their respective paths. Then, I'll set up the UI manager and layer.
+
+Next, I'll create a mock clipboard event. The event's clipboardData should have an item that's an image file. For this, I'll create a File object with a sample image content using a data URL.
+
+I'll set up the current layer in the UI manager and simulate the paste event by calling uiManager.paste(event).
+
+After pasting, I'll check if a new StampEditor was added to the layer. I'll look for the editor's type and ensure it's a StampEditor.
+
+I need to handle asynchronous operations because creating the editor might take time. Using async/await and setTimeout should help in waiting for the editor to be added.
+
+Finally, I'll assert that the editors array in the layer includes the new StampEditor, confirming the paste worked.
+
+I should make sure the test is self-contained and only uses the provided imports. Also, I'll structure the test to fail without the patch and pass with it, ensuring it correctly validates the issue resolution.
+</think>
+
+```javascript
+it("should support pasting an image from clipboard", async () => {
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+  const { StampEditor } = await import("../../src/display/editor/stamp.js");
+  
+  const uiManager = {
+    updateToolbar: jest.fn(),
+    updateMode: jest.fn(),
+    currentLayer: null,
+  };
+  
+  const layer = new AnnotationEditorLayer(uiManager);
+  uiManager.currentLayer = layer;
+  
+  const mockClipboardItem = new DataTransferItem(
+    "image/png",
+    new File([new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).buffer], "test.png")
+  );
+  
+  const clipboardData = {
+    items: [mockClipboardItem],
+    getData: () => null,
+  };
+  
+  const event = { clipboardData, preventDefault: jest.fn() };
+  
+  await layer.uiManager.paste(event);
+  
+  await new Promise(resolve => setTimeout(resolve, 100));
+  
+  const editors = layer.editors;
+  const isStampEditorAdded = editors.some(editor => editor instanceof StampEditor);
+  
+  expect(isStampEditorAdded).toBe(true);
+});
+```

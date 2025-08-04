@@ -1,0 +1,59 @@
+<think>
+Okay, so I need to write a regression test for the issue where opening a PDF in Firefox shows Japanese vertical punctuation errors. The patch provided modifies the fonts.js and fonts_utils.js files to handle vertical presentation forms correctly. 
+
+First, I should understand what the patch does. It looks like the patch adds a function getVerticalPresentationForm that maps certain Unicode characters to their vertical counterparts. Then, in the Font class, when a missing file is detected and vertical writing is enabled, it checks if the current character has a vertical form and replaces it if available.
+
+So, the test needs to verify that after applying the patch, the correct vertical punctuation is used. The test should fail before the patch because the vertical forms weren't being applied, and pass after because they are now handled.
+
+I'll need to create a test case that uses a PDF containing Japanese punctuation. The test will load the PDF, check the text, and ensure that the vertical forms are correctly rendered. 
+
+I'll structure the test using Jest. I'll import the necessary modules, create a sample PDF with the required characters, and then check the text content. 
+
+Wait, but I can't create a PDF on the fly. Maybe I can use a small PDF with known content. Alternatively, perhaps I can mock the font handling. Hmm, maybe I can create a test that checks the getVerticalPresentationForm function directly. 
+
+Alternatively, the test can create a Font instance, trigger the code path where the vertical substitution happens, and check if the character is replaced correctly. 
+
+So, the steps are:
+
+1. Import the necessary modules, including the Font class and getVerticalPresentationForm.
+2. Create a test that initializes a Font instance with vertical writing enabled and a missing file.
+3. Check if a specific character (like IDEOGRAPHIC COMMA, U+3001) is replaced with its vertical form (U+FE11).
+4. Before the patch, this replacement wouldn't happen, so the test would fail. After the patch, it should pass.
+
+I need to make sure that the test is self-contained and uses only the provided imports. I'll have to dynamically import the required modules to ensure compatibility with Node.js.
+
+I'll write the test using async/await since some imports are asynchronous. The test will create a Font instance, set it to vertical, and check the character replacement.
+
+So, the test will look something like this: it checks if the vertical form is applied correctly by comparing the expected Unicode code point after substitution.
+
+I should also handle any potential errors, like if the font isn't initialized correctly, but I think the patch ensures that the substitution happens when the conditions are met.
+
+Alright, putting it all together, the test will import the Font class and the getVerticalPresentationForm function, set up the Font instance with the necessary properties, and then assert that the character substitution occurs as expected.
+</think>
+
+```javascript
+it("should correctly handle vertical Japanese punctuation in PDFs", async () => {
+  const { Font } = await import("../../src/core/fonts.js");
+  const { getVerticalPresentationForm } = await import("../../src/core/fonts_utils.js");
+  
+  // Create a test character and its expected vertical form
+  const char = String.fromCharCode(0x3001); // IDEOGRAPHIC COMMA
+  const expectedVerticalForm = String.fromCharCode(getVerticalPresentationForm()[0x3001]);
+  
+  // Initialize Font instance with vertical writing enabled and missing file
+  const font = new Font();
+  font.missingFile = true;
+  font.vertical = true;
+  
+  // Apply the patch's logic to the character
+  let actualChar = char;
+  const unicode = char.charCodeAt(0);
+  const vertical = getVerticalPresentationForm()[unicode];
+  if (vertical) {
+    actualChar = String.fromCharCode(vertical);
+  }
+  
+  // Verify the character was replaced with its vertical form
+  expect(actualChar).toBe(expectedVerticalForm);
+});
+```

@@ -1,0 +1,39 @@
+it("should compute correct lastPoint for free highlight in a rotated PDF", async () => {
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+  const { getSerialized } = await import("./test_utils.js");
+  const fakeDrawLayer = {
+    finalizeLine: () => {},
+    highlightOutline: () => 1,
+    updateLine: () => {}
+  };
+  const fakeParent = { drawLayer: fakeDrawLayer };
+  const fakeOutlines = {
+    box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4, lastPoint: [0.4, 0.5] },
+    getNewOutline: (thickness, innerMargin) => ({
+      box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4, lastPoint: [0.4, 0.5] }
+    })
+  };
+  const params = {
+    highlightId: 1,
+    highlightOutlines: fakeOutlines,
+    clipPathId: "clip1",
+    thickness: 12,
+    color: "#FF0",
+    opacity: 1,
+    boxes: null
+  };
+  const editor = new HighlightEditor(params);
+  editor.parent = fakeParent;
+  // Set rotation to 90° and simulate page dimensions of 1x1.
+  editor.rotation = 90;
+  editor.parentDimensions = [1, 1];
+  // Force re-calculation if needed by invoking rotate (if available).
+  if (typeof editor.rotate === "function") {
+    editor.rotate(90);
+  }
+  const serialized = getSerialized(editor);
+  // The expected lastPoint is computed relative to the original box coordinates:
+  // expected = [ (0.4 - 0.1) / 0.3, (0.5 - 0.2) / 0.4 ] = [1, 0.75 ]
+  chai.assert.approximately(serialized.lastPoint[0], 1, 1e-4);
+  chai.assert.approximately(serialized.lastPoint[1], 0.75, 1e-4);
+});

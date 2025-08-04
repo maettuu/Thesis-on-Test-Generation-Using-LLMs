@@ -1,0 +1,64 @@
+it("should correctly save annotations with linearization", async () => {
+  const { Dict, Name, Ref } = await import("../../src/core/primitives.js");
+  const { incrementalUpdate, writeDict } = await import("../../src/core/writer.js");
+  const { bytesToString } = await import("../../src/shared/util.js");
+  const { StringStream } = await import("../../src/core/stream.js");
+
+  // Create a sample PDF with an annotation
+  const xref = {
+    trailer: new Dict(),
+    getNewTemporaryRef: () => new Ref(2, 0),
+    lastXRefStreamPos: 10,
+    encrypt: null,
+  };
+
+  // Set up the acroForm data
+  const acroForm = new Dict();
+  acroForm.set("NeedAppearances", true);
+
+  // Set up the annotation data
+  const annotationRef = new Ref(1, 0);
+  const annotation = new Dict();
+  annotation.set("Type", new Name("Annot"));
+  annotation.set("Subtype", new Name("Widget"));
+  annotation.set("T", new Name("Test"));
+
+  const buffer = await incrementalUpdate({
+    originalData: new Uint8Array(),
+    xrefInfo: {
+      rootRef: new Ref(0, 0),
+      encryptRef: null,
+      newRef: new Ref(1, 0),
+      infoRef: null,
+      info: {},
+      fileIds: null,
+      startXRef: 0,
+      filename: "test.pdf",
+    },
+    newRefs: [{ ref: annotationRef, data: "" }],
+    xref,
+    hasXfa: false,
+    xfaDatasetsRef: null,
+    hasXfaDatasetsEntry: false,
+    needAppearances: true,
+    acroFormRef: new Ref(0, 0),
+    acroForm,
+    xfaData: null,
+  });
+
+  // Verify the annotation was saved correctly
+  const stream = new StringStream(bytesToString(buffer));
+  const parser = new Parser({
+    lexer: new Lexer(stream),
+    xref: {
+      getEntry: (num) => {
+        if (num === 1) return annotation;
+        return null;
+      },
+    },
+  });
+
+  const xrefEntries = await parser.getObj();
+  const annotationEntry = xrefEntries.get(1);
+  expect(annotationEntry.get("Type")).toBe("Annot");
+});

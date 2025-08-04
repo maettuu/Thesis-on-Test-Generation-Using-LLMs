@@ -1,0 +1,86 @@
+<think>
+Okay, I need to write a regression test for the issue where PDF annotations aren't saved on certain PDFs. The user provided a patch, so the test should fail before the patch and pass after.
+
+First, I'll look at the changes in the patch. The main modifications are in worker.js, writer.js, and xref.js. 
+
+In worker.js, they added 'linearization' to the ensureDoc calls and modified the startXRef assignment. In writer.js, they updated the condition in updateAcroform to include a check for hasXfaDatasetsEntry. In xref.js, they introduced #firstXRefStmPos and updated lastXRefStreamPos to consider this new variable.
+
+The issue is about saving annotations, so the test should simulate adding an annotation and saving it. The problem occurs when the XRef handling doesn't account for linearization, causing the save to fail.
+
+I'll create a test that generates a PDF with an annotation, saves it, and checks if the annotation is present. Before the patch, this should fail, and after, it should pass.
+
+I'll use the existing test file structure. I'll import the necessary modules: Dict, Name, Ref from primitives.js, incrementalUpdate and writeDict from writer.js, bytesToString from util.js, and StringStream from stream.js.
+
+In the test, I'll create a sample PDF structure with an annotation. Then, I'll use incrementalUpdate to save the document. After the update, I'll check if the annotation was correctly added by looking for the "/Annot" key in the XRef.
+
+I'll set up the XRef with a trailer, add the annotation as a new reference, and ensure the buffer includes the necessary data. After writing, I'll parse the buffer to verify the annotation exists.
+
+The test will fail before the patch because the XRef might not handle linearization correctly, causing the annotation not to be saved. After applying the patch, the XRef should correctly process the linearization, and the test will pass.
+</think>
+
+```javascript
+it("should correctly save annotations with linearization", async () => {
+  const { Dict, Name, Ref } = await import("../../src/core/primitives.js");
+  const { incrementalUpdate, writeDict } = await import("../../src/core/writer.js");
+  const { bytesToString } = await import("../../src/shared/util.js");
+  const { StringStream } = await import("../../src/core/stream.js");
+
+  // Create a sample PDF with an annotation
+  const xref = {
+    trailer: new Dict(),
+    getNewTemporaryRef: () => new Ref(2, 0),
+    lastXRefStreamPos: 10,
+    encrypt: null,
+  };
+
+  // Set up the acroForm data
+  const acroForm = new Dict();
+  acroForm.set("NeedAppearances", true);
+
+  // Set up the annotation data
+  const annotationRef = new Ref(1, 0);
+  const annotation = new Dict();
+  annotation.set("Type", new Name("Annot"));
+  annotation.set("Subtype", new Name("Widget"));
+  annotation.set("T", new Name("Test"));
+
+  const buffer = await incrementalUpdate({
+    originalData: new Uint8Array(),
+    xrefInfo: {
+      rootRef: new Ref(0, 0),
+      encryptRef: null,
+      newRef: new Ref(1, 0),
+      infoRef: null,
+      info: {},
+      fileIds: null,
+      startXRef: 0,
+      filename: "test.pdf",
+    },
+    newRefs: [{ ref: annotationRef, data: "" }],
+    xref,
+    hasXfa: false,
+    xfaDatasetsRef: null,
+    hasXfaDatasetsEntry: false,
+    needAppearances: true,
+    acroFormRef: new Ref(0, 0),
+    acroForm,
+    xfaData: null,
+  });
+
+  // Verify the annotation was saved correctly
+  const stream = new StringStream(bytesToString(buffer));
+  const parser = new Parser({
+    lexer: new Lexer(stream),
+    xref: {
+      getEntry: (num) => {
+        if (num === 1) return annotation;
+        return null;
+      },
+    },
+  });
+
+  const xrefEntries = await parser.getObj();
+  const annotationEntry = xrefEntries.get(1);
+  expect(annotationEntry.get("Type")).toBe("Annot");
+});
+```

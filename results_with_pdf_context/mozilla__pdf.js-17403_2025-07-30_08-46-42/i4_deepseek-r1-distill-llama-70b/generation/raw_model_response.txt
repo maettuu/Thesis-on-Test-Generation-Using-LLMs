@@ -1,0 +1,45 @@
+<think>
+Okay, I need to write a regression test for the issue where rendering a PDF with a lot of pages is slow. The patch provided modifies the MessageHandler class to introduce queueing and postponing of task execution, which should improve performance by draining the message queue before processing tasks.
+
+First, I should understand what the patch does. It adds properties like #queue, #cancelledStreamIds, #executorRunning, and #isPostponed. The _onComObjOnMessage method now pushes messages into the queue and uses #postponeExecution to delay processing. The #executor method processes the queue, handling each message and postponing as needed.
+
+The test should simulate a scenario where multiple messages are sent and ensure that they are processed correctly without slowing down the rendering. I'll need to measure the time taken before and after the patch to confirm the improvement.
+
+I'll create a test that sends several messages and checks if the processing time is within an acceptable range. Using Jest's async/await, I'll set up a MessageHandler instance, send multiple messages, and measure the time it takes for all of them to be processed.
+
+I'll import the necessary modules, like MessageHandler and the required utilities. Then, I'll define a test that creates a MessageHandler, registers an action, sends several messages, and measures the time. After the patch, the processing should be faster, so the test should pass.
+
+I need to make sure the test is self-contained, doesn't rely on external dependencies, and accurately reflects the performance improvement. Using dynamic imports will ensure compatibility with Node.js.
+
+Finally, I'll write the test block, ensuring it's concise and to the point, focusing on the specific behavior change introduced by the patch.
+</think>
+
+```javascript
+it("should improve rendering performance with multiple pages", async () => {
+  const { MessageHandler, ...util } = await import("../../src/shared/message_handler.js");
+  const { assert } = await import("chai");
+
+  const comObj = {
+    postMessage: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+
+  const messageHandler = new MessageHandler("source", "target", comObj);
+  const actionResults = [];
+  const startTime = Date.now();
+  const NUM_MESSAGES = 100;
+
+  messageHandler.on("testAction", () => {
+    actionResults.push(Date.now() - startTime);
+    return Promise.resolve();
+  });
+
+  for (let i = 0; i < NUM_MESSAGES; i++) {
+    await messageHandler.sendWithPromise("testAction", {});
+  }
+
+  const processingTime = Date.now() - startTime;
+  assert.isBelow(processingTime, 500);
+});
+```

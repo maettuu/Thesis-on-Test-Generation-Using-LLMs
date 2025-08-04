@@ -1,0 +1,37 @@
+<think>
+Okay, I need to write a test that checks if the PDF viewer can correctly handle a PDF encrypted with a rare RC4 scheme where the key length is less than 128 bits. The patch provided modifies the crypto.js file to extend the key to 16 bytes if it's shorter, which should fix the issue.
+
+First, I should figure out how to structure the test. The test needs to fail before the patch and pass after. So I'll use a test PDF provided by the user, which is issue19484_1.pdf. This PDF uses a 40-bit key, which wasn't handled correctly before the patch.
+
+I'll start by importing the necessary modules. Since the test runs in Node.js, I'll use dynamic imports for getDocument from the display API and buildGetDocumentParams from test_utils.js. I'll also need to import the PDFDocument and CipherTransformFactory classes from their respective files.
+
+Next, I'll set up the test to load the PDF file. Using getDocument with the correct parameters will give me a loadingTask. I'll wait for the document to load and then retrieve the first page.
+
+Before the patch, loading this PDF would throw an error because the key length wasn't handled properly. After the patch, it should load without issues. So the test will attempt to load the PDF and check if it can access the page without throwing an exception.
+
+I'll wrap the loading process in a try-catch block. If an error occurs during loading or when trying to get the page, the test will fail. If everything works, the test passes.
+
+I should also make sure that the test is self-contained and doesn't rely on external dependencies beyond what's provided. The test will focus solely on whether the PDF can be loaded and a page retrieved, which indicates the encryption was handled correctly.
+
+Finally, I'll write the test using the it function with async/await to handle the asynchronous nature of loading the PDF. The test expects that after the patch, no error is thrown, and the page is successfully retrieved.
+</think>
+
+```javascript
+it("should handle RC4 encryption with key length < 128 bits", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { CipherTransformFactory } = await import("../../src/core/crypto.js");
+
+  const loadingTask = getDocument(buildGetDocumentParams('issue19484_1.pdf'));
+  const document = await loadingTask.document;
+
+  try {
+    await document.load();
+    const page = await document.getPage(1);
+    expect(page).toBeDefined();
+  } catch (error) {
+    fail("Failed to load or read the PDF");
+  }
+});
+```

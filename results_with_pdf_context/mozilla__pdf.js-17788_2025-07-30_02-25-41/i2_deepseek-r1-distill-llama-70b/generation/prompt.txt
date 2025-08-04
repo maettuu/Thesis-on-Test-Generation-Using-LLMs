@@ -1,0 +1,837 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Voice Over will not read highlighted text during editing inside a PDF
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/draw_layer.js b/src/display/draw_layer.js
+--- a/src/display/draw_layer.js
++++ b/src/display/draw_layer.js
+@@ -66,6 +66,7 @@ class DrawLayer {
+   #createSVG(box) {
+     const svg = DrawLayer._svgFactory.create(1, 1, /* skipDimensions = */ true);
+     this.#parent.append(svg);
++    svg.setAttribute("aria-hidden", true);
+     DrawLayer.#setBox(svg, box);
+ 
+     return svg;
+
+diff --git a/src/display/editor/color_picker.js b/src/display/editor/color_picker.js
+--- a/src/display/editor/color_picker.js
++++ b/src/display/editor/color_picker.js
+@@ -93,6 +93,7 @@ class ColorPicker {
+     button.addEventListener("keydown", this.#boundKeyDown);
+     const swatch = (this.#buttonSwatch = document.createElement("span"));
+     swatch.className = "swatch";
++    swatch.setAttribute("aria-hidden", true);
+     swatch.style.backgroundColor = this.#defaultColor;
+     button.append(swatch);
+     return button;
+
+diff --git a/src/display/editor/highlight.js b/src/display/editor/highlight.js
+--- a/src/display/editor/highlight.js
++++ b/src/display/editor/highlight.js
+@@ -61,6 +61,8 @@ class HighlightEditor extends AnnotationEditor {
+ 
+   #outlineId = null;
+ 
++  #text = "";
++
+   #thickness;
+ 
+   #methodOfCreation = "";
+@@ -104,6 +106,7 @@ class HighlightEditor extends AnnotationEditor {
+     this.#opacity = params.opacity || HighlightEditor._defaultOpacity;
+     this.#boxes = params.boxes || null;
+     this.#methodOfCreation = params.methodOfCreation || "";
++    this.#text = params.text || "";
+     this._isDraggable = false;
+ 
+     if (params.highlightId > -1) {
+@@ -558,6 +561,13 @@ class HighlightEditor extends AnnotationEditor {
+     }
+ 
+     const div = super.render();
++    if (this.#text) {
++      const mark = document.createElement("mark");
++      div.append(mark);
++      mark.append(document.createTextNode(this.#text));
++      // The text is invisible but it's still visible by a screen reader.
++      mark.className = "visuallyHidden";
++    }
+     if (this.#isFreeHighlight) {
+       div.classList.add("free");
+     } else {
+@@ -565,6 +575,7 @@ class HighlightEditor extends AnnotationEditor {
+     }
+     const highlightDiv = (this.#highlightDiv = document.createElement("div"));
+     div.append(highlightDiv);
++    highlightDiv.setAttribute("aria-hidden", "true");
+     highlightDiv.className = "internal";
+     highlightDiv.style.clipPath = this.#clipPathId;
+     const [parentWidth, parentHeight] = this.parentDimensions;
+
+diff --git a/src/display/editor/toolbar.js b/src/display/editor/toolbar.js
+--- a/src/display/editor/toolbar.js
++++ b/src/display/editor/toolbar.js
+@@ -31,6 +31,7 @@ class EditorToolbar {
+   render() {
+     const editToolbar = (this.#toolbar = document.createElement("div"));
+     editToolbar.className = "editToolbar";
++    editToolbar.setAttribute("role", "toolbar");
+     editToolbar.addEventListener("contextmenu", noContextMenu);
+     editToolbar.addEventListener("pointerdown", EditorToolbar.#pointerDown);
+
+diff --git a/src/display/editor/tools.js b/src/display/editor/tools.js
+--- a/src/display/editor/tools.js
++++ b/src/display/editor/tools.js
+@@ -952,6 +952,7 @@ class AnnotationEditorUIManager {
+       return;
+     }
+     const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
++    const text = selection.toString();
+     const anchorElement =
+       anchorNode.nodeType === Node.TEXT_NODE
+         ? anchorNode.parentElement
+@@ -974,6 +975,7 @@ class AnnotationEditorUIManager {
+           anchorOffset,
+           focusNode,
+           focusOffset,
++          text,
+         });
+         break;
+       }
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.9
+- @babel/preset-env: ^7.23.9
+- @babel/runtime: ^7.23.9
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @jazzer.js/core: ^2.1.0
+- autoprefixer: ^10.4.17
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001587
+- canvas: ^2.11.2
+- core-js: ^3.36.0
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^51.0.1
+- globals: ^14.0.0
+- gulp: ^4.0.2
+- gulp-cli: ^2.3.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.35
+- postcss-dark-theme-class: ^1.2.1
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.2.5
+- puppeteer: ^22.3.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.2.1
+- stylelint-prettier: ^5.0.0
+- terser-webpack-plugin: ^5.3.10
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.90.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/draw_layer.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { DOMSVGFactory } from "./display_utils.js";
+17 import { shadow } from "../shared/util.js";
+18 
+19 /**
+20  * Manage the SVGs drawn on top of the page canvas.
+21  * It's important to have them directly on top of the canvas because we want to
+22  * be able to use mix-blend-mode for some of them.
+23  */
+24 class DrawLayer {
+25   #parent = null;
+26 
+27   #id = 0;
+28 
+29   #mapping = new Map();
+30 
+31   #toUpdate = new Map();
+32 
+33   constructor({ pageIndex }) {
+34     this.pageIndex = pageIndex;
+35   }
+36 
+66   #createSVG(box) {
+67     const svg = DrawLayer._svgFactory.create(1, 1, /* skipDimensions = */ true);
+68     this.#parent.append(svg);
+69     DrawLayer.#setBox(svg, box);
+70 
+71     return svg;
+72   }
+73 
+242 }
+243 
+File:
+src/display/editor/color_picker.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { AnnotationEditorParamsType, shadow } from "../../shared/util.js";
+17 import { KeyboardManager } from "./tools.js";
+18 import { noContextMenu } from "../display_utils.js";
+19 
+20 class ColorPicker {
+21   #boundKeyDown = this.#keyDown.bind(this);
+22 
+23   #boundPointerDown = this.#pointerDown.bind(this);
+24 
+25   #button = null;
+26 
+27   #buttonSwatch = null;
+28 
+29   #defaultColor;
+30 
+31   #dropdown = null;
+32 
+33   #dropdownWasFromKeyboard = false;
+34 
+35   #isMainColorPicker = false;
+36 
+37   #editor = null;
+38 
+39   #eventBus;
+40 
+41   #uiManager = null;
+42 
+43   #type;
+44 
+69   constructor({ editor = null, uiManager = null }) {
+70     if (editor) {
+71       this.#isMainColorPicker = false;
+72       this.#type = AnnotationEditorParamsType.HIGHLIGHT_COLOR;
+73       this.#editor = editor;
+74     } else {
+75       this.#isMainColorPicker = true;
+76       this.#type = AnnotationEditorParamsType.HIGHLIGHT_DEFAULT_COLOR;
+77     }
+78     this.#uiManager = editor?._uiManager || uiManager;
+79     this.#eventBus = this.#uiManager._eventBus;
+80     this.#defaultColor =
+81       editor?.color ||
+82       this.#uiManager?.highlightColors.values().next().value ||
+83       "#FFFF98";
+84   }
+85 
+86   renderButton() {
+87     const button = (this.#button = document.createElement("button"));
+88     button.className = "colorPicker";
+89     button.tabIndex = "0";
+90     button.setAttribute("data-l10n-id", "pdfjs-editor-colorpicker-button");
+91     button.setAttribute("aria-haspopup", true);
+92     button.addEventListener("click", this.#openDropdown.bind(this));
+93     button.addEventListener("keydown", this.#boundKeyDown);
+94     const swatch = (this.#buttonSwatch = document.createElement("span"));
+95     swatch.className = "swatch";
+96     swatch.style.backgroundColor = this.#defaultColor;
+97     button.append(swatch);
+98     return button;
+99   }
+100 
+276 }
+277 
+File:
+src/display/editor/highlight.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorParamsType,
+18   AnnotationEditorType,
+19   shadow,
+20   Util,
+21 } from "../../shared/util.js";
+22 import { bindEvents, KeyboardManager } from "./tools.js";
+23 import { FreeOutliner, Outliner } from "./outliner.js";
+24 import { AnnotationEditor } from "./editor.js";
+25 import { ColorPicker } from "./color_picker.js";
+26 import { noContextMenu } from "../display_utils.js";
+27 
+28 /**
+29  * Basic draw editor in order to generate an Highlight annotation.
+30  */
+31 class HighlightEditor extends AnnotationEditor {
+32   #anchorNode = null;
+33 
+34   #anchorOffset = 0;
+35 
+36   #boxes;
+37 
+38   #clipPathId = null;
+39 
+40   #colorPicker = null;
+41 
+42   #focusOutlines = null;
+43 
+44   #focusNode = null;
+45 
+46   #focusOffset = 0;
+47 
+48   #highlightDiv = null;
+49 
+50   #highlightOutlines = null;
+51 
+52   #id = null;
+53 
+54   #isFreeHighlight = false;
+55 
+56   #boundKeydown = this.#keydown.bind(this);
+57 
+58   #lastPoint = null;
+59 
+60   #opacity;
+61 
+62   #outlineId = null;
+63 
+64   #thickness;
+65 
+66   #methodOfCreation = "";
+67 
+68   static _defaultColor = null;
+69 
+70   static _defaultOpacity = 1;
+71 
+72   static _defaultThickness = 12;
+73 
+74   static _l10nPromise;
+75 
+76   static _type = "highlight";
+77 
+78   static _editorType = AnnotationEditorType.HIGHLIGHT;
+79 
+80   static _freeHighlightId = -1;
+81 
+82   static _freeHighlight = null;
+83 
+84   static _freeHighlightClipId = "";
+85 
+100   constructor(params) {
+101     super({ ...params, name: "highlightEditor" });
+102     this.color = params.color || HighlightEditor._defaultColor;
+103     this.#thickness = params.thickness || HighlightEditor._defaultThickness;
+104     this.#opacity = params.opacity || HighlightEditor._defaultOpacity;
+105     this.#boxes = params.boxes || null;
+106     this.#methodOfCreation = params.methodOfCreation || "";
+107     this._isDraggable = false;
+108 
+109     if (params.highlightId > -1) {
+110       this.#isFreeHighlight = true;
+111       this.#createFreeOutlines(params);
+112       this.#addToDrawLayer();
+113     } else {
+114       this.#anchorNode = params.anchorNode;
+115       this.#anchorOffset = params.anchorOffset;
+116       this.#focusNode = params.focusNode;
+117       this.#focusOffset = params.focusOffset;
+118       this.#createOutlines();
+119       this.#addToDrawLayer();
+120       this.rotate(this.rotation);
+121     }
+122   }
+123 
+554   /** @inheritdoc */
+555   render() {
+556     if (this.div) {
+557       return this.div;
+558     }
+559 
+560     const div = super.render();
+561     if (this.#isFreeHighlight) {
+562       div.classList.add("free");
+563     } else {
+564       this.div.addEventListener("keydown", this.#boundKeydown);
+565     }
+566     const highlightDiv = (this.#highlightDiv = document.createElement("div"));
+567     div.append(highlightDiv);
+568     highlightDiv.className = "internal";
+569     highlightDiv.style.clipPath = this.#clipPathId;
+570     const [parentWidth, parentHeight] = this.parentDimensions;
+571     this.setDims(this.width * parentWidth, this.height * parentHeight);
+572 
+573     bindEvents(this, this.#highlightDiv, ["pointerover", "pointerleave"]);
+574     this.enableEditing();
+575 
+576     return div;
+577   }
+578 
+810 }
+811 
+File:
+src/display/editor/toolbar.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { noContextMenu } from "../display_utils.js";
+17 
+18 class EditorToolbar {
+19   #toolbar = null;
+20 
+21   #colorPicker = null;
+22 
+23   #editor;
+24 
+25   #buttons = null;
+26 
+27   constructor(editor) {
+28     this.#editor = editor;
+29   }
+30 
+31   render() {
+32     const editToolbar = (this.#toolbar = document.createElement("div"));
+33     editToolbar.className = "editToolbar";
+34     editToolbar.addEventListener("contextmenu", noContextMenu);
+35     editToolbar.addEventListener("pointerdown", EditorToolbar.#pointerDown);
+36 
+37     const buttons = (this.#buttons = document.createElement("div"));
+38     buttons.className = "buttons";
+39     editToolbar.append(buttons);
+40 
+41     const position = this.#editor.toolbarPosition;
+42     if (position) {
+43       const { style } = editToolbar;
+44       const x =
+45         this.#editor._uiManager.direction === "ltr"
+46           ? 1 - position[0]
+47           : position[0];
+48       style.insetInlineEnd = `${100 * x}%`;
+49       style.top = `calc(${
+50         100 * position[1]
+51       }% + var(--editor-toolbar-vert-offset))`;
+52     }
+53 
+54     this.#addDeleteButton();
+55 
+56     return editToolbar;
+57   }
+58 
+135 }
+136 
+File:
+src/display/editor/tools.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+17 // eslint-disable-next-line max-len
+19 
+20 import {
+21   AnnotationEditorParamsType,
+22   AnnotationEditorPrefix,
+23   AnnotationEditorType,
+24   FeatureTest,
+25   getUuid,
+26   shadow,
+27   Util,
+28   warn,
+29 } from "../../shared/util.js";
+30 import {
+31   fetchData,
+32   getColorValues,
+33   getRGB,
+34   PixelsPerInch,
+35 } from "../display_utils.js";
+36 
+527 /**
+528  * A pdf has several pages and each of them when it will rendered
+529  * will have an AnnotationEditorLayer which will contain the some
+530  * new Annotations associated to an editor in order to modify them.
+531  *
+532  * This class is used to manage all the different layers, editors and
+533  * some action like copy/paste, undo/redo, ...
+534  */
+535 class AnnotationEditorUIManager {
+536   #activeEditor = null;
+537 
+538   #allEditors = new Map();
+539 
+540   #allLayers = new Map();
+541 
+542   #altTextManager = null;
+543 
+544   #annotationStorage = null;
+545 
+546   #commandManager = new CommandManager();
+547 
+548   #currentPageIndex = 0;
+549 
+550   #deletedAnnotationsElementIds = new Set();
+551 
+552   #draggingEditors = null;
+553 
+554   #editorTypes = null;
+555 
+556   #editorsToRescale = new Set();
+557 
+558   #filterFactory = null;
+559 
+560   #focusMainContainerTimeoutId = null;
+561 
+562   #highlightColors = null;
+563 
+564   #highlightWhenShiftUp = false;
+565 
+566   #idManager = new IdManager();
+567 
+568   #isEnabled = false;
+569 
+570   #isWaiting = false;
+571 
+572   #lastActiveElement = null;
+573 
+574   #mainHighlightColorPicker = null;
+575 
+576   #mlManager = null;
+577 
+578   #mode = AnnotationEditorType.NONE;
+579 
+580   #selectedEditors = new Set();
+581 
+582   #selectedTextNode = null;
+583 
+584   #pageColors = null;
+585 
+586   #showAllStates = null;
+587 
+588   #boundBlur = this.blur.bind(this);
+589 
+590   #boundFocus = this.focus.bind(this);
+591 
+592   #boundCopy = this.copy.bind(this);
+593 
+594   #boundCut = this.cut.bind(this);
+595 
+596   #boundPaste = this.paste.bind(this);
+597 
+598   #boundKeydown = this.keydown.bind(this);
+599 
+600   #boundKeyup = this.keyup.bind(this);
+601 
+602   #boundOnEditingAction = this.onEditingAction.bind(this);
+603 
+604   #boundOnPageChanging = this.onPageChanging.bind(this);
+605 
+606   #boundOnScaleChanging = this.onScaleChanging.bind(this);
+607 
+608   #boundSelectionChange = this.#selectionChange.bind(this);
+609 
+610   #boundOnRotationChanging = this.onRotationChanging.bind(this);
+611 
+612   #previousStates = {
+613     isEditing: false,
+614     isEmpty: true,
+615     hasSomethingToUndo: false,
+616     hasSomethingToRedo: false,
+617     hasSelectedEditor: false,
+618     hasSelectedText: false,
+619   };
+620 
+621   #translation = [0, 0];
+622 
+623   #translationTimeoutId = null;
+624 
+625   #container = null;
+626 
+627   #viewer = null;
+628 
+629   static TRANSLATE_SMALL = 1; // page units.
+630 
+631   static TRANSLATE_BIG = 10; // page units.
+632 
+766   constructor(
+767     container,
+768     viewer,
+769     altTextManager,
+770     eventBus,
+771     pdfDocument,
+772     pageColors,
+773     highlightColors,
+774     mlManager
+775   ) {
+776     this.#container = container;
+777     this.#viewer = viewer;
+778     this.#altTextManager = altTextManager;
+779     this._eventBus = eventBus;
+780     this._eventBus._on("editingaction", this.#boundOnEditingAction);
+781     this._eventBus._on("pagechanging", this.#boundOnPageChanging);
+782     this._eventBus._on("scalechanging", this.#boundOnScaleChanging);
+783     this._eventBus._on("rotationchanging", this.#boundOnRotationChanging);
+784     this.#addSelectionListener();
+785     this.#annotationStorage = pdfDocument.annotationStorage;
+786     this.#filterFactory = pdfDocument.filterFactory;
+787     this.#pageColors = pageColors;
+788     this.#highlightColors = highlightColors || null;
+789     this.#mlManager = mlManager || null;
+790     this.viewParameters = {
+791       realScale: PixelsPerInch.PDF_TO_CSS_UNITS,
+792       rotation: 0,
+793     };
+794     this.isShiftKeyDown = false;
+795 
+796     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+797       Object.defineProperty(this, "reset", {
+798         value: () => {
+799           this.selectAll();
+800           this.delete();
+801           this.#idManager.reset();
+802         },
+803       });
+804     }
+805   }
+806 
+949   highlightSelection(methodOfCreation = "") {
+950     const selection = document.getSelection();
+951     if (!selection || selection.isCollapsed) {
+952       return;
+953     }
+954     const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
+955     const anchorElement =
+956       anchorNode.nodeType === Node.TEXT_NODE
+957         ? anchorNode.parentElement
+958         : anchorNode;
+959     const textLayer = anchorElement.closest(".textLayer");
+960     const boxes = this.getSelectionBoxes(textLayer);
+961     selection.empty();
+962     if (this.#mode === AnnotationEditorType.NONE) {
+963       this._eventBus.dispatch("showannotationeditorui", {
+964         source: this,
+965         mode: AnnotationEditorType.HIGHLIGHT,
+966       });
+967     }
+968     for (const layer of this.#allLayers.values()) {
+969       if (layer.hasTextLayer(textLayer)) {
+970         layer.createAndAddNewEditor({ x: 0, y: 0 }, false, {
+971           methodOfCreation,
+972           boxes,
+973           anchorNode,
+974           anchorOffset,
+975           focusNode,
+976           focusOffset,
+977         });
+978         break;
+979       }
+980     }
+981   }
+982 
+2190 }
+2191 
+</code>
+
+PR summary:
+<pr_summary>
+[Editor] Improve the accessibility of the highlight editor (bug 1881743)
+
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

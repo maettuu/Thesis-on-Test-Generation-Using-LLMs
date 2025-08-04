@@ -1,0 +1,57 @@
+const { expect } = require('chai');
+const { PDFDocument, PDFPage } = require('../../src/display/api.js');
+
+it("should display top and bottom images in pdf", async () => {
+  const pdfPath = "../../test/pdfs/issue-top-bottom-images.pdf";
+  const pdf = await PDFDocument.load(pdfPath);
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewPort({ scale: 1 });
+
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  await page.render({
+    canvasContext: context,
+    viewport,
+  });
+
+  const imgData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const pixelData = imgData.data;
+
+  // Check top image (black rectangle at the top)
+  const topStart = 0;
+  const topEnd = 100; // Adjust based on expected image height
+  let hasTopImage = false;
+
+  for (let y = topStart; y < topEnd; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const idx = (y * canvas.width + x) * 4;
+      if (pixelData[idx] === 0) { // Check for black pixel
+        hasTopImage = true;
+        break;
+      }
+    }
+    if (hasTopImage) break;
+  }
+
+  // Check bottom image (black rectangle at the bottom)
+  const bottomStart = canvas.height - 100; // Adjust based on expected image height
+  const bottomEnd = canvas.height;
+  let hasBottomImage = false;
+
+  for (let y = bottomStart; y < bottomEnd; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const idx = (y * canvas.width + x) * 4;
+      if (pixelData[idx] === 0) { // Check for black pixel
+        hasBottomImage = true;
+        break;
+      }
+    }
+    if (hasBottomImage) break;
+  }
+
+  expect(hasTopImage, "Top image is missing").to.be.true;
+  expect(hasBottomImage, "Bottom image is missing").to.be.true;
+});

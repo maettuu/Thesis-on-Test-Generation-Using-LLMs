@@ -1,0 +1,45 @@
+<think>
+Okay, I need to write a regression test for the patch that uses ImageDecoder to speed up decoding images in PDFs. The test should fail before the patch is applied and pass after.
+
+First, I should understand what the patch does. It looks like the patch adds support for using ImageDecoder in the JpegStream class. ImageDecoder is a web API that allows for efficient image decoding, which should make loading JPEG images in PDFs faster.
+
+So, the test needs to verify that when a PDF with a JPEG image is loaded, the ImageDecoder is used. If the patch is correctly applied, the test should pass; otherwise, it should fail.
+
+I'll start by setting up a test that loads a PDF with a JPEG image. I'll use a sample PDF from the test resources, like "image-jpeg.pdf". Then, I'll check if the image was decoded using ImageDecoder by looking for the presence of a bitmap in the image data.
+
+I'll create a mock function to track when getTransferableImage is called, which indicates that ImageDecoder is being used. If the function is called, it means the patch is effective.
+
+I'll use the PDFDocumentLoadingTask to load the document and then the first page. After the page is loaded, I'll check if the mock function was called. If it was, the test passes; otherwise, it fails.
+
+I need to make sure the test is self-contained and only uses the necessary imports. I'll import the required modules dynamically to ensure compatibility with Node.js.
+
+Putting it all together, the test will load the PDF, check the image loading process, and verify that ImageDecoder was used by checking the mock function call.
+</think>
+
+```javascript
+it("should use ImageDecoder for JPEG images", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { PDFWorker } = await import("../../src/display/worker.js");
+  const { JpegStream } = await import("../../src/core/jpeg_stream.js");
+
+  const pdfWorker = new PDFWorker();
+  const pdfDocument = await PDFDocumentLoadingTask.load(
+    pdfWorker,
+    "../../test/pdfs/image-jpeg.pdf"
+  );
+
+  const firstPagePromise = pdfDocument.getPage(1);
+  const mockGetTransferableImage = jest.fn();
+  const originalGetTransferableImage = JpegStream.prototype.getTransferableImage;
+
+  JpegStream.prototype.getTransferableImage = async function() {
+    mockGetTransferableImage();
+    return originalGetTransferableImage.apply(this, arguments);
+  };
+
+  const firstPage = await firstPagePromise;
+  await firstPage.render();
+
+  expect(mockGetTransferableImage).toHaveBeenCalled();
+});
+```

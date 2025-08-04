@@ -1,0 +1,36 @@
+it("should render PDF with HelveticaLTStd fonts using fallback", async () => {
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const server = new TestPdfsServer();
+  const pdfPath = `${TEST_PDFS_PATH}/Tax3921.pdf`;
+
+  try {
+    const { pdfDocument } = await getDocument({
+      url: server.urlForPDF(pdfPath),
+      transport: new PDFDataRangeTransport(),
+    });
+
+    const firstPage = await pdfDocument.getPage(1);
+    const viewport = firstPage.getViewport({ scale: 1 });
+    const renderTask = firstPage.render({
+      viewport,
+      canvasContext: null,
+      renderInteractive: false,
+      useTextLayer: false,
+    });
+
+    const warnings = [];
+    renderTask.on("warning", (evt) => {
+      warnings.push(evt.detail);
+    });
+
+    await renderTask.promise;
+
+    const expectedWarning = "Error: Requesting object that isn't resolved yet HelveticaLTStd_path";
+    assert.strictEqual(
+      warnings.some((warning) => warning.includes(expectedWarning)),
+      false
+    );
+  } finally {
+    await server.stop();
+  }
+});

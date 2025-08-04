@@ -1,0 +1,74 @@
+<think>
+Okay, I need to write a regression test for the issue where the highlight on a cropped PDF isn't visible when saving or printing. The patch provided modifies the `serializeBoxes` and `serializeOutlines` methods in `highlight.js` to correctly calculate the coordinates relative to the crop rectangle.
+
+First, I should understand what the patch does. It looks like the `serializeBoxes` method now takes a `rect` parameter, which represents the crop rectangle. This `rect` is used to adjust the x and y coordinates of the highlight boxes. Similarly, `serializeOutlines` also uses this `rect` to correctly position the outlines.
+
+The test needs to verify that after the patch, when a PDF is cropped, the highlight is correctly positioned and visible. So, the test should create a cropped PDF, add a highlight, and then check if the highlight's coordinates are correctly calculated.
+
+I'll start by importing the necessary modules. Since the test file already has many imports, I can reuse them. I'll need to import `PDFDocumentProxy` and `PDFPageProxy` from `../../src/display/api.js` because they aren't in the provided test file. I'll do this dynamically using `await import`.
+
+Next, I'll set up a sample PDF. For simplicity, I'll use a base64-encoded PDF. I'll create a new PDF document using `getDocument` and get the first page. Then, I'll apply a crop to the page to simulate a cropped PDF.
+
+I'll then create an `AnnotationEditorUIManager` and a `DrawLayer` to handle the annotation. The highlight editor will be initialized with some boxes to draw the highlight.
+
+After setting up the highlight, I'll serialize the data. The `serialize` method should include the `quadPoints` and `outlines` which are calculated using the new methods with the crop rectangle.
+
+I'll extract the expected quad points from the serialized data. Since the PDF is cropped, the quad points should reflect the adjusted coordinates based on the crop rectangle.
+
+Finally, I'll compare the expected quad points with the actual ones from the serialized data. If they match, the test passes, indicating that the highlight is correctly positioned even after cropping.
+
+I need to make sure the test is self-contained and only tests the specific behavior. I'll structure the test with `it` and include all necessary setup steps within the async function. I'll also ensure that I'm using the correct imports and that the test doesn't rely on any external state beyond what's provided.
+
+I should also consider any potential issues, like the PDF not loading correctly or the crop not being applied properly. But since the test is focused on the serialization after cropping, I'll assume the crop is correctly applied in the test setup.
+
+In summary, the test will:
+1. Import necessary modules.
+2. Create a cropped PDF page.
+3. Initialize the highlight editor.
+4. Serialize the highlight data.
+5. Verify the quad points match the expected values after cropping.
+
+This should ensure that the patch correctly fixes the issue where the highlight isn't visible on a cropped PDF when saved or printed.
+</think>
+
+```javascript
+it("should correctly position highlights on cropped PDFs", async () => {
+  const { PDFDocumentProxy, PDFPageProxy } = await import("../../src/display/api.js");
+  const pdfData = new Uint8Array([/* base64 encoded PDF data */]);
+  const pdf = await getDocument({
+    data: pdfData,
+    range: new PDFDataRangeTransport(),
+    password: "",
+  });
+  const page = await pdf.getPage(0);
+  
+  // Simulate cropped PDF
+  const cropRect = [100, 100, 300, 300]; // [x, y, width, height]
+  const viewport = page.getViewport({ scale: 1 });
+  const [pageWidth, pageHeight] = [viewport.width, viewport.height];
+  
+  const uiManager = new AnnotationEditorUIManager();
+  const drawLayer = new DrawLayer();
+  const highlightEditor = new HighlightEditor({
+    color: "#fff066",
+    opacity: 1,
+    boxes: [{ x: 0.5, y: 0.5, width: 0.2, height: 0.2 }],
+    pageIndex: 0,
+    page,
+  });
+  
+  highlightEditor.rotate(0);
+  const serialized = highlightEditor.serialize();
+  
+  const expectedQuadPoints = [
+    100 + (0.5 * pageWidth), 100 + (0.5 * pageHeight),
+    100 + (0.5 * pageWidth), 100 + (0.5 * pageHeight),
+    100 + (0.5 * pageWidth) + (0.2 * pageWidth), 100 + (0.5 * pageHeight),
+    100 + (0.5 * pageWidth) + (0.2 * pageWidth), 100 + (0.5 * pageHeight) + (0.2 * pageHeight),
+    100 + (0.5 * pageWidth), 100 + (0.5 * pageHeight) + (0.2 * pageHeight),
+    100 + (0.5 * pageWidth), 100 + (0.5 * pageHeight) + (0.2 * pageHeight)
+  ];
+  
+  expect(serialized.quadPoints).toEqual(expectedQuadPoints);
+});
+```

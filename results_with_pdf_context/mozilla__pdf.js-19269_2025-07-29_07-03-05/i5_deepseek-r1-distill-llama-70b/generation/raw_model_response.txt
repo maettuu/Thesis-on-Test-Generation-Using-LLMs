@@ -1,0 +1,42 @@
+<think>
+Okay, I need to write a regression test for the issue where the top and bottom images aren't displayed in the PDF file. The patch provided modifies the evaluator.js and operator_list.js files. Let me go through the changes to understand what's fixed.
+
+Looking at the patch, in evaluator.js, they added a 'hasMask' variable which checks if the dictionary has "SMask" or "Mask". This variable is then passed to addImageOps. In operator_list.js, addImageOps now accepts hasMask and adds save, setGState, and restore operations if hasMask is true.
+
+So, the problem was that images with masks weren't being displayed correctly. The patch ensures that when a mask is present, the PDF operators save the state, set the mask, and then restore the state, which should fix the rendering issue.
+
+To test this, I need a PDF that includes images with masks. I'll use a test PDF from the test suite, maybe one that has images with transparency or masks. I'll create a test that checks if the top and bottom images are rendered correctly.
+
+The test should create a PDF document, render a page, and then check if the expected images are present. Since the test needs to fail before the patch and pass after, I'll structure it to compare against a known good state.
+
+I'll import the necessary modules like PDFDocument and PDFPageProxy. Then, I'll load the test PDF. After rendering, I'll check if the images are present by perhaps comparing the rendered canvas or checking if the image operators were executed correctly.
+
+I need to make sure the test is self-contained and doesn't rely on external dependencies beyond the provided imports. I'll use async/await for the operations since PDF.js uses promises extensively.
+
+Finally, I'll write the test using Jest's it function, ensuring that it fails without the patch and passes with it. The test will load the PDF, render the page, and assert that the images are present.
+</think>
+
+```javascript
+it("should display top and bottom images in pdf with masks", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+
+  // Load a test PDF with images that have masks
+  const pdf = await PDFDocument.load(await fetch("test.pdf").then(res => res.arrayBuffer()));
+
+  // Get the first page
+  const page = (await pdf.getPages()).find(p => p.pageNumber === 1);
+
+  // Render the page
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  await page.render({ canvasContext: context, viewport });
+
+  // Check if images are rendered
+  const expectedImageCount = 2; // Top and bottom images
+  const actualImageCount = (context.__getDrawCalls || () => []).call(context).length;
+
+  expect(actualImageCount).toBe(expectedImageCount);
+});
+```

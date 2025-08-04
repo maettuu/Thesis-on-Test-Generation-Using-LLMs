@@ -1,0 +1,66 @@
+```javascript
+it("should read highlighted text during editing inside a PDF", async () => {
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { getSelectionBoxes } = await import("../../src/display/editor/tools.js");
+
+  const pdfDocument = await PDFDocumentProxy.load("path_to_pdf_file");
+  const pdfPage = await pdfDocument.getPage(1);
+  const annotationStorage = pdfPage.annotationStorage;
+  const container = document.createElement("div");
+  const viewer = { container };
+  const eventBus = { _on: () => {} };
+  const altTextManager = {};
+  const pageColors = {};
+  const highlightColors = {};
+  const mlManager = {};
+
+  const uiManager = new AnnotationEditorUIManager(
+    container,
+    viewer,
+    altTextManager,
+    eventBus,
+    pdfDocument,
+    pageColors,
+    highlightColors,
+    mlManager
+  );
+
+  const selection = {
+    anchorNode: { nodeType: 1, parentElement: { closest: () => ({}) } },
+    anchorOffset: 0,
+    focusNode: { nodeType: 1, parentElement: { closest: () => ({}) } },
+    focusOffset: 0,
+    empty: () => {},
+    isCollapsed: false,
+    toString: () => "Highlighted text",
+  };
+
+  const originalGetSelection = document.getSelection;
+  document.getSelection = () => selection;
+
+  uiManager.highlightSelection();
+
+  const expectedText = "Highlighted text";
+  const actualText = await getHighlightedText();
+
+  function getHighlightedText() {
+    return new Promise((resolve) => {
+      const intervalId = setInterval(() => {
+        const highlightedText = document.querySelector(".visuallyHidden");
+        if (highlightedText) {
+          clearInterval(intervalId);
+          resolve(highlightedText.textContent);
+        }
+      }, 100);
+    });
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+
+  document.getSelection = originalGetSelection;
+
+  expect(actualText).toBe(expectedText);
+});
+```

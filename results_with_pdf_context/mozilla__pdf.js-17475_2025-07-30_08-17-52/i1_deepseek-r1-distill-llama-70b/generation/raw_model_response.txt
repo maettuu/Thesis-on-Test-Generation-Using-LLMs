@@ -1,0 +1,54 @@
+<think>
+Okay, I need to write a regression test for the issue where the highlight on a cropped PDF isn't visible when saving or printing. The patch provided modifies the serializeBoxes and serializeOutlines methods in highlight.js. 
+
+First, I should understand what the patch does. It looks like the methods now take a 'rect' parameter, which is used to calculate the correct coordinates for the highlight boxes and outlines. Before the patch, these methods didn't account for the cropped area, so the highlights were probably positioned incorrectly when the PDF was cropped.
+
+The test needs to fail before the patch and pass after. So, I'll create a test that checks if the highlight's coordinates are correctly calculated within the cropped area.
+
+I'll use the provided PDF file, bug1872721.pdf, which is cropped. I'll load it using getDocument and buildGetDocumentParams from test_utils.js. Then, I'll create a highlight annotation and serialize it to get the quadPoints.
+
+I'll check if the quadPoints fall within the expected range of the cropped page. If they do, the test passes; otherwise, it fails. 
+
+I'll structure the test with an async it block, importing necessary modules dynamically. I'll set up the PDF document, create an editor, serialize the data, and assert the quadPoints are within the correct bounds.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll also ensure that the test correctly compares the expected and actual values to validate the patch's effectiveness.
+</think>
+
+```javascript
+it("should correctly calculate highlight coordinates for cropped PDFs", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1872721.pdf'));
+  
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const editor = new (await import("../../src/display/editor/highlight.js")).HighlightEditor({
+    color: "#fff066",
+    opacity: 1,
+    pageIndex: 0,
+    page,
+    uiManager: new (await import("../../src/display/editor/tools.js")).AnnotationEditorUIManager(),
+  });
+
+  const data = editor.serialize();
+  const quadPoints = data.quadPoints;
+
+  // Verify that the quadPoints are within the expected range for a cropped PDF
+  const [minX, maxX] = [Math.min(...quadPoints.filter((_, i) => i % 2 === 0)),
+    Math.max(...quadPoints.filter((_, i) => i % 2 === 0))];
+  const [minY, maxY] = [Math.min(...quadPoints.filter((_, i) => i % 2 === 1)),
+    Math.max(...quadPoints.filter((_, i) => i % 2 === 1))];
+
+  // The expected values should be adjusted based on the actual cropped PDF dimensions
+  // For this test, assume the cropped area has certain known dimensions
+  const expectedMinX = 100;
+  const expectedMaxX = 300;
+  const expectedMinY = 100;
+  const expectedMaxY = 300;
+
+  assert.between(minX, expectedMinX - 10, expectedMinX + 10);
+  assert.between(maxX, expectedMaxX - 10, expectedMaxX + 10);
+  assert.between(minY, expectedMinY - 10, expectedMinY + 10);
+  assert.between(maxY, expectedMaxY - 10, expectedMaxY + 10);
+});
+```

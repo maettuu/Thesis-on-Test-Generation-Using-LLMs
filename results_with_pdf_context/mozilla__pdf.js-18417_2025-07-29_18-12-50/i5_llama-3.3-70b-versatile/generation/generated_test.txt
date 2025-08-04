@@ -1,0 +1,42 @@
+it("should render PDF with transparency filters correctly when base href is defined", async () => {
+  const { PDFPageProxy, PDFDocumentProxy, PDFViewer } = await import("../../src/display/api.js");
+  const { createIdFactory } = await import("./test_utils.js");
+  const idFactory = createIdFactory();
+
+  const pdfUrl = `${TEST_PDFS_PATH}/test.pdf`;
+  const pdfDocument = await PDFDocumentProxy.load({ url: pdfUrl, cMapUrl: CMAP_URL, cMapPacked: true });
+  const pdfViewer = new PDFViewer({ container: document.body, viewer: { renderInteractiveForms: false } });
+  const pdfPage = await pdfDocument.getPage(1);
+  const scale = 1;
+  const viewport = pdfPage.getViewport({ scale });
+  pdfViewer.setDocumentAndPage(pdfDocument, pdfPage);
+  pdfViewer.render();
+
+  const baseHref = document.createElement("base");
+  baseHref.href = ".";
+  document.head.appendChild(baseHref);
+
+  const canvas = pdfViewer.getPageView(0).canvas;
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+  const expectedImageData = await new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const expectedCanvas = document.createElement("canvas");
+      expectedCanvas.width = canvas.width;
+      expectedCanvas.height = canvas.height;
+      const expectedCtx = expectedCanvas.getContext("2d");
+      expectedCtx.drawImage(img, 0, 0);
+      resolve(expectedCtx.getImageData(0, 0, canvas.width, canvas.height).data);
+    };
+    img.src = `${TEST_PDFS_PATH}/expected.png`;
+  });
+
+  for (let i = 0; i < imageData.length; i++) {
+    if (imageData[i] !== expectedImageData[i]) {
+      throw new Error("Transparency filters are not rendered correctly");
+    }
+  }
+});

@@ -1,0 +1,49 @@
+it("should correctly handle images with SMask", async () => {
+  const { PartialEvaluator, OperatorList, Dict, Name } = await import("../../src/core/evaluator.js");
+  const xref = new XRefMock();
+  const imageDict = new Dict();
+  imageDict.set("Subtype", new Name("Image"));
+  imageDict.set("W", 10);
+  imageDict.set("H", 10);
+  imageDict.set("SMask", new Name("Mask"));
+
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: {},
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+  });
+
+  const operatorList = new OperatorList();
+  const cacheKey = "test-image";
+  const localImageCache = new Map();
+
+  await evaluator.buildPaintImageXObject({
+    resources: new Dict(),
+    image: new Stream(new StringStream("")),
+    isInline: false,
+    operatorList,
+    cacheKey,
+    localImageCache,
+    localColorSpaceCache: new Map(),
+  });
+
+  const expectedOperations = [
+    { fn: OPS.save, args: [] },
+    { fn: OPS.setGState, args: [[["SMask", false]]] },
+    { fn: OPS.paintImageXObject, args: [expect.any(String), 10, 10] },
+    { fn: OPS.restore, args: [] },
+  ];
+
+  expect(operatorList.fnArray).toContain(OPS.save);
+  expect(operatorList.fnArray).toContain(OPS.setGState);
+  expect(operatorList.fnArray).toContain(OPS.paintImageXObject);
+  expect(operatorList.fnArray).toContain(OPS.restore);
+
+  expect(operatorList).toMatchSnapshot();
+});

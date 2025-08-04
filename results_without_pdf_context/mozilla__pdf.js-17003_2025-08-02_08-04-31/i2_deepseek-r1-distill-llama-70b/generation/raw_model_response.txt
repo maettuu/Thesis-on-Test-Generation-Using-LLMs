@@ -1,0 +1,59 @@
+<think>
+Okay, I need to write a regression test for the issue where a warning appears in the console when printing a PDF with an added annotation. The warning is "Warning: Unknown field name, falling back to empty field name." 
+
+First, I should understand what's causing this warning. From the issue description, it seems that the problem was introduced by a change in how annotations are collected, specifically when printing. The patch restores the `collectFields` parameter, which was causing unnecessary parsing and thus the warning.
+
+So, the test needs to verify that before the patch, the warning is triggered, and after the patch, it isn't. But since I can't run both versions in one test, I'll write the test assuming the patch is applied and check that the warning doesn't occur.
+
+I'll structure the test to:
+1. Load a PDF with annotations.
+2. Add an annotation to it.
+3. Attempt to print it.
+4. Check that no warning is logged during this process.
+
+I'll use the `TestReporter` to capture any warnings. If a warning is logged, the test should fail.
+
+I need to import necessary modules like `PDFDocument`, `Annotation`, and `TestReporter`. I'll create a sample PDF in memory with a page, add an annotation, and then trigger the print action. I'll wrap this in a promise to handle asynchronous operations.
+
+I should ensure that the test is self-contained and doesn't rely on external files. Using `PDFDocument` from `../../web/pdf_document.js` and `Annotation` from `../../src/core/annotation.js` makes sense. Also, I'll need `TestReporter` from `./testreporter.js` to capture the warnings.
+
+In the test, I'll set up a `TestReporter` instance and override the `warn` method to capture any warnings. Then, I'll load the document, create an annotation, and print. After printing, I'll check if any warning was captured. If so, the test fails.
+
+I think that's a solid plan. Now, I'll write the code accordingly.
+</think>
+
+```javascript
+it("should not log warning when printing with annotations", async () => {
+  const { PDFDocument } = await import("../../web/pdf_document.js");
+  const { Annotation } = await import("../../src/core/annotation.js");
+  const { TestReporter } = await import("./testreporter.js");
+
+  const reporter = new TestReporter();
+  let warningLogged = false;
+
+  reporter.warn = (message) => {
+    warningLogged = true;
+  };
+
+  // Create a sample PDF document with a page
+  const pdfDocument = new PDFDocument({
+    title: "Test PDF",
+    author: "Test Author",
+    creator: "Test Creator",
+  });
+
+  const page = pdfDocument.addPage();
+
+  // Create and add an annotation
+  const annotation = new Annotation();
+  page.annotations.add(annotation);
+
+  // Simulate printing
+  await pdfDocument.print();
+
+  // Verify no warning was logged
+  if (warningLogged) {
+    throw new Error("Warning was logged when printing with annotations");
+  }
+});
+```

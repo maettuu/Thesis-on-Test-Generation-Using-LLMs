@@ -1,0 +1,47 @@
+<think>
+Okay, I need to write a regression test for the issue where OpenJPEG warnings don't respect the PDF.js verbosity levels. The patch changes the import statement in jpx.js to include 'warn' from '../shared/util.js' and passes it to the OpenJPEG constructor. 
+
+First, I should understand the problem. Before the patch, OpenJPEG warnings were using console.warn directly, which doesn't respect the PDF.js verbosity settings. After the patch, OpenJPEG should use the 'warn' function from PDF.js, which honors the verbosity level.
+
+So, the test needs to verify that when the verbosity is set to 'none', no warnings are logged. Conversely, when verbosity is higher, warnings should be visible.
+
+I'll structure the test using Jest. I'll create a test case that checks both scenarios: when warnings are suppressed and when they're allowed.
+
+I'll need to import the necessary modules: JpxImage from '../../src/core/jpx.js' and the utility functions from '../shared/util.js' to set the verbosity level.
+
+In the test, I'll mock the console.warn function to track if it's called. For the first part, I'll set verbosity to 'none' and expect no warnings. For the second part, I'll set a higher verbosity and expect warnings to be logged when OpenJPEG encounters an issue.
+
+I'll create a sample JPX data that triggers a warning, perhaps by passing invalid data. Then, I'll call JpxImage.decode with this data and check if the mock function was called appropriately in each case.
+
+I'll structure the test with two parts: one with verbosity set to 'none' and another with a higher level. Each part will mock console.warn, reset the module, and test the behavior.
+
+Finally, I'll write the test code, ensuring it's self-contained and uses the correct imports. I'll make sure the test fails before the patch and passes after, confirming the fix.
+</think>
+
+```javascript
+it("should respect verbosity level when logging OpenJPEG warnings", async () => {
+  const { JpxImage } = await import("../../src/core/jpx.js");
+  const { setVerbosityLevel, VerbosityLevel } = await import("../../shared/util.js");
+
+  const mockConsoleWarn = jest.fn();
+  const originalConsoleWarn = console.warn;
+
+  // Test with verbosity NONE
+  setVerbosityLevel(VerbosityLevel.none);
+  console.warn = mockConsoleWarn;
+  const invalidJpxData = new Uint8Array([0x00, 0x00, 0x00, 0x00]); // Invalid JPX data to trigger warning
+  await expect(JpxImage.decode(invalidJpxData)).rejects.toThrow(JpxError);
+  expect(mockConsoleWarn).not.toHaveBeenCalled();
+  console.warn = originalConsoleWarn;
+
+  // Reset module for next test
+  JpxImage.cleanup();
+
+  // Test with verbosity WARNING
+  setVerbosityLevel(VerbosityLevel.warning);
+  console.warn = mockConsoleWarn;
+  await expect(JpxImage.decode(invalidJpxData)).rejects.toThrow(JpxError);
+  expect(mockConsoleWarn).toHaveBeenCalled();
+  console.warn = originalConsoleWarn;
+});
+```

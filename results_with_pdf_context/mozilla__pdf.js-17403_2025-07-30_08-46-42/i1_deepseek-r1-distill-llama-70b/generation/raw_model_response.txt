@@ -1,0 +1,66 @@
+<think>
+Okay, I need to create a regression test for the issue where rendering a PDF with many pages is slow. The patch provided modifies the MessageHandler class to introduce queuing and postponing of task execution. 
+
+First, I should understand what the patch does. It adds properties like #cancelledStreamIds, #executorRunning, #isPostponed, and #queue to the MessageHandler. The _onComObjOnMessage method now pushes messages into the queue and uses #postponeExecution to delay processing. The #executor method processes the queue, handling each message and postponing as needed.
+
+The goal is to write a test that fails before the patch and passes after. The test should simulate a scenario where multiple messages are sent, and the handler should process them correctly without getting stuck.
+
+I'll start by importing the necessary modules. Since the test file already imports MessageHandler and LoopbackPort, I can use those. I'll set up a test case using Jest's it function.
+
+In the test, I'll create a LoopbackPort to simulate the communication object. Then, I'll instantiate the MessageHandler with this port. 
+
+Next, I'll define a simple action that just returns the data it receives. I'll register this action using messageHandler.on. 
+
+I'll set up a counter to track how many times the action is executed and a flag to indicate when all tasks are done. 
+
+Now, I'll create multiple promises to send messages to the handler. Each promise will send a message, wait for the response, and increment the counter. I'm using a high number like 50 to simulate a large number of pages.
+
+I'll use async/await to handle the promises. After sending all messages, I'll wait for the done flag to be set. 
+
+The key part is ensuring that the executor doesn't block and all messages are processed. The test should check that all 50 messages are handled correctly.
+
+Finally, I'll assert that the counter equals 50, meaning all messages were processed successfully. This will confirm that the patch fixes the slow rendering issue by properly queuing and executing tasks without blocking.
+</think>
+
+```javascript
+it("should handle multiple messages without blocking", async () => {
+  const port = new LoopbackPort();
+  const messageHandler = new MessageHandler("source", "target", port);
+  
+  let counter = 0;
+  let done = false;
+  
+  function simpleAction(data) {
+    return data;
+  }
+  
+  messageHandler.on("testAction", simpleAction);
+  
+  const results = [];
+  
+  // Create 50 promises to simulate a lot of messages
+  const promises = Array.from({ length: 50 }).map(async (_, i) => {
+    const result = await new Promise((resolve, reject) => {
+      port.postMessage({
+        targetName: "source",
+        sourceName: "target",
+        action: "testAction",
+        data: { id: i },
+        callbackId: i,
+        callback: 1
+      });
+    });
+    results.push(result);
+    counter++;
+    
+    if (counter === 50) {
+      done = true;
+    }
+  });
+  
+  await Promise.all(promises);
+  await new Promise(resolve => resolve(done));
+  
+  expect(counter).toBe(50);
+});
+```

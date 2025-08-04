@@ -1,0 +1,38 @@
+<think>
+Okay, so I need to write a regression test for this issue where the HTML spec page printed to PDF can't be opened in Firefox. The patch provided is in xref.js, and it's supposed to fix bug 1978317. 
+
+First, I should understand what the patch does. Looking at the code, it seems to adjust the xref table entries. The comment says that if the generation number (gen) doesn't match the index (i), it fixes it. So, the patch is ensuring that the gen number in the xref entry matches the current index, which probably fixes some inconsistency that caused the PDF to be invalid.
+
+Now, for the test. The test needs to fail before the patch and pass after. So, I should create a PDF that triggers this bug. The HTML spec has a complex structure, so maybe when printed to PDF, it has specific cross-reference entries that were incorrect before the patch.
+
+I'll use the TestPdfsServer from test_utils.js to serve a test PDF. The test will attempt to load this PDF and check if it can be read without errors. Before the patch, this should throw an error, but after, it should load fine.
+
+I'll structure the test using Jest. I'll import the necessary modules like PDFDocument and TestPdfsServer. Then, I'll set up a server to serve the test PDF. The test will try to get the document and the first page. If it throws an error, the test fails. If it succeeds, the test passes.
+
+Since the issue is specific to Firefox, but the test is in a Node.js environment, I'll assume that the PDF's structure is such that the xref issue affects any viewer, including our PDF.js library. So, the test should catch the error regardless of the browser.
+
+I'll write the test to be self-contained, using async/await for the asynchronous operations. I'll make sure to only use the provided imports and no new dependencies.
+
+Putting it all together, the test will start the server, try to load the PDF, and check if it can be read. If the xref is wrong, it should throw an error before the patch, and pass after.
+</think>
+
+```javascript
+it("should fix HTML spec PDF opening in Firefox (issue 1978317)", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { TestPdfsServer } = await import("./test_utils.js");
+  
+  const server = new TestPdfsServer();
+  try {
+    server.addFile("html-spec.pdf", new TextEncoder().encode("<html></html>"));
+    
+    const loadingTask = PDFDocument.get({ url: 'http://localhost:9876/html-spec.pdf' });
+    const { numPages } = await loadingTask;
+    const page = await numPages.get(1);
+    
+    // If we reach here without an error, the PDF was loaded successfully
+    expect(page).toBeDefined();
+  } finally {
+    server.close();
+  }
+});
+```

@@ -1,0 +1,69 @@
+<think>
+Okay, I need to write a regression test for the issue where pasting an image from the clipboard into the editor wasn't supported. The patch adds this functionality, so the test should fail before the patch and pass after.
+
+First, I'll structure the test using Jest. The test should simulate the paste event and check if the editor correctly creates a new stamp editor with the pasted image.
+
+I'll start by importing the necessary modules. Since the test runs in Node.js, I'll use dynamic imports for the AnnotationEditorUIManager and StampEditor.
+
+Next, I'll set up the UI manager and create a mock current layer. I'll simulate the clipboard data with an image file. For this, I'll create a DataTransfer object with a File item of type 'image/png'.
+
+I'll prevent the default behavior of the paste event and set up a mock addEventListener to track if the editor is added. Then, I'll trigger the paste method on the UI manager with the mock event.
+
+After triggering the paste, I'll wait a bit to ensure all asynchronous operations complete. Then, I'll check if the current editor is an instance of StampEditor and if it has the expected bitmapFile set.
+
+I'll also verify that the addEventListener was called, indicating the editor was added to the layer.
+
+Finally, I'll structure all this into a single test block that uses async/await for proper handling of asynchronous operations.
+</think>
+
+```javascript
+it("should support pasting an image from clipboard", async () => {
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { StampEditor } = await import("../../src/display/editor/stamp.js");
+
+  const uiManager = new AnnotationEditorUIManager();
+  const currentLayer = {
+    add: jest.fn(),
+    getNextId: () => "test-id",
+    div: {
+      getBoundingClientRect: () => ({
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+      }),
+    },
+  };
+  uiManager.currentLayer = currentLayer;
+
+  const clipboardData = {
+    items: [
+      new DataTransferItem(
+        new File(["test"], "test.png", { type: "image/png" }),
+        "image/png"
+      ),
+    ],
+    getData: () => "test-data",
+  };
+
+  const event = {
+    preventDefault: jest.fn(),
+    clipboardData,
+  };
+
+  const mockAddEventListener = jest.fn();
+  const mockAdd = jest.fn();
+
+  currentLayer.add = mockAdd;
+  currentLayer.addEventListener = mockAddEventListener;
+
+  await uiManager.paste(event);
+
+  // Wait for async operations
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  expect(mockAddEventListener).toHaveBeenCalled();
+  expect(uiManager.currentEditor).toBeInstanceOf(StampEditor);
+  expect(uiManager.currentEditor.#bitmapFile).toBeTruthy();
+});
+```

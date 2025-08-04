@@ -1,0 +1,48 @@
+it("should correctly substitute HelveticaLTStdBold font with HelveticaBold", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { pdfjsLib } = await import("../../src/display/legacy/compatibility.js");
+  const pdfPath = require.resolve("../../test/pdfs/Tax3921.pdf");
+  const { promisify } = await import("util");
+  const { resolve, basename } = await import("path");
+  const { mkdir, unlink, writeFile } = await import("fs/promises");
+  const os = await import("os");
+
+  const tempDir = await promisify(os.tmpdir)();
+  const outputFilePath = resolve(tempDir, `output-${Date.now()}.png`);
+
+  try {
+    await pdfjsLib.GlobalWorkerOptions.workerSrc = "//cdnjs.cloudflare.com/ajax/libs/pdfjs/3.0.2790/build/pdf.worker.min.js";
+    const pdf = await PDFDocument.load(pdfPath);
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    const renderTask = page.render({
+      viewport,
+      useCanvas: false,
+      background: "white",
+      intent: "default",
+    });
+
+    await renderTask.promise;
+    const svg = renderTask.getSVG();
+    const svgString = await svg.toSVGString();
+
+    // Generate PNG and write to file
+    const canvas = await new (await import("canvas")).Canvas(viewport.width, viewport.height);
+    const ctx = canvas.getContext("2d");
+    const img = await canvas.loadImage(svgString);
+    ctx.drawImage(img, 0, 0);
+    const pngStream = canvas.createPNGStream();
+    const chunks = [];
+    pngStream.on("data", (chunk) => chunks.push(chunk));
+    pngStream.on("end", () => {
+      const pngBuffer = Buffer.concat(chunks);
+      writeFile(outputFilePath, pngBuffer);
+    });
+
+    // Cleanup
+    await pdf.close();
+    await unlink(outputFilePath).catch(() => {});
+  } catch (error) {
+    throw new Error("Failed to render PDF with font substitution");
+  }
+});

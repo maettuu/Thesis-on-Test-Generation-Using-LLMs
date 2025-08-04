@@ -1,0 +1,1187 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Fields not rendered after saving and opening Dutch tax form
+Attach (recommended) or Link to PDF file here:
+
+- Direct link: https://download.belastingdienst.nl/belastingdienst/docs/model_opgaaf_gegevens_loonheffingen_lh0082z11fol.pdf
+- Web Archive link: https://web.archive.org/web/20240309103139/https://download.belastingdienst.nl/belastingdienst/docs/model_opgaaf_gegevens_loonheffingen_lh0082z11fol.pdf
+
+Configuration:
+- Web browser and its version: Firefox 125.0.3
+- Operating system and its version: Arch Linux
+- PDF.js version: 4.1.342 embedded in Firefox and 4.3.21 from https://mozilla.github.io/pdf.js/web/viewer.html
+- Is a browser extension: no
+
+Steps to reproduce the problem:
+1. Open the PDF file (Dutch tax form).
+2. Click the first radio button on the second page. Notice that extra fields appear behind it.
+3. Enter a date: 12-05-2024
+4. Save the PDF file to disk.
+5. Open the saved PDF file. Notice that the first radio button on the second page is checked, but the extra fields behind it are no longer visible. This makes it _seem_ as if data loss occurred, even though that's not the case.
+6. Click the second radio button below it and click the first radio button again. Notice that the extra fields behind the first radio button are now correctly visible, including the entered date.
+
+What is the expected behavior? (add screenshot)
+![Expected](https://github.com/mozilla/pdf.js/assets/1993262/721ede30-1f5b-4dc9-bef1-58bba2c58cda)
+
+What went wrong? (add screenshot)
+![Actual](https://github.com/mozilla/pdf.js/assets/1993262/a9bbdcec-a4b0-4a20-9fef-bb400c81189e)
+
+Link to a viewer (if hosted on a site other than mozilla.github.io/pdf.js or as Firefox/Chrome extension): https://mozilla.github.io/pdf.js/web/viewer.html
+</issue>
+
+PDF File:
+<pdf>
+issue18072.pdf
+</pdf>
+
+Patch:
+<patch>
+diff --git a/src/core/annotation.js b/src/core/annotation.js
+--- a/src/core/annotation.js
++++ b/src/core/annotation.js
+@@ -27,6 +27,7 @@ import {
+   getModificationDate,
+   IDENTITY_MATRIX,
+   info,
++  isArrayEqual,
+   LINE_DESCENT_FACTOR,
+   LINE_FACTOR,
+   OPS,
+@@ -723,6 +724,38 @@ class Annotation {
+     return !!(flags & flag);
+   }
+ 
++  _buildFlags(noView, noPrint) {
++    let { flags } = this;
++    if (noView === undefined) {
++      if (noPrint === undefined) {
++        return undefined;
++      }
++      if (noPrint) {
++        return flags & ~AnnotationFlag.PRINT;
++      }
++      return (flags & ~AnnotationFlag.HIDDEN) | AnnotationFlag.PRINT;
++    }
++
++    if (noView) {
++      flags |= AnnotationFlag.PRINT;
++      if (noPrint) {
++        // display === 1.
++        return (flags & ~AnnotationFlag.NOVIEW) | AnnotationFlag.HIDDEN;
++      }
++      // display === 3.
++      return (flags & ~AnnotationFlag.HIDDEN) | AnnotationFlag.NOVIEW;
++    }
++
++    flags &= ~(AnnotationFlag.HIDDEN | AnnotationFlag.NOVIEW);
++    if (noPrint) {
++      // display === 2.
++      return flags & ~AnnotationFlag.PRINT;
++    }
++
++    // display === 0.
++    return flags | AnnotationFlag.PRINT;
++  }
++
+   /**
+    * @private
+    */
+@@ -2073,10 +2106,15 @@ class WidgetAnnotation extends Annotation {
+ 
+   async save(evaluator, task, annotationStorage) {
+     const storageEntry = annotationStorage?.get(this.data.id);
++    const flags = this._buildFlags(storageEntry?.noView, storageEntry?.noPrint);
+     let value = storageEntry?.value,
+       rotation = storageEntry?.rotation;
+     if (value === this.data.fieldValue || value === undefined) {
+-      if (!this._hasValueFromXFA && rotation === undefined) {
++      if (
++        !this._hasValueFromXFA &&
++        rotation === undefined &&
++        flags === undefined
++      ) {
+         return null;
+       }
+       value ||= this.data.fieldValue;
+@@ -2088,8 +2126,8 @@ class WidgetAnnotation extends Annotation {
+       !this._hasValueFromXFA &&
+       Array.isArray(value) &&
+       Array.isArray(this.data.fieldValue) &&
+-      value.length === this.data.fieldValue.length &&
+-      value.every((x, i) => x === this.data.fieldValue[i])
++      isArrayEqual(value, this.data.fieldValue) &&
++      flags === undefined
+     ) {
+       return null;
+     }
+@@ -2106,7 +2144,7 @@ class WidgetAnnotation extends Annotation {
+         RenderingIntentFlag.SAVE,
+         annotationStorage
+       );
+-      if (appearance === null) {
++      if (appearance === null && flags === undefined) {
+         // Appearance didn't change.
+         return null;
+       }
+@@ -2134,6 +2172,15 @@ class WidgetAnnotation extends Annotation {
+         dict.set(key, originalDict.getRaw(key));
+       }
+     }
++    if (flags !== undefined) {
++      dict.set("F", flags);
++      if (appearance === null && !needAppearances) {
++        const ap = originalDict.getRaw("AP");
++        if (ap) {
++          dict.set("AP", ap);
++        }
++      }
++    }
+ 
+     const xfa = {
+       path: this.data.fieldName,
+@@ -3019,10 +3066,11 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
+       return null;
+     }
+     const storageEntry = annotationStorage.get(this.data.id);
++    const flags = this._buildFlags(storageEntry?.noView, storageEntry?.noPrint);
+     let rotation = storageEntry?.rotation,
+       value = storageEntry?.value;
+ 
+-    if (rotation === undefined) {
++    if (rotation === undefined && flags === undefined) {
+       if (value === undefined) {
+         return null;
+       }
+@@ -3033,10 +3081,11 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
+       }
+     }
+ 
+-    const dict = evaluator.xref.fetchIfRef(this.ref);
++    let dict = evaluator.xref.fetchIfRef(this.ref);
+     if (!(dict instanceof Dict)) {
+       return null;
+     }
++    dict = dict.clone();
+ 
+     if (rotation === undefined) {
+       rotation = this.rotation;
+@@ -3054,6 +3103,9 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
+     dict.set("V", name);
+     dict.set("AS", name);
+     dict.set("M", `D:${getModificationDate()}`);
++    if (flags !== undefined) {
++      dict.set("F", flags);
++    }
+ 
+     const maybeMK = this._getMKDict(rotation);
+     if (maybeMK) {
+@@ -3071,10 +3123,11 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
+       return null;
+     }
+     const storageEntry = annotationStorage.get(this.data.id);
++    const flags = this._buildFlags(storageEntry?.noView, storageEntry?.noPrint);
+     let rotation = storageEntry?.rotation,
+       value = storageEntry?.value;
+ 
+-    if (rotation === undefined) {
++    if (rotation === undefined && flags === undefined) {
+       if (value === undefined) {
+         return null;
+       }
+@@ -3085,10 +3138,11 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
+       }
+     }
+ 
+-    const dict = evaluator.xref.fetchIfRef(this.ref);
++    let dict = evaluator.xref.fetchIfRef(this.ref);
+     if (!(dict instanceof Dict)) {
+       return null;
+     }
++    dict = dict.clone();
+ 
+     if (value === undefined) {
+       value = this.data.fieldValue === this.data.buttonValue;
+@@ -3121,6 +3175,9 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
+ 
+     dict.set("AS", name);
+     dict.set("M", `D:${getModificationDate()}`);
++    if (flags !== undefined) {
++      dict.set("F", flags);
++    }
+ 
+     const maybeMK = this._getMKDict(rotation);
+     if (maybeMK) {
+
+diff --git a/src/core/document.js b/src/core/document.js
+--- a/src/core/document.js
++++ b/src/core/document.js
+@@ -378,9 +378,6 @@ class Page {
+     return this._parsedAnnotations.then(function (annotations) {
+       const newRefsPromises = [];
+       for (const annotation of annotations) {
+-        if (!annotation.mustBePrinted(annotationStorage)) {
+-          continue;
+-        }
+         newRefsPromises.push(
+           annotation
+             .save(partialEvaluator, task, annotationStorage)
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.25.2
+- @babel/preset-env: ^7.25.4
+- @babel/runtime: ^7.25.6
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001662
+- canvas: ^2.11.2
+- core-js: ^3.38.1
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.1
+- eslint-plugin-import: ^2.30.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.1.0
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^55.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.3.0
+- jsdoc: ^4.0.3
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.4
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.47
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.0
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.0
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.9.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.2
+- vinyl: ^3.0.0
+- webpack: ^5.94.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/annotation.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationActionEventType,
+18   AnnotationBorderStyleType,
+19   AnnotationEditorType,
+20   AnnotationFieldFlag,
+21   AnnotationFlag,
+22   AnnotationReplyType,
+23   AnnotationType,
+24   assert,
+25   BASELINE_FACTOR,
+26   FeatureTest,
+27   getModificationDate,
+28   IDENTITY_MATRIX,
+29   info,
+30   LINE_DESCENT_FACTOR,
+31   LINE_FACTOR,
+32   OPS,
+33   RenderingIntentFlag,
+34   shadow,
+35   stringToPDFString,
+36   unreachable,
+37   Util,
+38   warn,
+39 } from "../shared/util.js";
+40 import {
+41   collectActions,
+42   escapeString,
+43   getInheritableProperty,
+44   getRotationMatrix,
+45   isNumberArray,
+46   lookupMatrix,
+47   lookupNormalRect,
+48   lookupRect,
+49   numberToString,
+50   stringToAsciiOrUTF16BE,
+51   stringToUTF16String,
+52 } from "./core_utils.js";
+53 import {
+54   createDefaultAppearance,
+55   FakeUnicodeFont,
+56   getPdfColor,
+57   parseAppearanceStream,
+58   parseDefaultAppearance,
+59 } from "./default_appearance.js";
+60 import { Dict, isName, isRefsEqual, Name, Ref, RefSet } from "./primitives.js";
+61 import { Stream, StringStream } from "./stream.js";
+62 import { BaseStream } from "./base_stream.js";
+63 import { bidi } from "./bidi.js";
+64 import { Catalog } from "./catalog.js";
+65 import { ColorSpace } from "./colorspace.js";
+66 import { FileSpec } from "./file_spec.js";
+67 import { JpegStream } from "./jpeg_stream.js";
+68 import { ObjectLoader } from "./object_loader.js";
+69 import { OperatorList } from "./operator_list.js";
+70 import { writeObject } from "./writer.js";
+71 import { XFAFactory } from "./xfa/factory.js";
+72 
+625 class Annotation {
+626   constructor(params) {
+627     const { dict, xref, annotationGlobals } = params;
+628 
+629     this.setTitle(dict.get("T"));
+630     this.setContents(dict.get("Contents"));
+631     this.setModificationDate(dict.get("M"));
+632     this.setFlags(dict.get("F"));
+633     this.setRectangle(dict.getArray("Rect"));
+634     this.setColor(dict.getArray("C"));
+635     this.setBorderStyle(dict);
+636     this.setAppearance(dict);
+637     this.setOptionalContent(dict);
+638 
+639     const MK = dict.get("MK");
+640     this.setBorderAndBackgroundColors(MK);
+641     this.setRotation(MK, dict);
+642     this.ref = params.ref instanceof Ref ? params.ref : null;
+643 
+644     this._streams = [];
+645     if (this.appearance) {
+646       this._streams.push(this.appearance);
+647     }
+648 
+649     // The annotation cannot be changed (neither its position/visibility nor its
+650     // contents), hence we can just display its appearance and don't generate
+651     // a HTML element for it.
+652     const isLocked = !!(this.flags & AnnotationFlag.LOCKED);
+653     const isContentLocked = !!(this.flags & AnnotationFlag.LOCKEDCONTENTS);
+654 
+655     if (annotationGlobals.structTreeRoot) {
+656       let structParent = dict.get("StructParent");
+657       structParent =
+658         Number.isInteger(structParent) && structParent >= 0 ? structParent : -1;
+659 
+660       annotationGlobals.structTreeRoot.addAnnotationIdToPage(
+661         params.pageRef,
+662         structParent
+663       );
+664     }
+665 
+666     // Expose public properties using a data object.
+667     this.data = {
+668       annotationFlags: this.flags,
+669       borderStyle: this.borderStyle,
+670       color: this.color,
+671       backgroundColor: this.backgroundColor,
+672       borderColor: this.borderColor,
+673       rotation: this.rotation,
+674       contentsObj: this._contents,
+675       hasAppearance: !!this.appearance,
+676       id: params.id,
+677       modificationDate: this.modificationDate,
+678       rect: this.rectangle,
+679       subtype: params.subtype,
+680       hasOwnCanvas: false,
+681       noRotate: !!(this.flags & AnnotationFlag.NOROTATE),
+682       noHTML: isLocked && isContentLocked,
+683       isEditable: false,
+684     };
+685 
+686     if (params.collectFields) {
+687       // Fields can act as container for other fields and have
+688       // some actions even if no Annotation inherit from them.
+689       // Those fields can be referenced by CO (calculation order).
+690       const kids = dict.get("Kids");
+691       if (Array.isArray(kids)) {
+692         const kidIds = [];
+693         for (const kid of kids) {
+694           if (kid instanceof Ref) {
+695             kidIds.push(kid.toString());
+696           }
+697         }
+698         if (kidIds.length !== 0) {
+699           this.data.kidIds = kidIds;
+700         }
+701       }
+702 
+703       this.data.actions = collectActions(xref, dict, AnnotationActionEventType);
+704       this.data.fieldName = this._constructFieldName(dict);
+705       this.data.pageIndex = params.pageIndex;
+706     }
+707 
+708     const it = dict.get("IT");
+709     if (it instanceof Name) {
+710       this.data.it = it.name;
+711     }
+712 
+713     this._isOffscreenCanvasSupported =
+714       params.evaluatorOptions.isOffscreenCanvasSupported;
+715     this._fallbackFontDict = null;
+716     this._needAppearances = false;
+717   }
+718 
+1377 }
+1378 
+1778 class WidgetAnnotation extends Annotation {
+1779   constructor(params) {
+1780     super(params);
+1781 
+1782     const { dict, xref, annotationGlobals } = params;
+1783     const data = this.data;
+1784     this._needAppearances = params.needAppearances;
+1785 
+1786     data.annotationType = AnnotationType.WIDGET;
+1787     if (data.fieldName === undefined) {
+1788       data.fieldName = this._constructFieldName(dict);
+1789     }
+1790 
+1791     if (data.actions === undefined) {
+1792       data.actions = collectActions(xref, dict, AnnotationActionEventType);
+1793     }
+1794 
+1795     let fieldValue = getInheritableProperty({
+1796       dict,
+1797       key: "V",
+1798       getArray: true,
+1799     });
+1800     data.fieldValue = this._decodeFormValue(fieldValue);
+1801 
+1802     const defaultFieldValue = getInheritableProperty({
+1803       dict,
+1804       key: "DV",
+1805       getArray: true,
+1806     });
+1807     data.defaultFieldValue = this._decodeFormValue(defaultFieldValue);
+1808 
+1809     if (fieldValue === undefined && annotationGlobals.xfaDatasets) {
+1810       // Try to figure out if we have something in the xfa dataset.
+1811       const path = this._title.str;
+1812       if (path) {
+1813         this._hasValueFromXFA = true;
+1814         data.fieldValue = fieldValue =
+1815           annotationGlobals.xfaDatasets.getValue(path);
+1816       }
+1817     }
+1818 
+1819     // When no "V" entry exists, let the fieldValue fallback to the "DV" entry
+1820     // (fixes issue13823.pdf).
+1821     if (fieldValue === undefined && data.defaultFieldValue !== null) {
+1822       data.fieldValue = data.defaultFieldValue;
+1823     }
+1824 
+1825     data.alternativeText = stringToPDFString(dict.get("TU") || "");
+1826 
+1827     this.setDefaultAppearance(params);
+1828 
+1829     data.hasAppearance ||=
+1830       this._needAppearances &&
+1831       data.fieldValue !== undefined &&
+1832       data.fieldValue !== null;
+1833 
+1834     const fieldType = getInheritableProperty({ dict, key: "FT" });
+1835     data.fieldType = fieldType instanceof Name ? fieldType.name : null;
+1836 
+1837     const localResources = getInheritableProperty({ dict, key: "DR" });
+1838     const acroFormResources = annotationGlobals.acroForm.get("DR");
+1839     const appearanceResources = this.appearance?.dict.get("Resources");
+1840 
+1841     this._fieldResources = {
+1842       localResources,
+1843       acroFormResources,
+1844       appearanceResources,
+1845       mergedResources: Dict.merge({
+1846         xref,
+1847         dictArray: [localResources, appearanceResources, acroFormResources],
+1848         mergeSubDicts: true,
+1849       }),
+1850     };
+1851 
+1852     data.fieldFlags = getInheritableProperty({ dict, key: "Ff" });
+1853     if (!Number.isInteger(data.fieldFlags) || data.fieldFlags < 0) {
+1854       data.fieldFlags = 0;
+1855     }
+1856 
+1857     data.readOnly = this.hasFieldFlag(AnnotationFieldFlag.READONLY);
+1858     data.required = this.hasFieldFlag(AnnotationFieldFlag.REQUIRED);
+1859     data.hidden =
+1860       this._hasFlag(data.annotationFlags, AnnotationFlag.HIDDEN) ||
+1861       this._hasFlag(data.annotationFlags, AnnotationFlag.NOVIEW);
+1862   }
+1863 
+2074   async save(evaluator, task, annotationStorage) {
+2075     const storageEntry = annotationStorage?.get(this.data.id);
+2076     let value = storageEntry?.value,
+2077       rotation = storageEntry?.rotation;
+2078     if (value === this.data.fieldValue || value === undefined) {
+2079       if (!this._hasValueFromXFA && rotation === undefined) {
+2080         return null;
+2081       }
+2082       value ||= this.data.fieldValue;
+2083     }
+2084 
+2085     // Value can be an array (with choice list and multiple selections)
+2086     if (
+2087       rotation === undefined &&
+2088       !this._hasValueFromXFA &&
+2089       Array.isArray(value) &&
+2090       Array.isArray(this.data.fieldValue) &&
+2091       value.length === this.data.fieldValue.length &&
+2092       value.every((x, i) => x === this.data.fieldValue[i])
+2093     ) {
+2094       return null;
+2095     }
+2096 
+2097     if (rotation === undefined) {
+2098       rotation = this.rotation;
+2099     }
+2100 
+2101     let appearance = null;
+2102     if (!this._needAppearances) {
+2103       appearance = await this._getAppearance(
+2104         evaluator,
+2105         task,
+2106         RenderingIntentFlag.SAVE,
+2107         annotationStorage
+2108       );
+2109       if (appearance === null) {
+2110         // Appearance didn't change.
+2111         return null;
+2112       }
+2113     } else {
+2114       // No need to create an appearance: the pdf has the flag /NeedAppearances
+2115       // which means that it's up to the reader to produce an appearance.
+2116     }
+2117 
+2118     let needAppearances = false;
+2119     if (appearance?.needAppearances) {
+2120       needAppearances = true;
+2121       appearance = null;
+2122     }
+2123 
+2124     const { xref } = evaluator;
+2125 
+2126     const originalDict = xref.fetchIfRef(this.ref);
+2127     if (!(originalDict instanceof Dict)) {
+2128       return null;
+2129     }
+2130 
+2131     const dict = new Dict(xref);
+2132     for (const key of originalDict.getKeys()) {
+2133       if (key !== "AP") {
+2134         dict.set(key, originalDict.getRaw(key));
+2135       }
+2136     }
+2137 
+2138     const xfa = {
+2139       path: this.data.fieldName,
+2140       value,
+2141     };
+2142 
+2143     dict.set(
+2144       "V",
+2145       Array.isArray(value)
+2146         ? value.map(stringToAsciiOrUTF16BE)
+2147         : stringToAsciiOrUTF16BE(value)
+2148     );
+2149     this.amendSavedDict(annotationStorage, dict);
+2150 
+2151     const maybeMK = this._getMKDict(rotation);
+2152     if (maybeMK) {
+2153       dict.set("MK", maybeMK);
+2154     }
+2155 
+2156     const buffer = [];
+2157     const changes = [
+2158       // data for the original object
+2159       // V field changed + reference for new AP
+2160       { ref: this.ref, data: "", xfa, needAppearances },
+2161     ];
+2162     if (appearance !== null) {
+2163       const newRef = xref.getNewTemporaryRef();
+2164       const AP = new Dict(xref);
+2165       dict.set("AP", AP);
+2166       AP.set("N", newRef);
+2167 
+2168       const resources = this._getSaveFieldResources(xref);
+2169       const appearanceStream = new StringStream(appearance);
+2170       const appearanceDict = (appearanceStream.dict = new Dict(xref));
+2171       appearanceDict.set("Subtype", Name.get("Form"));
+2172       appearanceDict.set("Resources", resources);
+2173       appearanceDict.set("BBox", [
+2174         0,
+2175         0,
+2176         this.data.rect[2] - this.data.rect[0],
+2177         this.data.rect[3] - this.data.rect[1],
+2178       ]);
+2179 
+2180       const rotationMatrix = this.getRotationMatrix(annotationStorage);
+2181       if (rotationMatrix !== IDENTITY_MATRIX) {
+2182         // The matrix isn't the identity one.
+2183         appearanceDict.set("Matrix", rotationMatrix);
+2184       }
+2185 
+2186       await writeObject(newRef, appearanceStream, buffer, xref);
+2187 
+2188       changes.push(
+2189         // data for the new AP
+2190         {
+2191           ref: newRef,
+2192           data: buffer.join(""),
+2193           xfa: null,
+2194           needAppearances: false,
+2195         }
+2196       );
+2197       buffer.length = 0;
+2198     }
+2199 
+2200     dict.set("M", `D:${getModificationDate()}`);
+2201     await writeObject(this.ref, dict, buffer, xref);
+2202 
+2203     changes[0].data = buffer.join("");
+2204 
+2205     return changes;
+2206   }
+2207 
+2680 }
+2681 
+2905 class ButtonWidgetAnnotation extends WidgetAnnotation {
+2906   constructor(params) {
+2907     super(params);
+2908 
+2909     this.checkedAppearance = null;
+2910     this.uncheckedAppearance = null;
+2911 
+2912     this.data.checkBox =
+2913       !this.hasFieldFlag(AnnotationFieldFlag.RADIO) &&
+2914       !this.hasFieldFlag(AnnotationFieldFlag.PUSHBUTTON);
+2915     this.data.radioButton =
+2916       this.hasFieldFlag(AnnotationFieldFlag.RADIO) &&
+2917       !this.hasFieldFlag(AnnotationFieldFlag.PUSHBUTTON);
+2918     this.data.pushButton = this.hasFieldFlag(AnnotationFieldFlag.PUSHBUTTON);
+2919     this.data.isTooltipOnly = false;
+2920 
+2921     if (this.data.checkBox) {
+2922       this._processCheckBox(params);
+2923     } else if (this.data.radioButton) {
+2924       this._processRadioButton(params);
+2925     } else if (this.data.pushButton) {
+2926       this.data.hasOwnCanvas = true;
+2927       this.data.noHTML = false;
+2928       this._processPushButton(params);
+2929     } else {
+2930       warn("Invalid field flags for button widget annotation");
+2931     }
+2932   }
+2933 
+3017   async _saveCheckbox(evaluator, task, annotationStorage) {
+3018     if (!annotationStorage) {
+3019       return null;
+3020     }
+3021     const storageEntry = annotationStorage.get(this.data.id);
+3022     let rotation = storageEntry?.rotation,
+3023       value = storageEntry?.value;
+3024 
+3025     if (rotation === undefined) {
+3026       if (value === undefined) {
+3027         return null;
+3028       }
+3029 
+3030       const defaultValue = this.data.fieldValue === this.data.exportValue;
+3031       if (defaultValue === value) {
+3032         return null;
+3033       }
+3034     }
+3035 
+3036     const dict = evaluator.xref.fetchIfRef(this.ref);
+3037     if (!(dict instanceof Dict)) {
+3038       return null;
+3039     }
+3040 
+3041     if (rotation === undefined) {
+3042       rotation = this.rotation;
+3043     }
+3044     if (value === undefined) {
+3045       value = this.data.fieldValue === this.data.exportValue;
+3046     }
+3047 
+3048     const xfa = {
+3049       path: this.data.fieldName,
+3050       value: value ? this.data.exportValue : "",
+3051     };
+3052 
+3053     const name = Name.get(value ? this.data.exportValue : "Off");
+3054     dict.set("V", name);
+3055     dict.set("AS", name);
+3056     dict.set("M", `D:${getModificationDate()}`);
+3057 
+3058     const maybeMK = this._getMKDict(rotation);
+3059     if (maybeMK) {
+3060       dict.set("MK", maybeMK);
+3061     }
+3062 
+3063     const buffer = [];
+3064     await writeObject(this.ref, dict, buffer, evaluator.xref);
+3065 
+3066     return [{ ref: this.ref, data: buffer.join(""), xfa }];
+3067   }
+3068 
+3069   async _saveRadioButton(evaluator, task, annotationStorage) {
+3070     if (!annotationStorage) {
+3071       return null;
+3072     }
+3073     const storageEntry = annotationStorage.get(this.data.id);
+3074     let rotation = storageEntry?.rotation,
+3075       value = storageEntry?.value;
+3076 
+3077     if (rotation === undefined) {
+3078       if (value === undefined) {
+3079         return null;
+3080       }
+3081 
+3082       const defaultValue = this.data.fieldValue === this.data.buttonValue;
+3083       if (defaultValue === value) {
+3084         return null;
+3085       }
+3086     }
+3087 
+3088     const dict = evaluator.xref.fetchIfRef(this.ref);
+3089     if (!(dict instanceof Dict)) {
+3090       return null;
+3091     }
+3092 
+3093     if (value === undefined) {
+3094       value = this.data.fieldValue === this.data.buttonValue;
+3095     }
+3096 
+3097     if (rotation === undefined) {
+3098       rotation = this.rotation;
+3099     }
+3100 
+3101     const xfa = {
+3102       path: this.data.fieldName,
+3103       value: value ? this.data.buttonValue : "",
+3104     };
+3105 
+3106     const name = Name.get(value ? this.data.buttonValue : "Off");
+3107     const buffer = [];
+3108     let parentData = null;
+3109 
+3110     if (value) {
+3111       if (this.parent instanceof Ref) {
+3112         const parent = evaluator.xref.fetch(this.parent);
+3113         parent.set("V", name);
+3114         await writeObject(this.parent, parent, buffer, evaluator.xref);
+3115         parentData = buffer.join("");
+3116         buffer.length = 0;
+3117       } else if (this.parent instanceof Dict) {
+3118         this.parent.set("V", name);
+3119       }
+3120     }
+3121 
+3122     dict.set("AS", name);
+3123     dict.set("M", `D:${getModificationDate()}`);
+3124 
+3125     const maybeMK = this._getMKDict(rotation);
+3126     if (maybeMK) {
+3127       dict.set("MK", maybeMK);
+3128     }
+3129 
+3130     await writeObject(this.ref, dict, buffer, evaluator.xref);
+3131     const newRefs = [{ ref: this.ref, data: buffer.join(""), xfa }];
+3132     if (parentData) {
+3133       newRefs.push({ ref: this.parent, data: parentData, xfa: null });
+3134     }
+3135 
+3136     return newRefs;
+3137   }
+3138 
+3373 }
+3374 
+4968 
+File:
+src/core/document.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorPrefix,
+18   assert,
+19   FormatError,
+20   info,
+21   InvalidPDFException,
+22   isArrayEqual,
+23   PageActionEventType,
+24   RenderingIntentFlag,
+25   shadow,
+26   stringToBytes,
+27   stringToPDFString,
+28   stringToUTF8String,
+29   unreachable,
+30   Util,
+31   warn,
+32 } from "../shared/util.js";
+33 import {
+34   AnnotationFactory,
+35   PopupAnnotation,
+36   WidgetAnnotation,
+37 } from "./annotation.js";
+38 import {
+39   collectActions,
+40   getInheritableProperty,
+41   getNewAnnotationsMap,
+42   isWhiteSpace,
+43   lookupNormalRect,
+44   MissingDataException,
+45   PDF_VERSION_REGEXP,
+46   validateCSSFont,
+47   XRefEntryException,
+48   XRefParseException,
+49 } from "./core_utils.js";
+50 import {
+51   Dict,
+52   isName,
+53   isRefsEqual,
+54   Name,
+55   Ref,
+56   RefSet,
+57   RefSetCache,
+58 } from "./primitives.js";
+59 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
+60 import { BaseStream } from "./base_stream.js";
+61 import { calculateMD5 } from "./crypto.js";
+62 import { Catalog } from "./catalog.js";
+63 import { clearGlobalCaches } from "./cleanup_helper.js";
+64 import { DatasetReader } from "./dataset_reader.js";
+65 import { Linearization } from "./parser.js";
+66 import { NullStream } from "./stream.js";
+67 import { ObjectLoader } from "./object_loader.js";
+68 import { OperatorList } from "./operator_list.js";
+69 import { PartialEvaluator } from "./evaluator.js";
+70 import { StreamsSequenceStream } from "./decode_stream.js";
+71 import { StructTreePage } from "./struct_tree.js";
+72 import { writeObject } from "./writer.js";
+73 import { XFAFactory } from "./xfa/factory.js";
+74 import { XRef } from "./xref.js";
+75 
+76 const DEFAULT_USER_UNIT = 1.0;
+77 const LETTER_SIZE_MEDIABOX = [0, 0, 612, 792];
+78 
+79 class Page {
+80   constructor({
+81     pdfManager,
+82     xref,
+83     pageIndex,
+84     pageDict,
+85     ref,
+86     globalIdFactory,
+87     fontCache,
+88     builtInCMapCache,
+89     standardFontDataCache,
+90     globalImageCache,
+91     systemFontCache,
+92     nonBlendModesSet,
+93     xfaFactory,
+94   }) {
+95     this.pdfManager = pdfManager;
+96     this.pageIndex = pageIndex;
+97     this.pageDict = pageDict;
+98     this.xref = xref;
+99     this.ref = ref;
+100     this.fontCache = fontCache;
+101     this.builtInCMapCache = builtInCMapCache;
+102     this.standardFontDataCache = standardFontDataCache;
+103     this.globalImageCache = globalImageCache;
+104     this.systemFontCache = systemFontCache;
+105     this.nonBlendModesSet = nonBlendModesSet;
+106     this.evaluatorOptions = pdfManager.evaluatorOptions;
+107     this.resourcesPromise = null;
+108     this.xfaFactory = xfaFactory;
+109 
+110     const idCounters = {
+111       obj: 0,
+112     };
+113     this._localIdFactory = class extends globalIdFactory {
+114       static createObjId() {
+115         return `p${pageIndex}_${++idCounters.obj}`;
+116       }
+117 
+118       static getPageObjId() {
+119         return `p${ref.toString()}`;
+120       }
+121     };
+122   }
+123 
+362   save(handler, task, annotationStorage) {
+363     const partialEvaluator = new PartialEvaluator({
+364       xref: this.xref,
+365       handler,
+366       pageIndex: this.pageIndex,
+367       idFactory: this._localIdFactory,
+368       fontCache: this.fontCache,
+369       builtInCMapCache: this.builtInCMapCache,
+370       standardFontDataCache: this.standardFontDataCache,
+371       globalImageCache: this.globalImageCache,
+372       systemFontCache: this.systemFontCache,
+373       options: this.evaluatorOptions,
+374     });
+375 
+376     // Fetch the page's annotations and save the content
+377     // in case of interactive form fields.
+378     return this._parsedAnnotations.then(function (annotations) {
+379       const newRefsPromises = [];
+380       for (const annotation of annotations) {
+381         if (!annotation.mustBePrinted(annotationStorage)) {
+382           continue;
+383         }
+384         newRefsPromises.push(
+385           annotation
+386             .save(partialEvaluator, task, annotationStorage)
+387             .catch(function (reason) {
+388               warn(
+389                 "save - ignoring annotation data during " +
+390                   `"${task.name}" task: "${reason}".`
+391               );
+392               return null;
+393             })
+394         );
+395       }
+396 
+397       return Promise.all(newRefsPromises).then(function (newRefs) {
+398         return newRefs.filter(newRef => !!newRef);
+399       });
+400     });
+401   }
+402 
+837 }
+838 
+839 const PDF_HEADER_SIGNATURE = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+840 const STARTXREF_SIGNATURE = new Uint8Array([
+841   0x73, 0x74, 0x61, 0x72, 0x74, 0x78, 0x72, 0x65, 0x66,
+842 ]);
+843 const ENDOBJ_SIGNATURE = new Uint8Array([0x65, 0x6e, 0x64, 0x6f, 0x62, 0x6a]);
+844 
+845 const FINGERPRINT_FIRST_BYTES = 1024;
+846 const EMPTY_FINGERPRINT =
+847   "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+848 
+1940 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/annotation_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  Annotation,
+  AnnotationBorderStyle,
+  AnnotationFactory,
+  getQuadPoints,
+  MarkupAnnotation,
+} from "../../src/core/annotation.js";
+import {
+  AnnotationBorderStyleType,
+  AnnotationEditorType,
+  AnnotationFieldFlag,
+  AnnotationFlag,
+  AnnotationType,
+  OPS,
+  RenderingIntentFlag,
+  stringToBytes,
+  stringToUTF8String,
+} from "../../src/shared/util.js";
+import {
+  CMAP_URL,
+  createIdFactory,
+  STANDARD_FONT_DATA_URL,
+  XRefMock,
+} from "./test_utils.js";
+import {
+  DefaultCMapReaderFactory,
+  DefaultStandardFontDataFactory,
+} from "../../src/display/api.js";
+import { Dict, Name, Ref, RefSetCache } from "../../src/core/primitives.js";
+import { Lexer, Parser } from "../../src/core/parser.js";
+import { FlateStream } from "../../src/core/flate_stream.js";
+import { PartialEvaluator } from "../../src/core/evaluator.js";
+import { StringStream } from "../../src/core/stream.js";
+import { WorkerTask } from "../../src/core/worker.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. You can use the PDF file for testing as follows:
+const { getDocument } = await import('../../src/display/api.js');
+const { buildGetDocumentParams } = await import('./test_utils.js');
+const loadingTask = getDocument(buildGetDocumentParams('issue18072.pdf'))
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

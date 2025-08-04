@@ -1,0 +1,30 @@
+```javascript
+it("should not store page-level data after cleanup", async () => {
+  const { WorkerTransport, PDFWorkerUtil, PDFDocumentProxy, MessageHandler } = await import("../../src/display/api.js");
+  const { PDFDataTransportStream } = await import("../../src/display/transport_stream.js");
+  const { PDFFetchStream } = await import("../../src/display/fetch_stream.js");
+  const { PDFNetworkStream } = await import("../../src/display/network.js");
+
+  const messageHandler = new MessageHandler();
+  const transport = new PDFDataTransportStream(new PDFFetchStream(new PDFNetworkStream()));
+  const workerTransport = new WorkerTransport(messageHandler, {}, transport, {}, {});
+
+  const pageProxy = { objs: new Map(), _intentStates: new Set(), _maybeCleanupAfterRender: true };
+  workerTransport.#pageCache.set(1, pageProxy);
+
+  const imageData = { bitmap: { close: () => {} } };
+
+  workerTransport.messageHandler.on("obj", ([id, pageIndex, type, imageData]) => {
+    if (pageIndex === 1 && type === "Image") {
+      pageProxy.objs.set(id, imageData);
+    }
+  });
+
+  workerTransport.messageHandler.send("obj", [1, 1, "Image", imageData]);
+
+  pageProxy._intentStates.clear();
+
+  expect(pageProxy.objs.size).toBe(0);
+  expect(imageData.bitmap.close).toHaveBeenCalledTimes(1);
+});
+```

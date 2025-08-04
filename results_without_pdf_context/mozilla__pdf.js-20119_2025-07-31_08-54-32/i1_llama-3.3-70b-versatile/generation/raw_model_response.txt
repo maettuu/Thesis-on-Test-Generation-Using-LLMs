@@ -1,0 +1,71 @@
+```javascript
+it("should add a comment button to the context menu for highlighting and commenting text selection in a pdf", async () => {
+  const { PDFDocument, PDFPageProxy } = await import("../../src/display/api.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { noContextMenu, stopEvent } = await import("../display_utils.js");
+
+  const pdfDocument = await PDFDocument.load(await fetchData("pdfjs/web/viewer/test/pdfs/annotation-test.pdf"));
+  const pdfPage = await pdfDocument.getPage(1);
+  const annotationEditorUIManager = new AnnotationEditorUIManager(null, null, null, null, null, null, null, null, null, null, null, null, null);
+
+  const contextMenuItemsBeforePatch = annotationEditorUIManager._eventBus._on("editingaction", () => {}, { signal: annotationEditorUIManager._signal });
+  const highlightSelectionBeforePatch = annotationEditorUIManager.highlightSelection("context_menu");
+  const commentSelectionBeforePatch = annotationEditorUIManager.commentSelection("context_menu");
+
+  expect(contextMenuItemsBeforePatch.length).toBeLessThan(3);
+  expect(highlightSelectionBeforePatch).toBeUndefined();
+  expect(commentSelectionBeforePatch).toBeUndefined();
+
+  // Apply the patch
+  annotationEditorUIManager.highlightSelection = function(methodOfCreation = "", comment = false) {
+    const selection = document.getSelection();
+    if (!selection || selection.isCollapsed) {
+      return;
+    }
+    const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
+    const text = selection.toString();
+    const anchorElement = annotationEditorUIManager.#getAnchorElementForSelection(selection);
+    const textLayer = anchorElement.closest(".textLayer");
+    const boxes = annotationEditorUIManager.getSelectionBoxes(textLayer);
+    if (!boxes) {
+      return;
+    }
+    selection.empty();
+
+    const layer = annotationEditorUIManager.#getLayerForTextLayer(textLayer);
+    const isNoneMode = annotationEditorUIManager.#mode === AnnotationEditorType.NONE;
+    const callback = () => {
+      const editor = layer?.createAndAddNewEditor({ x: 0, y: 0 }, false, {
+        methodOfCreation,
+        boxes,
+        anchorNode,
+        anchorOffset,
+        focusNode,
+        focusOffset,
+        text,
+      });
+      if (isNoneMode) {
+        annotationEditorUIManager.showAllEditors("highlight", true, /* updateButton = */ true);
+      }
+      if (comment) {
+        editor?.editComment();
+      }
+    };
+    if (isNoneMode) {
+      annotationEditorUIManager.switchToMode(AnnotationEditorType.HIGHLIGHT, callback);
+    } else {
+      callback();
+    }
+  };
+
+  annotationEditorUIManager.commentSelection = function(methodOfCreation = "") {
+    annotationEditorUIManager.highlightSelection(methodOfCreation, /* comment */ true);
+  };
+
+  const contextMenuItemsAfterPatch = annotationEditorUIManager._eventBus._on("editingaction", () => {}, { signal: annotationEditorUIManager._signal });
+  const highlightSelectionAfterPatch = annotationEditorUIManager.highlightSelection("context_menu");
+  const commentSelectionAfterPatch = annotationEditorUIManager.commentSelection("context_menu");
+
+  expect(contextMenuItemsAfterPatch.length).toBeGreaterThan(2);
+  expect(highlightSelectionAfterPatch).toBeDefined();
+  expect(commentSelectionAfterPatch).

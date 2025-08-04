@@ -1,0 +1,53 @@
+<think>
+Okay, I need to create a regression test for the issue where the `navigator` object doesn't have a `platform` property, causing an error when using `pdfjs-dist` in a Node.js environment. The user provided a patch that modifies `util.js` to handle cases where `navigator` might not exist or `navigator.platform` might not be a string.
+
+First, I'll look at the problem. The original code in `util.js` line 617-627 checks if `navigator` is undefined and then tries to access `navigator.platform.includes("Mac")`. In Node.js, `navigator` is undefined, so it returns `{ isMac: false }`. But in some cases, like when using certain packages that mock `navigator`, `navigator` might exist but `platform` could be missing or not a string, leading to errors.
+
+The patch changes the condition to check if `PDFJSDev` is not "MOZCENTRAL" or if `navigator.platform` is a string. If so, it sets `isMac` based on `navigator.platform`; otherwise, it defaults to `false`.
+
+To test this, I need to simulate environments where `navigator` exists but `platform` is missing or not a string. I'll use Jest to mock `navigator` in different scenarios.
+
+I'll write a test that imports the `FeatureTest` class. Then, I'll mock `navigator` in various ways: once without `platform`, once with `platform` as a non-string, and once with `platform` set to "Mac". For each case, I'll check if `FeatureTest.platform.isMac` returns the expected value.
+
+So, the test will have three scenarios:
+1. `navigator` is defined but `platform` is undefined.
+2. `navigator` is defined but `platform` is not a string (e.g., null).
+3. `navigator` is defined and `platform` is "Mac".
+
+In each case, the test expects `isMac` to be false except when `platform` is "Mac".
+
+I'll structure the test using Jest's `describe` and `it` blocks, but since the user requested exactly one `it` block, I'll include all three cases within a single test block.
+
+I'll use `jest.spyOn` to mock `global.navigator` for each scenario. After each test case, I'll restore the mock to ensure isolation.
+
+Finally, I'll assert that each scenario returns the correct `isMac` value, ensuring the patch works as intended.
+</think>
+
+```javascript
+it("should handle missing navigator.platform correctly", async () => {
+  const { FeatureTest } = await import("../../src/shared/util.js");
+
+  // Mock navigator scenarios
+  const scenarios = [
+    // 1. navigator exists but platform is undefined
+    { navigator: {} },
+    // 2. navigator exists but platform is not a string
+    { navigator: { platform: null } },
+    // 3. navigator exists and platform is "Mac"
+    { navigator: { platform: "Mac" } }
+  ];
+
+  const expectedMacResults = [false, false, true];
+
+  for (let i = 0; i < scenarios.length; i++) {
+    const { navigator } = scenarios[i];
+    jest.spyOn(global, "navigator", "get").mockImplementation(() => navigator);
+    
+    const result = await FeatureTest.platform.isMac;
+    
+    expect(result).toBe(expectedMacResults[i]);
+    
+    global.navigator.mockRestore();
+  }
+});
+```

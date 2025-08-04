@@ -1,0 +1,30 @@
+#test/unit/stamp_spec.js
+import { StampEditor } from "../../display/editor/stamp.js";
+import { AnnotationEditorUIManager } from "../../display/editor/tools.js";
+
+describe("StampEditor Image Type Support", () => {
+  it("should only allow supported image types", async () => {
+    const uiManager = new AnnotationEditorUIManager();
+    const stampEditor = new StampEditor({ uiManager });
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = StampEditor.supportedTypes;
+
+    const expectedTypes = [
+      "image/apng",
+      "image/avif",
+      "image/bmp",
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/svg+xml",
+      "image/webp",
+      "image/x-icon",
+    ].join(",");
+
+    const actualTypes = input.accept;
+
+    expect(actualTypes).toBe(expectedTypes);
+  });
+});

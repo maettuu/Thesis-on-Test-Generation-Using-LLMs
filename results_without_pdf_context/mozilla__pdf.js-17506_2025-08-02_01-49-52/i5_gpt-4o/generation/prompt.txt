@@ -1,0 +1,1175 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Support highlighting images of text in addition of text
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/draw_layer.js b/src/display/draw_layer.js
+--- a/src/display/draw_layer.js
++++ b/src/display/draw_layer.js
+@@ -28,6 +28,8 @@ class DrawLayer {
+ 
+   #mapping = new Map();
+ 
++  #toUpdate = new Map();
++
+   constructor({ pageIndex }) {
+     this.pageIndex = pageIndex;
+   }
+@@ -53,7 +55,7 @@ class DrawLayer {
+     return shadow(this, "_svgFactory", new DOMSVGFactory());
+   }
+ 
+-  static #setBox(element, { x, y, width, height }) {
++  static #setBox(element, { x = 0, y = 0, width = 1, height = 1 } = {}) {
+     const { style } = element;
+     style.top = `${100 * y}%`;
+     style.left = `${100 * x}%`;
+@@ -83,10 +85,13 @@ class DrawLayer {
+     return clipPathId;
+   }
+ 
+-  highlight(outlines, color, opacity) {
++  highlight(outlines, color, opacity, isPathUpdatable = false) {
+     const id = this.#id++;
+     const root = this.#createSVG(outlines.box);
+     root.classList.add("highlight");
++    if (outlines.free) {
++      root.classList.add("free");
++    }
+     const defs = DrawLayer._svgFactory.createElement("defs");
+     root.append(defs);
+     const path = DrawLayer._svgFactory.createElement("path");
+@@ -95,6 +100,10 @@ class DrawLayer {
+     path.setAttribute("id", pathId);
+     path.setAttribute("d", outlines.toSVGPath());
+ 
++    if (isPathUpdatable) {
++      this.#toUpdate.set(id, path);
++    }
++
+     // Create the clipping path for the editor div.
+     const clipPathId = this.#createClipPath(defs, pathId);
+ 
+@@ -139,6 +148,22 @@ class DrawLayer {
+     return id;
+   }
+ 
++  finalizeLine(id, line) {
++    const path = this.#toUpdate.get(id);
++    this.#toUpdate.delete(id);
++    this.updateBox(id, line.box);
++    path.setAttribute("d", line.toSVGPath());
++  }
++
++  removeFreeHighlight(id) {
++    this.remove(id);
++    this.#toUpdate.delete(id);
++  }
++
++  updatePath(id, line) {
++    this.#toUpdate.get(id).setAttribute("d", line.toSVGPath());
++  }
++
+   updateBox(id, box) {
+     DrawLayer.#setBox(this.#mapping.get(id), box);
+   }
+
+diff --git a/src/display/editor/annotation_editor_layer.js b/src/display/editor/annotation_editor_layer.js
+--- a/src/display/editor/annotation_editor_layer.js
++++ b/src/display/editor/annotation_editor_layer.js
+@@ -67,6 +67,8 @@ class AnnotationEditorLayer {
+ 
+   #boundPointerdown = this.pointerdown.bind(this);
+ 
++  #boundTextLayerPointerDown = this.#textLayerPointerDown.bind(this);
++
+   #editorFocusTimeoutId = null;
+ 
+   #boundSelectionStart = this.selectionStart.bind(this);
+@@ -199,7 +201,7 @@ class AnnotationEditorLayer {
+       }
+     }
+ 
+-    const editor = this.#createAndAddNewEditor(
++    const editor = this.createAndAddNewEditor(
+       { offsetX: 0, offsetY: 0 },
+       /* isCentered = */ false
+     );
+@@ -328,12 +330,34 @@ class AnnotationEditorLayer {
+   enableTextSelection() {
+     if (this.#textLayer?.div) {
+       document.addEventListener("selectstart", this.#boundSelectionStart);
++      this.#textLayer.div.addEventListener(
++        "pointerdown",
++        this.#boundTextLayerPointerDown
++      );
++      this.#textLayer.div.classList.add("drawing");
+     }
+   }
+ 
+   disableTextSelection() {
+     if (this.#textLayer?.div) {
+       document.removeEventListener("selectstart", this.#boundSelectionStart);
++      this.#textLayer.div.removeEventListener(
++        "pointerdown",
++        this.#boundTextLayerPointerDown
++      );
++      this.#textLayer.div.classList.remove("drawing");
++    }
++  }
++
++  #textLayerPointerDown(event) {
++    if (event.target === this.#textLayer.div) {
++      const { isMac } = FeatureTest.platform;
++      if (event.button !== 0 || (event.ctrlKey && isMac)) {
++        // Do nothing on right click.
++        return;
++      }
++      HighlightEditor.startHighlighting(this, event);
++      event.preventDefault();
+     }
+   }
+ 
+@@ -565,7 +589,7 @@ class AnnotationEditorLayer {
+    * @param [Object] data
+    * @returns {AnnotationEditor}
+    */
+-  #createAndAddNewEditor(event, isCentered, data = {}) {
++  createAndAddNewEditor(event, isCentered, data = {}) {
+     const id = this.getNextId();
+     const editor = this.#createNewEditor({
+       parent: this,
+@@ -603,10 +627,7 @@ class AnnotationEditorLayer {
+    * Create and add a new editor.
+    */
+   addNewEditor() {
+-    this.#createAndAddNewEditor(
+-      this.#getCenterPoint(),
+-      /* isCentered = */ true
+-    );
++    this.createAndAddNewEditor(this.#getCenterPoint(), /* isCentered = */ true);
+   }
+ 
+   /**
+@@ -726,7 +747,7 @@ class AnnotationEditorLayer {
+       boxes.push(rotator(x, y, width, height));
+     }
+     if (boxes.length !== 0) {
+-      this.#createAndAddNewEditor(event, false, {
++      this.createAndAddNewEditor(event, false, {
+         boxes,
+       });
+     }
+@@ -767,7 +788,7 @@ class AnnotationEditorLayer {
+       return;
+     }
+ 
+-    this.#createAndAddNewEditor(event, /* isCentered = */ false);
++    this.createAndAddNewEditor(event, /* isCentered = */ false);
+   }
+ 
+   /**
+@@ -901,6 +922,10 @@ class AnnotationEditorLayer {
+     const { pageWidth, pageHeight } = this.viewport.rawDims;
+     return [pageWidth, pageHeight];
+   }
++
++  get scale() {
++    return this.#uiManager.viewParameters.realScale;
++  }
+ }
+ 
+ export { AnnotationEditorLayer };
+
+diff --git a/src/display/editor/highlight.js b/src/display/editor/highlight.js
+--- a/src/display/editor/highlight.js
++++ b/src/display/editor/highlight.js
+@@ -18,10 +18,11 @@ import {
+   AnnotationEditorType,
+   Util,
+ } from "../../shared/util.js";
++import { FreeOutliner, Outliner } from "./outliner.js";
+ import { AnnotationEditor } from "./editor.js";
+ import { bindEvents } from "./tools.js";
+ import { ColorPicker } from "./color_picker.js";
+-import { Outliner } from "./outliner.js";
++import { noContextMenu } from "../display_utils.js";
+ 
+ /**
+  * Basic draw editor in order to generate an Highlight annotation.
+@@ -41,6 +42,8 @@ class HighlightEditor extends AnnotationEditor {
+ 
+   #id = null;
+ 
++  #isFreeHighlight = false;
++
+   #lastPoint = null;
+ 
+   #opacity;
+@@ -51,12 +54,20 @@ class HighlightEditor extends AnnotationEditor {
+ 
+   static _defaultOpacity = 1;
+ 
++  static _defaultThickness = 10;
++
+   static _l10nPromise;
+ 
+   static _type = "highlight";
+ 
+   static _editorType = AnnotationEditorType.HIGHLIGHT;
+ 
++  static _freeHighlightId = -1;
++
++  static _freeHighlight = null;
++
++  static _freeHighlightClipId = "";
++
+   constructor(params) {
+     super({ ...params, name: "highlightEditor" });
+     this.color = params.color || HighlightEditor._defaultColor;
+@@ -64,9 +75,15 @@ class HighlightEditor extends AnnotationEditor {
+     this.#boxes = params.boxes || null;
+     this._isDraggable = false;
+ 
+-    this.#createOutlines();
+-    this.#addToDrawLayer();
+-    this.rotate(this.rotation);
++    if (params.highlightId > -1) {
++      this.#isFreeHighlight = true;
++      this.#createFreeOutlines(params);
++      this.#addToDrawLayer();
++    } else {
++      this.#createOutlines();
++      this.#addToDrawLayer();
++      this.rotate(this.rotation);
++    }
+   }
+ 
+   #createOutlines() {
+@@ -95,6 +112,60 @@ class HighlightEditor extends AnnotationEditor {
+     ];
+   }
+ 
++  #createFreeOutlines({ highlight, highlightId, clipPathId }) {
++    this.#highlightOutlines = highlight.getOutlines(
++      this._uiManager.direction === "ltr"
++    );
++    this.#id = highlightId;
++    this.#clipPathId = clipPathId;
++    const { x, y, width, height, lastPoint } = this.#highlightOutlines.box;
++
++    // We need to redraw the highlight because we change the coordinates to be
++    // in the box coordinate system.
++    this.parent.drawLayer.finalizeLine(this.#id, this.#highlightOutlines);
++    switch (this.rotation) {
++      case 0:
++        this.x = x;
++        this.y = y;
++        this.width = width;
++        this.height = height;
++        break;
++      case 90: {
++        const [pageWidth, pageHeight] = this.parentDimensions;
++        this.x = y;
++        this.y = 1 - x;
++        this.width = (width * pageHeight) / pageWidth;
++        this.height = (height * pageWidth) / pageHeight;
++        break;
++      }
++      case 180:
++        this.x = 1 - x;
++        this.y = 1 - y;
++        this.width = width;
++        this.height = height;
++        break;
++      case 270: {
++        const [pageWidth, pageHeight] = this.parentDimensions;
++        this.x = 1 - y;
++        this.y = x;
++        this.width = (width * pageHeight) / pageWidth;
++        this.height = (height * pageWidth) / pageHeight;
++        break;
++      }
++    }
++
++    const innerMargin = 1.5;
++    this.#focusOutlines = highlight.getFocusOutline(
++      /* Slightly bigger than the highlight in order to have a little
++         space between the highlight and the outline. */
++      HighlightEditor._defaultThickness + innerMargin
++    );
++    this.#outlineId = this.parent.drawLayer.highlightOutline(
++      this.#focusOutlines
++    );
++    this.#lastPoint = lastPoint;
++  }
++
+   static initialize(l10n, uiManager) {
+     AnnotationEditor.initialize(l10n, uiManager);
+     HighlightEditor._defaultColor ||=
+@@ -196,12 +267,12 @@ class HighlightEditor extends AnnotationEditor {
+ 
+   /** @inheritdoc */
+   fixAndSetPosition() {
+-    return super.fixAndSetPosition(0);
++    return super.fixAndSetPosition(this.#getRotation());
+   }
+ 
+   /** @inheritdoc */
+   getRect(tx, ty) {
+-    return super.getRect(tx, ty, 0);
++    return super.getRect(tx, ty, this.#getRotation());
+   }
+ 
+   /** @inheritdoc */
+@@ -229,7 +300,7 @@ class HighlightEditor extends AnnotationEditor {
+     this.#addToDrawLayer();
+ 
+     if (!this.isAttachedToDOM) {
+-      // At some point this editor was removed and we're rebuilting it,
++      // At some point this editor was removed and we're rebuilding it,
+       // hence we must add it to its parent.
+       this.parent.add(this);
+     }
+@@ -273,10 +344,10 @@ class HighlightEditor extends AnnotationEditor {
+         this.color,
+         this.#opacity
+       ));
++    this.#outlineId = parent.drawLayer.highlightOutline(this.#focusOutlines);
+     if (this.#highlightDiv) {
+       this.#highlightDiv.style.clipPath = this.#clipPathId;
+     }
+-    this.#outlineId = parent.drawLayer.highlightOutline(this.#focusOutlines);
+   }
+ 
+   static #rotateBbox({ x, y, width, height }, angle) {
+@@ -313,10 +384,19 @@ class HighlightEditor extends AnnotationEditor {
+ 
+   /** @inheritdoc */
+   rotate(angle) {
++    // We need to rotate the svgs because of the coordinates system.
+     const { drawLayer } = this.parent;
++    let box;
++    if (this.#isFreeHighlight) {
++      angle = (angle - this.rotation + 360) % 360;
++      box = HighlightEditor.#rotateBbox(this.#highlightOutlines.box, angle);
++    } else {
++      // An highlight annotation is always drawn horizontally.
++      box = HighlightEditor.#rotateBbox(this, angle);
++    }
+     drawLayer.rotate(this.#id, angle);
+     drawLayer.rotate(this.#outlineId, angle);
+-    drawLayer.updateBox(this.#id, HighlightEditor.#rotateBbox(this, angle));
++    drawLayer.updateBox(this.#id, box);
+     drawLayer.updateBox(
+       this.#outlineId,
+       HighlightEditor.#rotateBbox(this.#focusOutlines.box, angle)
+@@ -330,6 +410,9 @@ class HighlightEditor extends AnnotationEditor {
+     }
+ 
+     const div = super.render();
++    if (this.#isFreeHighlight) {
++      div.classList.add("free");
++    }
+     const highlightDiv = (this.#highlightDiv = document.createElement("div"));
+     div.append(highlightDiv);
+     highlightDiv.className = "internal";
+@@ -364,7 +447,16 @@ class HighlightEditor extends AnnotationEditor {
+     this.parent?.drawLayer.removeClass(this.#outlineId, "selected");
+   }
+ 
++  #getRotation() {
++    // Highlight annotations are always drawn horizontally but if
++    // a free highlight annotation can be rotated.
++    return this.#isFreeHighlight ? this.rotation : 0;
++  }
++
+   #serializeBoxes(rect) {
++    if (this.#isFreeHighlight) {
++      return null;
++    }
+     const [pageWidth, pageHeight] = this.pageDimensions;
+     const boxes = this.#boxes;
+     const quadPoints = new Array(boxes.length * 8);
+@@ -387,7 +479,79 @@ class HighlightEditor extends AnnotationEditor {
+   }
+ 
+   #serializeOutlines(rect) {
+-    return this.#highlightOutlines.serialize(rect, 0);
++    return this.#highlightOutlines.serialize(rect, this.#getRotation());
++  }
++
++  static startHighlighting(parent, { target: textLayer, x, y }) {
++    const {
++      x: layerX,
++      y: layerY,
++      width: parentWidth,
++      height: parentHeight,
++    } = textLayer.getBoundingClientRect();
++    const pointerMove = e => {
++      this.#highlightMove(parent, e);
++    };
++    const pointerDownOptions = { capture: true, passive: false };
++    const pointerDown = e => {
++      // Avoid to have undesired clicks during the drawing.
++      e.preventDefault();
++      e.stopPropagation();
++    };
++    const pointerUpCallback = e => {
++      textLayer.removeEventListener("pointermove", pointerMove);
++      window.removeEventListener("blur", pointerUpCallback);
++      window.removeEventListener("pointerup", pointerUpCallback);
++      window.removeEventListener(
++        "pointerdown",
++        pointerDown,
++        pointerDownOptions
++      );
++      window.removeEventListener("contextmenu", noContextMenu);
++      this.#endHighlight(parent, e);
++    };
++    window.addEventListener("blur", pointerUpCallback);
++    window.addEventListener("pointerup", pointerUpCallback);
++    window.addEventListener("pointerdown", pointerDown, pointerDownOptions);
++    window.addEventListener("contextmenu", noContextMenu);
++
++    textLayer.addEventListener("pointermove", pointerMove);
++    this._freeHighlight = new FreeOutliner(
++      { x, y },
++      [layerX, layerY, parentWidth, parentHeight],
++      parent.scale,
++      this._defaultThickness,
++      /* innerMargin = */ 0.001
++    );
++    ({ id: this._freeHighlightId, clipPathId: this._freeHighlightClipId } =
++      parent.drawLayer.highlight(
++        this._freeHighlight,
++        this._defaultColor,
++        this._defaultOpacity,
++        /* isPathUpdatable = */ true
++      ));
++  }
++
++  static #highlightMove(parent, event) {
++    if (this._freeHighlight.add(event)) {
++      // Redraw only if the point has been added.
++      parent.drawLayer.updatePath(this._freeHighlightId, this._freeHighlight);
++    }
++  }
++
++  static #endHighlight(parent, event) {
++    if (!this._freeHighlight.isEmpty()) {
++      parent.createAndAddNewEditor(event, false, {
++        highlightId: this._freeHighlightId,
++        highlight: this._freeHighlight,
++        clipPathId: this._freeHighlightClipId,
++      });
++    } else {
++      parent.drawLayer.removeFreeHighlight(this._freeHighlightId);
++    }
++    this._freeHighlightId = -1;
++    this._freeHighlight = null;
++    this._freeHighlightClipId = "";
+   }
+ 
+   /** @inheritdoc */
+@@ -437,7 +601,7 @@ class HighlightEditor extends AnnotationEditor {
+       outlines: this.#serializeOutlines(rect),
+       pageIndex: this.pageIndex,
+       rect,
+-      rotation: 0,
++      rotation: this.#getRotation(),
+       structTreeParentId: this._structTreeParentId,
+     };
+   }
+
+diff --git a/src/display/editor/outliner.js b/src/display/editor/outliner.js
+--- a/src/display/editor/outliner.js
++++ b/src/display/editor/outliner.js
+@@ -13,6 +13,8 @@
+  * limitations under the License.
+  */
+ 
++import { Util } from "../../shared/util.js";
++
+ class Outliner {
+   #box;
+ 
+@@ -260,10 +262,16 @@ class Outliner {
+ }
+ 
+ class Outline {
++  /**
++   * @returns {string} The SVG path of the outline.
++   */
+   toSVGPath() {
+     throw new Error("Abstract method `toSVGPath` must be implemented.");
+   }
+ 
++  /**
++   * @type {Object|null} The bounding box of the outline.
++   */
+   get box() {
+     throw new Error("Abstract getter `box` must be implemented.");
+   }
+@@ -271,6 +279,10 @@ class Outline {
+   serialize(_bbox, _rotation) {
+     throw new Error("Abstract method `serialize` must be implemented.");
+   }
++
++  get free() {
++    return this instanceof FreeHighlightOutline;
++  }
+ }
+ 
+ class HighlightOutline extends Outline {
+@@ -331,4 +343,469 @@ class HighlightOutline extends Outline {
+   }
+ }
+ 
+-export { Outliner };
++class FreeOutliner {
++  #box;
++
++  #bottom = [];
++
++  #innerMargin;
++
++  #top = [];
++
++  // The first 6 elements are the last 3 points of the top part of the outline.
++  // The next 6 elements are the last 3 points of the line.
++  // The next 6 elements are the last 3 points of the bottom part of the
++  // outline.
++  // We track the last 3 points in order to be able to:
++  //  - compute the normal of the line,
++  //  - compute the control points of the quadratic Bézier curve.
++  #last = new Float64Array(18);
++
++  #min;
++
++  #min_dist;
++
++  #scaleFactor;
++
++  #thickness;
++
++  #points = [];
++
++  static #MIN_DIST = 8;
++
++  static #MIN_DIFF = 2;
++
++  static #MIN = FreeOutliner.#MIN_DIST + FreeOutliner.#MIN_DIFF;
++
++  constructor({ x, y }, box, scaleFactor, thickness, innerMargin = 0) {
++    this.#box = box;
++    this.#thickness = thickness * scaleFactor;
++    this.#last.set([NaN, NaN, NaN, NaN, x, y], 6);
++    this.#innerMargin = innerMargin;
++    this.#min_dist = FreeOutliner.#MIN_DIST * scaleFactor;
++    this.#min = FreeOutliner.#MIN * scaleFactor;
++    this.#scaleFactor = scaleFactor;
++    this.#points.push(x, y);
++  }
++
++  get free() {
++    return true;
++  }
++
++  isEmpty() {
++    // When we add a second point then this.#last.slice(6) will be something
++    // like [NaN, NaN, firstX, firstY, secondX, secondY,...] so having a NaN
++    // at index 8 means that we've only one point.
++    return isNaN(this.#last[8]);
++  }
++
++  add({ x, y }) {
++    const [layerX, layerY, layerWidth, layerHeight] = this.#box;
++    let [x1, y1, x2, y2] = this.#last.subarray(8, 12);
++    const diffX = x - x2;
++    const diffY = y - y2;
++    const d = Math.hypot(diffX, diffY);
++    if (d < this.#min) {
++      // The idea is to avoid garbage points around the last point.
++      // When the points are too close, it just leads to bad normal vectors and
++      // control points.
++      return false;
++    }
++    const diffD = d - this.#min_dist;
++    const K = diffD / d;
++    const shiftX = K * diffX;
++    const shiftY = K * diffY;
++
++    // We update the last 3 points of the line.
++    let x0 = x1;
++    let y0 = y1;
++    x1 = x2;
++    y1 = y2;
++    x2 += shiftX;
++    y2 += shiftY;
++
++    // We keep track of the points in order to be able to compute the focus
++    // outline.
++    this.#points?.push(x, y);
++
++    // Create the normal unit vector.
++    // |(shiftX, shiftY)| = |K| * |(diffX, diffY)| = |K| * d = diffD.
++    const nX = -shiftY / diffD;
++    const nY = shiftX / diffD;
++    const thX = nX * this.#thickness;
++    const thY = nY * this.#thickness;
++    this.#last.set(this.#last.subarray(2, 8), 0);
++    this.#last.set([x2 + thX, y2 + thY], 4);
++    this.#last.set(this.#last.subarray(14, 18), 12);
++    this.#last.set([x2 - thX, y2 - thY], 16);
++
++    if (isNaN(this.#last[6])) {
++      if (this.#top.length === 0) {
++        this.#last.set([x1 + thX, y1 + thY], 2);
++        this.#top.push(
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (x1 + thX - layerX) / layerWidth,
++          (y1 + thY - layerY) / layerHeight
++        );
++        this.#last.set([x1 - thX, y1 - thY], 14);
++        this.#bottom.push(
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (x1 - thX - layerX) / layerWidth,
++          (y1 - thY - layerY) / layerHeight
++        );
++      }
++      this.#last.set([x0, y0, x1, y1, x2, y2], 6);
++      return !this.isEmpty();
++    }
++
++    this.#last.set([x0, y0, x1, y1, x2, y2], 6);
++
++    const angle = Math.abs(
++      Math.atan2(y0 - y1, x0 - x1) - Math.atan2(shiftY, shiftX)
++    );
++    if (angle < Math.PI / 2) {
++      // In order to avoid some possible artifacts, we're going to use the a
++      // straight line instead of a quadratic Bézier curve.
++      [x1, y1, x2, y2] = this.#last.subarray(2, 6);
++      this.#top.push(
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        ((x1 + x2) / 2 - layerX) / layerWidth,
++        ((y1 + y2) / 2 - layerY) / layerHeight
++      );
++      [x1, y1, x0, y0] = this.#last.subarray(14, 18);
++      this.#bottom.push(
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        ((x0 + x1) / 2 - layerX) / layerWidth,
++        ((y0 + y1) / 2 - layerY) / layerHeight
++      );
++      return true;
++    }
++
++    // Control points and the final point for the quadratic Bézier curve.
++    [x0, y0, x1, y1, x2, y2] = this.#last.subarray(0, 6);
++    this.#top.push(
++      ((x0 + 5 * x1) / 6 - layerX) / layerWidth,
++      ((y0 + 5 * y1) / 6 - layerY) / layerHeight,
++      ((5 * x1 + x2) / 6 - layerX) / layerWidth,
++      ((5 * y1 + y2) / 6 - layerY) / layerHeight,
++      ((x1 + x2) / 2 - layerX) / layerWidth,
++      ((y1 + y2) / 2 - layerY) / layerHeight
++    );
++    [x2, y2, x1, y1, x0, y0] = this.#last.subarray(12, 18);
++    this.#bottom.push(
++      ((x0 + 5 * x1) / 6 - layerX) / layerWidth,
++      ((y0 + 5 * y1) / 6 - layerY) / layerHeight,
++      ((5 * x1 + x2) / 6 - layerX) / layerWidth,
++      ((5 * y1 + y2) / 6 - layerY) / layerHeight,
++      ((x1 + x2) / 2 - layerX) / layerWidth,
++      ((y1 + y2) / 2 - layerY) / layerHeight
++    );
++    return true;
++  }
++
++  toSVGPath() {
++    if (this.isEmpty()) {
++      // We've only one point.
++      return "";
++    }
++    const top = this.#top;
++    const bottom = this.#bottom;
++    const lastTop = this.#last.subarray(4, 6);
++    const lastBottom = this.#last.subarray(16, 18);
++    const [x, y, width, height] = this.#box;
++
++    if (isNaN(this.#last[6]) && !this.isEmpty()) {
++      // We've only two points.
++      return `M${(this.#last[2] - x) / width} ${
++        (this.#last[3] - y) / height
++      } L${(this.#last[4] - x) / width} ${(this.#last[5] - y) / height} L${
++        (this.#last[16] - x) / width
++      } ${(this.#last[17] - y) / height} L${(this.#last[14] - x) / width} ${
++        (this.#last[15] - y) / height
++      } Z`;
++    }
++
++    const buffer = [];
++    buffer.push(`M${top[4]} ${top[5]}`);
++    for (let i = 6; i < top.length; i += 6) {
++      if (isNaN(top[i])) {
++        buffer.push(`L${top[i + 4]} ${top[i + 5]}`);
++      } else {
++        buffer.push(
++          `C${top[i]} ${top[i + 1]} ${top[i + 2]} ${top[i + 3]} ${top[i + 4]} ${
++            top[i + 5]
++          }`
++        );
++      }
++    }
++    buffer.push(
++      `L${(lastTop[0] - x) / width} ${(lastTop[1] - y) / height} L${
++        (lastBottom[0] - x) / width
++      } ${(lastBottom[1] - y) / height}`
++    );
++    for (let i = bottom.length - 6; i >= 6; i -= 6) {
++      if (isNaN(bottom[i])) {
++        buffer.push(`L${bottom[i + 4]} ${bottom[i + 5]}`);
++      } else {
++        buffer.push(
++          `C${bottom[i]} ${bottom[i + 1]} ${bottom[i + 2]} ${bottom[i + 3]} ${
++            bottom[i + 4]
++          } ${bottom[i + 5]}`
++        );
++      }
++    }
++    buffer.push(`L${bottom[4]} ${bottom[5]} Z`);
++
++    return buffer.join(" ");
++  }
++
++  getFocusOutline(thickness) {
++    // Build the outline of the highlight to use as the focus outline.
++    const [x, y] = this.#points;
++    const outliner = new FreeOutliner(
++      { x, y },
++      this.#box,
++      this.#scaleFactor,
++      thickness,
++      /* innerMargin = */ 0.0025
++    );
++    outliner.#points = null;
++    for (let i = 2; i < this.#points.length; i += 2) {
++      outliner.add({ x: this.#points[i], y: this.#points[i + 1] });
++    }
++    return outliner.getOutlines();
++  }
++
++  getOutlines(isLTR) {
++    const top = this.#top;
++    const bottom = this.#bottom;
++    const last = this.#last;
++    const lastTop = last.subarray(4, 6);
++    const lastBottom = last.subarray(16, 18);
++    const [layerX, layerY, layerWidth, layerHeight] = this.#box;
++
++    if (isNaN(last[6]) && !this.isEmpty()) {
++      // We've only two points.
++      const outline = new Float64Array(24);
++      outline.set(
++        [
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (last[2] - layerX) / layerWidth,
++          (last[3] - layerY) / layerHeight,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (last[4] - layerX) / layerWidth,
++          (last[5] - layerY) / layerHeight,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (last[16] - layerX) / layerWidth,
++          (last[17] - layerY) / layerHeight,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (last[14] - layerX) / layerWidth,
++          (last[15] - layerY) / layerHeight,
++        ],
++        0
++      );
++      return new FreeHighlightOutline(outline, this.#innerMargin, isLTR);
++    }
++
++    const outline = new Float64Array(
++      this.#top.length + 12 + this.#bottom.length
++    );
++    let N = top.length;
++    for (let i = 0; i < N; i += 2) {
++      if (isNaN(top[i])) {
++        outline[i] = outline[i + 1] = NaN;
++        continue;
++      }
++      outline[i] = top[i];
++      outline[i + 1] = top[i + 1];
++    }
++    outline.set(
++      [
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        (lastTop[0] - layerX) / layerWidth,
++        (lastTop[1] - layerY) / layerHeight,
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        (lastBottom[0] - layerX) / layerWidth,
++        (lastBottom[1] - layerY) / layerHeight,
++      ],
++      N
++    );
++    N += 12;
++
++    for (let i = bottom.length - 6; i >= 6; i -= 6) {
++      for (let j = 0; j < 6; j += 2) {
++        if (isNaN(bottom[i + j])) {
++          outline[N] = outline[N + 1] = NaN;
++          N += 2;
++          continue;
++        }
++        outline[N] = bottom[i + j];
++        outline[N + 1] = bottom[i + j + 1];
++        N += 2;
++      }
++    }
++    outline.set([NaN, NaN, NaN, NaN, bottom[4], bottom[5]], N);
++    return new FreeHighlightOutline(outline, this.#innerMargin, isLTR);
++  }
++}
++
++class FreeHighlightOutline extends Outline {
++  #bbox = null;
++
++  #innerMargin;
++
++  #outline;
++
++  constructor(outline, innerMargin, isLTR) {
++    super();
++    this.#outline = outline;
++    this.#innerMargin = innerMargin;
++    this.#computeMinMax(isLTR);
++
++    const { x, y, width, height } = this.#bbox;
++    for (let i = 0, ii = outline.length; i < ii; i += 2) {
++      outline[i] = (outline[i] - x) / width;
++      outline[i + 1] = (outline[i + 1] - y) / height;
++    }
++  }
++
++  toSVGPath() {
++    const buffer = [`M${this.#outline[4]} ${this.#outline[5]}`];
++    for (let i = 6, ii = this.#outline.length; i < ii; i += 6) {
++      if (isNaN(this.#outline[i])) {
++        buffer.push(`L${this.#outline[i + 4]} ${this.#outline[i + 5]}`);
++        continue;
++      }
++      buffer.push(
++        `C${this.#outline[i]} ${this.#outline[i + 1]} ${this.#outline[i + 2]} ${
++          this.#outline[i + 3]
++        } ${this.#outline[i + 4]} ${this.#outline[i + 5]}`
++      );
++    }
++    buffer.push("Z");
++    return buffer.join(" ");
++  }
++
++  serialize([blX, blY, trX, trY], rotation) {
++    const src = this.#outline;
++    const outline = new Float64Array(src.length);
++    const width = trX - blX;
++    const height = trY - blY;
++    switch (rotation) {
++      case 0:
++        for (let i = 0, ii = src.length; i < ii; i += 2) {
++          outline[i] = blX + src[i] * width;
++          outline[i + 1] = trY - src[i + 1] * height;
++        }
++        break;
++      case 90:
++        for (let i = 0, ii = src.length; i < ii; i += 2) {
++          outline[i] = blX + src[i + 1] * width;
++          outline[i + 1] = blY + src[i] * height;
++        }
++        break;
++      case 180:
++        for (let i = 0, ii = src.length; i < ii; i += 2) {
++          outline[i] = trX - src[i] * width;
++          outline[i + 1] = blY + src[i + 1] * height;
++        }
++        break;
++      case 270:
++        for (let i = 0, ii = src.length; i < ii; i += 2) {
++          outline[i] = trX - src[i + 1] * width;
++          outline[i + 1] = trY - src[i] * height;
++        }
++    }
++    return outline;
++  }
++
++  #computeMinMax(isLTR) {
++    const outline = this.#outline;
++    let lastX = outline[4];
++    let lastY = outline[5];
++    let minX = lastX;
++    let minY = lastY;
++    let maxX = lastX;
++    let maxY = lastY;
++    let lastPointX = lastX;
++    let lastPointY = lastY;
++    const ltrCallback = isLTR ? Math.max : Math.min;
++
++    for (let i = 6, ii = outline.length; i < ii; i += 6) {
++      if (isNaN(outline[i])) {
++        minX = Math.min(minX, outline[i + 4]);
++        minY = Math.min(minY, outline[i + 5]);
++        maxX = Math.max(maxX, outline[i + 4]);
++        maxY = Math.max(maxY, outline[i + 5]);
++        if (lastPointY < outline[i + 5]) {
++          lastPointX = outline[i + 4];
++          lastPointY = outline[i + 5];
++        } else if (lastPointY === outline[i + 5]) {
++          lastPointX = ltrCallback(lastPointX, outline[i + 4]);
++        }
++      } else {
++        const bbox = Util.bezierBoundingBox(
++          lastX,
++          lastY,
++          ...outline.slice(i, i + 6)
++        );
++        minX = Math.min(minX, bbox[0]);
++        minY = Math.min(minY, bbox[1]);
++        maxX = Math.max(maxX, bbox[2]);
++        maxY = Math.max(maxY, bbox[3]);
++        if (lastPointY < bbox[3]) {
++          lastPointX = bbox[2];
++          lastPointY = bbox[3];
++        } else if (lastPointY === bbox[3]) {
++          lastPointX = ltrCallback(lastPointX, bbox[2]);
++        }
++      }
++      lastX = outline[i + 4];
++      lastY = outline[i + 5];
++    }
++
++    const x = minX - this.#innerMargin,
++      y = minY - this.#innerMargin,
++      width = maxX - minX + 2 * this.#innerMargin,
++      height = maxY - minY + 2 * this.#innerMargin;
++    lastPointX = (lastPointX - x) / width;
++    lastPointY = (lastPointY - y) / height;
++    this.#bbox = { x, y, width, height, lastPoint: [lastPointX, lastPointY] };
++  }
++
++  get box() {
++    return this.#bbox;
++  }
++}
++
++export { FreeOutliner, Outliner };
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.7
+- @babel/preset-env: ^7.23.7
+- @babel/runtime: ^7.23.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @javascript-obfuscator/escodegen: 2.3.0
+- @jazzer.js/core: ^2.1.0
+- acorn: ^8.11.3
+- autoprefixer: ^10.4.16
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001574
+- canvas: ^2.11.2
+- core-js: ^3.35.0
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.2
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^50.0.1
+- globals: ^13.24.0
+- gulp: ^4.0.2
+- gulp-cli: ^2.3.0
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.33
+- postcss-dark-theme-class: ^1.1.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.1.1
+- puppeteer: ^21.7.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.1.0
+- stylelint-prettier: ^5.0.0
+- terser: ^5.26.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.89.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n.js`: L10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

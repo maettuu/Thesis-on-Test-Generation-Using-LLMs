@@ -1,0 +1,46 @@
+<think>
+Okay, I need to write a test that checks if the memory usage issue when scrolling through a PDF is fixed by the provided patch. The issue is that memory usage balloons, which suggests that some data isn't being released properly.
+
+First, I'll look at the patch. It adds a condition in the WorkerTransport's obj method. If pageProxy._intentStates.size is 0, it closes the imageData.bitmap. This means that after cleanup, the image data is being released to free up memory.
+
+So, the test should verify that after rendering a page and cleaning up, the image data is no longer stored. I'll need to create a test that loads a PDF, renders a page, and then checks if the image data is properly closed.
+
+I'll structure the test using Jest. I'll import the necessary modules like PDFDocument and PDFWorker. Then, I'll create a PDF worker and load a test PDF file. Once the document is ready, I'll get the first page and render it. After rendering, I'll trigger the cleanup and then check if the image data is closed.
+
+To check the data, I'll access the commonObjs in the transport and look for the first object with bitmap data. If after cleanup, the bitmap is closed, the test passes.
+
+I'll set up the test to fail if any of these steps don't work as expected. Also, I'll ensure the test is self-contained and doesn't rely on external dependencies beyond the provided imports.
+
+Finally, I'll write the test in JavaScript, making sure it's concise and only tests the specific memory issue addressed by the patch.
+</think>
+
+```javascript
+it("should release image data after cleanup", async () => {
+  const { PDFWorker, PDFDocument, PDFWorkerUtil } = await import("../../src/display/api.js");
+  const { PDFDataRangeTransport } = await import("../../src/display/api.js");
+  const { CMAP_URL, TEST_PDFS_PATH } = await import("./test_utils.js");
+
+  const worker = new PDFWorker({ verbosity: 'error' });
+  const transport = new PDFDataRangeTransport(0, null, true);
+  const doc = await PDFDocument.load({
+    url: `${TEST_PDFS_PATH}/trivial.pdf`,
+    range: transport,
+    worker,
+  });
+
+  const page = await doc.getPage(1);
+  await page.render({
+    canvasContext: new (await import("../../src/display/canvas.js")).CanvasGraphics(),
+    viewport: page.getViewport({ scale: 1 }),
+  });
+
+  const transportAfter = new PDFDataRangeTransport(0, null, true);
+  const pageAfter = new PDFPageProxy(0, {}, transportAfter);
+  const cleanupResult = await pageAfter.cleanup();
+
+  const { commonObjs } = pageAfter._transport;
+  const imageData = Object.values(commonObjs._objs).find(obj => obj.data?.bitmap);
+
+  expect(imageData?.bitmap?.closed).toBe(true);
+});
+```

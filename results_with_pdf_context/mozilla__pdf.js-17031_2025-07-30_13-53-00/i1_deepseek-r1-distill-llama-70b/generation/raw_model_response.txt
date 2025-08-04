@@ -1,0 +1,49 @@
+<think>
+Okay, I need to write a regression test for the issue where the font size slider in the text editor isn't working smoothly. The patch provided modifies the `moveInDOM` method by adding a timeout to delay moving the editor in the DOM, which should prevent blocking the UI when changing the font size.
+
+First, I'll look at the existing test file `editor_spec.js`. It imports `CommandManager`, which might be useful. I'll need to create a test that checks if the editor's DOM movement is delayed correctly.
+
+I should set up a scenario where the font size is changed using the slider. The test will verify that the `moveInDOM` method is called with a delay. I'll mock the `moveEditorInDOM` method of the parent to track when it's invoked.
+
+I'll create a test case using `it` where I set up the editor, simulate a font size change, and then check if `moveInDOM` is called after a timeout. I'll use `jest.useFakeTimers()` to control the timers and ensure the timeout is respected.
+
+In the test, after setting the font size, I'll wait for the timeout to elapse using `jest.runAllTimers()`. Then, I'll check if `moveEditorInDOM` was called, indicating that the editor was moved in the DOM after the delay.
+
+This test should fail before the patch because the `moveInDOM` method didn't have the timeout, causing it to be called immediately and possibly blocking the UI. After the patch, the method should wait, allowing the test to pass.
+</think>
+
+```javascript
+it("should delay moving editor in DOM when changing font size", async () => {
+  const { AnnotationEditor } = await import("../../src/display/editor/editor.js");
+  const { CommandManager } = await import("../../src/display/editor/tools.js");
+
+  const mockParent = {
+    moveEditorInDOM: jest.fn(),
+  };
+
+  const editor = new AnnotationEditor({
+    parent: mockParent,
+    uiManager: new CommandManager(),
+    id: "test-editor",
+    name: "FreeText",
+    isCentered: false,
+  });
+
+  // Mock the font size slider change
+  const fontSizeSlider = {
+    value: 20,
+  };
+
+  // Simulate the font size change
+  editor.fontSize = fontSizeSlider.value;
+
+  // The moveInDOM method should now be called with a timeout
+  expect(mockParent.moveEditorInDOM).not.toHaveBeenCalled();
+
+  // Wait for the timeout to trigger
+  jest.useFakeTimers();
+  jest.runAllTimers();
+
+  expect(mockParent.moveEditorInDOM).toHaveBeenCalled();
+});
+```

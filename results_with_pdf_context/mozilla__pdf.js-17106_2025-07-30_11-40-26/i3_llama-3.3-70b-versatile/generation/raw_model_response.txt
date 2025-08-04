@@ -1,0 +1,29 @@
+```javascript
+it("should prevent memory usage from ballooning when scrolling through a PDF", async () => {
+  const pdfUrl = `${TEST_PDFS_PATH}/pdfissue.pdf`;
+  const loadingTask = await getDocument({ url: pdfUrl });
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+  const viewport = pdfPage.getViewport({ scale: 1 });
+  const canvas = document.createElement('canvas');
+  const canvasContext = canvas.getContext('2d');
+  const renderTask = pdfPage.render({
+    canvasContext,
+    viewport,
+  });
+  await renderTask.promise;
+  const pageIntentStates = pdfPage._intentStates;
+  const intentState = pageIntentStates.values().next().value;
+  const objs = intentState.operatorList;
+  const imageData = objs.argsArray.find(arg => arg instanceof Object && 'bitmap' in arg);
+  if (imageData) {
+    imageData.bitmap.close();
+  }
+  const pageProxy = pdfPage;
+  const pageIntentStatesSizeBeforeCleanup = pageIntentStates.size;
+  pageProxy.cleanup();
+  const pageIntentStatesSizeAfterCleanup = pageIntentStates.size;
+  expect(pageIntentStatesSizeBeforeCleanup).toBeGreaterThan(0);
+  expect(pageIntentStatesSizeAfterCleanup).toBe(0);
+});
+```

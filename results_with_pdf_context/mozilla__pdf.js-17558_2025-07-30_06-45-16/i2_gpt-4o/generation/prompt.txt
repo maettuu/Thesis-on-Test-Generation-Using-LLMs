@@ -1,0 +1,712 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Omnibus Experiment] Emojis not shown in PDFs
+</issue>
+
+PDF File:
+<pdf>
+bug1669097.pdf
+</pdf>
+
+Patch:
+<patch>
+diff --git a/src/core/annotation.js b/src/core/annotation.js
+--- a/src/core/annotation.js
++++ b/src/core/annotation.js
+@@ -3826,7 +3826,7 @@ class FreeTextAnnotation extends MarkupAnnotation {
+           fontColor,
+           strokeAlpha
+         );
+-        this._streams.push(this.appearance, FakeUnicodeFont.toUnicodeStream);
++        this._streams.push(this.appearance);
+       } else {
+         warn(
+           "FreeTextAnnotation: OffscreenCanvas is not supported, annotation may not render correctly."
+
+diff --git a/src/core/core_utils.js b/src/core/core_utils.js
+--- a/src/core/core_utils.js
++++ b/src/core/core_utils.js
+@@ -386,6 +386,17 @@ const XMLEntities = {
+   /* ' */ 0x27: "&apos;",
+ };
+ 
++function* codePointIter(str) {
++  for (let i = 0, ii = str.length; i < ii; i++) {
++    const char = str.codePointAt(i);
++    if (char > 0xd7ff && (char < 0xe000 || char > 0xfffd)) {
++      // char is represented by two u16
++      i++;
++    }
++    yield char;
++  }
++}
++
+ function encodeToXmlString(str) {
+   const buffer = [];
+   let start = 0;
+@@ -602,6 +613,7 @@ function getRotationMatrix(rotation, width, height) {
+ 
+ export {
+   arrayBuffersToBytes,
++  codePointIter,
+   collectActions,
+   encodeToXmlString,
+   escapePDFName,
+
+diff --git a/src/core/default_appearance.js b/src/core/default_appearance.js
+--- a/src/core/default_appearance.js
++++ b/src/core/default_appearance.js
+@@ -13,13 +13,14 @@
+  * limitations under the License.
+  */
+ 
+-import { Dict, Name } from "./primitives.js";
+ import {
++  codePointIter,
+   escapePDFName,
+   getRotationMatrix,
+   numberToString,
+   stringToUTF16HexString,
+ } from "./core_utils.js";
++import { Dict, Name } from "./primitives.js";
+ import {
+   LINE_DESCENT_FACTOR,
+   LINE_FACTOR,
+@@ -251,35 +252,6 @@ class FakeUnicodeFont {
+     );
+   }
+ 
+-  get toUnicodeRef() {
+-    if (!FakeUnicodeFont._toUnicodeRef) {
+-      const toUnicode = `/CIDInit /ProcSet findresource begin
+-12 dict begin
+-begincmap
+-/CIDSystemInfo
+-<< /Registry (Adobe)
+-/Ordering (UCS) /Supplement 0 >> def
+-/CMapName /Adobe-Identity-UCS def
+-/CMapType 2 def
+-1 begincodespacerange
+-<0000> <FFFF>
+-endcodespacerange
+-1 beginbfrange
+-<0000> <FFFF> <0000>
+-endbfrange
+-endcmap CMapName currentdict /CMap defineresource pop end end`;
+-      const toUnicodeStream = (FakeUnicodeFont.toUnicodeStream =
+-        new StringStream(toUnicode));
+-      const toUnicodeDict = new Dict(this.xref);
+-      toUnicodeStream.dict = toUnicodeDict;
+-      toUnicodeDict.set("Length", toUnicode.length);
+-      FakeUnicodeFont._toUnicodeRef =
+-        this.xref.getNewPersistentRef(toUnicodeStream);
+-    }
+-
+-    return FakeUnicodeFont._toUnicodeRef;
+-  }
+-
+   get fontDescriptorRef() {
+     if (!FakeUnicodeFont._fontDescriptorRef) {
+       const fontDescriptor = new Dict(this.xref);
+@@ -350,7 +322,7 @@ endcmap CMapName currentdict /CMap defineresource pop end end`;
+     baseFont.set("Subtype", Name.get("Type0"));
+     baseFont.set("Encoding", Name.get("Identity-H"));
+     baseFont.set("DescendantFonts", [this.descendantFontRef]);
+-    baseFont.set("ToUnicode", this.toUnicodeRef);
++    baseFont.set("ToUnicode", Name.get("Identity-H"));
+ 
+     return this.xref.getNewPersistentRef(baseFont);
+   }
+@@ -420,8 +392,8 @@ endcmap CMapName currentdict /CMap defineresource pop end end`;
+       // languages, like arabic, it'd be wrong because of ligatures.
+       const lineWidth = ctx.measureText(line).width;
+       maxWidth = Math.max(maxWidth, lineWidth);
+-      for (const char of line.split("")) {
+-        const code = char.charCodeAt(0);
++      for (const code of codePointIter(line)) {
++        const char = String.fromCodePoint(code);
+         let width = this.widths.get(code);
+         if (width === undefined) {
+           const metrics = ctx.measureText(char);
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.7
+- @babel/preset-env: ^7.23.8
+- @babel/runtime: ^7.23.8
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @javascript-obfuscator/escodegen: 2.3.0
+- @jazzer.js/core: ^2.1.0
+- acorn: ^8.11.3
+- autoprefixer: ^10.4.17
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001579
+- canvas: ^2.11.2
+- core-js: ^3.35.0
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^50.0.1
+- globals: ^13.24.0
+- gulp: ^4.0.2
+- gulp-cli: ^2.3.0
+- gulp-postcss: ^9.1.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.33
+- postcss-dark-theme-class: ^1.1.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.2.4
+- puppeteer: ^21.7.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.2.0
+- stylelint-prettier: ^5.0.0
+- terser: ^5.27.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.89.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n.js`: L10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/annotation.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationActionEventType,
+18   AnnotationBorderStyleType,
+19   AnnotationEditorType,
+20   AnnotationFieldFlag,
+21   AnnotationFlag,
+22   AnnotationReplyType,
+23   AnnotationType,
+24   assert,
+25   BASELINE_FACTOR,
+26   FeatureTest,
+27   getModificationDate,
+28   IDENTITY_MATRIX,
+29   info,
+30   LINE_DESCENT_FACTOR,
+31   LINE_FACTOR,
+32   OPS,
+33   RenderingIntentFlag,
+34   shadow,
+35   stringToPDFString,
+36   unreachable,
+37   Util,
+38   warn,
+39 } from "../shared/util.js";
+40 import {
+41   collectActions,
+42   escapeString,
+43   getInheritableProperty,
+44   getRotationMatrix,
+45   isAscii,
+46   numberToString,
+47   stringToUTF16String,
+48 } from "./core_utils.js";
+49 import {
+50   createDefaultAppearance,
+51   FakeUnicodeFont,
+52   getPdfColor,
+53   parseAppearanceStream,
+54   parseDefaultAppearance,
+55 } from "./default_appearance.js";
+56 import { Dict, isName, isRefsEqual, Name, Ref, RefSet } from "./primitives.js";
+57 import { Stream, StringStream } from "./stream.js";
+58 import { BaseStream } from "./base_stream.js";
+59 import { bidi } from "./bidi.js";
+60 import { Catalog } from "./catalog.js";
+61 import { ColorSpace } from "./colorspace.js";
+62 import { FileSpec } from "./file_spec.js";
+63 import { JpegStream } from "./jpeg_stream.js";
+64 import { ObjectLoader } from "./object_loader.js";
+65 import { OperatorList } from "./operator_list.js";
+66 import { writeObject } from "./writer.js";
+67 import { XFAFactory } from "./xfa/factory.js";
+68 
+3780 class FreeTextAnnotation extends MarkupAnnotation {
+3781   constructor(params) {
+3782     super(params);
+3783 
+3784     // It uses its own canvas in order to be hidden if edited.
+3785     // But if it has the noHTML flag, it means that we don't want to be able
+3786     // to modify it so we can just draw it on the main canvas.
+3787     this.data.hasOwnCanvas = !this.data.noHTML;
+3788     // We want to be able to add mouse listeners to the annotation.
+3789     this.data.noHTML = false;
+3790 
+3791     const { evaluatorOptions, xref } = params;
+3792     this.data.annotationType = AnnotationType.FREETEXT;
+3793     this.setDefaultAppearance(params);
+3794     this._hasAppearance = !!this.appearance;
+3795 
+3796     if (this._hasAppearance) {
+3797       const { fontColor, fontSize } = parseAppearanceStream(
+3798         this.appearance,
+3799         evaluatorOptions,
+3800         xref
+3801       );
+3802       this.data.defaultAppearanceData.fontColor = fontColor;
+3803       this.data.defaultAppearanceData.fontSize = fontSize || 10;
+3804     } else {
+3805       this.data.defaultAppearanceData.fontSize ||= 10;
+3806       const { fontColor, fontSize } = this.data.defaultAppearanceData;
+3807       if (this._contents.str) {
+3808         this.data.textContent = this._contents.str
+3809           .split(/\r\n?|\n/)
+3810           .map(line => line.trimEnd());
+3811         const { coords, bbox, matrix } = FakeUnicodeFont.getFirstPositionInfo(
+3812           this.rectangle,
+3813           this.rotation,
+3814           fontSize
+3815         );
+3816         this.data.textPosition = this._transformPoint(coords, bbox, matrix);
+3817       }
+3818       if (this._isOffscreenCanvasSupported) {
+3819         const strokeAlpha = params.dict.get("CA");
+3820         const fakeUnicodeFont = new FakeUnicodeFont(xref, "sans-serif");
+3821         this.appearance = fakeUnicodeFont.createAppearance(
+3822           this._contents.str,
+3823           this.rectangle,
+3824           this.rotation,
+3825           fontSize,
+3826           fontColor,
+3827           strokeAlpha
+3828         );
+3829         this._streams.push(this.appearance, FakeUnicodeFont.toUnicodeStream);
+3830       } else {
+3831         warn(
+3832           "FreeTextAnnotation: OffscreenCanvas is not supported, annotation may not render correctly."
+3833         );
+3834       }
+3835     }
+3836   }
+3837 
+4009 }
+4010 
+4955 
+File:
+src/core/core_utils.js
+1 /* Copyright 2019 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorPrefix,
+18   assert,
+19   BaseException,
+20   objectSize,
+21   stringToPDFString,
+22   warn,
+23 } from "../shared/util.js";
+24 import { Dict, isName, Ref, RefSet } from "./primitives.js";
+25 import { BaseStream } from "./base_stream.js";
+26 
+27 const PDF_VERSION_REGEXP = /^[1-9]\.\d$/;
+28 
+147 // prettier-ignore
+148 const ROMAN_NUMBER_MAP = [
+149   "", "C", "CC", "CCC", "CD", "D", "DC", "DCC", "DCCC", "CM",
+150   "", "X", "XX", "XXX", "XL", "L", "LX", "LXX", "LXXX", "XC",
+151   "", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"
+152 ];
+153 
+188 // Calculate the base 2 logarithm of the number `x`. This differs from the
+189 // native function in the sense that it returns the ceiling value and that it
+190 // returns 0 instead of `Infinity`/`NaN` for `x` values smaller than/equal to 0.
+197 
+216 // Checks if ch is one of the following characters: SPACE, TAB, CR or LF.
+220 
+281 // Replace "(", ")", "\n", "\r" and "\" by "\(", "\)", "\\n", "\\r" and "\\"
+282 // in order to write it in a PDF file.
+293 
+381 const XMLEntities = {
+382   /* < */ 0x3c: "&lt;",
+383   /* > */ 0x3e: "&gt;",
+384   /* & */ 0x26: "&amp;",
+385   /* " */ 0x22: "&quot;",
+386   /* ' */ 0x27: "&apos;",
+387 };
+388 
+602 
+File:
+src/core/default_appearance.js
+1 /* Copyright 2020 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { Dict, Name } from "./primitives.js";
+17 import {
+18   escapePDFName,
+19   getRotationMatrix,
+20   numberToString,
+21   stringToUTF16HexString,
+22 } from "./core_utils.js";
+23 import {
+24   LINE_DESCENT_FACTOR,
+25   LINE_FACTOR,
+26   OPS,
+27   shadow,
+28   warn,
+29 } from "../shared/util.js";
+30 import { ColorSpace } from "./colorspace.js";
+31 import { EvaluatorPreprocessor } from "./evaluator.js";
+32 import { LocalColorSpaceCache } from "./image_utils.js";
+33 import { PDFFunctionFactory } from "./function.js";
+34 import { StringStream } from "./stream.js";
+35 
+93 // Parse DA to extract font and color information.
+97 
+210 // Parse appearance stream to extract font and color information.
+211 // It returns the font properties used to render the first text object.
+215 
+227 // Create default appearance string from some information.
+234 
+235 class FakeUnicodeFont {
+236   constructor(xref, fontFamily) {
+237     this.xref = xref;
+238     this.widths = null;
+239     this.firstChar = Infinity;
+240     this.lastChar = -Infinity;
+241     this.fontFamily = fontFamily;
+242 
+243     const canvas = new OffscreenCanvas(1, 1);
+244     this.ctxMeasure = canvas.getContext("2d");
+245 
+246     if (!FakeUnicodeFont._fontNameId) {
+247       FakeUnicodeFont._fontNameId = 1;
+248     }
+249     this.fontName = Name.get(
+250       `InvalidPDFjsFont_${fontFamily}_${FakeUnicodeFont._fontNameId++}`
+251     );
+252   }
+253 
+254   get toUnicodeRef() {
+255     if (!FakeUnicodeFont._toUnicodeRef) {
+256       const toUnicode = `/CIDInit /ProcSet findresource begin
+257 12 dict begin
+258 begincmap
+259 /CIDSystemInfo
+260 << /Registry (Adobe)
+261 /Ordering (UCS) /Supplement 0 >> def
+262 /CMapName /Adobe-Identity-UCS def
+263 /CMapType 2 def
+264 1 begincodespacerange
+265 <0000> <FFFF>
+266 endcodespacerange
+267 1 beginbfrange
+268 <0000> <FFFF> <0000>
+269 endbfrange
+270 endcmap CMapName currentdict /CMap defineresource pop end end`;
+271       const toUnicodeStream = (FakeUnicodeFont.toUnicodeStream =
+272         new StringStream(toUnicode));
+273       const toUnicodeDict = new Dict(this.xref);
+274       toUnicodeStream.dict = toUnicodeDict;
+275       toUnicodeDict.set("Length", toUnicode.length);
+276       FakeUnicodeFont._toUnicodeRef =
+277         this.xref.getNewPersistentRef(toUnicodeStream);
+278     }
+279 
+280     return FakeUnicodeFont._toUnicodeRef;
+281   }
+282 
+346   get baseFontRef() {
+347     const baseFont = new Dict(this.xref);
+348     baseFont.set("BaseFont", this.fontName);
+349     baseFont.set("Type", Name.get("Font"));
+350     baseFont.set("Subtype", Name.get("Type0"));
+351     baseFont.set("Encoding", Name.get("Identity-H"));
+352     baseFont.set("DescendantFonts", [this.descendantFontRef]);
+353     baseFont.set("ToUnicode", this.toUnicodeRef);
+354 
+355     return this.xref.getNewPersistentRef(baseFont);
+356   }
+357 
+413   createAppearance(text, rect, rotation, fontSize, bgColor, strokeAlpha) {
+414     const ctx = this._createContext();
+415     const lines = [];
+416     let maxWidth = -Infinity;
+417     for (const line of text.split(/\r\n?|\n/)) {
+418       lines.push(line);
+419       // The line width isn't the sum of the char widths, because in some
+420       // languages, like arabic, it'd be wrong because of ligatures.
+421       const lineWidth = ctx.measureText(line).width;
+422       maxWidth = Math.max(maxWidth, lineWidth);
+423       for (const char of line.split("")) {
+424         const code = char.charCodeAt(0);
+425         let width = this.widths.get(code);
+426         if (width === undefined) {
+427           const metrics = ctx.measureText(char);
+428           width = Math.ceil(metrics.width);
+429           this.widths.set(code, width);
+430           this.firstChar = Math.min(code, this.firstChar);
+431           this.lastChar = Math.max(code, this.lastChar);
+432         }
+433       }
+434     }
+435     maxWidth *= fontSize / 1000;
+436 
+437     const [x1, y1, x2, y2] = rect;
+438     let w = x2 - x1;
+439     let h = y2 - y1;
+440 
+441     if (rotation % 180 !== 0) {
+442       [w, h] = [h, w];
+443     }
+444 
+445     let hscale = 1;
+446     if (maxWidth > w) {
+447       hscale = w / maxWidth;
+448     }
+449     let vscale = 1;
+450     const lineHeight = LINE_FACTOR * fontSize;
+451     const lineDescent = LINE_DESCENT_FACTOR * fontSize;
+452     const maxHeight = lineHeight * lines.length;
+453     if (maxHeight > h) {
+454       vscale = h / maxHeight;
+455     }
+456     const fscale = Math.min(hscale, vscale);
+457     const newFontSize = fontSize * fscale;
+458 
+459     const buffer = [
+460       "q",
+461       `0 0 ${numberToString(w)} ${numberToString(h)} re W n`,
+462       `BT`,
+463       `1 0 0 1 0 ${numberToString(h + lineDescent)} Tm 0 Tc ${getPdfColor(
+464         bgColor,
+465         /* isFill */ true
+466       )}`,
+467       `/${this.fontName.name} ${numberToString(newFontSize)} Tf`,
+468     ];
+469 
+470     const { resources } = this;
+471     strokeAlpha =
+472       typeof strokeAlpha === "number" && strokeAlpha >= 0 && strokeAlpha <= 1
+473         ? strokeAlpha
+474         : 1;
+475 
+476     if (strokeAlpha !== 1) {
+477       buffer.push("/R0 gs");
+478       const extGState = new Dict(this.xref);
+479       const r0 = new Dict(this.xref);
+480       r0.set("ca", strokeAlpha);
+481       r0.set("CA", strokeAlpha);
+482       r0.set("Type", Name.get("ExtGState"));
+483       extGState.set("R0", r0);
+484       resources.set("ExtGState", extGState);
+485     }
+486 
+487     const vShift = numberToString(lineHeight);
+488     for (const line of lines) {
+489       buffer.push(`0 -${vShift} Td <${stringToUTF16HexString(line)}> Tj`);
+490     }
+491     buffer.push("ET", "Q");
+492     const appearance = buffer.join("\n");
+493 
+494     const appearanceStreamDict = new Dict(this.xref);
+495     appearanceStreamDict.set("Subtype", Name.get("Form"));
+496     appearanceStreamDict.set("Type", Name.get("XObject"));
+497     appearanceStreamDict.set("BBox", [0, 0, w, h]);
+498     appearanceStreamDict.set("Length", appearance.length);
+499     appearanceStreamDict.set("Resources", resources);
+500 
+501     if (rotation) {
+502       const matrix = getRotationMatrix(rotation, w, h);
+503       appearanceStreamDict.set("Matrix", matrix);
+504     }
+505 
+506     const ap = new StringStream(appearance);
+507     ap.dict = appearanceStreamDict;
+508 
+509     return ap;
+510   }
+511 }
+512 
+</code>
+
+PR summary:
+<pr_summary>
+Print correctly documents containing chars with an unicode greater than 0xFFFF (bug 1669097)
+
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. You can use the PDF file for testing as follows:
+const { getDocument } = await import('../../src/display/api.js');
+const { buildGetDocumentParams } = await import('./test_utils.js');
+const loadingTask = getDocument(buildGetDocumentParams('bug1669097.pdf'))
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

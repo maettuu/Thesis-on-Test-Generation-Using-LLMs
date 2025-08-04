@@ -1,0 +1,51 @@
+<think>
+Okay, I need to write a regression test for the issue where embedded images are not being removed correctly when using the FileAttachmentAnnotation. The user provided a patch, so I need to ensure the test fails before the patch and passes after.
+
+First, I'll look at the problem. The user wants the black pin (pushpin) to be transparent so the image underneath is visible. The patch modifies the annotation_layer.js to check if fillAlpha is zero and then applies opacity to the trigger element.
+
+So, the test should check if the trigger element (the pin) has an opacity of 0 when fillAlpha is zero. Before the patch, this wouldn't happen, so the test should fail. After the patch, it should pass.
+
+I'll use the provided PDF file, issue16800.pdf. I'll need to get the first page and check the annotation. Since it's a file attachment annotation, I'll look for the FileAttachmentAnnotationElement in the annotation layer.
+
+I'll import getDocument from api.js and buildGetDocumentParams from test_utils.js. Then, I'll load the PDF and get the first page. After the page is rendered, I'll check the annotations.
+
+I'll find the first annotation of type FILEATTACHMENT. Once I have the annotation element, I'll check if the trigger element exists and if its opacity is 0. Before the patch, this should be false, so the test would fail. After the patch, it should be true, so the test passes.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll structure the test with async/await and use Jest's it function. The test will compare the expected opacity with the actual value from the DOM element.
+
+I should also handle any potential issues, like the annotation not being found, but the test should be straightforward since the PDF is provided.
+
+So, putting it all together, the test will load the PDF, check the annotation, and verify the trigger's opacity is zero after the patch.
+</think>
+
+```javascript
+it("should remove embedded images when fillAlpha is zero", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue16800.pdf'));
+  
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(2);
+  const annotationLayer = await page.getAnnotationLayer();
+  const annotations = await annotationLayer.getAnnotations();
+  
+  const fileAttachmentAnnotation = annotations.find(annotation => 
+    annotation instanceof (await import("../../src/core/annotation.js")).FileAttachmentAnnotation
+  );
+  
+  const annotationElement = new (await import("../../src/display/annotation_layer.js")).FileAttachmentAnnotationElement({
+    annotation: fileAttachmentAnnotation,
+    page: page,
+    data: fileAttachmentAnnotation.data,
+    imageResourcesPath: "",
+    linkService: null,
+    l10n: null,
+    isKeyboardNavigationEnabled: false
+  });
+  
+  await annotationElement.render();
+  const trigger = annotationElement.#trigger;
+  
+  expect(trigger.style.opacity).toBe('0');
+});
+```

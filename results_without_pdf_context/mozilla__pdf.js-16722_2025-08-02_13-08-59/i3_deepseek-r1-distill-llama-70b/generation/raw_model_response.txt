@@ -1,0 +1,50 @@
+<think>
+Okay, I need to create a regression test for the issue where Firefox is slow to render poster PDFs. The patch provided modifies the way the filter is set in the `resetCtxToDefault` function. 
+
+First, I should understand what the patch does. It looks like the patch changes how the filter is reset. Instead of always setting `ctx.filter = "none"`, it checks if the current filter is not "none" or empty and then sets it to "none". This should prevent unnecessary filter resets, which might have been causing performance issues.
+
+Now, I need to write a test that fails before the patch and passes after. The test should measure the rendering time of a PDF with a poster image. 
+
+I'll start by importing the necessary modules. I see that the test file already imports `getDocument` and `PDFDocumentProxy`, so I can use those. I'll also need to import `performance` from the `perf_hooks` module to measure time.
+
+Next, I'll set up the test. I'll create a `PDFDocumentProxy` using `getDocument` with a sample poster PDF. Once the PDF is loaded, I'll get the first page and its viewport.
+
+I'll then create a canvas element to render the page. The rendering should be done in the canvas context. I'll measure the time before and after rendering the page. The time taken should be within a reasonable threshold, say 100ms, after the patch is applied.
+
+In the test, I'll use `performance.now()` to capture the start and end times. The difference should be less than 100ms. 
+
+I need to ensure that the test is self-contained and doesn't rely on external factors. I'll use `await page.render()` to render the page and measure the time accurately.
+
+Finally, I'll write the test block using `it` from the test framework. The test will check if the rendering time is within the expected range after the patch is applied. If it is, the test passes; otherwise, it fails.
+
+I should make sure that all necessary variables are initialized and that the test doesn't have any side effects. Also, I'll ensure that the test correctly imports all required modules and uses them appropriately.
+
+So, putting it all together, the test will load the PDF, render it, measure the time, and assert that the time is within the expected limit. This will confirm that the patch resolves the performance issue.
+</think>
+
+```javascript
+it("should render poster PDF quickly", async () => {
+  const { performance } = await import("perf_hooks");
+  const pdfPath = `${TEST_PDFS_PATH}/poster.pdf`;
+  const pdf = await getDocument(buildGetDocumentParams(pdfPath, new PDFDocumentLoadingTask(new PDFDataRangeTransport(new DefaultFileReaderFactory()))));
+  const page = (await pdf.getPages())[0];
+  const viewport = page.getViewport({ scale: 1 });
+  
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  
+  const renderTask = new RenderTask();
+  renderTask.rasterizer = new PDFWorker();
+  renderTask.render = new RenderTask();
+  renderTask.renderCanvasContext = context;
+  renderTask.renderViewport = viewport;
+  
+  const startTime = performance.now();
+  await page.render(renderTask);
+  const endTime = performance.now();
+  
+  expect(endTime - startTime).toBeLessThan(100);
+});
+```

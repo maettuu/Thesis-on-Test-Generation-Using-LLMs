@@ -1,0 +1,80 @@
+<think>
+Okay, so I need to write a test that checks if the mouse cursor changes correctly when resizing an image or drawing in a PDF. The test should fail before the patch and pass after. Let me think about how to approach this.
+
+First, I'll need to create a test case where I add an image or drawing, then try to resize it from different edges and check the cursor's state. The cursor should change to different shapes like 'nwse-resize' when dragging from the top-left corner, 'nesw-resize' from the bottom-right, etc.
+
+I'll start by importing the necessary modules. Since the test is in Node.js, I'll use dynamic imports for the PDFJS code. I'll need the AnnotationEditor from the editor.js file and the StampEditor from stamp.js.
+
+Next, I'll set up a mock DOM environment because the test runs in Node. I'll create a mock document object with elements like div, which is required for creating the editor.
+
+Then, I'll initialize the editor with some parameters, like the parent layer, UI manager, etc. I'll set the initial dimensions and position of the editor.
+
+I'll define the expected cursor styles for each edge. For example, top-left should be 'nwse-resize', top-right 'nesw-resize', and so on.
+
+Now, I'll simulate resizing from each edge. For each edge, I'll create a resizeStart event, trigger it on the editor, and check if the cursor style matches the expected one. I'll use async/await for each resize operation to ensure they complete before checking.
+
+If any of the cursor styles don't match, the test should fail. If all match, it passes.
+
+I need to make sure that the test is self-contained and doesn't rely on any external dependencies beyond what's provided. Also, I should handle any potential errors during the resize operations.
+
+Finally, I'll structure the test using Jest's it function, ensuring it's concise and to the point.
+</think>
+
+```javascript
+it("should change cursor when resizing from different edges", async () => {
+  const { AnnotationEditor } = await import("../../src/display/editor/editor.js");
+  const { StampEditor } = await import("../../src/display/editor/stamp.js");
+
+  // Mock DOM elements
+  const mockDocument = {
+    createElement: (type) => ({
+      style: {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }),
+  };
+
+  const editorParams = {
+    parent: {
+      div: mockDocument.createElement("div"),
+      pageIndex: 0,
+      viewport: {
+        rotation: 0,
+        rawDims: {
+          pageWidth: 100,
+          pageHeight: 100,
+        },
+      },
+    },
+    uiManager: {},
+    id: "1",
+  };
+
+  const editor = new StampEditor(editorParams);
+  editor.width = 50;
+  editor.height = 50;
+  editor.x = 25;
+  editor.y = 25;
+
+  const expectedCursors = {
+    topLeft: "nwse-resize",
+    topRight: "nesw-resize",
+    bottomRight: "nwse-resize",
+    bottomLeft: "nesw-resize",
+    topMiddle: "ns-resize",
+    middleRight: "ew-resize",
+    bottomMiddle: "ns-resize",
+    middleLeft: "ew-resize",
+  };
+
+  for (const [edge, expectedCursor] of Object.entries(expectedCursors)) {
+    try {
+      await editor.resizeStart(edge);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(mockDocument.createElement("div").style.cursor).toBe(expectedCursor);
+    } catch (error) {
+      fail(`Resize from ${edge} failed: ${error.message}`);
+    }
+  }
+});
+```

@@ -1,0 +1,44 @@
+it("should render transparency filters correctly with base href", async () => {
+  const { PDFDocument } = await import("../../web/pdf_document.js");
+  const { PDFPage } = await import("../../web/pdf_page.js");
+  const { PDFViewer } = await import("../../web/pdf_viewer.js");
+  const { JSDOM } = await import("jsdom");
+  const { readFileSync } = require("fs");
+  const { join } = require("path");
+
+  const testPdf = readFileSync(join(__dirname, "test.pdf"));
+  const dom = new JSDOM();
+  const document = dom.window.document;
+
+  // Create base href element
+  const baseElement = document.createElement("base");
+  baseElement.setAttribute("href", ".");
+  document.head.appendChild(baseElement);
+
+  // Load and render PDF
+  const pdf = await PDFDocument.load({
+    data: testPdf.buffer,
+    loader: new PDFDocumentLoader({
+      verifyData: true,
+    }),
+  });
+  const page = await pdf.getPage(1);
+  const viewer = new PDFViewer({
+    container: document.body,
+    renderer: "canvas",
+    scale: 1,
+    rotate: 0,
+  });
+  viewer.setDocument(pdf);
+  await viewer.setPage(1);
+
+  const canvas = viewer.getCanvas();
+  const context = canvas.getContext("2d");
+
+  // Get pixel data to check transparency
+  const imageData = context.getImageData(100, 100, 1, 1).data;
+  const expectedAlpha = 128;
+  const actualAlpha = imageData[3];
+
+  expect(actualAlpha).toBe(expectedAlpha);
+});

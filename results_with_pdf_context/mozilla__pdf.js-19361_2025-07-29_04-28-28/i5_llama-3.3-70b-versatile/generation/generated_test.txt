@@ -1,0 +1,28 @@
+it("should close the previous subpath when starting a new move in text rendering", async () => {
+  const { compileCharString } = await import("../../src/core/font_renderer.js");
+  const commands = [];
+  const cmds = {
+    add: (cmd, args) => commands.push({ cmd, args })
+  };
+  // The following charstring simulates two move-to operations:
+  // First, a horizontal move (operator 22) with one argument (100),
+  // then a relative move (operator 21) with two arguments (50 and 80).
+  // Numbers are encoded as per the Type2 charstring specification:
+  // For numbers between -107 and 107, the value is encoded as (value + 139).
+  // Thus, 100 encodes to 239, 50 to 189, and 80 to 219.
+  const charStringCode = [239, 22, 189, 219, 21];
+  // Provide a dummy font object.
+  const font = {};
+  // Call compileCharString which will process the code.
+  compileCharString(charStringCode, cmds, font, 0);
+  // Expected behavior (post-patch):
+  // First move: moveTo(100, 0) -> adds "M" [100,0].
+  // Second move: before moveTo(150,80) it should close the previous subpath by adding "L" with the first point of that subpath ([100,0]),
+  // then add "M" with the new coordinates.
+  const expected = [
+    { cmd: "M", args: [100, 0] },
+    { cmd: "L", args: [100, 0] },
+    { cmd: "M", args: [150, 80] }
+  ];
+  expect(commands).toEqual(expected);
+});

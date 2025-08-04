@@ -1,0 +1,57 @@
+it("should highlight both text and image elements", async () => {
+  const { jsPDF } = await import("pdf-lib");
+  const pdf = new jsPDF();
+  pdf.setFontSize(20);
+  pdf.text("Highlight this text", 20, 50);
+  pdf.ellipse(20, 100, 50, 30);
+  pdf.save("test.pdf", undefined, "blob");
+  const blob = new Blob([pdf.output('blob')], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+
+  const pdfDocument = await getDocument(url);
+  const page = await pdfDocument.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const div = document.createElement("div");
+  div.style.width = `${viewport.width}px`;
+  div.style.height = `${viewport.height}px`;
+  document.body.appendChild(div);
+
+  const drawLayer = new DrawLayer({ pageIndex: 1 });
+  const annotationEditorLayer = new AnnotationEditorLayer({
+    uiManager: new AnnotationEditorUIManager(),
+    div,
+    drawLayer,
+    pageIndex: 1,
+    viewport,
+  });
+
+  annotationEditorLayer.updateToolbar(AnnotationEditorType.HIGHLIGHT);
+  annotationEditorLayer.updateMode();
+
+  const textHighlight = new Promise((resolve) => {
+    const textLayer = div.querySelector(".textLayer");
+    const textElement = textLayer.querySelector("div");
+    const imageElement = div.querySelector("canvas");
+
+    const handlePointerDown = (e) => {
+      e.preventDefault();
+      const pointerUp = (e) => {
+        e.preventDefault();
+        const highlights = div.querySelectorAll(".highlight");
+        expect(highlights).toHaveLength(2);
+        resolve();
+      };
+      imageElement.addEventListener("pointerup", pointerUp, { once: true });
+      textElement.addEventListener("pointerup", pointerUp, { once: true });
+    };
+
+    textElement.addEventListener("pointerdown", handlePointerDown, { once: true });
+    imageElement.addEventListener("pointerdown", handlePointerDown, { once: true });
+  });
+
+  await textHighlight;
+
+  URL.revokeObjectURL(url);
+  document.body.removeChild(div);
+  await pdfDocument.close();
+});

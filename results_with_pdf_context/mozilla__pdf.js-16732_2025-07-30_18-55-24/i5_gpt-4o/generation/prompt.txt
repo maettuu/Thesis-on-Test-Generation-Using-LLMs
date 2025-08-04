@@ -1,0 +1,690 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+The Mouse cursor should change its state according to the edge we resize it from for added images and drawings in PDF documents
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/editor.js b/src/display/editor/editor.js
+--- a/src/display/editor/editor.js
++++ b/src/display/editor/editor.js
+@@ -21,11 +21,6 @@
+ import { bindEvents, ColorManager } from "./tools.js";
+ import { FeatureTest, shadow, unreachable } from "../../shared/util.js";
+ 
+-// The dimensions of the resizer is 15x15:
+-// https://searchfox.org/mozilla-central/rev/1ce190047b9556c3c10ab4de70a0e61d893e2954/toolkit/content/minimal-xul.css#136-137
+-// so each dimension must be greater than RESIZER_SIZE.
+-const RESIZER_SIZE = 16;
+-
+ /**
+  * @typedef {Object} AnnotationEditorParameters
+  * @property {AnnotationEditorUIManager} uiManager - the global manager
+@@ -41,6 +36,10 @@ const RESIZER_SIZE = 16;
+ class AnnotationEditor {
+   #keepAspectRatio = false;
+ 
++  #resizersDiv = null;
++
++  #resizePosition = null;
++
+   #boundFocusin = this.focusin.bind(this);
+ 
+   #boundFocusout = this.focusout.bind(this);
+@@ -75,6 +74,7 @@ class AnnotationEditor {
+     this.div = null;
+     this._uiManager = parameters.uiManager;
+     this.annotationElementId = null;
++    this._willKeepAspectRatio = false;
+ 
+     const {
+       rotation,
+@@ -401,6 +401,274 @@ class AnnotationEditor {
+     return [0, 0];
+   }
+ 
++  #createResizers() {
++    if (this.#resizersDiv) {
++      return;
++    }
++    this.#resizersDiv = document.createElement("div");
++    this.#resizersDiv.classList.add("resizers");
++    const classes = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
++    if (!this._willKeepAspectRatio) {
++      classes.push("topMiddle", "middleRight", "bottomMiddle", "middleLeft");
++    }
++    for (const name of classes) {
++      const div = document.createElement("div");
++      this.#resizersDiv.append(div);
++      div.classList.add("resizer", name);
++      div.addEventListener(
++        "pointerdown",
++        this.#resizerPointerdown.bind(this, name)
++      );
++    }
++    this.div.prepend(this.#resizersDiv);
++  }
++
++  #resizerPointerdown(name, event) {
++    event.preventDefault();
++    this.#resizePosition = [event.clientX, event.clientY];
++    const boundResizerPointermove = this.#resizerPointermove.bind(this, name);
++    const savedDraggable = this.div.draggable;
++    this.div.draggable = false;
++    const resizingClassName = `resizing${name
++      .charAt(0)
++      .toUpperCase()}${name.slice(1)}`;
++    this.parent.div.classList.add(resizingClassName);
++    const pointerMoveOptions = { passive: true, capture: true };
++    window.addEventListener(
++      "pointermove",
++      boundResizerPointermove,
++      pointerMoveOptions
++    );
++    const pointerUpCallback = () => {
++      // Stop the undo accumulation in order to have an undo action for each
++      // resize session.
++      this._uiManager.stopUndoAccumulation();
++      this.div.draggable = savedDraggable;
++      this.parent.div.classList.remove(resizingClassName);
++      window.removeEventListener(
++        "pointermove",
++        boundResizerPointermove,
++        pointerMoveOptions
++      );
++    };
++    window.addEventListener("pointerup", pointerUpCallback, {
++      once: true,
++    });
++  }
++
++  #resizerPointermove(name, event) {
++    const { clientX, clientY } = event;
++    const deltaX = clientX - this.#resizePosition[0];
++    const deltaY = clientY - this.#resizePosition[1];
++    this.#resizePosition[0] = clientX;
++    this.#resizePosition[1] = clientY;
++    const [parentWidth, parentHeight] = this.parentDimensions;
++    const savedX = this.x;
++    const savedY = this.y;
++    const savedWidth = this.width;
++    const savedHeight = this.height;
++    const minWidth = AnnotationEditor.MIN_SIZE / parentWidth;
++    const minHeight = AnnotationEditor.MIN_SIZE / parentHeight;
++    let cmd;
++
++    // 10000 because we multiply by 100 and use toFixed(2) in fixAndSetPosition.
++    // Without rounding, the positions of the corners other than the top left
++    // one can be slightly wrong.
++    const round = x => Math.round(x * 10000) / 10000;
++    const updatePosition = (width, height) => {
++      // We must take the parent dimensions as they are when undo/redo.
++      const [pWidth, pHeight] = this.parentDimensions;
++      this.setDims(pWidth * width, pHeight * height);
++      this.fixAndSetPosition();
++    };
++    const undo = () => {
++      this.width = savedWidth;
++      this.height = savedHeight;
++      this.x = savedX;
++      this.y = savedY;
++      updatePosition(savedWidth, savedHeight);
++    };
++
++    switch (name) {
++      case "topLeft": {
++        if (Math.sign(deltaX) * Math.sign(deltaY) < 0) {
++          return;
++        }
++        const dist = Math.hypot(deltaX, deltaY);
++        const oldDiag = Math.hypot(
++          savedWidth * parentWidth,
++          savedHeight * parentHeight
++        );
++        const brX = round(savedX + savedWidth);
++        const brY = round(savedY + savedHeight);
++        const ratio = Math.max(
++          Math.min(
++            1 - Math.sign(deltaX) * (dist / oldDiag),
++            // Avoid the editor to be larger than the page.
++            1 / savedWidth,
++            1 / savedHeight
++          ),
++          // Avoid the editor to be smaller than the minimum size.
++          minWidth / savedWidth,
++          minHeight / savedHeight
++        );
++        const newWidth = round(savedWidth * ratio);
++        const newHeight = round(savedHeight * ratio);
++        const newX = brX - newWidth;
++        const newY = brY - newHeight;
++        cmd = () => {
++          this.width = newWidth;
++          this.height = newHeight;
++          this.x = newX;
++          this.y = newY;
++          updatePosition(newWidth, newHeight);
++        };
++        break;
++      }
++      case "topMiddle": {
++        const bmY = round(this.y + savedHeight);
++        const newHeight = round(
++          Math.max(minHeight, Math.min(1, savedHeight - deltaY / parentHeight))
++        );
++        const newY = bmY - newHeight;
++        cmd = () => {
++          this.height = newHeight;
++          this.y = newY;
++          updatePosition(savedWidth, newHeight);
++        };
++        break;
++      }
++      case "topRight": {
++        if (Math.sign(deltaX) * Math.sign(deltaY) > 0) {
++          return;
++        }
++        const dist = Math.hypot(deltaX, deltaY);
++        const oldDiag = Math.hypot(
++          this.width * parentWidth,
++          this.height * parentHeight
++        );
++        const blY = round(savedY + this.height);
++        const ratio = Math.max(
++          Math.min(
++            1 + Math.sign(deltaX) * (dist / oldDiag),
++            1 / savedWidth,
++            1 / savedHeight
++          ),
++          minWidth / savedWidth,
++          minHeight / savedHeight
++        );
++        const newWidth = round(savedWidth * ratio);
++        const newHeight = round(savedHeight * ratio);
++        const newY = blY - newHeight;
++        cmd = () => {
++          this.width = newWidth;
++          this.height = newHeight;
++          this.y = newY;
++          updatePosition(newWidth, newHeight);
++        };
++        break;
++      }
++      case "middleRight": {
++        const newWidth = round(
++          Math.max(minWidth, Math.min(1, savedWidth + deltaX / parentWidth))
++        );
++        cmd = () => {
++          this.width = newWidth;
++          updatePosition(newWidth, savedHeight);
++        };
++        break;
++      }
++      case "bottomRight": {
++        if (Math.sign(deltaX) * Math.sign(deltaY) < 0) {
++          return;
++        }
++        const dist = Math.hypot(deltaX, deltaY);
++        const oldDiag = Math.hypot(
++          this.width * parentWidth,
++          this.height * parentHeight
++        );
++        const ratio = Math.max(
++          Math.min(
++            1 + Math.sign(deltaX) * (dist / oldDiag),
++            1 / savedWidth,
++            1 / savedHeight
++          ),
++          minWidth / savedWidth,
++          minHeight / savedHeight
++        );
++        const newWidth = round(savedWidth * ratio);
++        const newHeight = round(savedHeight * ratio);
++        cmd = () => {
++          this.width = newWidth;
++          this.height = newHeight;
++          updatePosition(newWidth, newHeight);
++        };
++        break;
++      }
++      case "bottomMiddle": {
++        const newHeight = round(
++          Math.max(minHeight, Math.min(1, savedHeight + deltaY / parentHeight))
++        );
++        cmd = () => {
++          this.height = newHeight;
++          updatePosition(savedWidth, newHeight);
++        };
++        break;
++      }
++      case "bottomLeft": {
++        if (Math.sign(deltaX) * Math.sign(deltaY) > 0) {
++          return;
++        }
++        const dist = Math.hypot(deltaX, deltaY);
++        const oldDiag = Math.hypot(
++          this.width * parentWidth,
++          this.height * parentHeight
++        );
++        const trX = round(savedX + this.width);
++        const ratio = Math.max(
++          Math.min(
++            1 - Math.sign(deltaX) * (dist / oldDiag),
++            1 / savedWidth,
++            1 / savedHeight
++          ),
++          minWidth / savedWidth,
++          minHeight / savedHeight
++        );
++        const newWidth = round(savedWidth * ratio);
++        const newHeight = round(savedHeight * ratio);
++        const newX = trX - newWidth;
++        cmd = () => {
++          this.width = newWidth;
++          this.height = newHeight;
++          this.x = newX;
++          updatePosition(newWidth, newHeight);
++        };
++        break;
++      }
++      case "middleLeft": {
++        const mrX = round(savedX + savedWidth);
++        const newWidth = round(
++          Math.max(minWidth, Math.min(1, savedWidth - deltaX / parentWidth))
++        );
++        const newX = mrX - newWidth;
++        cmd = () => {
++          this.width = newWidth;
++          this.x = newX;
++          updatePosition(newWidth, savedHeight);
++        };
++        break;
++      }
++    }
++    this.addCommands({
++      cmd,
++      undo,
++      mustExec: true,
++      type: this.resizeType,
++      overwriteIfSameType: true,
++      keepUndo: true,
++    });
++  }
++
+   /**
+    * Render this editor in a div.
+    * @returns {HTMLDivElement}
+@@ -654,10 +922,35 @@ class AnnotationEditor {
+     }
+   }
+ 
++  /**
++   * @returns {number} the type to use in the undo/redo stack when resizing.
++   */
++  get resizeType() {
++    return -1;
++  }
++
++  /**
++   * @returns {boolean} true if this editor can be resized.
++   */
++  get isResizable() {
++    return false;
++  }
++
++  /**
++   * Add the resizers to this editor.
++   */
++  makeResizable() {
++    if (this.isResizable) {
++      this.#createResizers();
++      this.#resizersDiv.classList.remove("hidden");
++    }
++  }
++
+   /**
+    * Select this editor.
+    */
+   select() {
++    this.makeResizable();
+     this.div?.classList.add("selectedEditor");
+   }
+ 
+@@ -665,6 +958,7 @@ class AnnotationEditor {
+    * Unselect this editor.
+    */
+   unselect() {
++    this.#resizersDiv?.classList.add("hidden");
+     this.div?.classList.remove("selectedEditor");
+   }
+ 
+@@ -735,17 +1029,10 @@ class AnnotationEditor {
+     const { style } = this.div;
+     style.aspectRatio = aspectRatio;
+     style.height = "auto";
+-    if (aspectRatio >= 1) {
+-      style.minHeight = `${RESIZER_SIZE}px`;
+-      style.minWidth = `${Math.round(aspectRatio * RESIZER_SIZE)}px`;
+-    } else {
+-      style.minWidth = `${RESIZER_SIZE}px`;
+-      style.minHeight = `${Math.round(RESIZER_SIZE / aspectRatio)}px`;
+-    }
+   }
+ 
+   static get MIN_SIZE() {
+-    return RESIZER_SIZE;
++    return 16;
+   }
+ }
+
+diff --git a/src/display/editor/ink.js b/src/display/editor/ink.js
+--- a/src/display/editor/ink.js
++++ b/src/display/editor/ink.js
+@@ -79,6 +79,7 @@ class InkEditor extends AnnotationEditor {
+     this.translationX = this.translationY = 0;
+     this.x = 0;
+     this.y = 0;
++    this._willKeepAspectRatio = true;
+   }
+ 
+   /** @inheritdoc */
+@@ -156,6 +157,11 @@ class InkEditor extends AnnotationEditor {
+     ];
+   }
+ 
++  /** @inheritdoc */
++  get resizeType() {
++    return AnnotationEditorParamsType.INK_DIMS;
++  }
++
+   /**
+    * Update the thickness and make this action undoable.
+    * @param {number} thickness
+@@ -619,6 +625,7 @@ class InkEditor extends AnnotationEditor {
+     this.div.classList.add("disabled");
+ 
+     this.#fitToContent(/* firstTime = */ true);
++    this.makeResizable();
+ 
+     this.parent.addInkEditorIfNeeded(/* isCommitting = */ true);
+ 
+@@ -754,6 +761,11 @@ class InkEditor extends AnnotationEditor {
+     this.#observer.observe(this.div);
+   }
+ 
++  /** @inheritdoc */
++  get isResizable() {
++    return !this.isEmpty() && this.#disableEditing;
++  }
++
+   /** @inheritdoc */
+   render() {
+     if (this.div) {
+
+diff --git a/src/display/editor/stamp.js b/src/display/editor/stamp.js
+--- a/src/display/editor/stamp.js
++++ b/src/display/editor/stamp.js
+@@ -13,8 +13,11 @@
+  * limitations under the License.
+  */
+ 
++import {
++  AnnotationEditorParamsType,
++  AnnotationEditorType,
++} from "../../shared/util.js";
+ import { AnnotationEditor } from "./editor.js";
+-import { AnnotationEditorType } from "../../shared/util.js";
+ import { PixelsPerInch } from "../display_utils.js";
+ import { StampAnnotationElement } from "../annotation_layer.js";
+ 
+@@ -123,6 +126,11 @@ class StampEditor extends AnnotationEditor {
+     }
+   }
+ 
++  /** @inheritdoc */
++  get resizeType() {
++    return AnnotationEditorParamsType.STAMP_DIMS;
++  }
++
+   /** @inheritdoc */
+   remove() {
+     if (this.#bitmapId) {
+@@ -170,6 +178,11 @@ class StampEditor extends AnnotationEditor {
+     );
+   }
+ 
++  /** @inheritdoc */
++  get isResizable() {
++    return true;
++  }
++
+   /** @inheritdoc */
+   render() {
+     if (this.div) {
+@@ -194,7 +207,6 @@ class StampEditor extends AnnotationEditor {
+     if (this.width) {
+       // This editor was created in using copy (ctrl+c).
+       const [parentWidth, parentHeight] = this.parentDimensions;
+-      this.setAspectRatio(this.width * parentWidth, this.height * parentHeight);
+       this.setAt(
+         baseX * parentWidth,
+         baseY * parentHeight,
+@@ -233,8 +245,6 @@ class StampEditor extends AnnotationEditor {
+       (height * parentHeight) / pageHeight
+     );
+ 
+-    this.setAspectRatio(width, height);
+-
+     const canvas = (this.#canvas = document.createElement("canvas"));
+     div.append(canvas);
+     this.#drawBitmap(width, height);
+
+diff --git a/src/display/editor/tools.js b/src/display/editor/tools.js
+--- a/src/display/editor/tools.js
++++ b/src/display/editor/tools.js
+@@ -280,6 +280,12 @@ class CommandManager {
+     this.#commands.push(save);
+   }
+ 
++  stopUndoAccumulation() {
++    if (this.#position !== -1) {
++      this.#commands[this.#position].type = NaN;
++    }
++  }
++
+   /**
+    * Undo the last command.
+    */
+@@ -1168,6 +1174,10 @@ class AnnotationEditorUIManager {
+     return this.#selectedEditors.size !== 0;
+   }
+ 
++  stopUndoAccumulation() {
++    this.#commandManager.stopUndoAccumulation();
++  }
++
+   /**
+    * Undo the last command.
+    */
+
+diff --git a/src/shared/util.js b/src/shared/util.js
+--- a/src/shared/util.js
++++ b/src/shared/util.js
+@@ -83,6 +83,8 @@ const AnnotationEditorParamsType = {
+   INK_COLOR: 11,
+   INK_THICKNESS: 12,
+   INK_OPACITY: 13,
++  INK_DIMS: 14,
++  STAMP_DIMS: 21,
+ };
+ 
+ // Permission flags from Table 22, Section 7.6.3.2 of the PDF specification.
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.9
+- @babel/plugin-transform-modules-commonjs: ^7.22.5
+- @babel/preset-env: ^7.22.9
+- @babel/runtime: ^7.22.6
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.14
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001517
+- canvas: ^2.11.2
+- core-js: ^3.31.1
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.45.0
+- eslint-config-prettier: ^8.8.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.27.5
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.0
+- globals: ^13.20.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.27
+- postcss-dir-pseudo-class: ^8.0.0
+- prettier: ^3.0.0
+- puppeteer: ^20.9.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.2
+- stylelint-prettier: ^4.0.0
+- terser: ^5.19.2
+- through2: ^4.0.2
+- ttest: ^4.0.0
+- typescript: ^5.1.6
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

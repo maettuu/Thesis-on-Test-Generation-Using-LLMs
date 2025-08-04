@@ -1,0 +1,60 @@
+it("should fix free highlighting lag behind mouse cursor", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Page } = await import("../../src/core/document.js");
+  const { FreeOutliner } = await import("../../src/display/editor/outliner.js");
+
+  // Setup mock PDF document
+  const xref = new XRefMock();
+  const pdf = new PDFDocument({
+    xref,
+    fingerprint: "test",
+    bug: 0,
+  });
+  const page = new Page({
+    pdf,
+    xref,
+    index: 0,
+    ref: new Ref(1, 0),
+  });
+
+  // Setup outliner with initial point
+  const box = { x: 0, y: 0, width: 100, height: 100 };
+  const scaleFactor = 1;
+  const thickness = 2;
+  const isLTR = true;
+  const innerMargin = 0;
+  const outliner = new FreeOutliner(
+    { x: 50, y: 50 },
+    box,
+    scaleFactor,
+    thickness,
+    isLTR,
+    innerMargin
+  );
+
+  // Simulate user drawing
+  const points = [
+    { x: 60, y: 40 },
+    { x: 70, y: 30 },
+    { x: 80, y: 20 },
+    { x: 90, y: 10 },
+  ];
+
+  // Add points and verify outline
+  for (const point of points) {
+    const result = outliner.add(point);
+    expect(result).toBe(true);
+
+    // Verify the outline is generated correctly
+    const svgPath = outliner.toSVGPath();
+    const outlines = outliner.getOutlines();
+    expect(svgPath).not.toBeNull();
+    expect(outlines).not.toBeNull();
+  }
+
+  // Verify last point coordinates match expected
+  const expectedLastCoords = [90, 10];
+  const actualLastCoords = outliner.#last.slice(-2);
+  expect(actualLastCoords[0]).toBeCloseTo(expectedLastCoords[0]);
+  expect(actualLastCoords[1]).toBeCloseTo(expectedLastCoords[1]);
+});

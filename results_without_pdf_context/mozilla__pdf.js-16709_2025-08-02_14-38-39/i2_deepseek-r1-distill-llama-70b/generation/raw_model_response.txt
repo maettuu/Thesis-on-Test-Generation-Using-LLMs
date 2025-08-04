@@ -1,0 +1,63 @@
+<think>
+Okay, so I need to write a regression test for the issue where the redo functionality using keyboard shortcuts wasn't working properly on macOS, specifically with the meta+shift+z shortcut. The patch that was applied added additional key combinations to handle different cases on macOS, so the test should verify that redo now works as expected after the patch.
+
+First, I'll start by understanding the problem. Before the patch, when a user on macOS tried to redo an action using meta+shift+z, it didn't work because the code didn't account for the different cases of the 'z' key (lowercase vs uppercase). The patch added both "mac+meta+shift+z" and "mac+meta+shift+Z" to the list of recognized shortcuts for redo.
+
+So, the test needs to simulate this scenario. I'll create a test where an annotation is added, then undone, and then the redo shortcut is triggered to see if the annotation reappears.
+
+I'll need to import the necessary modules. Since the test is in Node.js, I'll use dynamic imports for the required files. I'll import AnnotationEditorUIManager from the appropriate path and also the TestReporter for any assertions.
+
+Next, I'll set up the test environment. I'll create a mock container element, a PDF document, and initialize the AnnotationEditorUIManager with these. Then, I'll create an annotation, add it, and trigger an undo to remove it.
+
+After that, I'll simulate the redo keyboard event. For macOS, the event's key should be 'Z' and the meta and shift keys should be pressed. I'll create a KeyboardEvent for this and dispatch it to the container.
+
+Finally, I'll check if the annotation was successfully redone by verifying that the count of annotations in the storage is correct. If it's 1, the redo worked; otherwise, the test fails.
+
+I need to make sure that the test is self-contained and doesn't rely on any external state beyond what's set up in the test. Also, I should handle any potential asynchronous operations, like the event handling, properly.
+
+So, putting it all together, the test will create the necessary objects, perform the actions, trigger the event, and assert the expected outcome. This should confirm that the patch resolves the issue with the redo shortcut on macOS.
+</think>
+
+```javascript
+it("should redo an annotation using meta+shift+z on mac", async () => {
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { TestReporter } = await import("./testreporter.js");
+
+  const container = document.createElement("div");
+  const pdfDocument = { annotationStorage: { add: () => {}, getAnnotations: () => [] } };
+  const eventBus = { _on: () => {} };
+  const pageColors = {};
+
+  const manager = new AnnotationEditorUIManager(container, eventBus, pdfDocument, pageColors);
+
+  // Create a test annotation
+  const annotation = { id: "test-annotation" };
+
+  // Add the annotation
+  manager.addAnnotation(annotation);
+
+  // Undo the action
+  manager.undo();
+
+  // Simulate the redo keyboard event for mac
+  const event = new KeyboardEvent("keydown", {
+    key: "Z",
+    keyCode: 90,
+    which: 90,
+    metaKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+
+  container.dispatchEvent(event);
+
+  // Check if the annotation was redone
+  const result = await pdfDocument.annotationStorage.getAnnotations();
+
+  new TestReporter().assert(
+    result.length === 1,
+    "Redo using meta+shift+z on mac should add the annotation back"
+  );
+});
+```

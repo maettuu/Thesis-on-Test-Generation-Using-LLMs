@@ -1,0 +1,54 @@
+<think>
+Okay, I need to write a regression test for the issue where the redo shortcut wasn't working for images, text, or drawings in the PDF editor. The patch modifies the keyboard shortcuts in tools.js to include more combinations for redo. 
+
+First, I should look at the test file provided. It's test/unit/annotation_spec.js. I see it imports necessary modules like Annotation, AnnotationFactory, etc. I can reuse these imports.
+
+The test needs to simulate adding an annotation, undoing it, and then trying to redo it using the keyboard shortcuts. Before the patch, the redo shortcut might not have been triggering the correct function, so the test should fail. After the patch, it should pass.
+
+I'll structure the test as follows:
+1. Create a PDF document with a page.
+2. Create an annotation (like a text annotation).
+3. Add the annotation to the storage.
+4. Trigger an undo operation, which should remove the annotation.
+5. Check that the annotation was removed (undo worked).
+6. Simulate a redo keyboard event (using the new shortcuts from the patch).
+7. Check that the annotation is added back, confirming redo works.
+
+I'll use the KeyManager from the patch to handle the keyboard events. Since the test is in Node.js, I'll need to dynamically import any necessary modules.
+
+I'll write the test using Jest syntax with async/await. I'll set up the PDF document, create the annotation, and manage the state changes. After each operation, I'll verify the state of the annotations to ensure the undo and redo are working as expected.
+
+I also need to make sure the test is self-contained and only tests the redo functionality after the patch. I'll use the correct keyboard shortcuts as per the patch to trigger the redo action.
+
+Finally, I'll write the code, making sure to import everything correctly and handle any potential errors or edge cases.
+</think>
+
+```javascript
+it("should redo an annotation using keyboard shortcuts", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { Annotation, AnnotationFactory, MarkupAnnotation } = await import("../../src/core/annotation.js");
+  const { KeyManager } = await import("../../src/display/editor/tools.js");
+
+  const pdfDocument = new PDFDocument(new XRefMock());
+  const page = pdfDocument.addPage();
+  const annotationStorage = pdfDocument.annotationStorage;
+
+  const textAnnotation = AnnotationFactory.create(AnnotationType.TEXT, {
+    text: "Test annotation",
+    color: "#FF0000",
+    page: page.ref,
+  });
+
+  // Add the annotation
+  annotationStorage.addAnnotation(textAnnotation);
+  expect(annotationStorage.getAnnotations().length).toBe(1);
+
+  // Undo the annotation
+  KeyManager.onKeyDown({ key: "z", ctrlKey: true, metaKey: true });
+  expect(annotationStorage.getAnnotations().length).toBe(0);
+
+  // Redo the annotation using the new keyboard shortcuts
+  KeyManager.onKeyDown({ key: "Z", ctrlKey: true, shiftKey: true });
+  expect(annotationStorage.getAnnotations().length).toBe(1);
+});
+```

@@ -1,0 +1,635 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: Invalid requests performed if `wasmUrl` or `iccUrl` are not provided but `useWasm` is
+### Attach (recommended) or Link to PDF file
+
+https://github.com/user-attachments/files/19016079/version4pdf.pdf (from https://github.com/mozilla/pdf.js/blob/master/test/pdfs/issue2856.pdf.link)
+
+### Web browser and its version
+
+Firefox 136.0.1
+
+### Operating system and its version
+
+Arch Linux
+
+### PDF.js version
+
+5.0.375 (and current master at 5.0.386)
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+1. Apply the following diff to `examples/learning/helloworld.html`:
+
+```diff
+diff --git a/examples/learning/helloworld.html b/examples/learning/helloworld.html
+index 6a74298f8..4c334db53 100644
+--- a/examples/learning/helloworld.html
++++ b/examples/learning/helloworld.html
+@@ -17,7 +17,9 @@
+   // If absolute URL from the remote server is provided, configure the CORS
+   // header on that server.
+   //
+-  const url = './helloworld.pdf';
++  const url = '../../test/pdfs/issue2856.pdf';
++  const wasmUrl = '../../../web/wasm/';
++  const iccUrl = '../../../external/iccs/';
+ 
+   //
+   // The workerSrc property shall be specified.
+@@ -28,7 +30,7 @@
+   //
+   // Asynchronous download PDF
+   //
+-  const loadingTask = pdfjsLib.getDocument(url);
++  const loadingTask = pdfjsLib.getDocument({ url, useWasm: true, useWorkerFetch: true });
+   const pdf = await loadingTask.promise;
+   //
+   // Fetch the first page
+```
+
+2. Run `npm install && npx gulp dist-install`.
+3. Run `npx gulp server` and browse to http://localhost:8888/examples/learning/helloworld.html.
+6. Open the network tab (refresh the page if necessary) and note that PDF.js, despite the absence of `wasmUrl`, still attempts to fetch the WASM file using a `null` value, which fails with a 404:
+
+```
+GET 404 http://localhost:8888/node_modules/pdfjs-dist/build/nullqcms_bg.wasm
+```
+
+7. Pass `wasmUrl` to `getDocument` and re-run the steps above. Note that the WASM file can be fetched now, but despite the absence of `iccUrl` the ICC file is also being attempted to fetch, which also fails with a 404:
+
+```
+GET 404 http://localhost:8888/node_modules/pdfjs-dist/build/nullCGATS001Compat-v2-micro.icc
+```
+
+### What is the expected behavior?
+
+If `useWasm` is set to `true` but the `wasmUrl` or `iccUrl` is not provided then PDF.js shouldn't attempt to fetch the WASM or ICC files because we know beforehand that those requests will fail, and the corresponding colorspace should be marked as "not usable".
+
+### What went wrong?
+
+The files are attempted to be fetched with a `null` value, which fails with a 404.
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+_No response_
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/colorspace_utils.js b/src/core/colorspace_utils.js
+--- a/src/core/colorspace_utils.js
++++ b/src/core/colorspace_utils.js
+@@ -289,7 +289,7 @@ class ColorSpaceUtils {
+   }
+ 
+   static get cmyk() {
+-    if (IccColorSpace.isUsable) {
++    if (CmykICCBasedCS.isUsable) {
+       try {
+         return shadow(this, "cmyk", new CmykICCBasedCS());
+       } catch {
+
+diff --git a/src/core/icc_colorspace.js b/src/core/icc_colorspace.js
+--- a/src/core/icc_colorspace.js
++++ b/src/core/icc_colorspace.js
+@@ -130,11 +130,15 @@ class IccColorSpace extends ColorSpace {
+   static get isUsable() {
+     let isUsable = false;
+     if (this.#useWasm) {
+-      try {
+-        this._module = QCMS._module = this.#load();
+-        isUsable = !!this._module;
+-      } catch (e) {
+-        warn(`ICCBased color space: "${e}".`);
++      if (this.#wasmUrl) {
++        try {
++          this._module = QCMS._module = this.#load();
++          isUsable = !!this._module;
++        } catch (e) {
++          warn(`ICCBased color space: "${e}".`);
++        }
++      } else {
++        warn("No ICC color space support due to missing `wasmUrl` API option");
+       }
+     }
+ 
+@@ -169,6 +173,19 @@ class CmykICCBasedCS extends IccColorSpace {
+   static setOptions({ iccUrl }) {
+     this.#iccUrl = iccUrl;
+   }
++
++  static get isUsable() {
++    let isUsable = false;
++    if (IccColorSpace.isUsable) {
++      if (this.#iccUrl) {
++        isUsable = true;
++      } else {
++        warn("No CMYK ICC profile support due to missing `iccUrl` API option");
++      }
++    }
++
++    return shadow(this, "isUsable", isUsable);
++  }
+ }
+ 
+ export { CmykICCBasedCS, IccColorSpace };
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.10
+- @babel/preset-env: ^7.26.9
+- @babel/runtime: ^7.26.10
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @metalsmith/layouts: ^3.0.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.68
+- @types/node: ^22.13.10
+- autoprefixer: ^10.4.21
+- babel-loader: ^10.0.0
+- caniuse-lite: ^1.0.30001704
+- core-js: ^3.41.0
+- eslint: ^9.22.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.10.1
+- eslint-plugin-prettier: ^5.2.3
+- eslint-plugin-unicorn: ^57.0.0
+- globals: ^16.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.6.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.3
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.5.3
+- puppeteer: ^24.4.0
+- stylelint: ^16.16.0
+- stylelint-prettier: ^5.0.3
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.14
+- tsc-alias: ^1.8.11
+- ttest: ^4.0.0
+- typescript: ^5.8.2
+- vinyl: ^3.0.0
+- webpack: ^5.98.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/calculate_md5.js`: calculateMD5
+- `../../src/core/calculate_sha256.js`: calculateSHA256
+- `../../src/core/calculate_sha_other.js`: calculateSHA384, calculateSHA512
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/colorspace_utils.js`: ColorSpaceUtils
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalColorSpaceCache, GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, isValidExplicitDest, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, FeatureTest, FormatError, ImageKind, InvalidPDFException, MathClamp, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/colorspace_utils.js
+1 /* Copyright 2024 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AlternateCS,
+18   CalGrayCS,
+19   CalRGBCS,
+20   DeviceCmykCS,
+21   DeviceGrayCS,
+22   DeviceRgbaCS,
+23   DeviceRgbCS,
+24   IndexedCS,
+25   LabCS,
+26   PatternCS,
+27 } from "./colorspace.js";
+28 import { CmykICCBasedCS, IccColorSpace } from "./icc_colorspace.js";
+29 import { Dict, Name, Ref } from "./primitives.js";
+30 import { MathClamp, shadow, unreachable, warn } from "../shared/util.js";
+31 import { MissingDataException } from "./core_utils.js";
+32 
+33 class ColorSpaceUtils {
+100 
+291   static get cmyk() {
+292     if (IccColorSpace.isUsable) {
+293       try {
+294         return shadow(this, "cmyk", new CmykICCBasedCS());
+295       } catch {
+296         warn("CMYK fallback: DeviceCMYK");
+297       }
+298     }
+299     return shadow(this, "cmyk", new DeviceCmykCS());
+300   }
+301 }
+302 
+File:
+src/core/icc_colorspace.js
+1 /* Copyright 2025 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   DataType,
+18   initSync,
+19   Intent,
+20   qcms_convert_array,
+21   qcms_convert_four,
+22   qcms_convert_one,
+23   qcms_convert_three,
+24   qcms_drop_transformer,
+25   qcms_transformer_from_memory,
+26 } from "../../external/qcms/qcms.js";
+27 import { shadow, warn } from "../shared/util.js";
+28 import { ColorSpace } from "./colorspace.js";
+29 import { QCMS } from "../../external/qcms/qcms_utils.js";
+30 
+31 class IccColorSpace extends ColorSpace {
+32   #transformer;
+33 
+34   #convertPixel;
+35 
+36   static #useWasm = true;
+37 
+38   static #wasmUrl = null;
+39 
+40   static #finalizer = new FinalizationRegistry(transformer => {
+41     qcms_drop_transformer(transformer);
+42   });
+43 
+44   constructor(iccProfile, name, numComps) {
+45     if (!IccColorSpace.isUsable) {
+46       throw new Error("No ICC color space support");
+47     }
+48 
+49     super(name, numComps);
+50 
+51     let inType;
+52     switch (numComps) {
+53       case 1:
+54         inType = DataType.Gray8;
+55         this.#convertPixel = (src, srcOffset) =>
+56           qcms_convert_one(this.#transformer, src[srcOffset] * 255);
+57         break;
+58       case 3:
+59         inType = DataType.RGB8;
+60         this.#convertPixel = (src, srcOffset) =>
+61           qcms_convert_three(
+62             this.#transformer,
+63             src[srcOffset] * 255,
+64             src[srcOffset + 1] * 255,
+65             src[srcOffset + 2] * 255
+66           );
+67         break;
+68       case 4:
+69         inType = DataType.CMYK;
+70         this.#convertPixel = (src, srcOffset) =>
+71           qcms_convert_four(
+72             this.#transformer,
+73             src[srcOffset] * 255,
+74             src[srcOffset + 1] * 255,
+75             src[srcOffset + 2] * 255,
+76             src[srcOffset + 3] * 255
+77           );
+78         break;
+79       default:
+80         throw new Error(`Unsupported number of components: ${numComps}`);
+81     }
+82     this.#transformer = qcms_transformer_from_memory(
+83       iccProfile,
+84       inType,
+85       Intent.Perceptual
+86     );
+87     if (!this.#transformer) {
+88       throw new Error("Failed to create ICC color space");
+89     }
+90     IccColorSpace.#finalizer.register(this, this.#transformer);
+91   }
+92 
+130   static get isUsable() {
+131     let isUsable = false;
+132     if (this.#useWasm) {
+133       try {
+134         this._module = QCMS._module = this.#load();
+135         isUsable = !!this._module;
+136       } catch (e) {
+137         warn(`ICCBased color space: "${e}".`);
+138       }
+139     }
+140 
+141     return shadow(this, "isUsable", isUsable);
+142   }
+143 
+155 }
+156 
+157 class CmykICCBasedCS extends IccColorSpace {
+158   static #iccUrl;
+159 
+160   constructor() {
+161     const filename = "CGATS001Compat-v2-micro.icc";
+162     const xhr = new XMLHttpRequest();
+163     xhr.open("GET", `${CmykICCBasedCS.#iccUrl}${filename}`, false);
+164     xhr.responseType = "arraybuffer";
+165     xhr.send(null);
+166     super(new Uint8Array(xhr.response), "DeviceCMYK", 4);
+167   }
+168 
+172 }
+173 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/pdf_spec.js
+/* Copyright 2023 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  AbortException,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationMode,
+  AnnotationType,
+  createValidAbsoluteUrl,
+  FeatureTest,
+  getUuid,
+  ImageKind,
+  InvalidPDFException,
+  MathClamp,
+  normalizeUnicode,
+  OPS,
+  PasswordResponses,
+  PermissionFlag,
+  ResponseException,
+  shadow,
+  Util,
+  VerbosityLevel,
+} from "../../src/shared/util.js";
+import {
+  build,
+  getDocument,
+  isValidExplicitDest,
+  PDFDataRangeTransport,
+  PDFWorker,
+  version,
+} from "../../src/display/api.js";
+import {
+  fetchData,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getXfaPageViewport,
+  isDataScheme,
+  isPdfFile,
+  noContextMenu,
+  OutputScale,
+  PDFDateString,
+  PixelsPerInch,
+  RenderingCancelledException,
+  setLayerDimensions,
+  stopEvent,
+  SupportedImageMimeTypes,
+} from "../../src/display/display_utils.js";
+import { AnnotationEditorLayer } from "../../src/display/editor/annotation_editor_layer.js";
+import { AnnotationEditorUIManager } from "../../src/display/editor/tools.js";
+import { AnnotationLayer } from "../../src/display/annotation_layer.js";
+import { ColorPicker } from "../../src/display/editor/color_picker.js";
+import { DOMSVGFactory } from "../../src/display/svg_factory.js";
+import { DrawLayer } from "../../src/display/draw_layer.js";
+import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
+import { SignatureExtractor } from "../../src/display/editor/drawers/signaturedraw.js";
+import { TextLayer } from "../../src/display/text_layer.js";
+import { TouchManager } from "../../src/display/touch_manager.js";
+import { XfaLayer } from "../../src/display/xfa_layer.js";
+const expectedAPI = Object.freeze({
+  AbortException,
+  AnnotationEditorLayer,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationEditorUIManager,
+  AnnotationLayer,
+  AnnotationMode,
+  AnnotationType,
+  build,
+  ColorPicker,
+  createValidAbsoluteUrl,
+  DOMSVGFactory,
+  DrawLayer,
+  FeatureTest,
+  fetchData,
+  getDocument,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getUuid,
+  getXfaPageViewport,
+  GlobalWorkerOptions,
+  ImageKind,
+  InvalidPDFException,
+  isDataScheme,
+  isPdfFile,
+  isValidExplicitDest,
+  MathClamp,
+  noContextMenu,
+  normalizeUnicode,
+  OPS,
+  OutputScale,
+  PasswordResponses,
+  PDFDataRangeTransport,
+  PDFDateString,
+  PDFWorker,
+  PermissionFlag,
+  PixelsPerInch,
+  RenderingCancelledException,
+  ResponseException,
+  setLayerDimensions,
+  shadow,
+  SignatureExtractor,
+  stopEvent,
+  SupportedImageMimeTypes,
+  TextLayer,
+  TouchManager,
+  Util,
+  VerbosityLevel,
+  version,
+  XfaLayer,
+});
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

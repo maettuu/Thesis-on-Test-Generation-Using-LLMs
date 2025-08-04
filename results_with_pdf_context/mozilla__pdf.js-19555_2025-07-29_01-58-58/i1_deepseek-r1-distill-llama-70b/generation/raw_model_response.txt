@@ -1,0 +1,33 @@
+<think>
+Okay, so I need to write a regression test for the patch that fixes the issue with rare RC4 encryption in the Firefox PDF Viewer. The issue was that PDFs using RC4 with R=4, V=4 and a key length less than 128 bits weren't opening properly. The patch modifies the CipherTransformFactory to extend shorter keys to 16 bytes by appending zero bytes.
+
+First, I should understand what the patch does. It looks like in the CipherTransformFactory's constructor, when the algorithm is 4 and the encryptionKey is less than 16 bytes, it creates a new 16-byte array, copies the shorter key into it, and fills the rest with zeros. So the test needs to verify that this behavior correctly allows opening such PDFs.
+
+The user provided a sample PDF, issue19484_1.pdf, which uses a 40-bit key. The test should attempt to open this PDF and check if it can be read without errors.
+
+I'll start by setting up the test. I'll need to import the necessary modules, like getDocument from the display API and buildGetDocumentParams from test_utils.js. Then, I'll use these to load the problematic PDF.
+
+In the test, I'll create a loading task for the PDF. If the PDF can be loaded without throwing an error, that means the patch worked. So I'll wrap the getDocument call in a promise and await it. If it resolves without an exception, the test passes.
+
+I should make sure that the test only checks for the specific issue. So I'll use a try-catch block. If an error occurs during loading, the test fails. Otherwise, it passes.
+
+I also need to ensure that the test is self-contained and doesn't rely on external state. Using the provided PDF file is key here because it's designed to trigger the issue.
+
+Putting it all together, the test will import the necessary modules, attempt to load the PDF, and assert that no error is thrown. This will confirm that the patch correctly handles the RC4 encryption with shorter keys.
+</think>
+
+```javascript
+it("should handle RC4 encryption with 40-bit key", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  
+  const loadingTask = getDocument(buildGetDocumentParams('issue19484_1.pdf'));
+  
+  try {
+    const document = await loadingTask;
+    await document.load();
+  } catch (error) {
+    throw new Error("Failed to load PDF with RC4 encryption");
+  }
+});
+```

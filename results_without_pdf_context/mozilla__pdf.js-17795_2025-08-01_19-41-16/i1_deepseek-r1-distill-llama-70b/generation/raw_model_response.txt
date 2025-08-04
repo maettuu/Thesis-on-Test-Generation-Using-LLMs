@@ -1,0 +1,63 @@
+<think>
+Okay, I need to write a regression test for the issue where some inlined images aren't rendering correctly. The problem was caused by missing the closing `EI` in the PDF, which made the parser mishandle the images. The patch adds a try-catch block around the image processing code to handle such cases more gracefully.
+
+First, I'll look at the existing test file to see what's available. It imports necessary modules like PartialEvaluator, OperatorList, and some primitives. I can reuse these imports.
+
+I need to simulate an inline image without the `EI` marker. So, I'll create a mock stream that represents such a PDF structure. The content should include an inline image that's not properly closed.
+
+I'll set up the test by creating a new PartialEvaluator instance with the appropriate options, especially setting `ignoreErrors` to false so that any errors during processing are thrown. Then, I'll create an OperatorList to capture the operations.
+
+Next, I'll define the inline image data. It should be a minimal PDF structure with an inline image that's missing the `EI` marker. This will trigger the error condition.
+
+When processing this image with the old code, it should throw an error because it can't handle the missing `EI`. But with the patch, the try-catch should catch the error, log a warning, and continue without throwing an exception.
+
+In the test, I'll call `buildPaintImageXObject` and check if it throws an error. If the code is patched correctly, the function should handle the error and not throw, meaning the test should not throw an exception.
+
+I'll structure the test using async/await and use `expect` to check that no error is thrown. This way, the test will fail before the patch (since an error is thrown) and pass after (since the error is caught and handled).
+
+I also need to ensure that the test is self-contained and only uses the provided imports. I'll dynamically import any necessary modules within the test function to maintain compatibility with Node.js.
+
+Finally, I'll write the test block, making sure it's concise and directly tests the scenario addressed by the patch.
+</think>
+
+```javascript
+it("should handle inline images without closing EI", async () => {
+  const { PartialEvaluator, OperatorList, Dict, Name, Stream } = await import("../../src/core/evaluator.js");
+  const { StringStream } = await import("../../src/core/stream.js");
+  
+  const xref = new XRefMock();
+  const options = {
+    ignoreErrors: false,
+    isOffscreenCanvasSupported: false,
+  };
+  
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: null,
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: null,
+    builtInCMapCache: null,
+    standardFontDataCache: null,
+    globalImageCache: null,
+    systemFontCache: null,
+    options,
+  });
+  
+  const operatorList = new OperatorList();
+  const resources = new Dict();
+  const imageStream = new StringStream("q 0 0 10 10 rect f*");
+  
+  await expect(
+    evaluator.buildPaintImageXObject({
+      resources,
+      image: imageStream,
+      isInline: true,
+      operatorList,
+      cacheKey: null,
+      localImageCache: null,
+      localColorSpaceCache: null,
+    })
+  ).resolves.not.toThrow();
+});
+```

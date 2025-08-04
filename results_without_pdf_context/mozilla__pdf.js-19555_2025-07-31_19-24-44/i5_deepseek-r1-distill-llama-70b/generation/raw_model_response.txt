@@ -1,0 +1,40 @@
+<think>
+Okay, I need to write a regression test for the issue where PDFs using a rare RC4 encryption with a key length less than 128 bits weren't opening in Firefox's PDF viewer. The patch provided modifies the crypto.js file to extend the encryption key to 16 bytes if it's shorter, specifically for algorithm 4.
+
+First, I should understand what the patch does. It checks if the algorithm is 4 (RC4) and if the encryption key's length is less than 16 bytes. If so, it extends the key to 16 bytes by appending zero bytes. This should fix the issue where such PDFs couldn't be opened before.
+
+Now, to write a test that fails before the patch and passes after. The test needs to be self-contained and use the provided imports. I'll use the test_utils.js and pdf_viewer.js as per the imports.
+
+I'll create a test PDF in memory with the specific encryption settings. I'll set R=4, V=4, and use a 40-bit key. The user password is empty, so it should open without prompting.
+
+In the test, I'll simulate opening this PDF and check if it can be read correctly. If the patch is applied, the PDF should load without errors. Before the patch, it should throw an error because the key wasn't extended.
+
+I'll structure the test using Jest's it function. I'll import the necessary modules dynamically. Then, I'll create a mock PDF with the correct encryption settings. I'll use PDFDocumentLoadingTask to load the PDF and check if it's successful.
+
+I need to handle any exceptions that might occur during loading. If the PDF can't be decrypted, it should throw an error, which I'll catch and fail the test. If it loads correctly, the test passes.
+
+I'll make sure the test is concise and only tests this specific behavior. I won't add unnecessary comments or steps, just the essential code to verify the fix.
+</think>
+
+```javascript
+it("should correctly handle RC4 encryption with 40-bit key", async () => {
+  const { PDFDocument, PDFDocumentLoadingTask } = await import("../../src/display/api.js");
+  const { ARCFourCipher } = await import("../../src/core/crypto.js");
+  const { TestPdfsServer } = await import("./test_utils.js");
+
+  // Create a test PDF with RC4 encryption (R=4, V=4) using a 40-bit key
+  const server = new TestPdfsServer();
+  const pdfData = await server.generateRC4EncryptedPDF(40);
+  
+  try {
+    const loadingTask = new PDFDocumentLoadingTask(pdfData);
+    const pdf = await PDFDocument.load(loadingTask);
+    
+    // If we reach here, the PDF was successfully decrypted and loaded
+    expect(pdf.numPages).toBeGreaterThan(0);
+  } catch (error) {
+    // If the decryption fails, the PDF couldn't be loaded
+    expect(error).not.toBeDefined();
+  }
+});
+```

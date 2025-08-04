@@ -1,0 +1,396 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+When in editing mode, support pasting an image from the clipboard
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/annotation_editor_layer.js b/src/display/editor/annotation_editor_layer.js
+--- a/src/display/editor/annotation_editor_layer.js
++++ b/src/display/editor/annotation_editor_layer.js
+@@ -464,6 +464,31 @@ class AnnotationEditorLayer {
+     return null;
+   }
+ 
++  /**
++   * Paste some content into a new editor.
++   * @param {number} mode
++   * @param {Object} params
++   */
++  pasteEditor(mode, params) {
++    this.#uiManager.updateToolbar(mode);
++    this.#uiManager.updateMode(mode);
++
++    const { offsetX, offsetY } = this.#getCenterPoint();
++    const id = this.getNextId();
++    const editor = this.#createNewEditor({
++      parent: this,
++      id,
++      x: offsetX,
++      y: offsetY,
++      uiManager: this.#uiManager,
++      isCentered: true,
++      ...params,
++    });
++    if (editor) {
++      this.add(editor);
++    }
++  }
++
+   /**
+    * Create a new editor
+    * @param {Object} data
+@@ -504,10 +529,7 @@ class AnnotationEditorLayer {
+     return editor;
+   }
+ 
+-  /**
+-   * Create and add a new editor.
+-   */
+-  addNewEditor() {
++  #getCenterPoint() {
+     const { x, y, width, height } = this.div.getBoundingClientRect();
+     const tlX = Math.max(0, x);
+     const tlY = Math.max(0, y);
+@@ -520,11 +542,15 @@ class AnnotationEditorLayer {
+         ? [centerX, centerY]
+         : [centerY, centerX];
+ 
++    return { offsetX, offsetY };
++  }
++
++  /**
++   * Create and add a new editor.
++   */
++  addNewEditor() {
+     this.#createAndAddNewEditor(
+-      {
+-        offsetX,
+-        offsetY,
+-      },
++      this.#getCenterPoint(),
+       /* isCentered = */ true
+     );
+   }
+
+diff --git a/src/display/editor/editor.js b/src/display/editor/editor.js
+--- a/src/display/editor/editor.js
++++ b/src/display/editor/editor.js
+@@ -140,6 +140,26 @@ class AnnotationEditor {
+     return [];
+   }
+ 
++  /**
++   * Check if this kind of editor is able to handle the given mime type for
++   * pasting.
++   * @param {string} mime
++   * @returns {boolean}
++   */
++  static isHandlingMimeForPasting(_mime) {
++    return false;
++  }
++
++  /**
++   * Extract the data from the clipboard item and delegate the creation of the
++   * editor to the parent.
++   * @param {DataTransferItem} item
++   * @param {AnnotationEditorLayer} parent
++   */
++  static paste(item, parent) {
++    unreachable("Not implemented");
++  }
++
+   /**
+    * Get the properties to update in the UI for this editor.
+    * @returns {Array}
+
+diff --git a/src/display/editor/stamp.js b/src/display/editor/stamp.js
+--- a/src/display/editor/stamp.js
++++ b/src/display/editor/stamp.js
+@@ -30,6 +30,8 @@ class StampEditor extends AnnotationEditor {
+ 
+   #bitmapUrl = null;
+ 
++  #bitmapFile = null;
++
+   #canvas = null;
+ 
+   #observer = null;
+@@ -45,6 +47,7 @@ class StampEditor extends AnnotationEditor {
+   constructor(params) {
+     super({ ...params, name: "stampEditor" });
+     this.#bitmapUrl = params.bitmapUrl;
++    this.#bitmapFile = params.bitmapFile;
+   }
+ 
+   static get supportedTypes() {
+@@ -64,10 +67,26 @@ class StampEditor extends AnnotationEditor {
+     return shadow(
+       this,
+       "supportedTypes",
+-      types.map(type => `image/${type}`).join(",")
++      types.map(type => `image/${type}`)
+     );
+   }
+ 
++  static get supportedTypesStr() {
++    return shadow(this, "supportedTypesStr", this.supportedTypes.join(","));
++  }
++
++  /** @inheritdoc */
++  static isHandlingMimeForPasting(mime) {
++    return this.supportedTypes.includes(mime);
++  }
++
++  /** @inheritdoc */
++  static paste(item, parent) {
++    parent.pasteEditor(AnnotationEditorType.STAMP, {
++      bitmapFile: item.getAsFile(),
++    });
++  }
++
+   #getBitmapDone() {
+     this._uiManager.enableWaiting(false);
+     if (this.#canvas) {
+@@ -115,6 +134,29 @@ class StampEditor extends AnnotationEditor {
+       return;
+     }
+ 
++    if (this.#bitmapFile) {
++      const file = this.#bitmapFile;
++      this.#bitmapFile = null;
++      this._uiManager.enableWaiting(true);
++      this.#bitmapPromise = this._uiManager.imageManager
++        .getFromFile(file)
++        .then(data => {
++          this.#bitmapPromise = null;
++          if (!data) {
++            this.remove();
++            return;
++          }
++          ({
++            bitmap: this.#bitmap,
++            id: this.#bitmapId,
++            isSvg: this.#isSvg,
++          } = data);
++          this.#createCanvas();
++        })
++        .finally(() => this.#getBitmapDone());
++      return;
++    }
++
+     const input = document.createElement("input");
+     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+       input.hidden = true;
+@@ -122,7 +164,7 @@ class StampEditor extends AnnotationEditor {
+       document.body.append(input);
+     }
+     input.type = "file";
+-    input.accept = StampEditor.supportedTypes;
++    input.accept = StampEditor.supportedTypesStr;
+     this.#bitmapPromise = new Promise(resolve => {
+       input.addEventListener("change", async () => {
+         this.#bitmapPromise = null;
+
+diff --git a/src/display/editor/tools.js b/src/display/editor/tools.js
+--- a/src/display/editor/tools.js
++++ b/src/display/editor/tools.js
+@@ -919,8 +919,17 @@ class AnnotationEditorUIManager {
+    */
+   paste(event) {
+     event.preventDefault();
++    const { clipboardData } = event;
++    for (const item of clipboardData.items) {
++      for (const editorType of this.#editorTypes) {
++        if (editorType.isHandlingMimeForPasting(item.type)) {
++          editorType.paste(item, this.currentLayer);
++          return;
++        }
++      }
++    }
+ 
+-    let data = event.clipboardData.getData("application/pdfjs");
++    let data = clipboardData.getData("application/pdfjs");
+     if (!data) {
+       return;
+     }
+@@ -1099,6 +1108,9 @@ class AnnotationEditorUIManager {
+    * @param {string|null} editId
+    */
+   updateMode(mode, editId = null) {
++    if (this.#mode === mode) {
++      return;
++    }
+     this.#mode = mode;
+     if (mode === AnnotationEditorType.NONE) {
+       this.setEditingState(false);
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.9
+- @babel/plugin-transform-modules-commonjs: ^7.22.5
+- @babel/preset-env: ^7.22.9
+- @babel/runtime: ^7.22.6
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.14
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001519
+- canvas: ^2.11.2
+- core-js: ^3.32.0
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.46.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.28.0
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.1
+- globals: ^13.20.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.27
+- postcss-dir-pseudo-class: ^8.0.0
+- postcss-nesting: ^12.0.1
+- prettier: ^3.0.1
+- puppeteer: ^21.0.1
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.2
+- stylelint-prettier: ^4.0.2
+- terser: ^5.19.2
+- through2: ^4.0.2
+- ttest: ^4.0.0
+- typescript: ^5.1.6
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

@@ -1,0 +1,56 @@
+<think>
+Alright, I need to write a regression test for the issue where adding a `<base href>` tag breaks transparency filters in Firefox. The test should fail before the patch and pass after. 
+
+First, I'll start by understanding the problem. The bug occurs when a `<base href>` is present, causing incorrect rendering of drop shadows in Firefox. The patch modifies `display_utils.js` to handle URLs correctly when a `<base>` element is present.
+
+I'll structure the test to check if the filter URLs are correctly generated. The test will create a `DOMFilterFactory` instance and check the URLs for filters. 
+
+I'll set up a fake document with a `<base href=".">` tag to simulate the issue. Then, I'll call `addFilter` and `addAlphaFilter` to generate filter URLs. 
+
+The key is to check if the URLs are absolute when the `<base>` element is present. Before the patch, the URLs would be relative, causing issues. After the patch, they should be absolute.
+
+I'll write the test using Jest. It will import `DOMFilterFactory` and set up the necessary mocks. The test will compare the generated URLs to ensure they start with `url(.)` when there's no base tag and use the correct absolute URL when the base tag is added.
+
+I need to make sure the test is self-contained and doesn't rely on external files. I'll mock the necessary document properties to simulate the presence of the `<base>` tag.
+
+Finally, I'll write the test to fail without the patch and pass after applying it, ensuring the patch resolves the issue.
+</think>
+
+```javascript
+it("should correctly generate filter URLs when <base> element is present", async () => {
+  const { DOMFilterFactory } = await import("../../src/display/display_utils.js");
+
+  // Create a mock document with a base element
+  const mockDocument = {
+    URL: "http://example.com",
+    baseURI: "http://example.com",
+    createElement: () => ({ tagName: "BASE" })
+  };
+
+  const factory = new DOMFilterFactory({
+    docId: "test",
+    ownerDocument: mockDocument
+  });
+
+  // Test with base href present
+  const filter1 = await factory.addFilter([0, 1]);
+  const alphaFilter1 = await factory.addAlphaFilter([0, 1]);
+
+  // Verify that URLs are correctly prefixed with the base URL
+  expect(filter1).toMatch(/^url\(http:\/\/example\.com#.+?\)$/);
+  expect(alphaFilter1).toMatch(/^url\(http:\/\/example\.com#.+?\)$/);
+
+  // Test without base href
+  const factoryWithoutBase = new DOMFilterFactory({
+    docId: "test",
+    ownerDocument: { URL: "http://example.com", baseURI: "http://example.com" }
+  });
+
+  const filter2 = await factoryWithoutBase.addFilter([0, 1]);
+  const alphaFilter2 = await factoryWithoutBase.addAlphaFilter([0, 1]);
+
+  // Verify that URLs are relative when no base element is present
+  expect(filter2).toMatch(/^url\(#.+?\)$/);
+  expect(alphaFilter2).toMatch(/^url\(#.+?\)$/);
+});
+```

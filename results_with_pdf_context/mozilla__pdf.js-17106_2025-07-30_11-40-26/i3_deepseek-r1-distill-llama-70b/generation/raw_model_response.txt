@@ -1,0 +1,64 @@
+<think>
+Okay, I need to write a test for the issue where memory usage balloons when scrolling through a PDF. The patch provided adds a check to release ImageBitmap data after cleanup. So the test should verify that without the patch, memory increases, and with the patch, it doesn't.
+
+First, I'll look at the test file provided. It imports necessary modules and has setup for testing. I'll need to create a test that loads a PDF, renders pages, and checks memory usage.
+
+I'll choose a PDF that's large enough to cause noticeable memory usage, like the 'tricky.pdf' used in other tests. I'll set up a fake worker to simulate the environment.
+
+In the test, I'll load the PDF and get the first page. Then, I'll render the page and force a garbage collection to get accurate memory measurements. I'll take a heap snapshot to check the size.
+
+The key is to measure memory before and after rendering. Without the patch, the ImageBitmaps aren't released, so the memory should stay high. With the patch, after cleanup, the memory should drop.
+
+I'll write the test using async/await for clarity. I'll use 'heapdump' to take snapshots and 'objectSize' from the shared utils to measure memory. I'll also set up a fake worker using LoopbackPort to simulate the worker environment.
+
+The test will check if the memory after cleanup is significantly less than before, ensuring the patch works as intended.
+</think>
+
+```javascript
+it("should release image data after cleanup to prevent memory ballooning", async () => {
+  const { PDFWorker } = await import("../../src/display/api.js");
+  const { LoopbackPort } = await import("../../src/display/api.js");
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  const { PDFDocumentLoadingTask } = await import("../../src/display/api.js");
+  const { GlobalImageCache } = await import("../../src/core/image_utils.js");
+  const { heapdump } = await import("heapdump");
+  const { objectSize } = await import("../../src/shared/util.js");
+
+  // Setup fake worker
+  const port = new LoopbackPort();
+  const worker = new PDFWorker({ port });
+
+  // Load test PDF
+  const pdfPath = require.resolve(`${TEST_PDFS_PATH}/tricky.pdf`);
+  const loadingTask = await PDFDocumentLoadingTask.fromFetch(pdfPath);
+  const doc = await loadingTask.promise;
+
+  // Get first page
+  const page = await doc.getPage(1);
+
+  // Render the page
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const context = canvas.getContext("2d");
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport,
+  });
+
+  // Ensure rendering is complete
+  await renderTask.promise;
+
+  // Force cleanup
+  await page.cleanup();
+
+  // Measure memory usage
+  const heapSnapshot = await heapdump.snapshot();
+  const imageSize = objectSize(heapSnapshot);
+
+  // Verify memory is released
+  expect(imageSize).toBeLessThan(10 * 1024 * 1024); // 10MB threshold
+});
+```

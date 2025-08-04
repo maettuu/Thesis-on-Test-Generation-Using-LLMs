@@ -1,0 +1,52 @@
+it("should render PDF with transparency filters correctly when base href is defined", async () => {
+  const { PDFDocument, PDFPage } = await import("../../src/display/api.js");
+  const { DOMFilterFactory } = await import("../../src/display/display_utils.js");
+  const { createTemporaryNodeServer } = await import("./test_utils.js");
+
+  const server = await createTemporaryNodeServer();
+  const pdfUrl = server.url + "/test/pdfs/test.pdf";
+  const pdf = await PDFDocument.load(pdfUrl);
+  const page = await pdf.getPage(1);
+  const filterFactory = new DOMFilterFactory();
+
+  const html = `
+    <html>
+    <head>
+      <base href=".">
+    </head>
+    <body>
+      <canvas id="canvas"></canvas>
+      <script>
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const filter = ${JSON.stringify(filterFactory.addFilter([0, 1]))};
+        ctx.filter = filter;
+        ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+        ctx.fillRect(10, 10, 50, 50);
+      </script>
+    </body>
+    </html>
+  `;
+
+  const expectedData = await page.render({
+    canvasContext: { filter: filterFactory.addFilter([0, 1]) },
+    viewport: page.getViewport({ scale: 1 }),
+  });
+
+  const actualData = await new Promise((resolve) => {
+    const iframe = document.createElement("iframe");
+    iframe.srcdoc = html;
+    document.body.appendChild(iframe);
+    const canvas = iframe.contentDocument.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(canvas, 0, 0);
+    const imageData = ctx.getImageData(10, 10, 50, 50);
+    resolve(imageData.data);
+  });
+
+  for (let i = 0; i < expectedData.data.length; i++) {
+    if (expectedData.data[i] !== actualData[i]) {
+      throw new Error("Transparency filter rendering failed");
+    }
+  }
+});

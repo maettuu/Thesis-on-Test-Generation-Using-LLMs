@@ -1,0 +1,17 @@
+#test/unit/stamp_spec.js
+it("should only accept supported image types", async () => {
+  const { StampEditor, AnnotationEditorType } = await import("../../display/editor/stamp.js");
+  const supportedTypes = [
+    "image/apng",
+    "image/avif",
+    "image/bmp",
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/svg+xml",
+    "image/webp",
+    "image/x-icon",
+  ].join(",");
+
+  expect(StampEditor.supportedTypes).toBe(supportedTypes);
+});

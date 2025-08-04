@@ -1,0 +1,78 @@
+<think>
+Okay, I need to write a regression test for the issue where memory usage balloons when scrolling through a PDF. The patch provided adds a check to release ImageBitmap data after cleanup, so the test should verify that this fix works.
+
+First, I should understand what the patch does. It looks like in the WorkerTransport class, when handling objects, if the intentStates are empty, it closes the ImageBitmap. This should help reduce memory usage.
+
+So, the test needs to simulate scrolling through a PDF and check if the memory usage doesn't balloon. Since it's a unit test, I can't measure actual memory, but I can check if the ImageBitmaps are being released properly.
+
+I'll use the test file provided. I see that it imports necessary modules like PDFDocumentProxy and PDFWorker. I'll set up a PDF document and a worker.
+
+I'll create a large PDF with many pages, maybe using a helper function. Then, I'll render each page and force a garbage collection to ensure any cleanup happens.
+
+I'll track the number of ImageBitmaps created. After rendering all pages, I'll check if the count is zero, indicating they've been released.
+
+I need to make sure the test runs in a way that the worker's cleanup is triggered. Maybe by navigating away or destroying the document after rendering.
+
+So, the steps are: create a large PDF, render each page, collect ImageBitmaps, force GC, and assert that all bitmaps are released.
+
+I'll write the test using async/await for setup and teardown. I'll import necessary modules dynamically to keep it clean.
+
+Finally, the test will fail before the patch because bitmaps aren't released, and pass after because the patch adds the necessary cleanup.
+</think>
+
+```javascript
+it("should release ImageBitmaps after cleanup to prevent memory ballooning", async () => {
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { createIdFactory } = await import("./test_utils.js");
+  const { GlobalImageCache } = await import("../../src/core/image_utils.js");
+
+  // Setup a PDF document with many pages to test scrolling
+  const pdfPath = `${TEST_PDFS_PATH}/large-pdf.pdf`;
+  const params = buildGetDocumentParams(pdfPath, DefaultFileReaderFactory);
+  const pdfDoc = await getDocument(params);
+  const transport = pdfDoc._transport;
+  const pageProxy = await pdfDoc.getPage(0);
+
+  // Track the number of ImageBitmaps created
+  const bitmaps = new Set();
+  const originalCreateImageBitmap = pageProxy.createImageBitmap.bind(pageProxy);
+  
+  pageProxy.createImageBitmap = async (imageData) => {
+    const bitmap = await originalCreateImageBitmap(imageData);
+    bitmaps.add(bitmap);
+    return bitmap;
+  };
+
+  // Simulate scrolling through all pages
+  for (let i = 0; i < 10; i++) {
+    const page = await pdfDoc.getPage(i);
+    await page.render({
+      viewport: page.getViewport({ scale: 1 }),
+      canvasContext: new CanvasGraphics(),
+      renderInteractive: false,
+    });
+  }
+
+  // Force cleanup and GC
+  transport._intentStates.clear();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  if (globalThis.gc) {
+    globalThis.gc();
+  }
+
+  // Verify that all ImageBitmaps have been released
+  const releasedBitmaps = new Set();
+  transport.pageProxies.forEach(proxy => {
+    if (proxy._cleanupAfterRender) {
+      proxy._cleanupAfterRender();
+    }
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 100));
+  if (globalThis.gc) {
+    globalThis.gc();
+  }
+
+  expect(bitmaps.size).toBe(0);
+});
+```

@@ -1,0 +1,55 @@
+<think>
+Okay, so I need to write a regression test for the issue where PDF annotations aren't saved on certain PDFs. The user provided the patch, and I have to ensure the test fails before the patch and passes after.
+
+First, I should understand the problem. The issue is that when saving a PDF with annotations, some PDFs don't retain those annotations. The patch modifies several files, including worker.js, writer.js, and xref.js. It looks like the changes are related to handling XRef streams and ensuring that the linearization is properly considered.
+
+Looking at the test file, it's test/unit/writer_spec.js. I can use the existing imports but might need to add more. The test should load the specific PDF, add an annotation, save it, and then check if the annotation exists.
+
+I'll need to import the necessary modules. Since the test is in Node.js, I'll use dynamic imports for PDFDocument and other dependencies. I'll also need to create a sample annotation to add to the PDF.
+
+The steps for the test would be:
+
+1. Load the PDF using getDocument from the display API.
+2. Create a new annotation, perhaps a text annotation.
+3. Add this annotation to the first page.
+4. Save the PDF with the new annotations.
+5. Load the saved PDF again and check if the annotation is present.
+
+I should structure the test within an async function. I'll use describe and it blocks, but since the user example uses it, I'll stick to that.
+
+I'll need to handle any potential errors, like if the saved PDF doesn't have the annotation. The test should throw an error in that case.
+
+Also, I should make sure that the test is self-contained and doesn't rely on external state. So, all necessary variables are initialized within the test block.
+
+I think I'll use the 'bug1844572.pdf' file provided. After applying the patch, the test should pass, meaning the annotations are saved correctly.
+
+So, putting it all together, I'll write the test block, making sure to import all necessary modules, set up the PDF, add the annotation, save, reload, and check for the presence of the annotation.
+</think>
+
+```javascript
+it("should save annotations on PDFs with certain linearization", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1844572.pdf'));
+
+  const pdfDoc = await loadingTask.promise;
+  const firstPage = await pdfDoc.getPage(1);
+  const annotations = await firstPage.getAnnotations();
+  const newAnnotation = {
+    type: 0, // Text annotation
+    rect: [100, 100, 200, 200],
+    contents: "Test annotation"
+  };
+  
+  await pdfDoc.addAnnotation(newAnnotation, 1);
+  
+  const savedPdfBytes = await pdfDoc.save();
+  const loadedPdfDoc = await PDFDocument.load(savedPdfBytes);
+  const loadedPage = await loadedPdfDoc.getPage(1);
+  const loadedAnnotations = await loadedPage.getAnnotations();
+  
+  if (!loadedAnnotations || loadedAnnotations.length === 0) {
+    throw new Error("Annotations not saved after PDF update");
+  }
+});
+```

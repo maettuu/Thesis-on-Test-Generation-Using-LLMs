@@ -1,0 +1,50 @@
+<think>
+Okay, I need to write a regression test for the issue where PDF annotations aren't saved on certain PDFs. The user provided a patch, and I have to ensure the test fails before the patch and passes after.
+
+First, I'll look at the patch details. The main changes are in worker.js, writer.js, and xref.js. It seems the fix involves ensuring the 'linearization' document is properly handled. So, the test should check if annotations are correctly saved when this condition is met.
+
+I'll use the provided PDF file, bug1844572.pdf. The test should open this PDF, add an annotation, save it, and then check if the annotation exists after reloading.
+
+I'll structure the test using Jest. I'll import getDocument from the display API and buildGetDocumentParams from test_utils.js. Then, I'll load the PDF, create a new annotation, save the document, reload it, and verify the annotation count.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll also handle any potential errors during loading or saving.
+
+So, the test will have two parts: before the patch, saving the annotation might fail, causing the test to fail. After the patch, the annotation should save correctly, making the test pass.
+
+I'll write the test to create an annotation, save, reload, and check the count. This should accurately verify the fix.
+</think>
+
+```javascript
+it("should save annotations on PDFs with linearization", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  
+  // Load the PDF with the issue
+  const loadingTask = getDocument(buildGetDocumentParams('bug1844572.pdf'));
+  const pdfDocument = await loadingTask.promise;
+  
+  // Create a new annotation
+  const annotation = {
+    type: "annotation",
+    subtype: "widget",
+    page: 0,
+    rect: [100, 100, 200, 200],
+    flags: ["hidden"],
+    fieldFlags: 1,
+    name: "testWidget",
+    value: "Test Value"
+  };
+  
+  // Add and save the annotation
+  const saveTask = pdfDocument.addAnnotation(annotation).then(() => pdfDocument.save());
+  await expect(saveTask).resolves.not.toThrow();
+  
+  // Reload the PDF to verify the annotation was saved
+  const reloadTask = getDocument(buildGetDocumentParams('bug1844572.pdf'));
+  const reloadedDocument = await reloadTask.promise;
+  const annotations = await reloadedDocument.getAnnotations({ page: 0 });
+  
+  // Verify the annotation exists after reload
+  expect(annotations).toHaveLength(1);
+});
+```

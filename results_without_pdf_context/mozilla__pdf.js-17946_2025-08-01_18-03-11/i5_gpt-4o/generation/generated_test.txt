@@ -1,0 +1,23 @@
+it("should render large images in PDF", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+
+  const loadingTask = getDocument(buildGetDocumentParams("example.pdf"));
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+
+  const viewport = pdfPage.getViewport({ scale: 1.0 });
+  const canvasFactory = new (await import("../../src/display/display_utils.js")).DOMCanvasFactory();
+  const canvasAndContext = canvasFactory.create(viewport.width, viewport.height);
+  const renderTask = pdfPage.render({
+    canvasContext: canvasAndContext.context,
+    viewport,
+  });
+
+  await renderTask.promise;
+
+  const imageData = canvasAndContext.context.getImageData(0, 0, viewport.width, viewport.height);
+  const hasNonWhitePixels = imageData.data.some((value, index) => index % 4 !== 3 && value !== 255);
+
+  expect(hasNonWhitePixels).toBe(true);
+});

@@ -1,0 +1,52 @@
+<think>
+Okay, so I need to write a regression test for the issue where embedded images, specifically the pin, aren't being removed as expected. The user provided a patch, and I need to ensure the test fails before the patch and passes after. 
+
+First, I'll look at the patch details. The changes are in two files: annotation.js and annotation_layer.js. In annotation.js, they added handling for 'fillAlpha' in the FileAttachmentAnnotation class. In annotation_layer.js, they modified the render method to check if fillAlpha is 0 and adjusted the trigger element accordingly.
+
+So, the test needs to simulate a scenario where the fillAlpha is set to 0. Before the patch, when fillAlpha was 0, the pin would still be visible, but after the patch, it should be hidden, showing the image underneath.
+
+I'll start by setting up the test in test/unit/annotation_spec.js. I'll import the necessary modules, including the test utilities. Then, I'll create a mock PDF document and page to simulate the scenario.
+
+I'll set up a FileAttachmentAnnotation with fillAlpha set to 0. Then, I'll create an instance of FileAttachmentAnnotationElement with this annotation. Rendering this element should, after the patch, not display the pin because fillAlpha is 0.
+
+In the test, I'll check if the trigger element (the pin) exists in the DOM. Before the patch, the trigger would be present, so the test would fail. After the patch, the trigger shouldn't be present, so the test should pass.
+
+I'll structure the test using async/await since some initializations are asynchronous. I'll use Jest's 'it' function and expect the trigger to be null when fillAlpha is 0.
+
+I need to make sure all necessary mocks are in place, like the XRefMock and the image resources path. Also, I'll stub out the requestAnimationFrame to ensure the render is complete.
+
+Finally, I'll write the test block, making sure it's self-contained and uses only the provided imports without adding new dependencies.
+</think>
+
+```javascript
+it("should remove embedded images when fillAlpha is 0", async () => {
+  const { XRefMock, createIdFactory } = await import("./test_utils.js");
+  const { Dict, Name, Ref } = await import("../../src/core/primitives.js");
+  const { FileAttachmentAnnotation } = await import("../../src/core/annotation.js");
+  const { FileAttachmentAnnotationElement } = await import("../../src/display/annotation_layer.js");
+
+  // Create mock objects
+  const xref = new XRefMock();
+  const idFactory = createIdFactory();
+  const dict = new Dict();
+  dict.set("FS", new Dict());
+  dict.set("Name", new Name("PushPin"));
+  dict.set("CA", 0); // Set fillAlpha to 0
+
+  // Create annotation and element
+  const annotation = new FileAttachmentAnnotation({ dict, xref });
+  const element = new FileAttachmentAnnotationElement({
+    annotation,
+    page: { viewport: { width: 100, height: 100 } },
+    imageResourcesPath: "../../web/images/",
+    linkService: { eventBus: { dispatch: () => {} } }
+  });
+
+  // Render the element
+  const container = element.render();
+  const trigger = element.#trigger;
+
+  // After patch, trigger should be null when fillAlpha is 0
+  expect(trigger).toBeNull();
+});
+```

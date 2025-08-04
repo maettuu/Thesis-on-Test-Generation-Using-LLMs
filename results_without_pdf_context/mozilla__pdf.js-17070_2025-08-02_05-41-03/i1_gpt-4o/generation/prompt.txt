@@ -1,0 +1,915 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Elements not displayed in demo viewer
+Attach (recommended) or Link to PDF file here:
+[Testdoc.pdf](https://github.com/mozilla/pdf.js/files/12802422/Testdoc.pdf)
+
+
+Configuration:
+- Web browser and its version: Chrome 117.0.5938.63 (Official Build) (64-bit)
+- Operating system and its version: Windows 10 Enterprise
+- PDF.js version: 4.0.10 & 3.11.174
+- Is a browser extension: no
+
+Steps to reproduce the problem:
+1. go to https://mozilla.github.io/pdf.js/web/viewer.html
+2. click on Open File button
+3. choose attached pdf
+
+What is the expected behavior? (add screenshot)
+comment and sticky note are rendered in viewer 
+please note this is working in 2.5.207 PDF.js version:
+![image](https://github.com/mozilla/pdf.js/assets/127196044/8bb6f9f9-0508-4335-95de-3bf78dcc4a6e)
+
+What went wrong? (add screenshot)
+comment and sticky note are not rendered in viewer
+![image](https://github.com/mozilla/pdf.js/assets/127196044/1e9623f1-6657-4bf8-a78a-6ee0a43736fe)
+
+
+Link to a viewer (if hosted on a site other than mozilla.github.io/pdf.js or as Firefox/Chrome extension):
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/annotation.js b/src/core/annotation.js
+--- a/src/core/annotation.js
++++ b/src/core/annotation.js
+@@ -2845,6 +2845,7 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
+       this._processRadioButton(params);
+     } else if (this.data.pushButton) {
+       this.data.hasOwnCanvas = true;
++      this.data.noHTML = false;
+       this._processPushButton(params);
+     } else {
+       warn("Invalid field flags for button widget annotation");
+@@ -3570,6 +3571,7 @@ class SignatureWidgetAnnotation extends WidgetAnnotation {
+     // to the main-thread (issue 10347).
+     this.data.fieldValue = null;
+     this.data.hasOwnCanvas = this.data.noRotate;
++    this.data.noHTML = !this.data.hasOwnCanvas;
+   }
+ 
+   getFieldObject() {
+@@ -3591,6 +3593,7 @@ class TextAnnotation extends MarkupAnnotation {
+     // No rotation for Text (see 12.5.6.4).
+     this.data.noRotate = true;
+     this.data.hasOwnCanvas = this.data.noRotate;
++    this.data.noHTML = false;
+ 
+     const { dict } = params;
+     this.data.annotationType = AnnotationType.TEXT;
+@@ -3643,6 +3646,11 @@ class PopupAnnotation extends Annotation {
+ 
+     const { dict } = params;
+     this.data.annotationType = AnnotationType.POPUP;
++
++    // A pop-up is never rendered on the main canvas so we must render its HTML
++    // version.
++    this.data.noHTML = false;
++
+     if (
+       this.data.rect[0] === this.data.rect[2] ||
+       this.data.rect[1] === this.data.rect[3]
+@@ -3712,7 +3720,10 @@ class FreeTextAnnotation extends MarkupAnnotation {
+   constructor(params) {
+     super(params);
+ 
+-    this.data.hasOwnCanvas = true;
++    // It uses its own canvas in order to be hidden if edited.
++    // But if it has the noHTML flag, it means that we don't want to be able
++    // to modify it so we can just draw it on the main canvas.
++    this.data.hasOwnCanvas = !this.data.noHTML;
+ 
+     const { evaluatorOptions, xref } = params;
+     this.data.annotationType = AnnotationType.FREETEXT;
+@@ -3926,6 +3937,7 @@ class LineAnnotation extends MarkupAnnotation {
+     const { dict, xref } = params;
+     this.data.annotationType = AnnotationType.LINE;
+     this.data.hasOwnCanvas = this.data.noRotate;
++    this.data.noHTML = false;
+ 
+     const lineCoordinates = dict.getArray("L");
+     this.data.lineCoordinates = Util.normalizeRect(lineCoordinates);
+@@ -3993,6 +4005,7 @@ class SquareAnnotation extends MarkupAnnotation {
+     const { dict, xref } = params;
+     this.data.annotationType = AnnotationType.SQUARE;
+     this.data.hasOwnCanvas = this.data.noRotate;
++    this.data.noHTML = false;
+ 
+     if (!this.appearance) {
+       // The default stroke color is black.
+@@ -4105,6 +4118,7 @@ class PolylineAnnotation extends MarkupAnnotation {
+     const { dict, xref } = params;
+     this.data.annotationType = AnnotationType.POLYLINE;
+     this.data.hasOwnCanvas = this.data.noRotate;
++    this.data.noHTML = false;
+     this.data.vertices = [];
+ 
+     if (
+@@ -4193,6 +4207,7 @@ class InkAnnotation extends MarkupAnnotation {
+     super(params);
+ 
+     this.data.hasOwnCanvas = this.data.noRotate;
++    this.data.noHTML = false;
+ 
+     const { dict, xref } = params;
+     this.data.annotationType = AnnotationType.INK;
+@@ -4531,6 +4546,7 @@ class StampAnnotation extends MarkupAnnotation {
+ 
+     this.data.annotationType = AnnotationType.STAMP;
+     this.data.hasOwnCanvas = this.data.noRotate;
++    this.data.noHTML = false;
+   }
+ 
+   static async createImage(bitmap, xref) {
+@@ -4680,6 +4696,7 @@ class FileAttachmentAnnotation extends MarkupAnnotation {
+ 
+     this.data.annotationType = AnnotationType.FILEATTACHMENT;
+     this.data.hasOwnCanvas = this.data.noRotate;
++    this.data.noHTML = false;
+     this.data.file = file.serializable;
+ 
+     const name = dict.get("Name");
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.20
+- @babel/plugin-transform-modules-commonjs: ^7.22.15
+- @babel/preset-env: ^7.22.20
+- @babel/runtime: ^7.22.15
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.16
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001538
+- canvas: ^2.11.2
+- core-js: ^3.32.2
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.50.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.28.1
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.2.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.1
+- globals: ^13.22.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.30
+- postcss-dir-pseudo-class: ^8.0.0
+- postcss-discard-comments: ^6.0.0
+- postcss-nesting: ^12.0.1
+- prettier: ^3.0.3
+- puppeteer: ^21.3.4
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.3
+- stylelint-prettier: ^4.0.2
+- terser: ^5.20.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.2.2
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, noContextMenu, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/annotation.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationActionEventType,
+18   AnnotationBorderStyleType,
+19   AnnotationEditorType,
+20   AnnotationFieldFlag,
+21   AnnotationFlag,
+22   AnnotationReplyType,
+23   AnnotationType,
+24   assert,
+25   BASELINE_FACTOR,
+26   FeatureTest,
+27   getModificationDate,
+28   IDENTITY_MATRIX,
+29   info,
+30   LINE_DESCENT_FACTOR,
+31   LINE_FACTOR,
+32   OPS,
+33   RenderingIntentFlag,
+34   shadow,
+35   stringToPDFString,
+36   unreachable,
+37   Util,
+38   warn,
+39 } from "../shared/util.js";
+40 import {
+41   collectActions,
+42   escapeString,
+43   getInheritableProperty,
+44   getRotationMatrix,
+45   isAscii,
+46   numberToString,
+47   stringToUTF16String,
+48 } from "./core_utils.js";
+49 import {
+50   createDefaultAppearance,
+51   FakeUnicodeFont,
+52   getPdfColor,
+53   parseAppearanceStream,
+54   parseDefaultAppearance,
+55 } from "./default_appearance.js";
+56 import { Dict, isName, isRefsEqual, Name, Ref, RefSet } from "./primitives.js";
+57 import { Stream, StringStream } from "./stream.js";
+58 import { BaseStream } from "./base_stream.js";
+59 import { bidi } from "./bidi.js";
+60 import { Catalog } from "./catalog.js";
+61 import { ColorSpace } from "./colorspace.js";
+62 import { FileSpec } from "./file_spec.js";
+63 import { JpegStream } from "./jpeg_stream.js";
+64 import { ObjectLoader } from "./object_loader.js";
+65 import { OperatorList } from "./operator_list.js";
+66 import { writeObject } from "./writer.js";
+67 import { XFAFactory } from "./xfa/factory.js";
+68 
+2826 class ButtonWidgetAnnotation extends WidgetAnnotation {
+2827   constructor(params) {
+2828     super(params);
+2829 
+2830     this.checkedAppearance = null;
+2831     this.uncheckedAppearance = null;
+2832 
+2833     this.data.checkBox =
+2834       !this.hasFieldFlag(AnnotationFieldFlag.RADIO) &&
+2835       !this.hasFieldFlag(AnnotationFieldFlag.PUSHBUTTON);
+2836     this.data.radioButton =
+2837       this.hasFieldFlag(AnnotationFieldFlag.RADIO) &&
+2838       !this.hasFieldFlag(AnnotationFieldFlag.PUSHBUTTON);
+2839     this.data.pushButton = this.hasFieldFlag(AnnotationFieldFlag.PUSHBUTTON);
+2840     this.data.isTooltipOnly = false;
+2841 
+2842     if (this.data.checkBox) {
+2843       this._processCheckBox(params);
+2844     } else if (this.data.radioButton) {
+2845       this._processRadioButton(params);
+2846     } else if (this.data.pushButton) {
+2847       this.data.hasOwnCanvas = true;
+2848       this._processPushButton(params);
+2849     } else {
+2850       warn("Invalid field flags for button widget annotation");
+2851     }
+2852   }
+2853 
+3303 }
+3304 
+3564 class SignatureWidgetAnnotation extends WidgetAnnotation {
+3565   constructor(params) {
+3566     super(params);
+3567 
+3568     // Unset the fieldValue since it's (most likely) a `Dict` which is
+3569     // non-serializable and will thus cause errors when sending annotations
+3570     // to the main-thread (issue 10347).
+3571     this.data.fieldValue = null;
+3572     this.data.hasOwnCanvas = this.data.noRotate;
+3573   }
+3574 
+3583 }
+3584 
+3585 class TextAnnotation extends MarkupAnnotation {
+3586   constructor(params) {
+3587     const DEFAULT_ICON_SIZE = 22; // px
+3588 
+3589     super(params);
+3590 
+3591     // No rotation for Text (see 12.5.6.4).
+3592     this.data.noRotate = true;
+3593     this.data.hasOwnCanvas = this.data.noRotate;
+3594 
+3595     const { dict } = params;
+3596     this.data.annotationType = AnnotationType.TEXT;
+3597 
+3598     if (this.data.hasAppearance) {
+3599       this.data.name = "NoIcon";
+3600     } else {
+3601       this.data.rect[1] = this.data.rect[3] - DEFAULT_ICON_SIZE;
+3602       this.data.rect[2] = this.data.rect[0] + DEFAULT_ICON_SIZE;
+3603       this.data.name = dict.has("Name") ? dict.get("Name").name : "Note";
+3604     }
+3605 
+3606     if (dict.has("State")) {
+3607       this.data.state = dict.get("State") || null;
+3608       this.data.stateModel = dict.get("StateModel") || null;
+3609     } else {
+3610       this.data.state = null;
+3611       this.data.stateModel = null;
+3612     }
+3613   }
+3614 }
+3615 
+3640 class PopupAnnotation extends Annotation {
+3641   constructor(params) {
+3642     super(params);
+3643 
+3644     const { dict } = params;
+3645     this.data.annotationType = AnnotationType.POPUP;
+3646     if (
+3647       this.data.rect[0] === this.data.rect[2] ||
+3648       this.data.rect[1] === this.data.rect[3]
+3649     ) {
+3650       this.data.rect = null;
+3651     }
+3652 
+3653     let parentItem = dict.get("Parent");
+3654     if (!parentItem) {
+3655       warn("Popup annotation has a missing or invalid parent annotation.");
+3656       return;
+3657     }
+3658 
+3659     const parentRect = parentItem.getArray("Rect");
+3660     this.data.parentRect =
+3661       Array.isArray(parentRect) && parentRect.length === 4
+3662         ? Util.normalizeRect(parentRect)
+3663         : null;
+3664 
+3665     const rt = parentItem.get("RT");
+3666     if (isName(rt, AnnotationReplyType.GROUP)) {
+3667       // Subordinate annotations in a group should inherit
+3668       // the group attributes from the primary annotation.
+3669       parentItem = parentItem.get("IRT");
+3670     }
+3671 
+3672     if (!parentItem.has("M")) {
+3673       this.data.modificationDate = null;
+3674     } else {
+3675       this.setModificationDate(parentItem.get("M"));
+3676       this.data.modificationDate = this.modificationDate;
+3677     }
+3678 
+3679     if (!parentItem.has("C")) {
+3680       // Fall back to the default background color.
+3681       this.data.color = null;
+3682     } else {
+3683       this.setColor(parentItem.getArray("C"));
+3684       this.data.color = this.color;
+3685     }
+3686 
+3687     // If the Popup annotation is not viewable, but the parent annotation is,
+3688     // that is most likely a bug. Fallback to inherit the flags from the parent
+3689     // annotation (this is consistent with the behaviour in Adobe Reader).
+3690     if (!this.viewable) {
+3691       const parentFlags = parentItem.get("F");
+3692       if (this._isViewable(parentFlags)) {
+3693         this.setFlags(parentFlags);
+3694       }
+3695     }
+3696 
+3697     this.setTitle(parentItem.get("T"));
+3698     this.data.titleObj = this._title;
+3699 
+3700     this.setContents(parentItem.get("Contents"));
+3701     this.data.contentsObj = this._contents;
+3702 
+3703     if (parentItem.has("RC")) {
+3704       this.data.richText = XFAFactory.getRichTextAsHtml(parentItem.get("RC"));
+3705     }
+3706 
+3707     this.data.open = !!dict.get("Open");
+3708   }
+3709 }
+3710 
+3711 class FreeTextAnnotation extends MarkupAnnotation {
+3712   constructor(params) {
+3713     super(params);
+3714 
+3715     this.data.hasOwnCanvas = true;
+3716 
+3717     const { evaluatorOptions, xref } = params;
+3718     this.data.annotationType = AnnotationType.FREETEXT;
+3719     this.setDefaultAppearance(params);
+3720     if (this.appearance) {
+3721       const { fontColor, fontSize } = parseAppearanceStream(
+3722         this.appearance,
+3723         evaluatorOptions,
+3724         xref
+3725       );
+3726       this.data.defaultAppearanceData.fontColor = fontColor;
+3727       this.data.defaultAppearanceData.fontSize = fontSize || 10;
+3728     } else if (this._isOffscreenCanvasSupported) {
+3729       const strokeAlpha = params.dict.get("CA");
+3730       const fakeUnicodeFont = new FakeUnicodeFont(xref, "sans-serif");
+3731       this.data.defaultAppearanceData.fontSize ||= 10;
+3732       const { fontColor, fontSize } = this.data.defaultAppearanceData;
+3733       this.appearance = fakeUnicodeFont.createAppearance(
+3734         this._contents.str,
+3735         this.rectangle,
+3736         this.rotation,
+3737         fontSize,
+3738         fontColor,
+3739         strokeAlpha
+3740       );
+3741       this._streams.push(this.appearance, FakeUnicodeFont.toUnicodeStream);
+3742     } else {
+3743       warn(
+3744         "FreeTextAnnotation: OffscreenCanvas is not supported, annotation may not render correctly."
+3745       );
+3746     }
+3747   }
+3748 
+3920 }
+3921 
+3922 class LineAnnotation extends MarkupAnnotation {
+3923   constructor(params) {
+3924     super(params);
+3925 
+3926     const { dict, xref } = params;
+3927     this.data.annotationType = AnnotationType.LINE;
+3928     this.data.hasOwnCanvas = this.data.noRotate;
+3929 
+3930     const lineCoordinates = dict.getArray("L");
+3931     this.data.lineCoordinates = Util.normalizeRect(lineCoordinates);
+3932 
+3933     if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) {
+3934       this.setLineEndings(dict.getArray("LE"));
+3935       this.data.lineEndings = this.lineEndings;
+3936     }
+3937 
+3938     if (!this.appearance) {
+3939       // The default stroke color is black.
+3940       const strokeColor = this.color ? getPdfColorArray(this.color) : [0, 0, 0];
+3941       const strokeAlpha = dict.get("CA");
+3942 
+3943       const interiorColor = getRgbColor(dict.getArray("IC"), null);
+3944       // The default fill color is transparent. Setting the fill colour is
+3945       // necessary if/when we want to add support for non-default line endings.
+3946       const fillColor = interiorColor ? getPdfColorArray(interiorColor) : null;
+3947       const fillAlpha = fillColor ? strokeAlpha : null;
+3948 
+3949       const borderWidth = this.borderStyle.width || 1,
+3950         borderAdjust = 2 * borderWidth;
+3951 
+3952       // If the /Rect-entry is empty/wrong, create a fallback rectangle so that
+3953       // we get similar rendering/highlighting behaviour as in Adobe Reader.
+3954       const bbox = [
+3955         this.data.lineCoordinates[0] - borderAdjust,
+3956         this.data.lineCoordinates[1] - borderAdjust,
+3957         this.data.lineCoordinates[2] + borderAdjust,
+3958         this.data.lineCoordinates[3] + borderAdjust,
+3959       ];
+3960       if (!Util.intersect(this.rectangle, bbox)) {
+3961         this.rectangle = bbox;
+3962       }
+3963 
+3964       this._setDefaultAppearance({
+3965         xref,
+3966         extra: `${borderWidth} w`,
+3967         strokeColor,
+3968         fillColor,
+3969         strokeAlpha,
+3970         fillAlpha,
+3971         pointsCallback: (buffer, points) => {
+3972           buffer.push(
+3973             `${lineCoordinates[0]} ${lineCoordinates[1]} m`,
+3974             `${lineCoordinates[2]} ${lineCoordinates[3]} l`,
+3975             "S"
+3976           );
+3977           return [
+3978             points[0].x - borderWidth,
+3979             points[1].x + borderWidth,
+3980             points[3].y - borderWidth,
+3981             points[1].y + borderWidth,
+3982           ];
+3983         },
+3984       });
+3985     }
+3986   }
+3987 }
+3988 
+3989 class SquareAnnotation extends MarkupAnnotation {
+3990   constructor(params) {
+3991     super(params);
+3992 
+3993     const { dict, xref } = params;
+3994     this.data.annotationType = AnnotationType.SQUARE;
+3995     this.data.hasOwnCanvas = this.data.noRotate;
+3996 
+3997     if (!this.appearance) {
+3998       // The default stroke color is black.
+3999       const strokeColor = this.color ? getPdfColorArray(this.color) : [0, 0, 0];
+4000       const strokeAlpha = dict.get("CA");
+4001 
+4002       const interiorColor = getRgbColor(dict.getArray("IC"), null);
+4003       // The default fill color is transparent.
+4004       const fillColor = interiorColor ? getPdfColorArray(interiorColor) : null;
+4005       const fillAlpha = fillColor ? strokeAlpha : null;
+4006 
+4007       if (this.borderStyle.width === 0 && !fillColor) {
+4008         // Prevent rendering a "hairline" border (fixes issue14164.pdf).
+4009         return;
+4010       }
+4011 
+4012       this._setDefaultAppearance({
+4013         xref,
+4014         extra: `${this.borderStyle.width} w`,
+4015         strokeColor,
+4016         fillColor,
+4017         strokeAlpha,
+4018         fillAlpha,
+4019         pointsCallback: (buffer, points) => {
+4020           const x = points[2].x + this.borderStyle.width / 2;
+4021           const y = points[2].y + this.borderStyle.width / 2;
+4022           const width = points[3].x - points[2].x - this.borderStyle.width;
+4023           const height = points[1].y - points[3].y - this.borderStyle.width;
+4024           buffer.push(`${x} ${y} ${width} ${height} re`);
+4025           if (fillColor) {
+4026             buffer.push("B");
+4027           } else {
+4028             buffer.push("S");
+4029           }
+4030           return [points[0].x, points[1].x, points[3].y, points[1].y];
+4031         },
+4032       });
+4033     }
+4034   }
+4035 }
+4036 
+4101 class PolylineAnnotation extends MarkupAnnotation {
+4102   constructor(params) {
+4103     super(params);
+4104 
+4105     const { dict, xref } = params;
+4106     this.data.annotationType = AnnotationType.POLYLINE;
+4107     this.data.hasOwnCanvas = this.data.noRotate;
+4108     this.data.vertices = [];
+4109 
+4110     if (
+4111       (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) &&
+4112       !(this instanceof PolygonAnnotation)
+4113     ) {
+4114       // Only meaningful for polyline annotations.
+4115       this.setLineEndings(dict.getArray("LE"));
+4116       this.data.lineEndings = this.lineEndings;
+4117     }
+4118 
+4119     // The vertices array is an array of numbers representing the alternating
+4120     // horizontal and vertical coordinates, respectively, of each vertex.
+4121     // Convert this to an array of objects with x and y coordinates.
+4122     const rawVertices = dict.getArray("Vertices");
+4123     if (!Array.isArray(rawVertices)) {
+4124       return;
+4125     }
+4126     for (let i = 0, ii = rawVertices.length; i < ii; i += 2) {
+4127       this.data.vertices.push({
+4128         x: rawVertices[i],
+4129         y: rawVertices[i + 1],
+4130       });
+4131     }
+4132 
+4133     if (!this.appearance) {
+4134       // The default stroke color is black.
+4135       const strokeColor = this.color ? getPdfColorArray(this.color) : [0, 0, 0];
+4136       const strokeAlpha = dict.get("CA");
+4137 
+4138       const borderWidth = this.borderStyle.width || 1,
+4139         borderAdjust = 2 * borderWidth;
+4140 
+4141       // If the /Rect-entry is empty/wrong, create a fallback rectangle so that
+4142       // we get similar rendering/highlighting behaviour as in Adobe Reader.
+4143       const bbox = [Infinity, Infinity, -Infinity, -Infinity];
+4144       for (const vertex of this.data.vertices) {
+4145         bbox[0] = Math.min(bbox[0], vertex.x - borderAdjust);
+4146         bbox[1] = Math.min(bbox[1], vertex.y - borderAdjust);
+4147         bbox[2] = Math.max(bbox[2], vertex.x + borderAdjust);
+4148         bbox[3] = Math.max(bbox[3], vertex.y + borderAdjust);
+4149       }
+4150       if (!Util.intersect(this.rectangle, bbox)) {
+4151         this.rectangle = bbox;
+4152       }
+4153 
+4154       this._setDefaultAppearance({
+4155         xref,
+4156         extra: `${borderWidth} w`,
+4157         strokeColor,
+4158         strokeAlpha,
+4159         pointsCallback: (buffer, points) => {
+4160           const vertices = this.data.vertices;
+4161           for (let i = 0, ii = vertices.length; i < ii; i++) {
+4162             buffer.push(
+4163               `${vertices[i].x} ${vertices[i].y} ${i === 0 ? "m" : "l"}`
+4164             );
+4165           }
+4166           buffer.push("S");
+4167           return [points[0].x, points[1].x, points[3].y, points[1].y];
+4168         },
+4169       });
+4170     }
+4171   }
+4172 }
+4173 
+4191 class InkAnnotation extends MarkupAnnotation {
+4192   constructor(params) {
+4193     super(params);
+4194 
+4195     this.data.hasOwnCanvas = this.data.noRotate;
+4196 
+4197     const { dict, xref } = params;
+4198     this.data.annotationType = AnnotationType.INK;
+4199     this.data.inkLists = [];
+4200 
+4201     const rawInkLists = dict.getArray("InkList");
+4202     if (!Array.isArray(rawInkLists)) {
+4203       return;
+4204     }
+4205     for (let i = 0, ii = rawInkLists.length; i < ii; ++i) {
+4206       // The raw ink lists array contains arrays of numbers representing
+4207       // the alternating horizontal and vertical coordinates, respectively,
+4208       // of each vertex. Convert this to an array of objects with x and y
+4209       // coordinates.
+4210       this.data.inkLists.push([]);
+4211       for (let j = 0, jj = rawInkLists[i].length; j < jj; j += 2) {
+4212         this.data.inkLists[i].push({
+4213           x: xref.fetchIfRef(rawInkLists[i][j]),
+4214           y: xref.fetchIfRef(rawInkLists[i][j + 1]),
+4215         });
+4216       }
+4217     }
+4218 
+4219     if (!this.appearance) {
+4220       // The default stroke color is black.
+4221       const strokeColor = this.color ? getPdfColorArray(this.color) : [0, 0, 0];
+4222       const strokeAlpha = dict.get("CA");
+4223 
+4224       const borderWidth = this.borderStyle.width || 1,
+4225         borderAdjust = 2 * borderWidth;
+4226 
+4227       // If the /Rect-entry is empty/wrong, create a fallback rectangle so that
+4228       // we get similar rendering/highlighting behaviour as in Adobe Reader.
+4229       const bbox = [Infinity, Infinity, -Infinity, -Infinity];
+4230       for (const inkLists of this.data.inkLists) {
+4231         for (const vertex of inkLists) {
+4232           bbox[0] = Math.min(bbox[0], vertex.x - borderAdjust);
+4233           bbox[1] = Math.min(bbox[1], vertex.y - borderAdjust);
+4234           bbox[2] = Math.max(bbox[2], vertex.x + borderAdjust);
+4235           bbox[3] = Math.max(bbox[3], vertex.y + borderAdjust);
+4236         }
+4237       }
+4238       if (!Util.intersect(this.rectangle, bbox)) {
+4239         this.rectangle = bbox;
+4240       }
+4241 
+4242       this._setDefaultAppearance({
+4243         xref,
+4244         extra: `${borderWidth} w`,
+4245         strokeColor,
+4246         strokeAlpha,
+4247         pointsCallback: (buffer, points) => {
+4248           // According to the specification, see "12.5.6.13 Ink Annotations":
+4249           //   When drawn, the points shall be connected by straight lines or
+4250           //   curves in an implementation-dependent way.
+4251           // In order to simplify things, we utilize straight lines for now.
+4252           for (const inkList of this.data.inkLists) {
+4253             for (let i = 0, ii = inkList.length; i < ii; i++) {
+4254               buffer.push(
+4255                 `${inkList[i].x} ${inkList[i].y} ${i === 0 ? "m" : "l"}`
+4256               );
+4257             }
+4258             buffer.push("S");
+4259           }
+4260           return [points[0].x, points[1].x, points[3].y, points[1].y];
+4261         },
+4262       });
+4263     }
+4264   }
+4265 
+4359 }
+4360 
+4528 class StampAnnotation extends MarkupAnnotation {
+4529   constructor(params) {
+4530     super(params);
+4531 
+4532     this.data.annotationType = AnnotationType.STAMP;
+4533     this.data.hasOwnCanvas = this.data.noRotate;
+4534   }
+4535 
+4672 }
+4673 
+4674 class FileAttachmentAnnotation extends MarkupAnnotation {
+4675   constructor(params) {
+4676     super(params);
+4677 
+4678     const { dict, xref } = params;
+4679     const file = new FileSpec(dict.get("FS"), xref);
+4680 
+4681     this.data.annotationType = AnnotationType.FILEATTACHMENT;
+4682     this.data.hasOwnCanvas = this.data.noRotate;
+4683     this.data.file = file.serializable;
+4684 
+4685     const name = dict.get("Name");
+4686     this.data.name =
+4687       name instanceof Name ? stringToPDFString(name.name) : "PushPin";
+4688 
+4689     const fillAlpha = dict.get("ca");
+4690     this.data.fillAlpha =
+4691       typeof fillAlpha === "number" && fillAlpha >= 0 && fillAlpha <= 1
+4692         ? fillAlpha
+4693         : null;
+4694   }
+4695 }
+4696 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/annotation_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  Annotation,
+  AnnotationBorderStyle,
+  AnnotationFactory,
+  getQuadPoints,
+  MarkupAnnotation,
+} from "../../src/core/annotation.js";
+import {
+  AnnotationBorderStyleType,
+  AnnotationEditorType,
+  AnnotationFieldFlag,
+  AnnotationFlag,
+  AnnotationType,
+  OPS,
+  RenderingIntentFlag,
+  stringToBytes,
+  stringToUTF8String,
+} from "../../src/shared/util.js";
+import {
+  CMAP_URL,
+  createIdFactory,
+  STANDARD_FONT_DATA_URL,
+  XRefMock,
+} from "./test_utils.js";
+import {
+  DefaultCMapReaderFactory,
+  DefaultStandardFontDataFactory,
+} from "../../src/display/api.js";
+import { Dict, Name, Ref, RefSetCache } from "../../src/core/primitives.js";
+import { Lexer, Parser } from "../../src/core/parser.js";
+import { PartialEvaluator } from "../../src/core/evaluator.js";
+import { StringStream } from "../../src/core/stream.js";
+import { WorkerTask } from "../../src/core/worker.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

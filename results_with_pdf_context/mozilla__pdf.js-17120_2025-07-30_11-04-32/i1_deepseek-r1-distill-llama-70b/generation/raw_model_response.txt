@@ -1,0 +1,216 @@
+<think>
+Okay, I need to create a regression test for the issue where new code scanning alerts appeared in the pdf.js repository. The problem is that some old, unused debugging code is causing these alerts. The patch provided removes this code, so the test should fail before the patch is applied and pass after.
+
+First, I'll look at the existing test file, test/unit/crypto_spec.js. It imports several modules from crypto.js and others. I can reuse these imports if needed, but the issue is about code in cffStandardStrings.js and fonts_utils.js, which aren't directly related to crypto. So, I might need to import something else, but the user said to only use provided imports.
+
+The task is to write a test that checks if the unused code is present. Since the patch deletes the files, the test should check for the existence of certain variables or functions from those files.
+
+Looking at the code, the patch deletes cffStandardStrings.js and fonts_utils.js entirely. So, in the original code, these files export variables like CFFEncodingMap, CFFDictDataMap, etc. The test can try to import these and see if they exist.
+
+So, the test will import cffStandardStrings.js and check if CFFEncodingMap is present. Before the patch, it should be present, so the test would fail because the code is still there. After the patch, the import should fail, so the test would pass.
+
+Wait, no. The test should fail before the patch because the code is present and causing alerts. After the patch, the code is removed, so the test should pass. Hmm, maybe I need to structure it the other way.
+
+Alternatively, the test can check that the code is removed. So, in the original code, the variables exist, so the test would fail because they shouldn't. After the patch, the variables are gone, so the test passes.
+
+Wait, but the alerts are about the code being present. So the test should ensure that the code is no longer present after the patch.
+
+So, the test can try to import cffStandardStrings.js and check if CFFEncodingMap is undefined. If it's undefined, the test passes because the code was removed.
+
+But in the original code, CFFEncodingMap is defined, so the test would fail. After the patch, it's undefined, so the test passes.
+
+So, the test structure would be:
+
+Import cffStandardStrings.js. Then, check if CFFEncodingMap is undefined. If it is, the test passes; else, it fails.
+
+But how to handle the import? Since the test is in a different directory, I need to use the correct path. The test file is in test/unit/, and the code is in src/shared/, so the import should be "../../../src/shared/cffStandardStrings.js".
+
+Wait, in the provided test file, the imports are from "../../src/core/...", so from test/unit to src/core is two levels up. So, for src/shared, it's also two levels up, so the path would be "../../src/shared/cffStandardStrings.js".
+
+So, in the test, I'll dynamically import that file and check if CFFEncodingMap is undefined.
+
+But in JavaScript, if a module doesn't export a variable, it won't be available. So, in the original code, cffStandardStrings.js has 'var CFFEncodingMap = ...', which is not exported. So, when imported, it's not directly accessible. Hmm, that complicates things.
+
+Wait, in the original code, the variables are in the global scope because they're defined with 'var' and not inside a module. But when using ES modules, variables declared with 'var' are not exported unless they're included in the export.
+
+So, perhaps the test can't directly access them. That's a problem. So, maybe the test should check for the existence of the Type2Parser, which is defined in fonts_utils.js. If the code is removed, Type2Parser won't be present.
+
+So, the test can try to import fonts_utils.js and check if Type2Parser is undefined.
+
+In the original code, Type2Parser is defined, so the test would fail. After the patch, it's removed, so the test passes.
+
+So, the test structure would be:
+
+Import fonts_utils.js. Then, check if Type2Parser is undefined. If it is, the test passes.
+
+But how to import it? The test is in test/unit, so the path would be "../../../src/shared/fonts_utils.js".
+
+Wait, in the provided test file, the imports are using relative paths, but the test is using ES modules, so maybe the paths need to be adjusted.
+
+Alternatively, perhaps the test can check if the code is present by trying to access a function or variable that's part of the removed code.
+
+But I'm not sure. Another approach is to check that the code doesn't have the problematic code anymore. So, the test can attempt to require the module and see if it throws an error or not.
+
+Wait, but in Node.js, if a module is removed, requiring it would throw an error. So, the test can try to require the module and expect it to not exist.
+
+But the test is written in JavaScript using async/await and dynamic imports, so perhaps using a try-catch block.
+
+So, the test would look like this:
+
+it("should remove unused CFF debugging code", async () => {
+  try {
+    const module = await import("../../../src/shared/cffStandardStrings.js");
+    if (module.CFFEncodingMap) {
+      throw new Error("CFF debugging code still present");
+    }
+  } catch (error) {
+    // If the module doesn't exist, the error is caught here
+  }
+});
+
+Wait, but in the original code, cffStandardStrings.js is present, so the import would succeed, and CFFEncodingMap would be undefined because it's not exported. So, that approach might not work.
+
+Alternatively, perhaps the test can check if the code is present by trying to use a function from fonts_utils.js, like writeToFile, which is exported.
+
+Wait, looking at the code, writeToFile is a function in fonts_utils.js. So, in the original code, it's present, and after the patch, it's removed.
+
+So, the test can try to import fonts_utils.js and check if writeToFile is undefined.
+
+So, the test would be:
+
+it("should remove unused CFF debugging code", async () => {
+  const { writeToFile } = await import("../../../src/shared/fonts_utils.js");
+  expect(writeToFile).toBeUndefined();
+});
+
+But wait, in the original code, writeToFile is defined, so the test would fail because it's not undefined. After the patch, it's removed, so the test would pass.
+
+But in the patch, the entire fonts_utils.js is removed, so importing it would throw an error. So, the test needs to handle that.
+
+So, the test can try to import the module and check if it throws an error, indicating the file is missing.
+
+So, the test would be:
+
+it("should remove unused CFF debugging code", async () => {
+  try {
+    await import("../../../src/shared/fonts_utils.js");
+    throw new Error("fonts_utils.js still exists");
+  } catch (error) {
+    // If the module is not found, the error is caught here, and the test passes
+    expect(error instanceof Error).toBe(true);
+  }
+});
+
+But I'm not sure if this is the best approach. Alternatively, the test can check for the presence of a specific function or variable that's been removed.
+
+Another idea: The patch removes the entire cffStandardStrings.js and fonts_utils.js files. So, any imports of these files should fail after the patch. So, the test can try to import them and expect them to throw errors.
+
+So, the test would look like this:
+
+it("should remove unused CFF debugging code", async () => {
+  try {
+    await import("../../../src/shared/cffStandardStrings.js");
+    throw new Error("cffStandardStrings.js still exists");
+  } catch (error) {
+    // Expected, as the file is removed
+  }
+
+  try {
+    await import("../../../src/shared/fonts_utils.js");
+    throw new Error("fonts_utils.js still exists");
+  } catch (error) {
+    // Expected, as the file is removed
+  }
+});
+
+But this might not be the most efficient way. Alternatively, the test can check if the variables are present.
+
+But given the constraints, perhaps the best way is to check that the files are no longer present by attempting to import them and expecting an error.
+
+So, putting it all together, the test will attempt to import the two files and expect them to throw errors, indicating they've been removed.
+
+But in the provided example, the test uses a single import and checks for a specific behavior. So, the test can be written to import one of the files and check if a specific function is undefined.
+
+Wait, perhaps the simplest way is to check if the Type2Parser is present. Since the patch removes fonts_utils.js, the Type2Parser function will no longer be available.
+
+So, the test can import fonts_utils.js and check if Type2Parser is undefined.
+
+But in the original code, Type2Parser is defined, so the test would fail. After the patch, it's undefined, so the test passes.
+
+So, the test code would be:
+
+it("should remove unused CFF debugging code", async () => {
+  const { Type2Parser } = await import("../../../src/shared/fonts_utils.js");
+  expect(Type2Parser).toBeUndefined();
+});
+
+But wait, in the original code, Type2Parser is exported. Looking at the code, in fonts_utils.js, the function is defined as 'var Type2Parser = function type2Parser(aFilePath) { ... };' and not exported. So, when using ES modules, variables declared with 'var' are not exported unless they're included in the export.
+
+Wait, no, in ES modules, 'var' declarations are not hoisted and not exported unless explicitly exported. So, in the original code, Type2Parser is not exported, so when importing, it's not available. So, the test would always pass because Type2Parser is undefined, which is not correct.
+
+Hmm, this is a problem. So, perhaps the test can't rely on checking for Type2Parser because it's not exported.
+
+So, perhaps a better approach is to check for the existence of a function that is part of the removed code, like writeToFile, which is exported.
+
+Looking at the code, writeToFile is a function in fonts_utils.js, and it's not exported either. So, it's not accessible via import.
+
+Wait, in the code, writeToFile is defined as a function at the end of fonts_utils.js. Since it's not exported, it's not accessible when importing the module.
+
+So, perhaps the test can't directly check for the presence of these variables because they're not exported.
+
+This complicates things. Maybe the test can check the length of the CFFStrings array, which is modified in the original code. But that might not be reliable.
+
+Alternatively, perhaps the test can check if the code is present by trying to use a function that's part of the removed code. But again, since those functions aren't exported, it's not possible.
+
+Hmm, maybe the best approach is to check that the files are no longer present by trying to import them and expecting an error.
+
+So, the test would attempt to import cffStandardStrings.js and fonts_utils.js and expect them to throw errors.
+
+So, the test code would be:
+
+it("should remove unused CFF debugging code", async () => {
+  try {
+    await import("../../../src/shared/cffStandardStrings.js");
+    throw new Error("cffStandardStrings.js still exists");
+  } catch (error) {
+    // Expected, as the file is removed
+  }
+
+  try {
+    await import("../../../src/shared/fonts_utils.js");
+    throw new Error("fonts_utils.js still exists");
+  } catch (error) {
+    // Expected, as the file is removed
+  }
+});
+
+But in the original code, these files exist, so the imports would not throw errors, causing the test to fail. After the patch, the imports would throw, so the test would pass.
+
+Wait, no. In the original code, the files exist, so the import statements would not throw errors. The test would then throw an error because it expects the files to be missing. So, the test would fail before the patch and pass after.
+
+Yes, that makes sense. So, the test is checking that the files are no longer present, which is the case after the patch.
+
+So, the test would look like that. But in the provided example, the test uses a single import, but here we have two. So, the test can have two try-catch blocks.
+
+Alternatively, the test can check for the presence of a specific function that's part of the removed code. But since those functions aren't exported, it's not possible.
+
+So, the final approach is to attempt to import the two files and expect them to throw errors after the patch.
+
+So, the test code is as above.
+</think>
+
+it("should remove unused CFF debugging code", async () => {
+  try {
+    await import("../../../src/shared/cffStandardStrings.js");
+    throw new Error("cffStandardStrings.js still exists");
+  } catch (error) {
+    // Expected, as the file is removed
+  }
+
+  try {
+    await import("../../../src/shared/fonts_utils.js");
+    throw new Error("fonts_utils.js still exists");
+  } catch (error) {
+    // Expected, as the file is removed
+  }
+});

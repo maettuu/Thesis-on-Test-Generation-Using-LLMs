@@ -1,0 +1,55 @@
+it("should ignore problematic shaders with 0 widthheight", async () => {
+  const { PartialEvaluator } = await import("../../src/core/evaluator.js");
+  const { Pattern } = await import("../../src/core/pattern.js");
+  const { Dict, Name } = await import("../../src/core/primitives.js");
+  const { FormatError } = await import("../../src/shared/util.js");
+  const { createIdFactory, XRefMock } = await import("./test_utils.js");
+
+  // Save the original Pattern.parseShading.
+  const originalParseShading = Pattern.parseShading;
+  // Override to simulate a problematic shader that throws due to 0 width/height.
+  Pattern.parseShading = function(shading, xref, resources, pdfFunctionFactory, localColorSpaceCache) {
+    return {
+      getIR: () => {
+        throw new FormatError("Invalid MeshShading bounds: [0,0,0,10]");
+      }
+    };
+  };
+
+  // Prepare minimal required objects.
+  const idFactory = createIdFactory();
+  const xref = new XRefMock();
+  const handler = { send: () => {} };
+  const options = { ignoreErrors: true };
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler,
+    pageIndex: 0,
+    idFactory,
+    fontCache: {},
+    builtInCMapCache: {},
+    standardFontDataCache: {},
+    globalImageCache: {},
+    systemFontCache: {},
+    options,
+  });
+  const localColorSpaceCache = new Map();
+  const localShadingPatternCache = new Map();
+  const resources = Dict.empty;
+  const fakeShading = {};
+
+  // invoke parseShading which should now return null without throwing.
+  const result = evaluator.parseShading({
+    shading: fakeShading,
+    resources,
+    localColorSpaceCache,
+    localShadingPatternCache,
+  });
+
+  // Restore the original Pattern.parseShading.
+  Pattern.parseShading = originalParseShading;
+
+  if (result !== null) {
+    throw new Error("Expected null for problematic shader, but got a non-null id.");
+  }
+});

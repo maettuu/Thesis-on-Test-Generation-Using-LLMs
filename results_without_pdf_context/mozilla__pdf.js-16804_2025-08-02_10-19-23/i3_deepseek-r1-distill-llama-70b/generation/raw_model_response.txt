@@ -1,0 +1,80 @@
+<think>
+Okay, I need to create a test that checks if the patch correctly removes the black pin from embedded images. The user provided a patch that modifies two files: annotation.js and annotation_layer.js. 
+
+First, I'll look at the issue. The user wants to remove the black pin (embedded image) from page 2 of a PDF. The expected behavior is that the pin isn't visible, showing the image underneath. 
+
+The patch adds handling for 'fillAlpha' in annotation.js and modifies how the trigger element is created in annotation_layer.js. So, the test should verify that when 'fillAlpha' is set to 0, the pin becomes transparent.
+
+I'll start by setting up the test environment. I'll create a mock PDF with an embedded image and a file attachment annotation. Then, I'll simulate rendering the annotation and check if the image is visible without the pin.
+
+I'll import necessary modules and create an XRefMock for the PDF structure. I'll define the annotation data, including 'fillAlpha' set to 0. Then, I'll instantiate the annotation and check the generated HTML elements.
+
+In the test, I'll look for the 'trigger' element. If 'fillAlpha' is 0, the trigger's opacity should be 0, making the pin invisible. I'll assert that the opacity is 0 and that the image is visible.
+
+I'll structure the test using async/await for any promises. I'll use Jest's 'it' function and make sure the test is self-contained, only using the provided imports.
+
+Finally, I'll write the test code, ensuring it fails before the patch and passes after, confirming the fix.
+</think>
+
+```javascript
+it("should remove embedded images when fillAlpha is 0", async () => {
+  const { annotation, annotation_layer } = await import("../../src/core/annotation.js");
+  const { XRefMock } = await import("../../test_utils.js");
+  
+  // Setup mock PDF data
+  const xref = new XRefMock({
+    getFetchPromise: () => Promise.resolve(new Dict()),
+  });
+  
+  // Create annotation data with fillAlpha set to 0
+  const annotationData = {
+    subtype: "FileAttachment",
+    dict: new Dict({
+      Name: new Name("PushPin"),
+      FS: new Dict(),
+    }),
+    fillAlpha: 0,
+  };
+  
+  // Create the annotation
+  const annotation = new FileAttachmentAnnotation({
+    data: annotationData,
+    xref,
+  });
+  
+  // Render the annotation
+  const layer = {
+    div: document.createElement("div"),
+    viewport: {
+      rawDims: {
+        pageWidth: 100,
+        pageHeight: 100,
+        pageX: 0,
+        pageY: 0,
+      },
+    },
+    linkService: {},
+    downloadManager: {},
+    imageResourcesPath: "",
+    renderForms: true,
+    enableScripting: false,
+    hasJSActions: false,
+    fieldObjects: null,
+    parent: {},
+  };
+  
+  const params = {
+    ...layer,
+    annotations: [annotation],
+  };
+  
+  const annotationLayer = new AnnotationLayer(params);
+  await annotationLayer.render(params);
+  
+  // Check the trigger element
+  const trigger = annotationLayer.div.querySelector(".fileAttachmentAnnotation > img");
+  const opacity = parseFloat(trigger.style.opacity);
+  
+  expect(opacity).toBe(0);
+});
+```

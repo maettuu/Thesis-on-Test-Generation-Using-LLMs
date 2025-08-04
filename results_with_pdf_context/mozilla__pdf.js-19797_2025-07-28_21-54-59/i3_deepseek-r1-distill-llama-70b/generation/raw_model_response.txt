@@ -1,0 +1,84 @@
+<think>
+Okay, I need to write a regression test for the issue where a TypeError occurs when using annotations on a PDF in Safari on iOS. The error is "null is not an object (evaluating 'this.#touchMoveAC.abort')" and it happens when drawing and moving around.
+
+First, I should understand the problem. The error occurs because `this.#touchMoveAC` is null when `abort()` is called on it. Looking at the provided patch, in `touch_manager.js`, the code now checks if `this.#touchMoveAC` is not null before calling `abort()`. So the test needs to simulate the scenario where this would fail before the patch and pass after.
+
+I'll use the existing test file `test/unit/pdf_spec.js` and add a new test case. The test should simulate touch events that would trigger the error.
+
+I'll set up a `TouchManager` instance. Since the test is in Node.js, I'll mock the necessary browser APIs like `AbortController`, `document`, and `window`. I'll create a container element and simulate touch events.
+
+The test will involve starting a touch interaction, moving, and then ending it. Before the patch, this would cause the error because `#touchMoveAC` might be null when `abort()` is called. After the patch, the check prevents this.
+
+I'll structure the test to mock the necessary events and verify that no error is thrown. I'll use `jest.spyOn` to mock `console.error` and ensure it's not called with the expected error message.
+
+So, the test will:
+
+1. Import necessary modules and set up mocks for browser APIs.
+2. Create a `TouchManager` instance with the mocked container and signals.
+3. Simulate touch start, move, and end events.
+4. Check that no error is thrown and that the `abort` method is called correctly.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll dynamically import `TouchManager` from the correct path and set up all mocks within the test block.
+
+Finally, the test will assert that the error doesn't occur by checking the console logs and that the `abort` method was called as expected.
+</think>
+
+```javascript
+it("should not throw when touch move abort is called on null", async () => {
+  const { TouchManager } = await import("../../src/display/touch_manager.js");
+  const container = {
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+  };
+
+  const signal = new AbortController().signal;
+  const touchManager = new TouchManager({
+    container,
+    signal,
+  });
+
+  // Mock required browser APIs
+  const mockAbortController = {
+    abort: jest.fn(),
+  };
+  jest.spyOn(window, 'AbortController').mockImplementation(() => mockAbortController);
+
+  // Mock touch events
+  const touchStartEvt = {
+    touches: [
+      { screenX: 100, screenY: 100, identifier: 1 },
+      { screenX: 200, screenY: 200, identifier: 2 },
+    ],
+    preventDefault: jest.fn(),
+  };
+  const touchMoveEvt = {
+    touches: [
+      { screenX: 150, screenY: 150, identifier: 1 },
+      { screenX: 250, screenY: 250, identifier: 2 },
+    ],
+    preventDefault: jest.fn(),
+  };
+  const touchEndEvt = {
+    touches: [],
+    preventDefault: jest.fn(),
+  };
+
+  // Mock console.error to check for errors
+  const mockConsoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+  // Simulate touch events
+  touchManager['onTouchStart'](touchStartEvt);
+  touchManager['onTouchMove'](touchMoveEvt);
+  touchManager['onTouchEnd'](touchEndEvt);
+
+  // Verify no error was thrown
+  expect(mockConsoleError).not.toHaveBeenCalledWith(
+    "TypeError: null is not an object (evaluating 'this.#touchMoveAC.abort')"
+  );
+
+  // Verify abort was called on touchMoveAC if it exists
+  if (touchManager['#touchMoveAC']) {
+    expect(mockAbortController.abort).toHaveBeenCalled();
+  }
+});
+```

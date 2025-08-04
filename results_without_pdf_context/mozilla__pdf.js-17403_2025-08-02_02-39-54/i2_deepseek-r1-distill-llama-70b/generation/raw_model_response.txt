@@ -1,0 +1,96 @@
+<think>
+Okay, I need to write a regression test for the issue where rendering a PDF with many pages is slow. The patch provided is supposed to fix this by improving how tasks are handled in the worker, specifically by skipping useless tasks when a page rendering is cancelled.
+
+First, I should understand what the patch does. From the PR summary, it mentions that when a page rendering is cancelled, a task is sent to the worker but becomes useless if the rendering is already cancelled. The patch introduces a way to postpone task execution and skip certain tasks, improving performance during scrolling.
+
+So, the test needs to verify that after the patch, when a task is cancelled, the worker doesn't process it, which should make rendering faster.
+
+I'll structure the test using Jest. The test should simulate sending a render task and then a cancel task. Before the patch, both tasks would be processed, causing unnecessary work. After the patch, the render task should be skipped when the cancel task arrives.
+
+I'll create a mock for the worker using a MessageChannel to simulate the worker's behavior. The MessageHandler is the class under test, so I'll set up instances for both the main and worker sides.
+
+In the test, I'll send a render action, then a cancel action, and check if the worker processes the render task. If the worker doesn't process it, the test passes.
+
+I'll use Promises to wait for messages and assertions to verify the outcome. The test should be self-contained, using only the provided imports and no external dependencies beyond what's specified.
+
+I'll also need to mock the necessary methods and set up the MessageHandler correctly, ensuring that the worker's onmessage behaves as expected.
+
+Finally, I'll write the test in the specified format, making sure it's concise and only includes the necessary code without any extra explanations.
+</think>
+
+```javascript
+it("should skip rendering tasks when cancelled", async () => {
+  const { MessageHandler, StreamKind } = await import("../../src/shared/message_handler.js");
+  const { PDFWorker } = await import("../../src/display/api.js");
+
+  const worker = new PDFWorker();
+  const mainHandler = new MessageHandler("main", "worker", worker);
+  const workerHandler = new MessageHandler("worker", "main", worker);
+
+  let renderTaskProcessed = false;
+  let cancelTaskProcessed = false;
+
+  const originalPostMessage = worker.postMessage.bind(worker);
+
+  worker.postMessage = (message) => {
+    if (message.action === "RenderTask") {
+      renderTaskProcessed = true;
+    } else if (message.action === "CancelTask") {
+      cancelTaskProcessed = true;
+    }
+    return originalPostMessage(message);
+  };
+
+  // Simulate sending a render task
+  workerHandler.on("RenderTask", () => {
+    return new Promise((resolve) => {
+      resolve({ status: "completed" });
+    });
+  });
+
+  // Send a render action
+  mainHandler.actionHandler["RenderTask"] = () => {
+    return Promise.resolve();
+  };
+
+  // Send a cancel action
+  mainHandler.actionHandler["CancelTask"] = () => {
+    return Promise.resolve();
+  };
+
+  // Simulate worker messages
+  worker.onmessage = ({ data }) => {
+    if (data.action === "RenderTask") {
+      workerHandler._onComObjOnMessage({ data });
+    } else if (data.action === "CancelTask") {
+      workerHandler._onComObjOnMessage({ data });
+    }
+  };
+
+  // Execute the test scenario
+  await mainHandler.on("RenderTask", () => {
+    worker.postMessage({
+      sourceName: "main",
+      targetName: "worker",
+      action: "RenderTask",
+      data: {}
+    });
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  await mainHandler.on("CancelTask", () => {
+    worker.postMessage({
+      sourceName: "main",
+      targetName: "worker",
+      action: "CancelTask",
+      data: {}
+    });
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  expect(renderTaskProcessed).toBe(false);
+  expect(cancelTaskProcessed).toBe(true);
+});
+```

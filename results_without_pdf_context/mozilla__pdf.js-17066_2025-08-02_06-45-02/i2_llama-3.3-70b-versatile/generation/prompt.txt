@@ -1,0 +1,636 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Read only form field not rendered when AnnotationMode = 1 (ENABLED)
+`Pdf.js` displays AcroForm text field in all states except one - when the form field is `read-only` and `Pdf.js` `AnnotationMode` is set to `1 (ENABLED)`.
+
+![image](https://github.com/mozilla/pdf.js/assets/131694949/54553cab-f079-47e7-bbe8-9939b6ef126d)
+
+The default `AnnotationMode` is `2 (ENABLED_FORMS)`, so when a pdf with a readonly text field is displayed in Firefox, everything looks ok. However when `AnnotationMode` is set to `1 (ENABLED)`, the text form field is not displayed.
+
+The form field might not be displayed because `isRenderable`  is `false` in `TextWidgetAnnotationElement`.
+See: https://github.com/mozilla/pdf.js/blob/59d94b549ff487895f96f1ab0f151ce550e06175/src/display/annotation_layer.js#L1162
+
+`parameters.renderForms` is `false` because `AnnotationMode = 1 (ENABLED)`
+`parameters.data.hasAppearance` is `true`
+`parameters.data.fieldValue` is `"Foo"`
+
+Because `renderForms` is `false`, the `hasAppearance` property controls whether the widget is renderable.
+Why the widget is only renderable if it has a value and not an appearance - is that right?
+The widget with the value is rendered if `isRenderable` variable is set to `true`. 
+
+
+Steps to reproduce:
+
+1. Set AnnotationMode to 1 (ENABLED)
+2. Display [simple-form-readonly.pdf](https://github.com/mozilla/pdf.js/files/12793820/simple-form-readonly.pdf)
+3. You will see the text field is not rendered. This is not OK.
+4. Display [simple-form.pdf](https://github.com/mozilla/pdf.js/files/12793820/simple-form.pdf)
+5. You will see the text field is rendered. This is OK.
+
+BTW: see the checkbox tick symbol - why does it look different in both modes?
+
+Configuration:
+
+pdfjs-dist: 3.10.111 build e142baecb
+
+Used forms:
+
+[simple-form.pdf](https://github.com/mozilla/pdf.js/files/12793819/simple-form.pdf)
+[simple-form-readonly.pdf](https://github.com/mozilla/pdf.js/files/12793820/simple-form-readonly.pdf)
+
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/annotation_layer.js b/src/display/annotation_layer.js
+--- a/src/display/annotation_layer.js
++++ b/src/display/annotation_layer.js
+@@ -1159,6 +1159,7 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
+   constructor(parameters) {
+     const isRenderable =
+       parameters.renderForms ||
++      parameters.data.hasOwnCanvas ||
+       (!parameters.data.hasAppearance && !!parameters.data.fieldValue);
+     super(parameters, { isRenderable });
+   }
+@@ -1497,6 +1498,10 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
+       element.textContent = this.data.fieldValue;
+       element.style.verticalAlign = "middle";
+       element.style.display = "table-cell";
++
++      if (this.data.hasOwnCanvas) {
++        element.hidden = true;
++      }
+     }
+ 
+     this._setTextStyle(element);
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.20
+- @babel/plugin-transform-modules-commonjs: ^7.22.15
+- @babel/preset-env: ^7.22.20
+- @babel/runtime: ^7.22.15
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.16
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001538
+- canvas: ^2.11.2
+- core-js: ^3.32.2
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.50.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.28.1
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.2.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.1
+- globals: ^13.22.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.30
+- postcss-dir-pseudo-class: ^8.0.0
+- postcss-discard-comments: ^6.0.0
+- postcss-nesting: ^12.0.1
+- prettier: ^3.0.3
+- puppeteer: ^21.3.4
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.3
+- stylelint-prettier: ^4.0.2
+- terser: ^5.20.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.2.2
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, noContextMenu, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/annotation_layer.js
+1 /* Copyright 2014 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+18 // eslint-disable-next-line max-len
+20 // eslint-disable-next-line max-len
+23 
+24 import {
+25   AnnotationBorderStyleType,
+26   AnnotationEditorType,
+27   AnnotationPrefix,
+28   AnnotationType,
+29   FeatureTest,
+30   LINE_FACTOR,
+31   shadow,
+32   unreachable,
+33   Util,
+34   warn,
+35 } from "../shared/util.js";
+36 import {
+37   DOMSVGFactory,
+38   getFilenameFromUrl,
+39   PDFDateString,
+40   setLayerDimensions,
+41 } from "./display_utils.js";
+42 import { AnnotationStorage } from "./annotation_storage.js";
+43 import { ColorConverters } from "../shared/scripting_utils.js";
+44 import { NullL10n } from "display-l10n_utils";
+45 import { XfaLayer } from "./xfa_layer.js";
+46 
+47 const DEFAULT_TAB_INDEX = 1000;
+48 const DEFAULT_FONT_SIZE = 9;
+49 const GetElementsByNameSet = new WeakSet();
+50 
+1158 class TextWidgetAnnotationElement extends WidgetAnnotationElement {
+1159   constructor(parameters) {
+1160     const isRenderable =
+1161       parameters.renderForms ||
+1162       (!parameters.data.hasAppearance && !!parameters.data.fieldValue);
+1163     super(parameters, { isRenderable });
+1164   }
+1165 
+1179   render() {
+1180     const storage = this.annotationStorage;
+1181     const id = this.data.id;
+1182 
+1183     this.container.classList.add("textWidgetAnnotation");
+1184 
+1185     let element = null;
+1186     if (this.renderForms) {
+1187       // NOTE: We cannot set the values using `element.value` below, since it
+1188       //       prevents the AnnotationLayer rasterizer in `test/driver.js`
+1189       //       from parsing the elements correctly for the reference tests.
+1190       const storedData = storage.getValue(id, {
+1191         value: this.data.fieldValue,
+1192       });
+1193       let textContent = storedData.value || "";
+1194       const maxLen = storage.getValue(id, {
+1195         charLimit: this.data.maxLen,
+1196       }).charLimit;
+1197       if (maxLen && textContent.length > maxLen) {
+1198         textContent = textContent.slice(0, maxLen);
+1199       }
+1200 
+1201       let fieldFormattedValues =
+1202         storedData.formattedValue || this.data.textContent?.join("\n") || null;
+1203       if (fieldFormattedValues && this.data.comb) {
+1204         fieldFormattedValues = fieldFormattedValues.replaceAll(/\s+/g, "");
+1205       }
+1206 
+1207       const elementData = {
+1208         userValue: textContent,
+1209         formattedValue: fieldFormattedValues,
+1210         lastCommittedValue: null,
+1211         commitKey: 1,
+1212         focused: false,
+1213       };
+1214 
+1215       if (this.data.multiLine) {
+1216         element = document.createElement("textarea");
+1217         element.textContent = fieldFormattedValues ?? textContent;
+1218         if (this.data.doNotScroll) {
+1219           element.style.overflowY = "hidden";
+1220         }
+1221       } else {
+1222         element = document.createElement("input");
+1223         element.type = "text";
+1224         element.setAttribute("value", fieldFormattedValues ?? textContent);
+1225         if (this.data.doNotScroll) {
+1226           element.style.overflowX = "hidden";
+1227         }
+1228       }
+1229       if (this.data.hasOwnCanvas) {
+1230         element.hidden = true;
+1231       }
+1232       GetElementsByNameSet.add(element);
+1233       element.setAttribute("data-element-id", id);
+1234 
+1235       element.disabled = this.data.readOnly;
+1236       element.name = this.data.fieldName;
+1237       element.tabIndex = DEFAULT_TAB_INDEX;
+1238 
+1239       this._setRequired(element, this.data.required);
+1240 
+1241       if (maxLen) {
+1242         element.maxLength = maxLen;
+1243       }
+1244 
+1245       element.addEventListener("input", event => {
+1246         storage.setValue(id, { value: event.target.value });
+1247         this.setPropertyOnSiblings(
+1248           element,
+1249           "value",
+1250           event.target.value,
+1251           "value"
+1252         );
+1253         elementData.formattedValue = null;
+1254       });
+1255 
+1256       element.addEventListener("resetform", event => {
+1257         const defaultValue = this.data.defaultFieldValue ?? "";
+1258         element.value = elementData.userValue = defaultValue;
+1259         elementData.formattedValue = null;
+1260       });
+1261 
+1262       let blurListener = event => {
+1263         const { formattedValue } = elementData;
+1264         if (formattedValue !== null && formattedValue !== undefined) {
+1265           event.target.value = formattedValue;
+1266         }
+1267         // Reset the cursor position to the start of the field (issue 12359).
+1268         event.target.scrollLeft = 0;
+1269       };
+1270 
+1271       if (this.enableScripting && this.hasJSActions) {
+1272         element.addEventListener("focus", event => {
+1273           if (elementData.focused) {
+1274             return;
+1275           }
+1276           const { target } = event;
+1277           if (elementData.userValue) {
+1278             target.value = elementData.userValue;
+1279           }
+1280           elementData.lastCommittedValue = target.value;
+1281           elementData.commitKey = 1;
+1282           elementData.focused = true;
+1283         });
+1284 
+1285         element.addEventListener("updatefromsandbox", jsEvent => {
+1286           this.showElementAndHideCanvas(jsEvent.target);
+1287           const actions = {
+1288             value(event) {
+1289               elementData.userValue = event.detail.value ?? "";
+1290               storage.setValue(id, { value: elementData.userValue.toString() });
+1291               event.target.value = elementData.userValue;
+1292             },
+1293             formattedValue(event) {
+1294               const { formattedValue } = event.detail;
+1295               elementData.formattedValue = formattedValue;
+1296               if (
+1297                 formattedValue !== null &&
+1298                 formattedValue !== undefined &&
+1299                 event.target !== document.activeElement
+1300               ) {
+1301                 // Input hasn't the focus so display formatted string
+1302                 event.target.value = formattedValue;
+1303               }
+1304               storage.setValue(id, {
+1305                 formattedValue,
+1306               });
+1307             },
+1308             selRange(event) {
+1309               event.target.setSelectionRange(...event.detail.selRange);
+1310             },
+1311             charLimit: event => {
+1312               const { charLimit } = event.detail;
+1313               const { target } = event;
+1314               if (charLimit === 0) {
+1315                 target.removeAttribute("maxLength");
+1316                 return;
+1317               }
+1318 
+1319               target.setAttribute("maxLength", charLimit);
+1320               let value = elementData.userValue;
+1321               if (!value || value.length <= charLimit) {
+1322                 return;
+1323               }
+1324               value = value.slice(0, charLimit);
+1325               target.value = elementData.userValue = value;
+1326               storage.setValue(id, { value });
+1327 
+1328               this.linkService.eventBus?.dispatch("dispatcheventinsandbox", {
+1329                 source: this,
+1330                 detail: {
+1331                   id,
+1332                   name: "Keystroke",
+1333                   value,
+1334                   willCommit: true,
+1335                   commitKey: 1,
+1336                   selStart: target.selectionStart,
+1337                   selEnd: target.selectionEnd,
+1338                 },
+1339               });
+1340             },
+1341           };
+1342           this._dispatchEventFromSandbox(actions, jsEvent);
+1343         });
+1344 
+1345         // Even if the field hasn't any actions
+1346         // leaving it can still trigger some actions with Calculate
+1347         element.addEventListener("keydown", event => {
+1348           elementData.commitKey = 1;
+1349           // If the key is one of Escape, Enter then the data are committed.
+1350           // If we've a Tab then data will be committed on blur.
+1351           let commitKey = -1;
+1352           if (event.key === "Escape") {
+1353             commitKey = 0;
+1354           } else if (event.key === "Enter" && !this.data.multiLine) {
+1355             // When we've a multiline field, "Enter" key is a key as the other
+1356             // hence we don't commit the data (Acrobat behaves the same way)
+1357             // (see issue #15627).
+1358             commitKey = 2;
+1359           } else if (event.key === "Tab") {
+1360             elementData.commitKey = 3;
+1361           }
+1362           if (commitKey === -1) {
+1363             return;
+1364           }
+1365           const { value } = event.target;
+1366           if (elementData.lastCommittedValue === value) {
+1367             return;
+1368           }
+1369           elementData.lastCommittedValue = value;
+1370           // Save the entered value
+1371           elementData.userValue = value;
+1372           this.linkService.eventBus?.dispatch("dispatcheventinsandbox", {
+1373             source: this,
+1374             detail: {
+1375               id,
+1376               name: "Keystroke",
+1377               value,
+1378               willCommit: true,
+1379               commitKey,
+1380               selStart: event.target.selectionStart,
+1381               selEnd: event.target.selectionEnd,
+1382             },
+1383           });
+1384         });
+1385         const _blurListener = blurListener;
+1386         blurListener = null;
+1387         element.addEventListener("blur", event => {
+1388           if (!elementData.focused || !event.relatedTarget) {
+1389             return;
+1390           }
+1391           elementData.focused = false;
+1392           const { value } = event.target;
+1393           elementData.userValue = value;
+1394           if (elementData.lastCommittedValue !== value) {
+1395             this.linkService.eventBus?.dispatch("dispatcheventinsandbox", {
+1396               source: this,
+1397               detail: {
+1398                 id,
+1399                 name: "Keystroke",
+1400                 value,
+1401                 willCommit: true,
+1402                 commitKey: elementData.commitKey,
+1403                 selStart: event.target.selectionStart,
+1404                 selEnd: event.target.selectionEnd,
+1405               },
+1406             });
+1407           }
+1408           _blurListener(event);
+1409         });
+1410 
+1411         if (this.data.actions?.Keystroke) {
+1412           element.addEventListener("beforeinput", event => {
+1413             elementData.lastCommittedValue = null;
+1414             const { data, target } = event;
+1415             const { value, selectionStart, selectionEnd } = target;
+1416 
+1417             let selStart = selectionStart,
+1418               selEnd = selectionEnd;
+1419 
+1420             switch (event.inputType) {
+1421               // https://rawgit.com/w3c/input-events/v1/index.html#interface-InputEvent-Attributes
+1422               case "deleteWordBackward": {
+1423                 const match = value
+1424                   .substring(0, selectionStart)
+1425                   .match(/\w*[^\w]*$/);
+1426                 if (match) {
+1427                   selStart -= match[0].length;
+1428                 }
+1429                 break;
+1430               }
+1431               case "deleteWordForward": {
+1432                 const match = value
+1433                   .substring(selectionStart)
+1434                   .match(/^[^\w]*\w*/);
+1435                 if (match) {
+1436                   selEnd += match[0].length;
+1437                 }
+1438                 break;
+1439               }
+1440               case "deleteContentBackward":
+1441                 if (selectionStart === selectionEnd) {
+1442                   selStart -= 1;
+1443                 }
+1444                 break;
+1445               case "deleteContentForward":
+1446                 if (selectionStart === selectionEnd) {
+1447                   selEnd += 1;
+1448                 }
+1449                 break;
+1450             }
+1451 
+1452             // We handle the event ourselves.
+1453             event.preventDefault();
+1454             this.linkService.eventBus?.dispatch("dispatcheventinsandbox", {
+1455               source: this,
+1456               detail: {
+1457                 id,
+1458                 name: "Keystroke",
+1459                 value,
+1460                 change: data || "",
+1461                 willCommit: false,
+1462                 selStart,
+1463                 selEnd,
+1464               },
+1465             });
+1466           });
+1467         }
+1468 
+1469         this._setEventListeners(
+1470           element,
+1471           elementData,
+1472           [
+1473             ["focus", "Focus"],
+1474             ["blur", "Blur"],
+1475             ["mousedown", "Mouse Down"],
+1476             ["mouseenter", "Mouse Enter"],
+1477             ["mouseleave", "Mouse Exit"],
+1478             ["mouseup", "Mouse Up"],
+1479           ],
+1480           event => event.target.value
+1481         );
+1482       }
+1483 
+1484       if (blurListener) {
+1485         element.addEventListener("blur", blurListener);
+1486       }
+1487 
+1488       if (this.data.comb) {
+1489         const fieldWidth = this.data.rect[2] - this.data.rect[0];
+1490         const combWidth = fieldWidth / maxLen;
+1491 
+1492         element.classList.add("comb");
+1493         element.style.letterSpacing = `calc(${combWidth}px * var(--scale-factor) - 1ch)`;
+1494       }
+1495     } else {
+1496       element = document.createElement("div");
+1497       element.textContent = this.data.fieldValue;
+1498       element.style.verticalAlign = "middle";
+1499       element.style.display = "table-cell";
+1500     }
+1501 
+1502     this._setTextStyle(element);
+1503     this._setBackgroundColor(element);
+1504     this._setDefaultPropertiesFromJS(element);
+1505 
+1506     this.container.append(element);
+1507     return this.container;
+1508   }
+1509 }
+1510 
+3056 
+</code>
+
+PR summary:
+<pr_summary>
+Ensure that readonly TextWidget-annotations are rendered when forms are disabled (issue 17064)
+To reduced the risk of regressing something else, given that the issue only applies to a (for the default viewer) non-default configuration, this patch is purposely limited to only TextWidget-annotations in the display layer.
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

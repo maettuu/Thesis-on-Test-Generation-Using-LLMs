@@ -1,0 +1,4527 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+When in editing mode, support pasting an image from the clipboard
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/annotation_editor_layer.js b/src/display/editor/annotation_editor_layer.js
+--- a/src/display/editor/annotation_editor_layer.js
++++ b/src/display/editor/annotation_editor_layer.js
+@@ -464,6 +464,31 @@ class AnnotationEditorLayer {
+     return null;
+   }
+ 
++  /**
++   * Paste some content into a new editor.
++   * @param {number} mode
++   * @param {Object} params
++   */
++  pasteEditor(mode, params) {
++    this.#uiManager.updateToolbar(mode);
++    this.#uiManager.updateMode(mode);
++
++    const { offsetX, offsetY } = this.#getCenterPoint();
++    const id = this.getNextId();
++    const editor = this.#createNewEditor({
++      parent: this,
++      id,
++      x: offsetX,
++      y: offsetY,
++      uiManager: this.#uiManager,
++      isCentered: true,
++      ...params,
++    });
++    if (editor) {
++      this.add(editor);
++    }
++  }
++
+   /**
+    * Create a new editor
+    * @param {Object} data
+@@ -504,10 +529,7 @@ class AnnotationEditorLayer {
+     return editor;
+   }
+ 
+-  /**
+-   * Create and add a new editor.
+-   */
+-  addNewEditor() {
++  #getCenterPoint() {
+     const { x, y, width, height } = this.div.getBoundingClientRect();
+     const tlX = Math.max(0, x);
+     const tlY = Math.max(0, y);
+@@ -520,11 +542,15 @@ class AnnotationEditorLayer {
+         ? [centerX, centerY]
+         : [centerY, centerX];
+ 
++    return { offsetX, offsetY };
++  }
++
++  /**
++   * Create and add a new editor.
++   */
++  addNewEditor() {
+     this.#createAndAddNewEditor(
+-      {
+-        offsetX,
+-        offsetY,
+-      },
++      this.#getCenterPoint(),
+       /* isCentered = */ true
+     );
+   }
+
+diff --git a/src/display/editor/editor.js b/src/display/editor/editor.js
+--- a/src/display/editor/editor.js
++++ b/src/display/editor/editor.js
+@@ -140,6 +140,26 @@ class AnnotationEditor {
+     return [];
+   }
+ 
++  /**
++   * Check if this kind of editor is able to handle the given mime type for
++   * pasting.
++   * @param {string} mime
++   * @returns {boolean}
++   */
++  static isHandlingMimeForPasting(_mime) {
++    return false;
++  }
++
++  /**
++   * Extract the data from the clipboard item and delegate the creation of the
++   * editor to the parent.
++   * @param {DataTransferItem} item
++   * @param {AnnotationEditorLayer} parent
++   */
++  static paste(item, parent) {
++    unreachable("Not implemented");
++  }
++
+   /**
+    * Get the properties to update in the UI for this editor.
+    * @returns {Array}
+
+diff --git a/src/display/editor/stamp.js b/src/display/editor/stamp.js
+--- a/src/display/editor/stamp.js
++++ b/src/display/editor/stamp.js
+@@ -30,6 +30,8 @@ class StampEditor extends AnnotationEditor {
+ 
+   #bitmapUrl = null;
+ 
++  #bitmapFile = null;
++
+   #canvas = null;
+ 
+   #observer = null;
+@@ -45,6 +47,7 @@ class StampEditor extends AnnotationEditor {
+   constructor(params) {
+     super({ ...params, name: "stampEditor" });
+     this.#bitmapUrl = params.bitmapUrl;
++    this.#bitmapFile = params.bitmapFile;
+   }
+ 
+   static get supportedTypes() {
+@@ -64,10 +67,26 @@ class StampEditor extends AnnotationEditor {
+     return shadow(
+       this,
+       "supportedTypes",
+-      types.map(type => `image/${type}`).join(",")
++      types.map(type => `image/${type}`)
+     );
+   }
+ 
++  static get supportedTypesStr() {
++    return shadow(this, "supportedTypesStr", this.supportedTypes.join(","));
++  }
++
++  /** @inheritdoc */
++  static isHandlingMimeForPasting(mime) {
++    return this.supportedTypes.includes(mime);
++  }
++
++  /** @inheritdoc */
++  static paste(item, parent) {
++    parent.pasteEditor(AnnotationEditorType.STAMP, {
++      bitmapFile: item.getAsFile(),
++    });
++  }
++
+   #getBitmapDone() {
+     this._uiManager.enableWaiting(false);
+     if (this.#canvas) {
+@@ -115,6 +134,29 @@ class StampEditor extends AnnotationEditor {
+       return;
+     }
+ 
++    if (this.#bitmapFile) {
++      const file = this.#bitmapFile;
++      this.#bitmapFile = null;
++      this._uiManager.enableWaiting(true);
++      this.#bitmapPromise = this._uiManager.imageManager
++        .getFromFile(file)
++        .then(data => {
++          this.#bitmapPromise = null;
++          if (!data) {
++            this.remove();
++            return;
++          }
++          ({
++            bitmap: this.#bitmap,
++            id: this.#bitmapId,
++            isSvg: this.#isSvg,
++          } = data);
++          this.#createCanvas();
++        })
++        .finally(() => this.#getBitmapDone());
++      return;
++    }
++
+     const input = document.createElement("input");
+     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+       input.hidden = true;
+@@ -122,7 +164,7 @@ class StampEditor extends AnnotationEditor {
+       document.body.append(input);
+     }
+     input.type = "file";
+-    input.accept = StampEditor.supportedTypes;
++    input.accept = StampEditor.supportedTypesStr;
+     this.#bitmapPromise = new Promise(resolve => {
+       input.addEventListener("change", async () => {
+         this.#bitmapPromise = null;
+
+diff --git a/src/display/editor/tools.js b/src/display/editor/tools.js
+--- a/src/display/editor/tools.js
++++ b/src/display/editor/tools.js
+@@ -919,8 +919,17 @@ class AnnotationEditorUIManager {
+    */
+   paste(event) {
+     event.preventDefault();
++    const { clipboardData } = event;
++    for (const item of clipboardData.items) {
++      for (const editorType of this.#editorTypes) {
++        if (editorType.isHandlingMimeForPasting(item.type)) {
++          editorType.paste(item, this.currentLayer);
++          return;
++        }
++      }
++    }
+ 
+-    let data = event.clipboardData.getData("application/pdfjs");
++    let data = clipboardData.getData("application/pdfjs");
+     if (!data) {
+       return;
+     }
+@@ -1099,6 +1108,9 @@ class AnnotationEditorUIManager {
+    * @param {string|null} editId
+    */
+   updateMode(mode, editId = null) {
++    if (this.#mode === mode) {
++      return;
++    }
+     this.#mode = mode;
+     if (mode === AnnotationEditorType.NONE) {
+       this.setEditingState(false);
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.9
+- @babel/plugin-transform-modules-commonjs: ^7.22.5
+- @babel/preset-env: ^7.22.9
+- @babel/runtime: ^7.22.6
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.14
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001519
+- canvas: ^2.11.2
+- core-js: ^3.32.0
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.46.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.28.0
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.1
+- globals: ^13.20.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.27
+- postcss-dir-pseudo-class: ^8.0.0
+- postcss-nesting: ^12.0.1
+- prettier: ^3.0.1
+- puppeteer: ^21.0.1
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.2
+- stylelint-prettier: ^4.0.2
+- terser: ^5.19.2
+- through2: ^4.0.2
+- ttest: ^4.0.0
+- typescript: ^5.1.6
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/annotation_editor_layer.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 // eslint-disable-next-line max-len
+17 /** @typedef {import("./tools.js").AnnotationEditorUIManager} AnnotationEditorUIManager */
+18 /** @typedef {import("../display_utils.js").PageViewport} PageViewport */
+19 // eslint-disable-next-line max-len
+20 /** @typedef {import("../../web/text_accessibility.js").TextAccessibilityManager} TextAccessibilityManager */
+21 /** @typedef {import("../../web/interfaces").IL10n} IL10n */
+22 // eslint-disable-next-line max-len
+23 /** @typedef {import("../src/display/annotation_layer.js").AnnotationLayer} AnnotationLayer */
+24 
+25 import { AnnotationEditorType, FeatureTest } from "../../shared/util.js";
+26 import { AnnotationEditor } from "./editor.js";
+27 import { FreeTextEditor } from "./freetext.js";
+28 import { InkEditor } from "./ink.js";
+29 import { setLayerDimensions } from "../display_utils.js";
+30 import { StampEditor } from "./stamp.js";
+31 
+32 /**
+33  * @typedef {Object} AnnotationEditorLayerOptions
+34  * @property {Object} mode
+35  * @property {HTMLDivElement} div
+36  * @property {AnnotationEditorUIManager} uiManager
+37  * @property {boolean} enabled
+38  * @property {TextAccessibilityManager} [accessibilityManager]
+39  * @property {number} pageIndex
+40  * @property {IL10n} l10n
+41  * @property {AnnotationLayer} [annotationLayer]
+42  * @property {PageViewport} viewport
+43  */
+44 
+45 /**
+46  * @typedef {Object} RenderEditorLayerOptions
+47  * @property {PageViewport} viewport
+48  */
+49 
+50 /**
+51  * Manage all the different editors on a page.
+52  */
+53 class AnnotationEditorLayer {
+54   #accessibilityManager;
+55 
+56   #allowClick = false;
+57 
+58   #annotationLayer = null;
+59 
+60   #boundPointerup = this.pointerup.bind(this);
+61 
+62   #boundPointerdown = this.pointerdown.bind(this);
+63 
+64   #editors = new Map();
+65 
+66   #hadPointerDown = false;
+67 
+68   #isCleaningUp = false;
+69 
+70   #isDisabling = false;
+71 
+72   #uiManager;
+73 
+74   static _initialized = false;
+75 
+76   /**
+77    * @param {AnnotationEditorLayerOptions} options
+78    */
+79   constructor({
+80     uiManager,
+81     pageIndex,
+82     div,
+83     accessibilityManager,
+84     annotationLayer,
+85     viewport,
+86     l10n,
+87   }) {
+88     const editorTypes = [FreeTextEditor, InkEditor, StampEditor];
+89     if (!AnnotationEditorLayer._initialized) {
+90       AnnotationEditorLayer._initialized = true;
+91       for (const editorType of editorTypes) {
+92         editorType.initialize(l10n);
+93       }
+94     }
+95     uiManager.registerEditorTypes(editorTypes);
+96 
+97     this.#uiManager = uiManager;
+98     this.pageIndex = pageIndex;
+99     this.div = div;
+100     this.#accessibilityManager = accessibilityManager;
+101     this.#annotationLayer = annotationLayer;
+102     this.viewport = viewport;
+103 
+104     this.#uiManager.addLayer(this);
+105   }
+106 
+107   get isEmpty() {
+108     return this.#editors.size === 0;
+109   }
+110 
+111   /**
+112    * Update the toolbar if it's required to reflect the tool currently used.
+113    * @param {number} mode
+114    */
+115   updateToolbar(mode) {
+116     this.#uiManager.updateToolbar(mode);
+117   }
+118 
+119   /**
+120    * The mode has changed: it must be updated.
+121    * @param {number} mode
+122    */
+123   updateMode(mode = this.#uiManager.getMode()) {
+124     this.#cleanup();
+125     if (mode === AnnotationEditorType.INK) {
+126       // We always want to an ink editor ready to draw in.
+127       this.addInkEditorIfNeeded(false);
+128       this.disableClick();
+129     } else {
+130       this.enableClick();
+131     }
+132 
+133     if (mode !== AnnotationEditorType.NONE) {
+134       this.div.classList.toggle(
+135         "freeTextEditing",
+136         mode === AnnotationEditorType.FREETEXT
+137       );
+138       this.div.classList.toggle(
+139         "inkEditing",
+140         mode === AnnotationEditorType.INK
+141       );
+142       this.div.classList.toggle(
+143         "stampEditing",
+144         mode === AnnotationEditorType.STAMP
+145       );
+146       this.div.hidden = false;
+147     }
+148   }
+149 
+150   addInkEditorIfNeeded(isCommitting) {
+151     if (
+152       !isCommitting &&
+153       this.#uiManager.getMode() !== AnnotationEditorType.INK
+154     ) {
+155       return;
+156     }
+157 
+158     if (!isCommitting) {
+159       // We're removing an editor but an empty one can already exist so in this
+160       // case we don't need to create a new one.
+161       for (const editor of this.#editors.values()) {
+162         if (editor.isEmpty()) {
+163           editor.setInBackground();
+164           return;
+165         }
+166       }
+167     }
+168 
+169     const editor = this.#createAndAddNewEditor(
+170       { offsetX: 0, offsetY: 0 },
+171       /* isCentered = */ false
+172     );
+173     editor.setInBackground();
+174   }
+175 
+176   /**
+177    * Set the editing state.
+178    * @param {boolean} isEditing
+179    */
+180   setEditingState(isEditing) {
+181     this.#uiManager.setEditingState(isEditing);
+182   }
+183 
+184   /**
+185    * Add some commands into the CommandManager (undo/redo stuff).
+186    * @param {Object} params
+187    */
+188   addCommands(params) {
+189     this.#uiManager.addCommands(params);
+190   }
+191 
+192   /**
+193    * Enable pointer events on the main div in order to enable
+194    * editor creation.
+195    */
+196   enable() {
+197     this.div.style.pointerEvents = "auto";
+198     const annotationElementIds = new Set();
+199     for (const editor of this.#editors.values()) {
+200       editor.enableEditing();
+201       if (editor.annotationElementId) {
+202         annotationElementIds.add(editor.annotationElementId);
+203       }
+204     }
+205 
+206     if (!this.#annotationLayer) {
+207       return;
+208     }
+209 
+210     const editables = this.#annotationLayer.getEditableAnnotations();
+211     for (const editable of editables) {
+212       // The element must be hidden whatever its state is.
+213       editable.hide();
+214       if (this.#uiManager.isDeletedAnnotationElement(editable.data.id)) {
+215         continue;
+216       }
+217       if (annotationElementIds.has(editable.data.id)) {
+218         continue;
+219       }
+220       const editor = this.deserialize(editable);
+221       if (!editor) {
+222         continue;
+223       }
+224       this.addOrRebuild(editor);
+225       editor.enableEditing();
+226     }
+227   }
+228 
+229   /**
+230    * Disable editor creation.
+231    */
+232   disable() {
+233     this.#isDisabling = true;
+234     this.div.style.pointerEvents = "none";
+235     const hiddenAnnotationIds = new Set();
+236     for (const editor of this.#editors.values()) {
+237       editor.disableEditing();
+238       if (!editor.annotationElementId || editor.serialize() !== null) {
+239         hiddenAnnotationIds.add(editor.annotationElementId);
+240         continue;
+241       }
+242       this.getEditableAnnotation(editor.annotationElementId)?.show();
+243       editor.remove();
+244     }
+245 
+246     if (this.#annotationLayer) {
+247       // Show the annotations that were hidden in enable().
+248       const editables = this.#annotationLayer.getEditableAnnotations();
+249       for (const editable of editables) {
+250         const { id } = editable.data;
+251         if (
+252           hiddenAnnotationIds.has(id) ||
+253           this.#uiManager.isDeletedAnnotationElement(id)
+254         ) {
+255           continue;
+256         }
+257         editable.show();
+258       }
+259     }
+260 
+261     this.#cleanup();
+262     if (this.isEmpty) {
+263       this.div.hidden = true;
+264     }
+265     this.#isDisabling = false;
+266   }
+267 
+268   getEditableAnnotation(id) {
+269     return this.#annotationLayer?.getEditableAnnotation(id) || null;
+270   }
+271 
+272   /**
+273    * Set the current editor.
+274    * @param {AnnotationEditor} editor
+275    */
+276   setActiveEditor(editor) {
+277     const currentActive = this.#uiManager.getActive();
+278     if (currentActive === editor) {
+279       return;
+280     }
+281 
+282     this.#uiManager.setActiveEditor(editor);
+283   }
+284 
+285   enableClick() {
+286     this.div.addEventListener("pointerdown", this.#boundPointerdown);
+287     this.div.addEventListener("pointerup", this.#boundPointerup);
+288   }
+289 
+290   disableClick() {
+291     this.div.removeEventListener("pointerdown", this.#boundPointerdown);
+292     this.div.removeEventListener("pointerup", this.#boundPointerup);
+293   }
+294 
+295   attach(editor) {
+296     this.#editors.set(editor.id, editor);
+297     const { annotationElementId } = editor;
+298     if (
+299       annotationElementId &&
+300       this.#uiManager.isDeletedAnnotationElement(annotationElementId)
+301     ) {
+302       this.#uiManager.removeDeletedAnnotationElement(editor);
+303     }
+304   }
+305 
+306   detach(editor) {
+307     this.#editors.delete(editor.id);
+308     this.#accessibilityManager?.removePointerInTextLayer(editor.contentDiv);
+309 
+310     if (!this.#isDisabling && editor.annotationElementId) {
+311       this.#uiManager.addDeletedAnnotationElement(editor);
+312     }
+313   }
+314 
+315   /**
+316    * Remove an editor.
+317    * @param {AnnotationEditor} editor
+318    */
+319   remove(editor) {
+320     // Since we can undo a removal we need to keep the
+321     // parent property as it is, so don't null it!
+322 
+323     this.detach(editor);
+324     this.#uiManager.removeEditor(editor);
+325     if (editor.div.contains(document.activeElement)) {
+326       setTimeout(() => {
+327         // When the div is removed from DOM the focus can move on the
+328         // document.body, so we need to move it back to the main container.
+329         this.#uiManager.focusMainContainer();
+330       }, 0);
+331     }
+332     editor.div.remove();
+333     editor.isAttachedToDOM = false;
+334 
+335     if (!this.#isCleaningUp) {
+336       this.addInkEditorIfNeeded(/* isCommitting = */ false);
+337     }
+338   }
+339 
+340   /**
+341    * An editor can have a different parent, for example after having
+342    * being dragged and droped from a page to another.
+343    * @param {AnnotationEditor} editor
+344    */
+345   changeParent(editor) {
+346     if (editor.parent === this) {
+347       return;
+348     }
+349 
+350     if (editor.annotationElementId) {
+351       this.#uiManager.addDeletedAnnotationElement(editor.annotationElementId);
+352       AnnotationEditor.deleteAnnotationElement(editor);
+353       editor.annotationElementId = null;
+354     }
+355 
+356     this.attach(editor);
+357     editor.parent?.detach(editor);
+358     editor.setParent(this);
+359     if (editor.div && editor.isAttachedToDOM) {
+360       editor.div.remove();
+361       this.div.append(editor.div);
+362     }
+363   }
+364 
+365   /**
+366    * Add a new editor in the current view.
+367    * @param {AnnotationEditor} editor
+368    */
+369   add(editor) {
+370     this.changeParent(editor);
+371     this.#uiManager.addEditor(editor);
+372     this.attach(editor);
+373 
+374     if (!editor.isAttachedToDOM) {
+375       const div = editor.render();
+376       this.div.append(div);
+377       editor.isAttachedToDOM = true;
+378     }
+379 
+380     this.moveEditorInDOM(editor);
+381     editor.onceAdded();
+382     this.#uiManager.addToAnnotationStorage(editor);
+383   }
+384 
+385   moveEditorInDOM(editor) {
+386     if (!editor.isAttachedToDOM) {
+387       return;
+388     }
+389 
+390     const { activeElement } = document;
+391     if (editor.div.contains(activeElement)) {
+392       // When the div is moved in the DOM the focus can move somewhere else,
+393       // so we want to be sure that the focus will stay on the editor but we
+394       // don't want to call any focus callbacks, hence we disable them and only
+395       // re-enable them when the editor has the focus.
+396       editor._focusEventsAllowed = false;
+397       setTimeout(() => {
+398         editor.div.addEventListener(
+399           "focusin",
+400           () => {
+401             editor._focusEventsAllowed = true;
+402           },
+403           { once: true }
+404         );
+405         activeElement.focus();
+406       }, 0);
+407     }
+408 
+409     this.#accessibilityManager?.moveElementInDOM(
+410       this.div,
+411       editor.div,
+412       editor.contentDiv,
+413       /* isRemovable = */ true
+414     );
+415   }
+416 
+417   /**
+418    * Add or rebuild depending if it has been removed or not.
+419    * @param {AnnotationEditor} editor
+420    */
+421   addOrRebuild(editor) {
+422     if (editor.needsToBeRebuilt()) {
+423       editor.rebuild();
+424     } else {
+425       this.add(editor);
+426     }
+427   }
+428 
+429   /**
+430    * Add a new editor and make this addition undoable.
+431    * @param {AnnotationEditor} editor
+432    */
+433   addUndoableEditor(editor) {
+434     const cmd = () => editor._uiManager.rebuild(editor);
+435     const undo = () => {
+436       editor.remove();
+437     };
+438 
+439     this.addCommands({ cmd, undo, mustExec: false });
+440   }
+441 
+442   /**
+443    * Get an id for an editor.
+444    * @returns {string}
+445    */
+446   getNextId() {
+447     return this.#uiManager.getId();
+448   }
+449 
+450   /**
+451    * Create a new editor
+452    * @param {Object} params
+453    * @returns {AnnotationEditor}
+454    */
+455   #createNewEditor(params) {
+456     switch (this.#uiManager.getMode()) {
+457       case AnnotationEditorType.FREETEXT:
+458         return new FreeTextEditor(params);
+459       case AnnotationEditorType.INK:
+460         return new InkEditor(params);
+461       case AnnotationEditorType.STAMP:
+462         return new StampEditor(params);
+463     }
+464     return null;
+465   }
+466 
+467   /**
+468    * Create a new editor
+469    * @param {Object} data
+470    * @returns {AnnotationEditor}
+471    */
+472   deserialize(data) {
+473     switch (data.annotationType ?? data.annotationEditorType) {
+474       case AnnotationEditorType.FREETEXT:
+475         return FreeTextEditor.deserialize(data, this, this.#uiManager);
+476       case AnnotationEditorType.INK:
+477         return InkEditor.deserialize(data, this, this.#uiManager);
+478       case AnnotationEditorType.STAMP:
+479         return StampEditor.deserialize(data, this, this.#uiManager);
+480     }
+481     return null;
+482   }
+483 
+484   /**
+485    * Create and add a new editor.
+486    * @param {PointerEvent} event
+487    * @param {boolean} isCentered
+488    * @returns {AnnotationEditor}
+489    */
+490   #createAndAddNewEditor(event, isCentered) {
+491     const id = this.getNextId();
+492     const editor = this.#createNewEditor({
+493       parent: this,
+494       id,
+495       x: event.offsetX,
+496       y: event.offsetY,
+497       uiManager: this.#uiManager,
+498       isCentered,
+499     });
+500     if (editor) {
+501       this.add(editor);
+502     }
+503 
+504     return editor;
+505   }
+506 
+507   /**
+508    * Create and add a new editor.
+509    */
+510   addNewEditor() {
+511     const { x, y, width, height } = this.div.getBoundingClientRect();
+512     const tlX = Math.max(0, x);
+513     const tlY = Math.max(0, y);
+514     const brX = Math.min(window.innerWidth, x + width);
+515     const brY = Math.min(window.innerHeight, y + height);
+516     const centerX = (tlX + brX) / 2 - x;
+517     const centerY = (tlY + brY) / 2 - y;
+518     const [offsetX, offsetY] =
+519       this.viewport.rotation % 180 === 0
+520         ? [centerX, centerY]
+521         : [centerY, centerX];
+522 
+523     this.#createAndAddNewEditor(
+524       {
+525         offsetX,
+526         offsetY,
+527       },
+528       /* isCentered = */ true
+529     );
+530   }
+531 
+532   /**
+533    * Set the last selected editor.
+534    * @param {AnnotationEditor} editor
+535    */
+536   setSelected(editor) {
+537     this.#uiManager.setSelected(editor);
+538   }
+539 
+540   /**
+541    * Add or remove an editor the current selection.
+542    * @param {AnnotationEditor} editor
+543    */
+544   toggleSelected(editor) {
+545     this.#uiManager.toggleSelected(editor);
+546   }
+547 
+548   /**
+549    * Check if the editor is selected.
+550    * @param {AnnotationEditor} editor
+551    */
+552   isSelected(editor) {
+553     return this.#uiManager.isSelected(editor);
+554   }
+555 
+556   /**
+557    * Unselect an editor.
+558    * @param {AnnotationEditor} editor
+559    */
+560   unselect(editor) {
+561     this.#uiManager.unselect(editor);
+562   }
+563 
+564   /**
+565    * Pointerup callback.
+566    * @param {PointerEvent} event
+567    */
+568   pointerup(event) {
+569     const { isMac } = FeatureTest.platform;
+570     if (event.button !== 0 || (event.ctrlKey && isMac)) {
+571       // Don't create an editor on right click.
+572       return;
+573     }
+574 
+575     if (event.target !== this.div) {
+576       return;
+577     }
+578 
+579     if (!this.#hadPointerDown) {
+580       // It can happen when the user starts a drag inside a text editor
+581       // and then releases the mouse button outside of it. In such a case
+582       // we don't want to create a new editor, hence we check that a pointerdown
+583       // occurred on this div previously.
+584       return;
+585     }
+586     this.#hadPointerDown = false;
+587 
+588     if (!this.#allowClick) {
+589       this.#allowClick = true;
+590       return;
+591     }
+592 
+593     if (this.#uiManager.getMode() === AnnotationEditorType.STAMP) {
+594       this.#uiManager.unselectAll();
+595       return;
+596     }
+597 
+598     this.#createAndAddNewEditor(event, /* isCentered = */ false);
+599   }
+600 
+601   /**
+602    * Pointerdown callback.
+603    * @param {PointerEvent} event
+604    */
+605   pointerdown(event) {
+606     if (this.#hadPointerDown) {
+607       // It's possible to have a second pointerdown event before a pointerup one
+608       // when the user puts a finger on a touchscreen and then add a second one
+609       // to start a pinch-to-zoom gesture.
+610       // That said, in case it's possible to have two pointerdown events with
+611       // a mouse, we don't want to create a new editor in such a case either.
+612       this.#hadPointerDown = false;
+613       return;
+614     }
+615     const { isMac } = FeatureTest.platform;
+616     if (event.button !== 0 || (event.ctrlKey && isMac)) {
+617       // Do nothing on right click.
+618       return;
+619     }
+620 
+621     if (event.target !== this.div) {
+622       return;
+623     }
+624 
+625     this.#hadPointerDown = true;
+626 
+627     const editor = this.#uiManager.getActive();
+628     this.#allowClick = !editor || editor.isEmpty();
+629   }
+630 
+631   /**
+632    *
+633    * @param {AnnotationEditor} editor
+634    * @param {number} x
+635    * @param {number} y
+636    * @returns
+637    */
+638   findNewParent(editor, x, y) {
+639     const layer = this.#uiManager.findParent(x, y);
+640     if (layer === null || layer === this) {
+641       return false;
+642     }
+643     layer.changeParent(editor);
+644     return true;
+645   }
+646 
+647   /**
+648    * Destroy the main editor.
+649    */
+650   destroy() {
+651     if (this.#uiManager.getActive()?.parent === this) {
+652       this.#uiManager.setActiveEditor(null);
+653     }
+654 
+655     for (const editor of this.#editors.values()) {
+656       this.#accessibilityManager?.removePointerInTextLayer(editor.contentDiv);
+657       editor.setParent(null);
+658       editor.isAttachedToDOM = false;
+659       editor.div.remove();
+660     }
+661     this.div = null;
+662     this.#editors.clear();
+663     this.#uiManager.removeLayer(this);
+664   }
+665 
+666   #cleanup() {
+667     // When we're cleaning up, some editors are removed but we don't want
+668     // to add a new one which will induce an addition in this.#editors, hence
+669     // an infinite loop.
+670     this.#isCleaningUp = true;
+671     for (const editor of this.#editors.values()) {
+672       if (editor.isEmpty()) {
+673         editor.remove();
+674       }
+675     }
+676     this.#isCleaningUp = false;
+677   }
+678 
+679   /**
+680    * Render the main editor.
+681    * @param {RenderEditorLayerOptions} parameters
+682    */
+683   render({ viewport }) {
+684     this.viewport = viewport;
+685     setLayerDimensions(this.div, viewport);
+686     for (const editor of this.#uiManager.getEditors(this.pageIndex)) {
+687       this.add(editor);
+688     }
+689     this.updateMode();
+690   }
+691 
+692   /**
+693    * Update the main editor.
+694    * @param {RenderEditorLayerOptions} parameters
+695    */
+696   update({ viewport }) {
+697     // Editors have their dimensions/positions in percent so to avoid any
+698     // issues (see #15582), we must commit the current one before changing
+699     // the viewport.
+700     this.#uiManager.commitOrRemove();
+701 
+702     this.viewport = viewport;
+703     setLayerDimensions(this.div, { rotation: viewport.rotation });
+704     this.updateMode();
+705   }
+706 
+707   /**
+708    * Get page dimensions.
+709    * @returns {Object} dimensions.
+710    */
+711   get pageDimensions() {
+712     const { pageWidth, pageHeight } = this.viewport.rawDims;
+713     return [pageWidth, pageHeight];
+714   }
+715 }
+716 
+717 export { AnnotationEditorLayer };
+File:
+src/display/editor/editor.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 // eslint-disable-next-line max-len
+17 /** @typedef {import("./annotation_editor_layer.js").AnnotationEditorLayer} AnnotationEditorLayer */
+18 // eslint-disable-next-line max-len
+19 /** @typedef {import("./tools.js").AnnotationEditorUIManager} AnnotationEditorUIManager */
+20 
+21 import { bindEvents, ColorManager } from "./tools.js";
+22 import { FeatureTest, shadow, unreachable } from "../../shared/util.js";
+23 
+24 /**
+25  * @typedef {Object} AnnotationEditorParameters
+26  * @property {AnnotationEditorUIManager} uiManager - the global manager
+27  * @property {AnnotationEditorLayer} parent - the layer containing this editor
+28  * @property {string} id - editor id
+29  * @property {number} x - x-coordinate
+30  * @property {number} y - y-coordinate
+31  */
+32 
+33 /**
+34  * Base class for editors.
+35  */
+36 class AnnotationEditor {
+37   #keepAspectRatio = false;
+38 
+39   #resizersDiv = null;
+40 
+41   #boundFocusin = this.focusin.bind(this);
+42 
+43   #boundFocusout = this.focusout.bind(this);
+44 
+45   #hasBeenClicked = false;
+46 
+47   #isEditing = false;
+48 
+49   #isInEditMode = false;
+50 
+51   _initialOptions = Object.create(null);
+52 
+53   _uiManager = null;
+54 
+55   _focusEventsAllowed = true;
+56 
+57   #isDraggable = false;
+58 
+59   #zIndex = AnnotationEditor._zIndex++;
+60 
+61   static _colorManager = new ColorManager();
+62 
+63   static _zIndex = 1;
+64 
+65   /**
+66    * @param {AnnotationEditorParameters} parameters
+67    */
+68   constructor(parameters) {
+69     if (this.constructor === AnnotationEditor) {
+70       unreachable("Cannot initialize AnnotationEditor.");
+71     }
+72 
+73     this.parent = parameters.parent;
+74     this.id = parameters.id;
+75     this.width = this.height = null;
+76     this.pageIndex = parameters.parent.pageIndex;
+77     this.name = parameters.name;
+78     this.div = null;
+79     this._uiManager = parameters.uiManager;
+80     this.annotationElementId = null;
+81     this._willKeepAspectRatio = false;
+82     this._initialOptions.isCentered = parameters.isCentered;
+83 
+84     const {
+85       rotation,
+86       rawDims: { pageWidth, pageHeight, pageX, pageY },
+87     } = this.parent.viewport;
+88 
+89     this.rotation = rotation;
+90     this.pageRotation =
+91       (360 + rotation - this._uiManager.viewParameters.rotation) % 360;
+92     this.pageDimensions = [pageWidth, pageHeight];
+93     this.pageTranslation = [pageX, pageY];
+94 
+95     const [width, height] = this.parentDimensions;
+96     this.x = parameters.x / width;
+97     this.y = parameters.y / height;
+98 
+99     this.isAttachedToDOM = false;
+100     this.deleted = false;
+101   }
+102 
+103   static get _defaultLineColor() {
+104     return shadow(
+105       this,
+106       "_defaultLineColor",
+107       this._colorManager.getHexCode("CanvasText")
+108     );
+109   }
+110 
+111   static deleteAnnotationElement(editor) {
+112     const fakeEditor = new FakeEditor({
+113       id: editor.parent.getNextId(),
+114       parent: editor.parent,
+115       uiManager: editor._uiManager,
+116     });
+117     fakeEditor.annotationElementId = editor.annotationElementId;
+118     fakeEditor.deleted = true;
+119     fakeEditor._uiManager.addToAnnotationStorage(fakeEditor);
+120   }
+121 
+122   /**
+123    * Initialize the l10n stuff for this type of editor.
+124    * @param {Object} _l10n
+125    */
+126   static initialize(_l10n) {}
+127 
+128   /**
+129    * Update the default parameters for this type of editor.
+130    * @param {number} _type
+131    * @param {*} _value
+132    */
+133   static updateDefaultParams(_type, _value) {}
+134 
+135   /**
+136    * Get the default properties to set in the UI for this type of editor.
+137    * @returns {Array}
+138    */
+139   static get defaultPropertiesToUpdate() {
+140     return [];
+141   }
+142 
+143   /**
+144    * Get the properties to update in the UI for this editor.
+145    * @returns {Array}
+146    */
+147   get propertiesToUpdate() {
+148     return [];
+149   }
+150 
+151   get _isDraggable() {
+152     return this.#isDraggable;
+153   }
+154 
+155   set _isDraggable(value) {
+156     this.#isDraggable = value;
+157     this.div?.classList.toggle("draggable", value);
+158   }
+159 
+160   center() {
+161     const [pageWidth, pageHeight] = this.pageDimensions;
+162     switch (this.parentRotation) {
+163       case 90:
+164         this.x -= (this.height * pageHeight) / (pageWidth * 2);
+165         this.y += (this.width * pageWidth) / (pageHeight * 2);
+166         break;
+167       case 180:
+168         this.x += this.width / 2;
+169         this.y += this.height / 2;
+170         break;
+171       case 270:
+172         this.x += (this.height * pageHeight) / (pageWidth * 2);
+173         this.y -= (this.width * pageWidth) / (pageHeight * 2);
+174         break;
+175       default:
+176         this.x -= this.width / 2;
+177         this.y -= this.height / 2;
+178         break;
+179     }
+180     this.fixAndSetPosition();
+181   }
+182 
+183   /**
+184    * Add some commands into the CommandManager (undo/redo stuff).
+185    * @param {Object} params
+186    */
+187   addCommands(params) {
+188     this._uiManager.addCommands(params);
+189   }
+190 
+191   get currentLayer() {
+192     return this._uiManager.currentLayer;
+193   }
+194 
+195   /**
+196    * This editor will be behind the others.
+197    */
+198   setInBackground() {
+199     this.div.style.zIndex = 0;
+200   }
+201 
+202   /**
+203    * This editor will be in the foreground.
+204    */
+205   setInForeground() {
+206     this.div.style.zIndex = this.#zIndex;
+207   }
+208 
+209   setParent(parent) {
+210     if (parent !== null) {
+211       this.pageIndex = parent.pageIndex;
+212       this.pageDimensions = parent.pageDimensions;
+213     }
+214     this.parent = parent;
+215   }
+216 
+217   /**
+218    * onfocus callback.
+219    */
+220   focusin(event) {
+221     if (!this._focusEventsAllowed) {
+222       return;
+223     }
+224     if (!this.#hasBeenClicked) {
+225       this.parent.setSelected(this);
+226     } else {
+227       this.#hasBeenClicked = false;
+228     }
+229   }
+230 
+231   /**
+232    * onblur callback.
+233    * @param {FocusEvent} event
+234    */
+235   focusout(event) {
+236     if (!this._focusEventsAllowed) {
+237       return;
+238     }
+239 
+240     if (!this.isAttachedToDOM) {
+241       return;
+242     }
+243 
+244     // In case of focusout, the relatedTarget is the element which
+245     // is grabbing the focus.
+246     // So if the related target is an element under the div for this
+247     // editor, then the editor isn't unactive.
+248     const target = event.relatedTarget;
+249     if (target?.closest(`#${this.id}`)) {
+250       return;
+251     }
+252 
+253     event.preventDefault();
+254 
+255     if (!this.parent?.isMultipleSelection) {
+256       this.commitOrRemove();
+257     }
+258   }
+259 
+260   commitOrRemove() {
+261     if (this.isEmpty()) {
+262       this.remove();
+263     } else {
+264       this.commit();
+265     }
+266   }
+267 
+268   /**
+269    * Commit the data contained in this editor.
+270    */
+271   commit() {
+272     this.addToAnnotationStorage();
+273   }
+274 
+275   addToAnnotationStorage() {
+276     this._uiManager.addToAnnotationStorage(this);
+277   }
+278 
+279   /**
+280    * Set the editor position within its parent.
+281    * @param {number} x
+282    * @param {number} y
+283    * @param {number} tx - x-translation in screen coordinates.
+284    * @param {number} ty - y-translation in screen coordinates.
+285    */
+286   setAt(x, y, tx, ty) {
+287     const [width, height] = this.parentDimensions;
+288     [tx, ty] = this.screenToPageTranslation(tx, ty);
+289 
+290     this.x = (x + tx) / width;
+291     this.y = (y + ty) / height;
+292 
+293     this.fixAndSetPosition();
+294   }
+295 
+296   #translate([width, height], x, y) {
+297     [x, y] = this.screenToPageTranslation(x, y);
+298 
+299     this.x += x / width;
+300     this.y += y / height;
+301 
+302     this.fixAndSetPosition();
+303   }
+304 
+305   /**
+306    * Translate the editor position within its parent.
+307    * @param {number} x - x-translation in screen coordinates.
+308    * @param {number} y - y-translation in screen coordinates.
+309    */
+310   translate(x, y) {
+311     this.#translate(this.parentDimensions, x, y);
+312   }
+313 
+314   /**
+315    * Translate the editor position within its page and adjust the scroll
+316    * in order to have the editor in the view.
+317    * @param {number} x - x-translation in page coordinates.
+318    * @param {number} y - y-translation in page coordinates.
+319    */
+320   translateInPage(x, y) {
+321     this.#translate(this.pageDimensions, x, y);
+322     this.moveInDOM();
+323     this.div.scrollIntoView({ block: "nearest" });
+324   }
+325 
+326   drag(tx, ty) {
+327     const [parentWidth, parentHeight] = this.parentDimensions;
+328     this.x += tx / parentWidth;
+329     this.y += ty / parentHeight;
+330     if (this.x < 0 || this.x > 1 || this.y < 0 || this.y > 1) {
+331       // The element will be outside of its parent so change the parent.
+332       const { x, y } = this.div.getBoundingClientRect();
+333       if (this.parent.findNewParent(this, x, y)) {
+334         this.x -= Math.floor(this.x);
+335         this.y -= Math.floor(this.y);
+336       }
+337     }
+338 
+339     // The editor can be moved wherever the user wants, so we don't need to fix
+340     // the position: it'll be done when the user will release the mouse button.
+341     this.div.style.left = `${(100 * this.x).toFixed(2)}%`;
+342     this.div.style.top = `${(100 * this.y).toFixed(2)}%`;
+343     this.div.scrollIntoView({ block: "nearest" });
+344   }
+345 
+346   fixAndSetPosition() {
+347     const [pageWidth, pageHeight] = this.pageDimensions;
+348     let { x, y, width, height } = this;
+349     width *= pageWidth;
+350     height *= pageHeight;
+351     x *= pageWidth;
+352     y *= pageHeight;
+353 
+354     switch (this.rotation) {
+355       case 0:
+356         x = Math.max(0, Math.min(pageWidth - width, x));
+357         y = Math.max(0, Math.min(pageHeight - height, y));
+358         break;
+359       case 90:
+360         x = Math.max(0, Math.min(pageWidth - height, x));
+361         y = Math.min(pageHeight, Math.max(width, y));
+362         break;
+363       case 180:
+364         x = Math.min(pageWidth, Math.max(width, x));
+365         y = Math.min(pageHeight, Math.max(height, y));
+366         break;
+367       case 270:
+368         x = Math.min(pageWidth, Math.max(height, x));
+369         y = Math.max(0, Math.min(pageHeight - width, y));
+370         break;
+371     }
+372 
+373     this.x = x / pageWidth;
+374     this.y = y / pageHeight;
+375 
+376     this.div.style.left = `${(100 * this.x).toFixed(2)}%`;
+377     this.div.style.top = `${(100 * this.y).toFixed(2)}%`;
+378   }
+379 
+380   static #rotatePoint(x, y, angle) {
+381     switch (angle) {
+382       case 90:
+383         return [y, -x];
+384       case 180:
+385         return [-x, -y];
+386       case 270:
+387         return [-y, x];
+388       default:
+389         return [x, y];
+390     }
+391   }
+392 
+393   /**
+394    * Convert a screen translation into a page one.
+395    * @param {number} x
+396    * @param {number} y
+397    */
+398   screenToPageTranslation(x, y) {
+399     return AnnotationEditor.#rotatePoint(x, y, this.parentRotation);
+400   }
+401 
+402   /**
+403    * Convert a page translation into a screen one.
+404    * @param {number} x
+405    * @param {number} y
+406    */
+407   pageTranslationToScreen(x, y) {
+408     return AnnotationEditor.#rotatePoint(x, y, 360 - this.parentRotation);
+409   }
+410 
+411   #getRotationMatrix(rotation) {
+412     switch (rotation) {
+413       case 90: {
+414         const [pageWidth, pageHeight] = this.pageDimensions;
+415         return [0, -pageWidth / pageHeight, pageHeight / pageWidth, 0];
+416       }
+417       case 180:
+418         return [-1, 0, 0, -1];
+419       case 270: {
+420         const [pageWidth, pageHeight] = this.pageDimensions;
+421         return [0, pageWidth / pageHeight, -pageHeight / pageWidth, 0];
+422       }
+423       default:
+424         return [1, 0, 0, 1];
+425     }
+426   }
+427 
+428   get parentScale() {
+429     return this._uiManager.viewParameters.realScale;
+430   }
+431 
+432   get parentRotation() {
+433     return (this._uiManager.viewParameters.rotation + this.pageRotation) % 360;
+434   }
+435 
+436   get parentDimensions() {
+437     const {
+438       parentScale,
+439       pageDimensions: [pageWidth, pageHeight],
+440     } = this;
+441     const scaledWidth = pageWidth * parentScale;
+442     const scaledHeight = pageHeight * parentScale;
+443     return FeatureTest.isCSSRoundSupported
+444       ? [Math.round(scaledWidth), Math.round(scaledHeight)]
+445       : [scaledWidth, scaledHeight];
+446   }
+447 
+448   /**
+449    * Set the dimensions of this editor.
+450    * @param {number} width
+451    * @param {number} height
+452    */
+453   setDims(width, height) {
+454     const [parentWidth, parentHeight] = this.parentDimensions;
+455     this.div.style.width = `${((100 * width) / parentWidth).toFixed(2)}%`;
+456     if (!this.#keepAspectRatio) {
+457       this.div.style.height = `${((100 * height) / parentHeight).toFixed(2)}%`;
+458     }
+459   }
+460 
+461   fixDims() {
+462     const { style } = this.div;
+463     const { height, width } = style;
+464     const widthPercent = width.endsWith("%");
+465     const heightPercent = !this.#keepAspectRatio && height.endsWith("%");
+466     if (widthPercent && heightPercent) {
+467       return;
+468     }
+469 
+470     const [parentWidth, parentHeight] = this.parentDimensions;
+471     if (!widthPercent) {
+472       style.width = `${((100 * parseFloat(width)) / parentWidth).toFixed(2)}%`;
+473     }
+474     if (!this.#keepAspectRatio && !heightPercent) {
+475       style.height = `${((100 * parseFloat(height)) / parentHeight).toFixed(
+476         2
+477       )}%`;
+478     }
+479   }
+480 
+481   /**
+482    * Get the translation used to position this editor when it's created.
+483    * @returns {Array<number>}
+484    */
+485   getInitialTranslation() {
+486     return [0, 0];
+487   }
+488 
+489   static #noContextMenu(e) {
+490     e.preventDefault();
+491   }
+492 
+493   #createResizers() {
+494     if (this.#resizersDiv) {
+495       return;
+496     }
+497     this.#resizersDiv = document.createElement("div");
+498     this.#resizersDiv.classList.add("resizers");
+499     const classes = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
+500     if (!this._willKeepAspectRatio) {
+501       classes.push("topMiddle", "middleRight", "bottomMiddle", "middleLeft");
+502     }
+503     for (const name of classes) {
+504       const div = document.createElement("div");
+505       this.#resizersDiv.append(div);
+506       div.classList.add("resizer", name);
+507       div.addEventListener(
+508         "pointerdown",
+509         this.#resizerPointerdown.bind(this, name)
+510       );
+511       div.addEventListener("contextmenu", AnnotationEditor.#noContextMenu);
+512     }
+513     this.div.prepend(this.#resizersDiv);
+514   }
+515 
+516   #resizerPointerdown(name, event) {
+517     event.preventDefault();
+518     const { isMac } = FeatureTest.platform;
+519     if (event.button !== 0 || (event.ctrlKey && isMac)) {
+520       return;
+521     }
+522 
+523     const boundResizerPointermove = this.#resizerPointermove.bind(this, name);
+524     const savedDraggable = this._isDraggable;
+525     this._isDraggable = false;
+526     const pointerMoveOptions = { passive: true, capture: true };
+527     window.addEventListener(
+528       "pointermove",
+529       boundResizerPointermove,
+530       pointerMoveOptions
+531     );
+532     const savedX = this.x;
+533     const savedY = this.y;
+534     const savedWidth = this.width;
+535     const savedHeight = this.height;
+536     const savedParentCursor = this.parent.div.style.cursor;
+537     const savedCursor = this.div.style.cursor;
+538     this.div.style.cursor = this.parent.div.style.cursor =
+539       window.getComputedStyle(event.target).cursor;
+540 
+541     const pointerUpCallback = () => {
+542       this._isDraggable = savedDraggable;
+543       window.removeEventListener("pointerup", pointerUpCallback);
+544       window.removeEventListener("blur", pointerUpCallback);
+545       window.removeEventListener(
+546         "pointermove",
+547         boundResizerPointermove,
+548         pointerMoveOptions
+549       );
+550       this.parent.div.style.cursor = savedParentCursor;
+551       this.div.style.cursor = savedCursor;
+552 
+553       const newX = this.x;
+554       const newY = this.y;
+555       const newWidth = this.width;
+556       const newHeight = this.height;
+557       if (
+558         newX === savedX &&
+559         newY === savedY &&
+560         newWidth === savedWidth &&
+561         newHeight === savedHeight
+562       ) {
+563         return;
+564       }
+565 
+566       this.addCommands({
+567         cmd: () => {
+568           this.width = newWidth;
+569           this.height = newHeight;
+570           this.x = newX;
+571           this.y = newY;
+572           const [parentWidth, parentHeight] = this.parentDimensions;
+573           this.setDims(parentWidth * newWidth, parentHeight * newHeight);
+574           this.fixAndSetPosition();
+575           this.moveInDOM();
+576         },
+577         undo: () => {
+578           this.width = savedWidth;
+579           this.height = savedHeight;
+580           this.x = savedX;
+581           this.y = savedY;
+582           const [parentWidth, parentHeight] = this.parentDimensions;
+583           this.setDims(parentWidth * savedWidth, parentHeight * savedHeight);
+584           this.fixAndSetPosition();
+585           this.moveInDOM();
+586         },
+587         mustExec: true,
+588       });
+589     };
+590     window.addEventListener("pointerup", pointerUpCallback);
+591     // If the user switches to another window (with alt+tab), then we end the
+592     // resize session.
+593     window.addEventListener("blur", pointerUpCallback);
+594   }
+595 
+596   #resizerPointermove(name, event) {
+597     const [parentWidth, parentHeight] = this.parentDimensions;
+598     const savedX = this.x;
+599     const savedY = this.y;
+600     const savedWidth = this.width;
+601     const savedHeight = this.height;
+602     const minWidth = AnnotationEditor.MIN_SIZE / parentWidth;
+603     const minHeight = AnnotationEditor.MIN_SIZE / parentHeight;
+604 
+605     // 10000 because we multiply by 100 and use toFixed(2) in fixAndSetPosition.
+606     // Without rounding, the positions of the corners other than the top left
+607     // one can be slightly wrong.
+608     const round = x => Math.round(x * 10000) / 10000;
+609     const rotationMatrix = this.#getRotationMatrix(this.rotation);
+610     const transf = (x, y) => [
+611       rotationMatrix[0] * x + rotationMatrix[2] * y,
+612       rotationMatrix[1] * x + rotationMatrix[3] * y,
+613     ];
+614     const invRotationMatrix = this.#getRotationMatrix(360 - this.rotation);
+615     const invTransf = (x, y) => [
+616       invRotationMatrix[0] * x + invRotationMatrix[2] * y,
+617       invRotationMatrix[1] * x + invRotationMatrix[3] * y,
+618     ];
+619     let getPoint;
+620     let getOpposite;
+621     let isDiagonal = false;
+622     let isHorizontal = false;
+623 
+624     switch (name) {
+625       case "topLeft":
+626         isDiagonal = true;
+627         getPoint = (w, h) => [0, 0];
+628         getOpposite = (w, h) => [w, h];
+629         break;
+630       case "topMiddle":
+631         getPoint = (w, h) => [w / 2, 0];
+632         getOpposite = (w, h) => [w / 2, h];
+633         break;
+634       case "topRight":
+635         isDiagonal = true;
+636         getPoint = (w, h) => [w, 0];
+637         getOpposite = (w, h) => [0, h];
+638         break;
+639       case "middleRight":
+640         isHorizontal = true;
+641         getPoint = (w, h) => [w, h / 2];
+642         getOpposite = (w, h) => [0, h / 2];
+643         break;
+644       case "bottomRight":
+645         isDiagonal = true;
+646         getPoint = (w, h) => [w, h];
+647         getOpposite = (w, h) => [0, 0];
+648         break;
+649       case "bottomMiddle":
+650         getPoint = (w, h) => [w / 2, h];
+651         getOpposite = (w, h) => [w / 2, 0];
+652         break;
+653       case "bottomLeft":
+654         isDiagonal = true;
+655         getPoint = (w, h) => [0, h];
+656         getOpposite = (w, h) => [w, 0];
+657         break;
+658       case "middleLeft":
+659         isHorizontal = true;
+660         getPoint = (w, h) => [0, h / 2];
+661         getOpposite = (w, h) => [w, h / 2];
+662         break;
+663     }
+664 
+665     const point = getPoint(savedWidth, savedHeight);
+666     const oppositePoint = getOpposite(savedWidth, savedHeight);
+667     let transfOppositePoint = transf(...oppositePoint);
+668     const oppositeX = round(savedX + transfOppositePoint[0]);
+669     const oppositeY = round(savedY + transfOppositePoint[1]);
+670     let ratioX = 1;
+671     let ratioY = 1;
+672 
+673     let [deltaX, deltaY] = this.screenToPageTranslation(
+674       event.movementX,
+675       event.movementY
+676     );
+677     [deltaX, deltaY] = invTransf(deltaX / parentWidth, deltaY / parentHeight);
+678 
+679     if (isDiagonal) {
+680       const oldDiag = Math.hypot(savedWidth, savedHeight);
+681       ratioX = ratioY = Math.max(
+682         Math.min(
+683           Math.hypot(
+684             oppositePoint[0] - point[0] - deltaX,
+685             oppositePoint[1] - point[1] - deltaY
+686           ) / oldDiag,
+687           // Avoid the editor to be larger than the page.
+688           1 / savedWidth,
+689           1 / savedHeight
+690         ),
+691         // Avoid the editor to be smaller than the minimum size.
+692         minWidth / savedWidth,
+693         minHeight / savedHeight
+694       );
+695     } else if (isHorizontal) {
+696       ratioX =
+697         Math.max(
+698           minWidth,
+699           Math.min(1, Math.abs(oppositePoint[0] - point[0] - deltaX))
+700         ) / savedWidth;
+701     } else {
+702       ratioY =
+703         Math.max(
+704           minHeight,
+705           Math.min(1, Math.abs(oppositePoint[1] - point[1] - deltaY))
+706         ) / savedHeight;
+707     }
+708 
+709     const newWidth = round(savedWidth * ratioX);
+710     const newHeight = round(savedHeight * ratioY);
+711     transfOppositePoint = transf(...getOpposite(newWidth, newHeight));
+712     const newX = oppositeX - transfOppositePoint[0];
+713     const newY = oppositeY - transfOppositePoint[1];
+714 
+715     this.width = newWidth;
+716     this.height = newHeight;
+717     this.x = newX;
+718     this.y = newY;
+719 
+720     this.setDims(parentWidth * newWidth, parentHeight * newHeight);
+721     this.fixAndSetPosition();
+722   }
+723 
+724   /**
+725    * Render this editor in a div.
+726    * @returns {HTMLDivElement}
+727    */
+728   render() {
+729     this.div = document.createElement("div");
+730     this.div.setAttribute("data-editor-rotation", (360 - this.rotation) % 360);
+731     this.div.className = this.name;
+732     this.div.setAttribute("id", this.id);
+733     this.div.setAttribute("tabIndex", 0);
+734 
+735     this.setInForeground();
+736 
+737     this.div.addEventListener("focusin", this.#boundFocusin);
+738     this.div.addEventListener("focusout", this.#boundFocusout);
+739 
+740     const [parentWidth, parentHeight] = this.parentDimensions;
+741     if (this.parentRotation % 180 !== 0) {
+742       this.div.style.maxWidth = `${((100 * parentHeight) / parentWidth).toFixed(
+743         2
+744       )}%`;
+745       this.div.style.maxHeight = `${(
+746         (100 * parentWidth) /
+747         parentHeight
+748       ).toFixed(2)}%`;
+749     }
+750 
+751     const [tx, ty] = this.getInitialTranslation();
+752     this.translate(tx, ty);
+753 
+754     bindEvents(this, this.div, ["pointerdown"]);
+755 
+756     return this.div;
+757   }
+758 
+759   /**
+760    * Onpointerdown callback.
+761    * @param {PointerEvent} event
+762    */
+763   pointerdown(event) {
+764     const { isMac } = FeatureTest.platform;
+765     if (event.button !== 0 || (event.ctrlKey && isMac)) {
+766       // Avoid to focus this editor because of a non-left click.
+767       event.preventDefault();
+768       return;
+769     }
+770 
+771     this.#hasBeenClicked = true;
+772 
+773     this.#setUpDragSession(event);
+774   }
+775 
+776   #setUpDragSession(event) {
+777     if (!this._isDraggable) {
+778       return;
+779     }
+780 
+781     const isSelected = this._uiManager.isSelected(this);
+782     this._uiManager.setUpDragSession();
+783 
+784     let pointerMoveOptions, pointerMoveCallback;
+785     if (isSelected) {
+786       pointerMoveOptions = { passive: true, capture: true };
+787       pointerMoveCallback = e => {
+788         const [tx, ty] = this.screenToPageTranslation(e.movementX, e.movementY);
+789         this._uiManager.dragSelectedEditors(tx, ty);
+790       };
+791       window.addEventListener(
+792         "pointermove",
+793         pointerMoveCallback,
+794         pointerMoveOptions
+795       );
+796     }
+797 
+798     const pointerUpCallback = () => {
+799       window.removeEventListener("pointerup", pointerUpCallback);
+800       window.removeEventListener("blur", pointerUpCallback);
+801       if (isSelected) {
+802         window.removeEventListener(
+803           "pointermove",
+804           pointerMoveCallback,
+805           pointerMoveOptions
+806         );
+807       }
+808 
+809       this.#hasBeenClicked = false;
+810       if (!this._uiManager.endDragSession()) {
+811         const { isMac } = FeatureTest.platform;
+812         if (
+813           (event.ctrlKey && !isMac) ||
+814           event.shiftKey ||
+815           (event.metaKey && isMac)
+816         ) {
+817           this.parent.toggleSelected(this);
+818         } else {
+819           this.parent.setSelected(this);
+820         }
+821       }
+822     };
+823     window.addEventListener("pointerup", pointerUpCallback);
+824     // If the user is using alt+tab during the dragging session, the pointerup
+825     // event could be not fired, but a blur event is fired so we can use it in
+826     // order to interrupt the dragging session.
+827     window.addEventListener("blur", pointerUpCallback);
+828   }
+829 
+830   moveInDOM() {
+831     this.parent.moveEditorInDOM(this);
+832   }
+833 
+834   _setParentAndPosition(parent, x, y) {
+835     parent.changeParent(this);
+836     this.x = x;
+837     this.y = y;
+838     this.fixAndSetPosition();
+839     this.moveInDOM();
+840   }
+841 
+842   /**
+843    * Convert the current rect into a page one.
+844    */
+845   getRect(tx, ty) {
+846     const scale = this.parentScale;
+847     const [pageWidth, pageHeight] = this.pageDimensions;
+848     const [pageX, pageY] = this.pageTranslation;
+849     const shiftX = tx / scale;
+850     const shiftY = ty / scale;
+851     const x = this.x * pageWidth;
+852     const y = this.y * pageHeight;
+853     const width = this.width * pageWidth;
+854     const height = this.height * pageHeight;
+855 
+856     switch (this.rotation) {
+857       case 0:
+858         return [
+859           x + shiftX + pageX,
+860           pageHeight - y - shiftY - height + pageY,
+861           x + shiftX + width + pageX,
+862           pageHeight - y - shiftY + pageY,
+863         ];
+864       case 90:
+865         return [
+866           x + shiftY + pageX,
+867           pageHeight - y + shiftX + pageY,
+868           x + shiftY + height + pageX,
+869           pageHeight - y + shiftX + width + pageY,
+870         ];
+871       case 180:
+872         return [
+873           x - shiftX - width + pageX,
+874           pageHeight - y + shiftY + pageY,
+875           x - shiftX + pageX,
+876           pageHeight - y + shiftY + height + pageY,
+877         ];
+878       case 270:
+879         return [
+880           x - shiftY - height + pageX,
+881           pageHeight - y - shiftX - width + pageY,
+882           x - shiftY + pageX,
+883           pageHeight - y - shiftX + pageY,
+884         ];
+885       default:
+886         throw new Error("Invalid rotation");
+887     }
+888   }
+889 
+890   getRectInCurrentCoords(rect, pageHeight) {
+891     const [x1, y1, x2, y2] = rect;
+892 
+893     const width = x2 - x1;
+894     const height = y2 - y1;
+895 
+896     switch (this.rotation) {
+897       case 0:
+898         return [x1, pageHeight - y2, width, height];
+899       case 90:
+900         return [x1, pageHeight - y1, height, width];
+901       case 180:
+902         return [x2, pageHeight - y1, width, height];
+903       case 270:
+904         return [x2, pageHeight - y2, height, width];
+905       default:
+906         throw new Error("Invalid rotation");
+907     }
+908   }
+909 
+910   /**
+911    * Executed once this editor has been rendered.
+912    */
+913   onceAdded() {}
+914 
+915   /**
+916    * Check if the editor contains something.
+917    * @returns {boolean}
+918    */
+919   isEmpty() {
+920     return false;
+921   }
+922 
+923   /**
+924    * Enable edit mode.
+925    */
+926   enableEditMode() {
+927     this.#isInEditMode = true;
+928   }
+929 
+930   /**
+931    * Disable edit mode.
+932    */
+933   disableEditMode() {
+934     this.#isInEditMode = false;
+935   }
+936 
+937   /**
+938    * Check if the editor is edited.
+939    * @returns {boolean}
+940    */
+941   isInEditMode() {
+942     return this.#isInEditMode;
+943   }
+944 
+945   /**
+946    * If it returns true, then this editor handle the keyboard
+947    * events itself.
+948    * @returns {boolean}
+949    */
+950   shouldGetKeyboardEvents() {
+951     return false;
+952   }
+953 
+954   /**
+955    * Check if this editor needs to be rebuilt or not.
+956    * @returns {boolean}
+957    */
+958   needsToBeRebuilt() {
+959     return this.div && !this.isAttachedToDOM;
+960   }
+961 
+962   /**
+963    * Rebuild the editor in case it has been removed on undo.
+964    *
+965    * To implement in subclasses.
+966    */
+967   rebuild() {
+968     this.div?.addEventListener("focusin", this.#boundFocusin);
+969     this.div?.addEventListener("focusout", this.#boundFocusout);
+970   }
+971 
+972   /**
+973    * Serialize the editor.
+974    * The result of the serialization will be used to construct a
+975    * new annotation to add to the pdf document.
+976    *
+977    * To implement in subclasses.
+978    * @param {boolean} isForCopying
+979    * @param {Object} [context]
+980    */
+981   serialize(_isForCopying = false, _context = null) {
+982     unreachable("An editor must be serializable");
+983   }
+984 
+985   /**
+986    * Deserialize the editor.
+987    * The result of the deserialization is a new editor.
+988    *
+989    * @param {Object} data
+990    * @param {AnnotationEditorLayer} parent
+991    * @param {AnnotationEditorUIManager} uiManager
+992    * @returns {AnnotationEditor}
+993    */
+994   static deserialize(data, parent, uiManager) {
+995     const editor = new this.prototype.constructor({
+996       parent,
+997       id: parent.getNextId(),
+998       uiManager,
+999     });
+1000     editor.rotation = data.rotation;
+1001 
+1002     const [pageWidth, pageHeight] = editor.pageDimensions;
+1003     const [x, y, width, height] = editor.getRectInCurrentCoords(
+1004       data.rect,
+1005       pageHeight
+1006     );
+1007     editor.x = x / pageWidth;
+1008     editor.y = y / pageHeight;
+1009     editor.width = width / pageWidth;
+1010     editor.height = height / pageHeight;
+1011 
+1012     return editor;
+1013   }
+1014 
+1015   /**
+1016    * Remove this editor.
+1017    * It's used on ctrl+backspace action.
+1018    */
+1019   remove() {
+1020     this.div.removeEventListener("focusin", this.#boundFocusin);
+1021     this.div.removeEventListener("focusout", this.#boundFocusout);
+1022 
+1023     if (!this.isEmpty()) {
+1024       // The editor is removed but it can be back at some point thanks to
+1025       // undo/redo so we must commit it before.
+1026       this.commit();
+1027     }
+1028     if (this.parent) {
+1029       this.parent.remove(this);
+1030     } else {
+1031       this._uiManager.removeEditor(this);
+1032     }
+1033   }
+1034 
+1035   /**
+1036    * @returns {boolean} true if this editor can be resized.
+1037    */
+1038   get isResizable() {
+1039     return false;
+1040   }
+1041 
+1042   /**
+1043    * Add the resizers to this editor.
+1044    */
+1045   makeResizable() {
+1046     if (this.isResizable) {
+1047       this.#createResizers();
+1048       this.#resizersDiv.classList.remove("hidden");
+1049     }
+1050   }
+1051 
+1052   /**
+1053    * Select this editor.
+1054    */
+1055   select() {
+1056     this.makeResizable();
+1057     this.div?.classList.add("selectedEditor");
+1058   }
+1059 
+1060   /**
+1061    * Unselect this editor.
+1062    */
+1063   unselect() {
+1064     this.#resizersDiv?.classList.add("hidden");
+1065     this.div?.classList.remove("selectedEditor");
+1066     if (this.div?.contains(document.activeElement)) {
+1067       // Don't use this.div.blur() because we don't know where the focus will
+1068       // go.
+1069       this._uiManager.currentLayer.div.focus();
+1070     }
+1071   }
+1072 
+1073   /**
+1074    * Update some parameters which have been changed through the UI.
+1075    * @param {number} type
+1076    * @param {*} value
+1077    */
+1078   updateParams(type, value) {}
+1079 
+1080   /**
+1081    * When the user disables the editing mode some editors can change some of
+1082    * their properties.
+1083    */
+1084   disableEditing() {}
+1085 
+1086   /**
+1087    * When the user enables the editing mode some editors can change some of
+1088    * their properties.
+1089    */
+1090   enableEditing() {}
+1091 
+1092   /**
+1093    * The editor is about to be edited.
+1094    */
+1095   enterInEditMode() {}
+1096 
+1097   /**
+1098    * Get the div which really contains the displayed content.
+1099    */
+1100   get contentDiv() {
+1101     return this.div;
+1102   }
+1103 
+1104   /**
+1105    * If true then the editor is currently edited.
+1106    * @type {boolean}
+1107    */
+1108   get isEditing() {
+1109     return this.#isEditing;
+1110   }
+1111 
+1112   /**
+1113    * When set to true, it means that this editor is currently edited.
+1114    * @param {boolean} value
+1115    */
+1116   set isEditing(value) {
+1117     this.#isEditing = value;
+1118     if (!this.parent) {
+1119       return;
+1120     }
+1121     if (value) {
+1122       this.parent.setSelected(this);
+1123       this.parent.setActiveEditor(this);
+1124     } else {
+1125       this.parent.setActiveEditor(null);
+1126     }
+1127   }
+1128 
+1129   /**
+1130    * Set the aspect ratio to use when resizing.
+1131    * @param {number} width
+1132    * @param {number} height
+1133    */
+1134   setAspectRatio(width, height) {
+1135     this.#keepAspectRatio = true;
+1136     const aspectRatio = width / height;
+1137     const { style } = this.div;
+1138     style.aspectRatio = aspectRatio;
+1139     style.height = "auto";
+1140   }
+1141 
+1142   static get MIN_SIZE() {
+1143     return 16;
+1144   }
+1145 }
+1146 
+1147 // This class is used to fake an editor which has been deleted.
+1148 class FakeEditor extends AnnotationEditor {
+1149   constructor(params) {
+1150     super(params);
+1151     this.annotationElementId = params.annotationElementId;
+1152     this.deleted = true;
+1153   }
+1154 
+1155   serialize() {
+1156     return {
+1157       id: this.annotationElementId,
+1158       deleted: true,
+1159       pageIndex: this.pageIndex,
+1160     };
+1161   }
+1162 }
+1163 
+1164 export { AnnotationEditor };
+File:
+src/display/editor/stamp.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { AnnotationEditorType, shadow } from "../../shared/util.js";
+17 import { AnnotationEditor } from "./editor.js";
+18 import { PixelsPerInch } from "../display_utils.js";
+19 import { StampAnnotationElement } from "../annotation_layer.js";
+20 
+21 /**
+22  * Basic text editor in order to create a FreeTex annotation.
+23  */
+24 class StampEditor extends AnnotationEditor {
+25   #bitmap = null;
+26 
+27   #bitmapId = null;
+28 
+29   #bitmapPromise = null;
+30 
+31   #bitmapUrl = null;
+32 
+33   #canvas = null;
+34 
+35   #observer = null;
+36 
+37   #resizeTimeoutId = null;
+38 
+39   #isSvg = false;
+40 
+41   #hasBeenAddedInUndoStack = false;
+42 
+43   static _type = "stamp";
+44 
+45   constructor(params) {
+46     super({ ...params, name: "stampEditor" });
+47     this.#bitmapUrl = params.bitmapUrl;
+48   }
+49 
+50   static get supportedTypes() {
+51     // See https://developer.mozilla.org/en-US/docs/Web/Media/Formats/Image_types
+52     // to know which types are supported by the browser.
+53     const types = [
+54       "apng",
+55       "avif",
+56       "bmp",
+57       "gif",
+58       "jpeg",
+59       "png",
+60       "svg+xml",
+61       "webp",
+62       "x-icon",
+63     ];
+64     return shadow(
+65       this,
+66       "supportedTypes",
+67       types.map(type => `image/${type}`).join(",")
+68     );
+69   }
+70 
+71   #getBitmapDone() {
+72     this._uiManager.enableWaiting(false);
+73     if (this.#canvas) {
+74       this.div.focus();
+75     }
+76   }
+77 
+78   #getBitmap() {
+79     if (this.#bitmapId) {
+80       this._uiManager.enableWaiting(true);
+81       this._uiManager.imageManager
+82         .getFromId(this.#bitmapId)
+83         .then(data => {
+84           if (!data) {
+85             this.remove();
+86             return;
+87           }
+88           this.#bitmap = data.bitmap;
+89           this.#createCanvas();
+90         })
+91         .finally(() => this.#getBitmapDone());
+92       return;
+93     }
+94 
+95     if (this.#bitmapUrl) {
+96       const url = this.#bitmapUrl;
+97       this.#bitmapUrl = null;
+98       this._uiManager.enableWaiting(true);
+99       this.#bitmapPromise = this._uiManager.imageManager
+100         .getFromUrl(url)
+101         .then(data => {
+102           this.#bitmapPromise = null;
+103           if (!data) {
+104             this.remove();
+105             return;
+106           }
+107           ({
+108             bitmap: this.#bitmap,
+109             id: this.#bitmapId,
+110             isSvg: this.#isSvg,
+111           } = data);
+112           this.#createCanvas();
+113         })
+114         .finally(() => this.#getBitmapDone());
+115       return;
+116     }
+117 
+118     const input = document.createElement("input");
+119     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+120       input.hidden = true;
+121       input.id = "stampEditorFileInput";
+122       document.body.append(input);
+123     }
+124     input.type = "file";
+125     input.accept = StampEditor.supportedTypes;
+126     this.#bitmapPromise = new Promise(resolve => {
+127       input.addEventListener("change", async () => {
+128         this.#bitmapPromise = null;
+129         if (!input.files || input.files.length === 0) {
+130           this.remove();
+131         } else {
+132           this._uiManager.enableWaiting(true);
+133           const data = await this._uiManager.imageManager.getFromFile(
+134             input.files[0]
+135           );
+136           if (!data) {
+137             this.remove();
+138             return;
+139           }
+140           ({
+141             bitmap: this.#bitmap,
+142             id: this.#bitmapId,
+143             isSvg: this.#isSvg,
+144           } = data);
+145           this.#createCanvas();
+146         }
+147         if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+148           input.remove();
+149         }
+150         resolve();
+151       });
+152       input.addEventListener("cancel", () => {
+153         this.#bitmapPromise = null;
+154         this.remove();
+155         resolve();
+156       });
+157     }).finally(() => this.#getBitmapDone());
+158     if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("TESTING")) {
+159       input.click();
+160     }
+161   }
+162 
+163   /** @inheritdoc */
+164   remove() {
+165     if (this.#bitmapId) {
+166       this.#bitmap = null;
+167       this._uiManager.imageManager.deleteId(this.#bitmapId);
+168       this.#canvas?.remove();
+169       this.#canvas = null;
+170       this.#observer?.disconnect();
+171       this.#observer = null;
+172     }
+173     super.remove();
+174   }
+175 
+176   /** @inheritdoc */
+177   rebuild() {
+178     if (!this.parent) {
+179       // It's possible to have to rebuild an editor which is not on a visible
+180       // page.
+181       if (this.#bitmapId) {
+182         this.#getBitmap();
+183       }
+184       return;
+185     }
+186     super.rebuild();
+187     if (this.div === null) {
+188       return;
+189     }
+190 
+191     if (this.#bitmapId) {
+192       this.#getBitmap();
+193     }
+194 
+195     if (!this.isAttachedToDOM) {
+196       // At some point this editor was removed and we're rebuilting it,
+197       // hence we must add it to its parent.
+198       this.parent.add(this);
+199     }
+200   }
+201 
+202   /** @inheritdoc */
+203   onceAdded() {
+204     this._isDraggable = true;
+205     this.div.focus();
+206   }
+207 
+208   /** @inheritdoc */
+209   isEmpty() {
+210     return (
+211       this.#bitmapPromise === null &&
+212       this.#bitmap === null &&
+213       this.#bitmapUrl === null
+214     );
+215   }
+216 
+217   /** @inheritdoc */
+218   get isResizable() {
+219     return true;
+220   }
+221 
+222   /** @inheritdoc */
+223   render() {
+224     if (this.div) {
+225       return this.div;
+226     }
+227 
+228     let baseX, baseY;
+229     if (this.width) {
+230       baseX = this.x;
+231       baseY = this.y;
+232     }
+233 
+234     super.render();
+235     this.div.hidden = true;
+236 
+237     if (this.#bitmap) {
+238       this.#createCanvas();
+239     } else {
+240       this.#getBitmap();
+241     }
+242 
+243     if (this.width) {
+244       // This editor was created in using copy (ctrl+c).
+245       const [parentWidth, parentHeight] = this.parentDimensions;
+246       this.setAt(
+247         baseX * parentWidth,
+248         baseY * parentHeight,
+249         this.width * parentWidth,
+250         this.height * parentHeight
+251       );
+252     }
+253 
+254     return this.div;
+255   }
+256 
+257   #createCanvas() {
+258     const { div } = this;
+259     let { width, height } = this.#bitmap;
+260     const [pageWidth, pageHeight] = this.pageDimensions;
+261     const MAX_RATIO = 0.75;
+262     if (this.width) {
+263       width = this.width * pageWidth;
+264       height = this.height * pageHeight;
+265     } else if (
+266       width > MAX_RATIO * pageWidth ||
+267       height > MAX_RATIO * pageHeight
+268     ) {
+269       // If the the image is too big compared to the page dimensions
+270       // (more than MAX_RATIO) then we scale it down.
+271       const factor = Math.min(
+272         (MAX_RATIO * pageWidth) / width,
+273         (MAX_RATIO * pageHeight) / height
+274       );
+275       width *= factor;
+276       height *= factor;
+277     }
+278     const [parentWidth, parentHeight] = this.parentDimensions;
+279     this.setDims(
+280       (width * parentWidth) / pageWidth,
+281       (height * parentHeight) / pageHeight
+282     );
+283 
+284     this._uiManager.enableWaiting(false);
+285     const canvas = (this.#canvas = document.createElement("canvas"));
+286     div.append(canvas);
+287     div.hidden = false;
+288     this.#drawBitmap(width, height);
+289     this.#createObserver();
+290     if (!this.#hasBeenAddedInUndoStack) {
+291       this.parent.addUndoableEditor(this);
+292       this.#hasBeenAddedInUndoStack = true;
+293     }
+294   }
+295 
+296   /**
+297    * When the dimensions of the div change the inner canvas must
+298    * renew its dimensions, hence it must redraw its own contents.
+299    * @param {number} width - the new width of the div
+300    * @param {number} height - the new height of the div
+301    * @returns
+302    */
+303   #setDimensions(width, height) {
+304     const [parentWidth, parentHeight] = this.parentDimensions;
+305     this.width = width / parentWidth;
+306     this.height = height / parentHeight;
+307     this.setDims(width, height);
+308     if (this._initialOptions?.isCentered) {
+309       this.center();
+310     } else {
+311       this.fixAndSetPosition();
+312     }
+313     this._initialOptions = null;
+314     if (this.#resizeTimeoutId !== null) {
+315       clearTimeout(this.#resizeTimeoutId);
+316     }
+317     // When the user is resizing the editor we just use CSS to scale the image
+318     // to avoid redrawing it too often.
+319     // And once the user stops resizing the editor we redraw the image in
+320     // rescaling it correctly (see this.#scaleBitmap).
+321     const TIME_TO_WAIT = 200;
+322     this.#resizeTimeoutId = setTimeout(() => {
+323       this.#resizeTimeoutId = null;
+324       this.#drawBitmap(width, height);
+325     }, TIME_TO_WAIT);
+326   }
+327 
+328   #scaleBitmap(width, height) {
+329     const { width: bitmapWidth, height: bitmapHeight } = this.#bitmap;
+330 
+331     let newWidth = bitmapWidth;
+332     let newHeight = bitmapHeight;
+333     let bitmap = this.#bitmap;
+334     while (newWidth > 2 * width || newHeight > 2 * height) {
+335       const prevWidth = newWidth;
+336       const prevHeight = newHeight;
+337 
+338       if (newWidth > 2 * width) {
+339         // See bug 1820511 (Windows specific bug).
+340         // TODO: once the above bug is fixed we could revert to:
+341         // newWidth = Math.ceil(newWidth / 2);
+342         newWidth =
+343           newWidth >= 16384
+344             ? Math.floor(newWidth / 2) - 1
+345             : Math.ceil(newWidth / 2);
+346       }
+347       if (newHeight > 2 * height) {
+348         newHeight =
+349           newHeight >= 16384
+350             ? Math.floor(newHeight / 2) - 1
+351             : Math.ceil(newHeight / 2);
+352       }
+353 
+354       const offscreen = new OffscreenCanvas(newWidth, newHeight);
+355       const ctx = offscreen.getContext("2d");
+356       ctx.drawImage(
+357         bitmap,
+358         0,
+359         0,
+360         prevWidth,
+361         prevHeight,
+362         0,
+363         0,
+364         newWidth,
+365         newHeight
+366       );
+367       bitmap = offscreen.transferToImageBitmap();
+368     }
+369 
+370     return bitmap;
+371   }
+372 
+373   #drawBitmap(width, height) {
+374     width = Math.ceil(width);
+375     height = Math.ceil(height);
+376     const canvas = this.#canvas;
+377     if (!canvas || (canvas.width === width && canvas.height === height)) {
+378       return;
+379     }
+380     canvas.width = width;
+381     canvas.height = height;
+382     const bitmap = this.#isSvg
+383       ? this.#bitmap
+384       : this.#scaleBitmap(width, height);
+385     const ctx = canvas.getContext("2d");
+386     ctx.filter = this._uiManager.hcmFilter;
+387     ctx.drawImage(
+388       bitmap,
+389       0,
+390       0,
+391       bitmap.width,
+392       bitmap.height,
+393       0,
+394       0,
+395       width,
+396       height
+397     );
+398   }
+399 
+400   #serializeBitmap(toUrl) {
+401     if (toUrl) {
+402       if (this.#isSvg) {
+403         const url = this._uiManager.imageManager.getSvgUrl(this.#bitmapId);
+404         if (url) {
+405           return url;
+406         }
+407       }
+408       // We convert to a data url because it's sync and the url can live in the
+409       // clipboard.
+410       const canvas = document.createElement("canvas");
+411       ({ width: canvas.width, height: canvas.height } = this.#bitmap);
+412       const ctx = canvas.getContext("2d");
+413       ctx.drawImage(this.#bitmap, 0, 0);
+414 
+415       return canvas.toDataURL();
+416     }
+417 
+418     if (this.#isSvg) {
+419       const [pageWidth, pageHeight] = this.pageDimensions;
+420       // Multiply by PixelsPerInch.PDF_TO_CSS_UNITS in order to increase the
+421       // image resolution when rasterizing it.
+422       const width = Math.round(
+423         this.width * pageWidth * PixelsPerInch.PDF_TO_CSS_UNITS
+424       );
+425       const height = Math.round(
+426         this.height * pageHeight * PixelsPerInch.PDF_TO_CSS_UNITS
+427       );
+428       const offscreen = new OffscreenCanvas(width, height);
+429       const ctx = offscreen.getContext("2d");
+430       ctx.drawImage(
+431         this.#bitmap,
+432         0,
+433         0,
+434         this.#bitmap.width,
+435         this.#bitmap.height,
+436         0,
+437         0,
+438         width,
+439         height
+440       );
+441       return offscreen.transferToImageBitmap();
+442     }
+443 
+444     return structuredClone(this.#bitmap);
+445   }
+446 
+447   /**
+448    * Create the resize observer.
+449    */
+450   #createObserver() {
+451     this.#observer = new ResizeObserver(entries => {
+452       const rect = entries[0].contentRect;
+453       if (rect.width && rect.height) {
+454         this.#setDimensions(rect.width, rect.height);
+455       }
+456     });
+457     this.#observer.observe(this.div);
+458   }
+459 
+460   /** @inheritdoc */
+461   static deserialize(data, parent, uiManager) {
+462     if (data instanceof StampAnnotationElement) {
+463       return null;
+464     }
+465     const editor = super.deserialize(data, parent, uiManager);
+466     const { rect, bitmapUrl, bitmapId, isSvg } = data;
+467     if (bitmapId && uiManager.imageManager.isValidId(bitmapId)) {
+468       editor.#bitmapId = bitmapId;
+469     } else {
+470       editor.#bitmapUrl = bitmapUrl;
+471     }
+472     editor.#isSvg = isSvg;
+473 
+474     const [parentWidth, parentHeight] = editor.pageDimensions;
+475     editor.width = (rect[2] - rect[0]) / parentWidth;
+476     editor.height = (rect[3] - rect[1]) / parentHeight;
+477 
+478     return editor;
+479   }
+480 
+481   /** @inheritdoc */
+482   serialize(isForCopying = false, context = null) {
+483     if (this.isEmpty()) {
+484       return null;
+485     }
+486 
+487     const serialized = {
+488       annotationType: AnnotationEditorType.STAMP,
+489       bitmapId: this.#bitmapId,
+490       pageIndex: this.pageIndex,
+491       rect: this.getRect(0, 0),
+492       rotation: this.rotation,
+493       isSvg: this.#isSvg,
+494     };
+495 
+496     if (isForCopying) {
+497       // We don't know what's the final destination (this pdf or another one)
+498       // of this annotation and the clipboard doesn't support ImageBitmaps,
+499       // hence we serialize the bitmap to a data url.
+500       serialized.bitmapUrl = this.#serializeBitmap(/* toUrl = */ true);
+501       return serialized;
+502     }
+503 
+504     if (context === null) {
+505       return serialized;
+506     }
+507 
+508     context.stamps ||= new Map();
+509     const area = this.#isSvg
+510       ? (serialized.rect[2] - serialized.rect[0]) *
+511         (serialized.rect[3] - serialized.rect[1])
+512       : null;
+513     if (!context.stamps.has(this.#bitmapId)) {
+514       // We don't want to have multiple copies of the same bitmap in the
+515       // annotationMap, hence we only add the bitmap the first time we meet it.
+516       context.stamps.set(this.#bitmapId, { area, serialized });
+517       serialized.bitmap = this.#serializeBitmap(/* toUrl = */ false);
+518     } else if (this.#isSvg) {
+519       // If we have multiple copies of the same svg but with different sizes,
+520       // then we want to keep the biggest one.
+521       const prevData = context.stamps.get(this.#bitmapId);
+522       if (area > prevData.area) {
+523         prevData.area = area;
+524         prevData.serialized.bitmap.close();
+525         prevData.serialized.bitmap = this.#serializeBitmap(/* toUrl = */ false);
+526       }
+527     }
+528     return serialized;
+529   }
+530 }
+531 
+532 export { StampEditor };
+File:
+src/display/editor/tools.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 /** @typedef {import("./editor.js").AnnotationEditor} AnnotationEditor */
+17 // eslint-disable-next-line max-len
+18 /** @typedef {import("./annotation_editor_layer.js").AnnotationEditorLayer} AnnotationEditorLayer */
+19 
+20 import {
+21   AnnotationEditorParamsType,
+22   AnnotationEditorPrefix,
+23   AnnotationEditorType,
+24   FeatureTest,
+25   getUuid,
+26   shadow,
+27   Util,
+28   warn,
+29 } from "../../shared/util.js";
+30 import { getColorValues, getRGB, PixelsPerInch } from "../display_utils.js";
+31 
+32 function bindEvents(obj, element, names) {
+33   for (const name of names) {
+34     element.addEventListener(name, obj[name].bind(obj));
+35   }
+36 }
+37 
+38 /**
+39  * Convert a number between 0 and 100 into an hex number between 0 and 255.
+40  * @param {number} opacity
+41  * @return {string}
+42  */
+43 function opacityToHex(opacity) {
+44   return Math.round(Math.min(255, Math.max(1, 255 * opacity)))
+45     .toString(16)
+46     .padStart(2, "0");
+47 }
+48 
+49 /**
+50  * Class to create some unique ids for the different editors.
+51  */
+52 class IdManager {
+53   #id = 0;
+54 
+55   /**
+56    * Get a unique id.
+57    * @returns {string}
+58    */
+59   getId() {
+60     return `${AnnotationEditorPrefix}${this.#id++}`;
+61   }
+62 }
+63 
+64 /**
+65  * Class to manage the images used by the editors.
+66  * The main idea is to try to minimize the memory used by the images.
+67  * The images are cached and reused when possible
+68  * We use a refCounter to know when an image is not used anymore but we need to
+69  * be able to restore an image after a remove+undo, so we keep a file reference
+70  * or an url one.
+71  */
+72 class ImageManager {
+73   #baseId = getUuid();
+74 
+75   #id = 0;
+76 
+77   #cache = null;
+78 
+79   static get _isSVGFittingCanvas() {
+80     // By default, Firefox doesn't rescale without preserving the aspect ratio
+81     // when drawing an SVG image on a canvas, see https://bugzilla.mozilla.org/1547776.
+82     // The "workaround" is to append "svgView(preserveAspectRatio(none))" to the
+83     // url, but according to comment #15, it seems that it leads to unexpected
+84     // behavior in Safari.
+85     const svg = `data:image/svg+xml;charset=UTF-8,<svg viewBox="0 0 1 1" width="1" height="1" xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1" style="fill:red;"/></svg>`;
+86     const canvas = new OffscreenCanvas(1, 3);
+87     const ctx = canvas.getContext("2d");
+88     const image = new Image();
+89     image.src = svg;
+90     const promise = image.decode().then(() => {
+91       ctx.drawImage(image, 0, 0, 1, 1, 0, 0, 1, 3);
+92       return new Uint32Array(ctx.getImageData(0, 0, 1, 1).data.buffer)[0] === 0;
+93     });
+94 
+95     return shadow(this, "_isSVGFittingCanvas", promise);
+96   }
+97 
+98   async #get(key, rawData) {
+99     this.#cache ||= new Map();
+100     let data = this.#cache.get(key);
+101     if (data === null) {
+102       // We already tried to load the image but it failed.
+103       return null;
+104     }
+105     if (data?.bitmap) {
+106       data.refCounter += 1;
+107       return data;
+108     }
+109     try {
+110       data ||= {
+111         bitmap: null,
+112         id: `image_${this.#baseId}_${this.#id++}`,
+113         refCounter: 0,
+114         isSvg: false,
+115       };
+116       let image;
+117       if (typeof rawData === "string") {
+118         data.url = rawData;
+119 
+120         const response = await fetch(rawData);
+121         if (!response.ok) {
+122           throw new Error(response.statusText);
+123         }
+124         image = await response.blob();
+125       } else {
+126         image = data.file = rawData;
+127       }
+128 
+129       if (image.type === "image/svg+xml") {
+130         // Unfortunately, createImageBitmap doesn't work with SVG images.
+131         // (see https://bugzilla.mozilla.org/1841972).
+132         const mustRemoveAspectRatioPromise = ImageManager._isSVGFittingCanvas;
+133         const fileReader = new FileReader();
+134         const imageElement = new Image();
+135         const imagePromise = new Promise((resolve, reject) => {
+136           imageElement.onload = () => {
+137             data.bitmap = imageElement;
+138             data.isSvg = true;
+139             resolve();
+140           };
+141           fileReader.onload = async () => {
+142             const url = (data.svgUrl = fileReader.result);
+143             // We need to set the preserveAspectRatio to none in order to let
+144             // the image fits the canvas when resizing.
+145             imageElement.src = (await mustRemoveAspectRatioPromise)
+146               ? `${url}#svgView(preserveAspectRatio(none))`
+147               : url;
+148           };
+149           imageElement.onerror = fileReader.onerror = reject;
+150         });
+151         fileReader.readAsDataURL(image);
+152         await imagePromise;
+153       } else {
+154         data.bitmap = await createImageBitmap(image);
+155       }
+156       data.refCounter = 1;
+157     } catch (e) {
+158       console.error(e);
+159       data = null;
+160     }
+161     this.#cache.set(key, data);
+162     if (data) {
+163       this.#cache.set(data.id, data);
+164     }
+165     return data;
+166   }
+167 
+168   async getFromFile(file) {
+169     const { lastModified, name, size, type } = file;
+170     return this.#get(`${lastModified}_${name}_${size}_${type}`, file);
+171   }
+172 
+173   async getFromUrl(url) {
+174     return this.#get(url, url);
+175   }
+176 
+177   async getFromId(id) {
+178     this.#cache ||= new Map();
+179     const data = this.#cache.get(id);
+180     if (!data) {
+181       return null;
+182     }
+183     if (data.bitmap) {
+184       data.refCounter += 1;
+185       return data;
+186     }
+187 
+188     if (data.file) {
+189       return this.getFromFile(data.file);
+190     }
+191     return this.getFromUrl(data.url);
+192   }
+193 
+194   getSvgUrl(id) {
+195     const data = this.#cache.get(id);
+196     if (!data?.isSvg) {
+197       return null;
+198     }
+199     return data.svgUrl;
+200   }
+201 
+202   deleteId(id) {
+203     this.#cache ||= new Map();
+204     const data = this.#cache.get(id);
+205     if (!data) {
+206       return;
+207     }
+208     data.refCounter -= 1;
+209     if (data.refCounter !== 0) {
+210       return;
+211     }
+212     data.bitmap = null;
+213   }
+214 
+215   // We can use the id only if it belongs this manager.
+216   // We must take care of having the right manager because we can copy/paste
+217   // some images from other documents, hence it'd be a pity to use an id from an
+218   // other manager.
+219   isValidId(id) {
+220     return id.startsWith(`image_${this.#baseId}_`);
+221   }
+222 }
+223 
+224 /**
+225  * Class to handle undo/redo.
+226  * Commands are just saved in a buffer.
+227  * If we hit some memory issues we could likely use a circular buffer.
+228  * It has to be used as a singleton.
+229  */
+230 class CommandManager {
+231   #commands = [];
+232 
+233   #locked = false;
+234 
+235   #maxSize;
+236 
+237   #position = -1;
+238 
+239   constructor(maxSize = 128) {
+240     this.#maxSize = maxSize;
+241   }
+242 
+243   /**
+244    * @typedef {Object} addOptions
+245    * @property {function} cmd
+246    * @property {function} undo
+247    * @property {boolean} mustExec
+248    * @property {number} type
+249    * @property {boolean} overwriteIfSameType
+250    * @property {boolean} keepUndo
+251    */
+252 
+253   /**
+254    * Add a new couple of commands to be used in case of redo/undo.
+255    * @param {addOptions} options
+256    */
+257   add({
+258     cmd,
+259     undo,
+260     mustExec,
+261     type = NaN,
+262     overwriteIfSameType = false,
+263     keepUndo = false,
+264   }) {
+265     if (mustExec) {
+266       cmd();
+267     }
+268 
+269     if (this.#locked) {
+270       return;
+271     }
+272 
+273     const save = { cmd, undo, type };
+274     if (this.#position === -1) {
+275       if (this.#commands.length > 0) {
+276         // All the commands have been undone and then a new one is added
+277         // hence we clear the queue.
+278         this.#commands.length = 0;
+279       }
+280       this.#position = 0;
+281       this.#commands.push(save);
+282       return;
+283     }
+284 
+285     if (overwriteIfSameType && this.#commands[this.#position].type === type) {
+286       // For example when we change a color we don't want to
+287       // be able to undo all the steps, hence we only want to
+288       // keep the last undoable action in this sequence of actions.
+289       if (keepUndo) {
+290         save.undo = this.#commands[this.#position].undo;
+291       }
+292       this.#commands[this.#position] = save;
+293       return;
+294     }
+295 
+296     const next = this.#position + 1;
+297     if (next === this.#maxSize) {
+298       this.#commands.splice(0, 1);
+299     } else {
+300       this.#position = next;
+301       if (next < this.#commands.length) {
+302         this.#commands.splice(next);
+303       }
+304     }
+305 
+306     this.#commands.push(save);
+307   }
+308 
+309   /**
+310    * Undo the last command.
+311    */
+312   undo() {
+313     if (this.#position === -1) {
+314       // Nothing to undo.
+315       return;
+316     }
+317 
+318     // Avoid to insert something during the undo execution.
+319     this.#locked = true;
+320     this.#commands[this.#position].undo();
+321     this.#locked = false;
+322 
+323     this.#position -= 1;
+324   }
+325 
+326   /**
+327    * Redo the last command.
+328    */
+329   redo() {
+330     if (this.#position < this.#commands.length - 1) {
+331       this.#position += 1;
+332 
+333       // Avoid to insert something during the redo execution.
+334       this.#locked = true;
+335       this.#commands[this.#position].cmd();
+336       this.#locked = false;
+337     }
+338   }
+339 
+340   /**
+341    * Check if there is something to undo.
+342    * @returns {boolean}
+343    */
+344   hasSomethingToUndo() {
+345     return this.#position !== -1;
+346   }
+347 
+348   /**
+349    * Check if there is something to redo.
+350    * @returns {boolean}
+351    */
+352   hasSomethingToRedo() {
+353     return this.#position < this.#commands.length - 1;
+354   }
+355 
+356   destroy() {
+357     this.#commands = null;
+358   }
+359 }
+360 
+361 /**
+362  * Class to handle the different keyboards shortcuts we can have on mac or
+363  * non-mac OSes.
+364  */
+365 class KeyboardManager {
+366   /**
+367    * Create a new keyboard manager class.
+368    * @param {Array<Array>} callbacks - an array containing an array of shortcuts
+369    * and a callback to call.
+370    * A shortcut is a string like `ctrl+c` or `mac+ctrl+c` for mac OS.
+371    */
+372   constructor(callbacks) {
+373     this.buffer = [];
+374     this.callbacks = new Map();
+375     this.allKeys = new Set();
+376 
+377     const { isMac } = FeatureTest.platform;
+378     for (const [keys, callback, options = {}] of callbacks) {
+379       for (const key of keys) {
+380         const isMacKey = key.startsWith("mac+");
+381         if (isMac && isMacKey) {
+382           this.callbacks.set(key.slice(4), { callback, options });
+383           this.allKeys.add(key.split("+").at(-1));
+384         } else if (!isMac && !isMacKey) {
+385           this.callbacks.set(key, { callback, options });
+386           this.allKeys.add(key.split("+").at(-1));
+387         }
+388       }
+389     }
+390   }
+391 
+392   /**
+393    * Serialize an event into a string in order to match a
+394    * potential key for a callback.
+395    * @param {KeyboardEvent} event
+396    * @returns {string}
+397    */
+398   #serialize(event) {
+399     if (event.altKey) {
+400       this.buffer.push("alt");
+401     }
+402     if (event.ctrlKey) {
+403       this.buffer.push("ctrl");
+404     }
+405     if (event.metaKey) {
+406       this.buffer.push("meta");
+407     }
+408     if (event.shiftKey) {
+409       this.buffer.push("shift");
+410     }
+411     this.buffer.push(event.key);
+412     const str = this.buffer.join("+");
+413     this.buffer.length = 0;
+414 
+415     return str;
+416   }
+417 
+418   /**
+419    * Execute a callback, if any, for a given keyboard event.
+420    * The self is used as `this` in the callback.
+421    * @param {Object} self.
+422    * @param {KeyboardEvent} event
+423    * @returns
+424    */
+425   exec(self, event) {
+426     if (!this.allKeys.has(event.key)) {
+427       return;
+428     }
+429     const info = this.callbacks.get(this.#serialize(event));
+430     if (!info) {
+431       return;
+432     }
+433     const {
+434       callback,
+435       options: { bubbles = false, args = [], checker = null },
+436     } = info;
+437 
+438     if (checker && !checker(self, event)) {
+439       return;
+440     }
+441     callback.bind(self, ...args)();
+442 
+443     // For example, ctrl+s in a FreeText must be handled by the viewer, hence
+444     // the event must bubble.
+445     if (!bubbles) {
+446       event.stopPropagation();
+447       event.preventDefault();
+448     }
+449   }
+450 }
+451 
+452 class ColorManager {
+453   static _colorsMapping = new Map([
+454     ["CanvasText", [0, 0, 0]],
+455     ["Canvas", [255, 255, 255]],
+456   ]);
+457 
+458   get _colors() {
+459     if (
+460       typeof PDFJSDev !== "undefined" &&
+461       PDFJSDev.test("LIB") &&
+462       typeof document === "undefined"
+463     ) {
+464       return shadow(this, "_colors", ColorManager._colorsMapping);
+465     }
+466 
+467     const colors = new Map([
+468       ["CanvasText", null],
+469       ["Canvas", null],
+470     ]);
+471     getColorValues(colors);
+472     return shadow(this, "_colors", colors);
+473   }
+474 
+475   /**
+476    * In High Contrast Mode, the color on the screen is not always the
+477    * real color used in the pdf.
+478    * For example in some cases white can appear to be black but when saving
+479    * we want to have white.
+480    * @param {string} color
+481    * @returns {Array<number>}
+482    */
+483   convert(color) {
+484     const rgb = getRGB(color);
+485     if (!window.matchMedia("(forced-colors: active)").matches) {
+486       return rgb;
+487     }
+488 
+489     for (const [name, RGB] of this._colors) {
+490       if (RGB.every((x, i) => x === rgb[i])) {
+491         return ColorManager._colorsMapping.get(name);
+492       }
+493     }
+494     return rgb;
+495   }
+496 
+497   /**
+498    * An input element must have its color value as a hex string
+499    * and not as color name.
+500    * So this function converts a name into an hex string.
+501    * @param {string} name
+502    * @returns {string}
+503    */
+504   getHexCode(name) {
+505     const rgb = this._colors.get(name);
+506     if (!rgb) {
+507       return name;
+508     }
+509     return Util.makeHexColor(...rgb);
+510   }
+511 }
+512 
+513 /**
+514  * A pdf has several pages and each of them when it will rendered
+515  * will have an AnnotationEditorLayer which will contain the some
+516  * new Annotations associated to an editor in order to modify them.
+517  *
+518  * This class is used to manage all the different layers, editors and
+519  * some action like copy/paste, undo/redo, ...
+520  */
+521 class AnnotationEditorUIManager {
+522   #activeEditor = null;
+523 
+524   #allEditors = new Map();
+525 
+526   #allLayers = new Map();
+527 
+528   #annotationStorage = null;
+529 
+530   #commandManager = new CommandManager();
+531 
+532   #currentPageIndex = 0;
+533 
+534   #deletedAnnotationsElementIds = new Set();
+535 
+536   #draggingEditors = null;
+537 
+538   #editorTypes = null;
+539 
+540   #editorsToRescale = new Set();
+541 
+542   #eventBus = null;
+543 
+544   #filterFactory = null;
+545 
+546   #idManager = new IdManager();
+547 
+548   #isEnabled = false;
+549 
+550   #isWaiting = false;
+551 
+552   #lastActiveElement = null;
+553 
+554   #mode = AnnotationEditorType.NONE;
+555 
+556   #selectedEditors = new Set();
+557 
+558   #pageColors = null;
+559 
+560   #boundBlur = this.blur.bind(this);
+561 
+562   #boundFocus = this.focus.bind(this);
+563 
+564   #boundCopy = this.copy.bind(this);
+565 
+566   #boundCut = this.cut.bind(this);
+567 
+568   #boundPaste = this.paste.bind(this);
+569 
+570   #boundKeydown = this.keydown.bind(this);
+571 
+572   #boundOnEditingAction = this.onEditingAction.bind(this);
+573 
+574   #boundOnPageChanging = this.onPageChanging.bind(this);
+575 
+576   #boundOnScaleChanging = this.onScaleChanging.bind(this);
+577 
+578   #boundOnRotationChanging = this.onRotationChanging.bind(this);
+579 
+580   #previousStates = {
+581     isEditing: false,
+582     isEmpty: true,
+583     hasSomethingToUndo: false,
+584     hasSomethingToRedo: false,
+585     hasSelectedEditor: false,
+586   };
+587 
+588   #translation = [0, 0];
+589 
+590   #translationTimeoutId = null;
+591 
+592   #container = null;
+593 
+594   #viewer = null;
+595 
+596   static TRANSLATE_SMALL = 1; // page units.
+597 
+598   static TRANSLATE_BIG = 10; // page units.
+599 
+600   static get _keyboardManager() {
+601     const proto = AnnotationEditorUIManager.prototype;
+602 
+603     const arrowChecker = self => {
+604       // If the focused element is an input, we don't want to handle the arrow.
+605       // For example, sliders can be controlled with the arrow keys.
+606       const { activeElement } = document;
+607       return (
+608         activeElement &&
+609         self.#container.contains(activeElement) &&
+610         self.hasSomethingToControl()
+611       );
+612     };
+613 
+614     const small = this.TRANSLATE_SMALL;
+615     const big = this.TRANSLATE_BIG;
+616 
+617     return shadow(
+618       this,
+619       "_keyboardManager",
+620       new KeyboardManager([
+621         [["ctrl+a", "mac+meta+a"], proto.selectAll],
+622         [["ctrl+z", "mac+meta+z"], proto.undo],
+623         [
+624           // On mac, depending of the OS version, the event.key is either "z" or
+625           // "Z" when the user presses "meta+shift+z".
+626           [
+627             "ctrl+y",
+628             "ctrl+shift+z",
+629             "mac+meta+shift+z",
+630             "ctrl+shift+Z",
+631             "mac+meta+shift+Z",
+632           ],
+633           proto.redo,
+634         ],
+635         [
+636           [
+637             "Backspace",
+638             "alt+Backspace",
+639             "ctrl+Backspace",
+640             "shift+Backspace",
+641             "mac+Backspace",
+642             "mac+alt+Backspace",
+643             "mac+ctrl+Backspace",
+644             "Delete",
+645             "ctrl+Delete",
+646             "shift+Delete",
+647             "mac+Delete",
+648           ],
+649           proto.delete,
+650         ],
+651         [["Escape", "mac+Escape"], proto.unselectAll],
+652         [
+653           ["ArrowLeft", "mac+ArrowLeft"],
+654           proto.translateSelectedEditors,
+655           { args: [-small, 0], checker: arrowChecker },
+656         ],
+657         [
+658           ["ctrl+ArrowLeft", "mac+shift+ArrowLeft"],
+659           proto.translateSelectedEditors,
+660           { args: [-big, 0], checker: arrowChecker },
+661         ],
+662         [
+663           ["ArrowRight", "mac+ArrowRight"],
+664           proto.translateSelectedEditors,
+665           { args: [small, 0], checker: arrowChecker },
+666         ],
+667         [
+668           ["ctrl+ArrowRight", "mac+shift+ArrowRight"],
+669           proto.translateSelectedEditors,
+670           { args: [big, 0], checker: arrowChecker },
+671         ],
+672         [
+673           ["ArrowUp", "mac+ArrowUp"],
+674           proto.translateSelectedEditors,
+675           { args: [0, -small], checker: arrowChecker },
+676         ],
+677         [
+678           ["ctrl+ArrowUp", "mac+shift+ArrowUp"],
+679           proto.translateSelectedEditors,
+680           { args: [0, -big], checker: arrowChecker },
+681         ],
+682         [
+683           ["ArrowDown", "mac+ArrowDown"],
+684           proto.translateSelectedEditors,
+685           { args: [0, small], checker: arrowChecker },
+686         ],
+687         [
+688           ["ctrl+ArrowDown", "mac+shift+ArrowDown"],
+689           proto.translateSelectedEditors,
+690           { args: [0, big], checker: arrowChecker },
+691         ],
+692       ])
+693     );
+694   }
+695 
+696   constructor(container, viewer, eventBus, pdfDocument, pageColors) {
+697     this.#container = container;
+698     this.#viewer = viewer;
+699     this.#eventBus = eventBus;
+700     this.#eventBus._on("editingaction", this.#boundOnEditingAction);
+701     this.#eventBus._on("pagechanging", this.#boundOnPageChanging);
+702     this.#eventBus._on("scalechanging", this.#boundOnScaleChanging);
+703     this.#eventBus._on("rotationchanging", this.#boundOnRotationChanging);
+704     this.#annotationStorage = pdfDocument.annotationStorage;
+705     this.#filterFactory = pdfDocument.filterFactory;
+706     this.#pageColors = pageColors;
+707     this.viewParameters = {
+708       realScale: PixelsPerInch.PDF_TO_CSS_UNITS,
+709       rotation: 0,
+710     };
+711   }
+712 
+713   destroy() {
+714     this.#removeKeyboardManager();
+715     this.#removeFocusManager();
+716     this.#eventBus._off("editingaction", this.#boundOnEditingAction);
+717     this.#eventBus._off("pagechanging", this.#boundOnPageChanging);
+718     this.#eventBus._off("scalechanging", this.#boundOnScaleChanging);
+719     this.#eventBus._off("rotationchanging", this.#boundOnRotationChanging);
+720     for (const layer of this.#allLayers.values()) {
+721       layer.destroy();
+722     }
+723     this.#allLayers.clear();
+724     this.#allEditors.clear();
+725     this.#editorsToRescale.clear();
+726     this.#activeEditor = null;
+727     this.#selectedEditors.clear();
+728     this.#commandManager.destroy();
+729   }
+730 
+731   get hcmFilter() {
+732     return shadow(
+733       this,
+734       "hcmFilter",
+735       this.#pageColors
+736         ? this.#filterFactory.addHCMFilter(
+737             this.#pageColors.foreground,
+738             this.#pageColors.background
+739           )
+740         : "none"
+741     );
+742   }
+743 
+744   onPageChanging({ pageNumber }) {
+745     this.#currentPageIndex = pageNumber - 1;
+746   }
+747 
+748   focusMainContainer() {
+749     this.#container.focus();
+750   }
+751 
+752   findParent(x, y) {
+753     for (const layer of this.#allLayers.values()) {
+754       const {
+755         x: layerX,
+756         y: layerY,
+757         width,
+758         height,
+759       } = layer.div.getBoundingClientRect();
+760       if (
+761         x >= layerX &&
+762         x <= layerX + width &&
+763         y >= layerY &&
+764         y <= layerY + height
+765       ) {
+766         return layer;
+767       }
+768     }
+769     return null;
+770   }
+771 
+772   disableUserSelect(value = false) {
+773     this.#viewer.classList.toggle("noUserSelect", value);
+774   }
+775 
+776   addShouldRescale(editor) {
+777     this.#editorsToRescale.add(editor);
+778   }
+779 
+780   removeShouldRescale(editor) {
+781     this.#editorsToRescale.delete(editor);
+782   }
+783 
+784   onScaleChanging({ scale }) {
+785     this.commitOrRemove();
+786     this.viewParameters.realScale = scale * PixelsPerInch.PDF_TO_CSS_UNITS;
+787     for (const editor of this.#editorsToRescale) {
+788       editor.onScaleChanging();
+789     }
+790   }
+791 
+792   onRotationChanging({ pagesRotation }) {
+793     this.commitOrRemove();
+794     this.viewParameters.rotation = pagesRotation;
+795   }
+796 
+797   /**
+798    * Add an editor in the annotation storage.
+799    * @param {AnnotationEditor} editor
+800    */
+801   addToAnnotationStorage(editor) {
+802     if (
+803       !editor.isEmpty() &&
+804       this.#annotationStorage &&
+805       !this.#annotationStorage.has(editor.id)
+806     ) {
+807       this.#annotationStorage.setValue(editor.id, editor);
+808     }
+809   }
+810 
+811   #addFocusManager() {
+812     window.addEventListener("focus", this.#boundFocus);
+813     window.addEventListener("blur", this.#boundBlur);
+814   }
+815 
+816   #removeFocusManager() {
+817     window.removeEventListener("focus", this.#boundFocus);
+818     window.removeEventListener("blur", this.#boundBlur);
+819   }
+820 
+821   blur() {
+822     if (!this.hasSelection) {
+823       return;
+824     }
+825     // When several editors are selected and the window loses focus, we want to
+826     // keep the last active element in order to be able to focus it again when
+827     // the window gets the focus back but we don't want to trigger any focus
+828     // callbacks else only one editor will be selected.
+829     const { activeElement } = document;
+830     for (const editor of this.#selectedEditors) {
+831       if (editor.div.contains(activeElement)) {
+832         this.#lastActiveElement = [editor, activeElement];
+833         editor._focusEventsAllowed = false;
+834         break;
+835       }
+836     }
+837   }
+838 
+839   focus() {
+840     if (!this.#lastActiveElement) {
+841       return;
+842     }
+843     const [lastEditor, lastActiveElement] = this.#lastActiveElement;
+844     this.#lastActiveElement = null;
+845     lastActiveElement.addEventListener(
+846       "focusin",
+847       () => {
+848         lastEditor._focusEventsAllowed = true;
+849       },
+850       { once: true }
+851     );
+852     lastActiveElement.focus();
+853   }
+854 
+855   #addKeyboardManager() {
+856     // The keyboard events are caught at the container level in order to be able
+857     // to execute some callbacks even if the current page doesn't have focus.
+858     window.addEventListener("keydown", this.#boundKeydown, { capture: true });
+859   }
+860 
+861   #removeKeyboardManager() {
+862     window.removeEventListener("keydown", this.#boundKeydown, {
+863       capture: true,
+864     });
+865   }
+866 
+867   #addCopyPasteListeners() {
+868     document.addEventListener("copy", this.#boundCopy);
+869     document.addEventListener("cut", this.#boundCut);
+870     document.addEventListener("paste", this.#boundPaste);
+871   }
+872 
+873   #removeCopyPasteListeners() {
+874     document.removeEventListener("copy", this.#boundCopy);
+875     document.removeEventListener("cut", this.#boundCut);
+876     document.removeEventListener("paste", this.#boundPaste);
+877   }
+878 
+879   /**
+880    * Copy callback.
+881    * @param {ClipboardEvent} event
+882    */
+883   copy(event) {
+884     event.preventDefault();
+885 
+886     // An editor is being edited so just commit it.
+887     this.#activeEditor?.commitOrRemove();
+888 
+889     if (!this.hasSelection) {
+890       return;
+891     }
+892 
+893     const editors = [];
+894     for (const editor of this.#selectedEditors) {
+895       const serialized = editor.serialize(/* isForCopying = */ true);
+896       if (serialized) {
+897         editors.push(serialized);
+898       }
+899     }
+900     if (editors.length === 0) {
+901       return;
+902     }
+903 
+904     event.clipboardData.setData("application/pdfjs", JSON.stringify(editors));
+905   }
+906 
+907   /**
+908    * Cut callback.
+909    * @param {ClipboardEvent} event
+910    */
+911   cut(event) {
+912     this.copy(event);
+913     this.delete();
+914   }
+915 
+916   /**
+917    * Paste callback.
+918    * @param {ClipboardEvent} event
+919    */
+920   paste(event) {
+921     event.preventDefault();
+922 
+923     let data = event.clipboardData.getData("application/pdfjs");
+924     if (!data) {
+925       return;
+926     }
+927 
+928     try {
+929       data = JSON.parse(data);
+930     } catch (ex) {
+931       warn(`paste: "${ex.message}".`);
+932       return;
+933     }
+934 
+935     if (!Array.isArray(data)) {
+936       return;
+937     }
+938 
+939     this.unselectAll();
+940     const layer = this.currentLayer;
+941 
+942     try {
+943       const newEditors = [];
+944       for (const editor of data) {
+945         const deserializedEditor = layer.deserialize(editor);
+946         if (!deserializedEditor) {
+947           return;
+948         }
+949         newEditors.push(deserializedEditor);
+950       }
+951 
+952       const cmd = () => {
+953         for (const editor of newEditors) {
+954           this.#addEditorToLayer(editor);
+955         }
+956         this.#selectEditors(newEditors);
+957       };
+958       const undo = () => {
+959         for (const editor of newEditors) {
+960           editor.remove();
+961         }
+962       };
+963       this.addCommands({ cmd, undo, mustExec: true });
+964     } catch (ex) {
+965       warn(`paste: "${ex.message}".`);
+966     }
+967   }
+968 
+969   /**
+970    * Keydown callback.
+971    * @param {KeyboardEvent} event
+972    */
+973   keydown(event) {
+974     if (!this.getActive()?.shouldGetKeyboardEvents()) {
+975       AnnotationEditorUIManager._keyboardManager.exec(this, event);
+976     }
+977   }
+978 
+979   /**
+980    * Execute an action for a given name.
+981    * For example, the user can click on the "Undo" entry in the context menu
+982    * and it'll trigger the undo action.
+983    * @param {Object} details
+984    */
+985   onEditingAction(details) {
+986     if (["undo", "redo", "delete", "selectAll"].includes(details.name)) {
+987       this[details.name]();
+988     }
+989   }
+990 
+991   /**
+992    * Update the different possible states of this manager, e.g. is there
+993    * something to undo, redo, ...
+994    * @param {Object} details
+995    */
+996   #dispatchUpdateStates(details) {
+997     const hasChanged = Object.entries(details).some(
+998       ([key, value]) => this.#previousStates[key] !== value
+999     );
+1000 
+1001     if (hasChanged) {
+1002       this.#eventBus.dispatch("annotationeditorstateschanged", {
+1003         source: this,
+1004         details: Object.assign(this.#previousStates, details),
+1005       });
+1006     }
+1007   }
+1008 
+1009   #dispatchUpdateUI(details) {
+1010     this.#eventBus.dispatch("annotationeditorparamschanged", {
+1011       source: this,
+1012       details,
+1013     });
+1014   }
+1015 
+1016   /**
+1017    * Set the editing state.
+1018    * It can be useful to temporarily disable it when the user is editing a
+1019    * FreeText annotation.
+1020    * @param {boolean} isEditing
+1021    */
+1022   setEditingState(isEditing) {
+1023     if (isEditing) {
+1024       this.#addFocusManager();
+1025       this.#addKeyboardManager();
+1026       this.#addCopyPasteListeners();
+1027       this.#dispatchUpdateStates({
+1028         isEditing: this.#mode !== AnnotationEditorType.NONE,
+1029         isEmpty: this.#isEmpty(),
+1030         hasSomethingToUndo: this.#commandManager.hasSomethingToUndo(),
+1031         hasSomethingToRedo: this.#commandManager.hasSomethingToRedo(),
+1032         hasSelectedEditor: false,
+1033       });
+1034     } else {
+1035       this.#removeFocusManager();
+1036       this.#removeKeyboardManager();
+1037       this.#removeCopyPasteListeners();
+1038       this.#dispatchUpdateStates({
+1039         isEditing: false,
+1040       });
+1041       this.disableUserSelect(false);
+1042     }
+1043   }
+1044 
+1045   registerEditorTypes(types) {
+1046     if (this.#editorTypes) {
+1047       return;
+1048     }
+1049     this.#editorTypes = types;
+1050     for (const editorType of this.#editorTypes) {
+1051       this.#dispatchUpdateUI(editorType.defaultPropertiesToUpdate);
+1052     }
+1053   }
+1054 
+1055   /**
+1056    * Get an id.
+1057    * @returns {string}
+1058    */
+1059   getId() {
+1060     return this.#idManager.getId();
+1061   }
+1062 
+1063   get currentLayer() {
+1064     return this.#allLayers.get(this.#currentPageIndex);
+1065   }
+1066 
+1067   getLayer(pageIndex) {
+1068     return this.#allLayers.get(pageIndex);
+1069   }
+1070 
+1071   get currentPageIndex() {
+1072     return this.#currentPageIndex;
+1073   }
+1074 
+1075   /**
+1076    * Add a new layer for a page which will contains the editors.
+1077    * @param {AnnotationEditorLayer} layer
+1078    */
+1079   addLayer(layer) {
+1080     this.#allLayers.set(layer.pageIndex, layer);
+1081     if (this.#isEnabled) {
+1082       layer.enable();
+1083     } else {
+1084       layer.disable();
+1085     }
+1086   }
+1087 
+1088   /**
+1089    * Remove a layer.
+1090    * @param {AnnotationEditorLayer} layer
+1091    */
+1092   removeLayer(layer) {
+1093     this.#allLayers.delete(layer.pageIndex);
+1094   }
+1095 
+1096   /**
+1097    * Change the editor mode (None, FreeText, Ink, ...)
+1098    * @param {number} mode
+1099    * @param {string|null} editId
+1100    */
+1101   updateMode(mode, editId = null) {
+1102     this.#mode = mode;
+1103     if (mode === AnnotationEditorType.NONE) {
+1104       this.setEditingState(false);
+1105       this.#disableAll();
+1106       return;
+1107     }
+1108     this.setEditingState(true);
+1109     this.#enableAll();
+1110     this.unselectAll();
+1111     for (const layer of this.#allLayers.values()) {
+1112       layer.updateMode(mode);
+1113     }
+1114     if (!editId) {
+1115       return;
+1116     }
+1117     for (const editor of this.#allEditors.values()) {
+1118       if (editor.annotationElementId === editId) {
+1119         this.setSelected(editor);
+1120         editor.enterInEditMode();
+1121         break;
+1122       }
+1123     }
+1124   }
+1125 
+1126   /**
+1127    * Update the toolbar if it's required to reflect the tool currently used.
+1128    * @param {number} mode
+1129    * @returns {undefined}
+1130    */
+1131   updateToolbar(mode) {
+1132     if (mode === this.#mode) {
+1133       return;
+1134     }
+1135     this.#eventBus.dispatch("switchannotationeditormode", {
+1136       source: this,
+1137       mode,
+1138     });
+1139   }
+1140 
+1141   /**
+1142    * Update a parameter in the current editor or globally.
+1143    * @param {number} type
+1144    * @param {*} value
+1145    */
+1146   updateParams(type, value) {
+1147     if (!this.#editorTypes) {
+1148       return;
+1149     }
+1150     if (type === AnnotationEditorParamsType.CREATE) {
+1151       this.currentLayer.addNewEditor(type);
+1152       return;
+1153     }
+1154 
+1155     for (const editor of this.#selectedEditors) {
+1156       editor.updateParams(type, value);
+1157     }
+1158 
+1159     for (const editorType of this.#editorTypes) {
+1160       editorType.updateDefaultParams(type, value);
+1161     }
+1162   }
+1163 
+1164   enableWaiting(mustWait = false) {
+1165     if (this.#isWaiting === mustWait) {
+1166       return;
+1167     }
+1168     this.#isWaiting = mustWait;
+1169     for (const layer of this.#allLayers.values()) {
+1170       if (mustWait) {
+1171         layer.disableClick();
+1172       } else {
+1173         layer.enableClick();
+1174       }
+1175       layer.div.classList.toggle("waiting", mustWait);
+1176     }
+1177   }
+1178 
+1179   /**
+1180    * Enable all the layers.
+1181    */
+1182   #enableAll() {
+1183     if (!this.#isEnabled) {
+1184       this.#isEnabled = true;
+1185       for (const layer of this.#allLayers.values()) {
+1186         layer.enable();
+1187       }
+1188     }
+1189   }
+1190 
+1191   /**
+1192    * Disable all the layers.
+1193    */
+1194   #disableAll() {
+1195     this.unselectAll();
+1196     if (this.#isEnabled) {
+1197       this.#isEnabled = false;
+1198       for (const layer of this.#allLayers.values()) {
+1199         layer.disable();
+1200       }
+1201     }
+1202   }
+1203 
+1204   /**
+1205    * Get all the editors belonging to a given page.
+1206    * @param {number} pageIndex
+1207    * @returns {Array<AnnotationEditor>}
+1208    */
+1209   getEditors(pageIndex) {
+1210     const editors = [];
+1211     for (const editor of this.#allEditors.values()) {
+1212       if (editor.pageIndex === pageIndex) {
+1213         editors.push(editor);
+1214       }
+1215     }
+1216     return editors;
+1217   }
+1218 
+1219   /**
+1220    * Get an editor with the given id.
+1221    * @param {string} id
+1222    * @returns {AnnotationEditor}
+1223    */
+1224   getEditor(id) {
+1225     return this.#allEditors.get(id);
+1226   }
+1227 
+1228   /**
+1229    * Add a new editor.
+1230    * @param {AnnotationEditor} editor
+1231    */
+1232   addEditor(editor) {
+1233     this.#allEditors.set(editor.id, editor);
+1234   }
+1235 
+1236   /**
+1237    * Remove an editor.
+1238    * @param {AnnotationEditor} editor
+1239    */
+1240   removeEditor(editor) {
+1241     this.#allEditors.delete(editor.id);
+1242     this.unselect(editor);
+1243     if (
+1244       !editor.annotationElementId ||
+1245       !this.#deletedAnnotationsElementIds.has(editor.annotationElementId)
+1246     ) {
+1247       this.#annotationStorage?.remove(editor.id);
+1248     }
+1249   }
+1250 
+1251   /**
+1252    * The annotation element with the given id has been deleted.
+1253    * @param {AnnotationEditor} editor
+1254    */
+1255   addDeletedAnnotationElement(editor) {
+1256     this.#deletedAnnotationsElementIds.add(editor.annotationElementId);
+1257     editor.deleted = true;
+1258   }
+1259 
+1260   /**
+1261    * Check if the annotation element with the given id has been deleted.
+1262    * @param {string} annotationElementId
+1263    * @returns {boolean}
+1264    */
+1265   isDeletedAnnotationElement(annotationElementId) {
+1266     return this.#deletedAnnotationsElementIds.has(annotationElementId);
+1267   }
+1268 
+1269   /**
+1270    * The annotation element with the given id have been restored.
+1271    * @param {AnnotationEditor} editor
+1272    */
+1273   removeDeletedAnnotationElement(editor) {
+1274     this.#deletedAnnotationsElementIds.delete(editor.annotationElementId);
+1275     editor.deleted = false;
+1276   }
+1277 
+1278   /**
+1279    * Add an editor to the layer it belongs to or add it to the global map.
+1280    * @param {AnnotationEditor} editor
+1281    */
+1282   #addEditorToLayer(editor) {
+1283     const layer = this.#allLayers.get(editor.pageIndex);
+1284     if (layer) {
+1285       layer.addOrRebuild(editor);
+1286     } else {
+1287       this.addEditor(editor);
+1288     }
+1289   }
+1290 
+1291   /**
+1292    * Set the given editor as the active one.
+1293    * @param {AnnotationEditor} editor
+1294    */
+1295   setActiveEditor(editor) {
+1296     if (this.#activeEditor === editor) {
+1297       return;
+1298     }
+1299 
+1300     this.#activeEditor = editor;
+1301     if (editor) {
+1302       this.#dispatchUpdateUI(editor.propertiesToUpdate);
+1303     }
+1304   }
+1305 
+1306   /**
+1307    * Add or remove an editor the current selection.
+1308    * @param {AnnotationEditor} editor
+1309    */
+1310   toggleSelected(editor) {
+1311     if (this.#selectedEditors.has(editor)) {
+1312       this.#selectedEditors.delete(editor);
+1313       editor.unselect();
+1314       this.#dispatchUpdateStates({
+1315         hasSelectedEditor: this.hasSelection,
+1316       });
+1317       return;
+1318     }
+1319     this.#selectedEditors.add(editor);
+1320     editor.select();
+1321     this.#dispatchUpdateUI(editor.propertiesToUpdate);
+1322     this.#dispatchUpdateStates({
+1323       hasSelectedEditor: true,
+1324     });
+1325   }
+1326 
+1327   /**
+1328    * Set the last selected editor.
+1329    * @param {AnnotationEditor} editor
+1330    */
+1331   setSelected(editor) {
+1332     for (const ed of this.#selectedEditors) {
+1333       if (ed !== editor) {
+1334         ed.unselect();
+1335       }
+1336     }
+1337     this.#selectedEditors.clear();
+1338 
+1339     this.#selectedEditors.add(editor);
+1340     editor.select();
+1341     this.#dispatchUpdateUI(editor.propertiesToUpdate);
+1342     this.#dispatchUpdateStates({
+1343       hasSelectedEditor: true,
+1344     });
+1345   }
+1346 
+1347   /**
+1348    * Check if the editor is selected.
+1349    * @param {AnnotationEditor} editor
+1350    */
+1351   isSelected(editor) {
+1352     return this.#selectedEditors.has(editor);
+1353   }
+1354 
+1355   /**
+1356    * Unselect an editor.
+1357    * @param {AnnotationEditor} editor
+1358    */
+1359   unselect(editor) {
+1360     editor.unselect();
+1361     this.#selectedEditors.delete(editor);
+1362     this.#dispatchUpdateStates({
+1363       hasSelectedEditor: this.hasSelection,
+1364     });
+1365   }
+1366 
+1367   get hasSelection() {
+1368     return this.#selectedEditors.size !== 0;
+1369   }
+1370 
+1371   /**
+1372    * Undo the last command.
+1373    */
+1374   undo() {
+1375     this.#commandManager.undo();
+1376     this.#dispatchUpdateStates({
+1377       hasSomethingToUndo: this.#commandManager.hasSomethingToUndo(),
+1378       hasSomethingToRedo: true,
+1379       isEmpty: this.#isEmpty(),
+1380     });
+1381   }
+1382 
+1383   /**
+1384    * Redo the last undoed command.
+1385    */
+1386   redo() {
+1387     this.#commandManager.redo();
+1388     this.#dispatchUpdateStates({
+1389       hasSomethingToUndo: true,
+1390       hasSomethingToRedo: this.#commandManager.hasSomethingToRedo(),
+1391       isEmpty: this.#isEmpty(),
+1392     });
+1393   }
+1394 
+1395   /**
+1396    * Add a command to execute (cmd) and another one to undo it.
+1397    * @param {Object} params
+1398    */
+1399   addCommands(params) {
+1400     this.#commandManager.add(params);
+1401     this.#dispatchUpdateStates({
+1402       hasSomethingToUndo: true,
+1403       hasSomethingToRedo: false,
+1404       isEmpty: this.#isEmpty(),
+1405     });
+1406   }
+1407 
+1408   #isEmpty() {
+1409     if (this.#allEditors.size === 0) {
+1410       return true;
+1411     }
+1412 
+1413     if (this.#allEditors.size === 1) {
+1414       for (const editor of this.#allEditors.values()) {
+1415         return editor.isEmpty();
+1416       }
+1417     }
+1418 
+1419     return false;
+1420   }
+1421 
+1422   /**
+1423    * Delete the current editor or all.
+1424    */
+1425   delete() {
+1426     this.commitOrRemove();
+1427     if (!this.hasSelection) {
+1428       return;
+1429     }
+1430 
+1431     const editors = [...this.#selectedEditors];
+1432     const cmd = () => {
+1433       for (const editor of editors) {
+1434         editor.remove();
+1435       }
+1436     };
+1437     const undo = () => {
+1438       for (const editor of editors) {
+1439         this.#addEditorToLayer(editor);
+1440       }
+1441     };
+1442 
+1443     this.addCommands({ cmd, undo, mustExec: true });
+1444   }
+1445 
+1446   commitOrRemove() {
+1447     // An editor is being edited so just commit it.
+1448     this.#activeEditor?.commitOrRemove();
+1449   }
+1450 
+1451   hasSomethingToControl() {
+1452     return this.#activeEditor || this.hasSelection;
+1453   }
+1454 
+1455   /**
+1456    * Select the editors.
+1457    * @param {Array<AnnotationEditor>} editors
+1458    */
+1459   #selectEditors(editors) {
+1460     this.#selectedEditors.clear();
+1461     for (const editor of editors) {
+1462       if (editor.isEmpty()) {
+1463         continue;
+1464       }
+1465       this.#selectedEditors.add(editor);
+1466       editor.select();
+1467     }
+1468     this.#dispatchUpdateStates({ hasSelectedEditor: true });
+1469   }
+1470 
+1471   /**
+1472    * Select all the editors.
+1473    */
+1474   selectAll() {
+1475     for (const editor of this.#selectedEditors) {
+1476       editor.commit();
+1477     }
+1478     this.#selectEditors(this.#allEditors.values());
+1479   }
+1480 
+1481   /**
+1482    * Unselect all the selected editors.
+1483    */
+1484   unselectAll() {
+1485     if (this.#activeEditor) {
+1486       // An editor is being edited so just commit it.
+1487       this.#activeEditor.commitOrRemove();
+1488       return;
+1489     }
+1490 
+1491     if (!this.hasSelection) {
+1492       return;
+1493     }
+1494     for (const editor of this.#selectedEditors) {
+1495       editor.unselect();
+1496     }
+1497     this.#selectedEditors.clear();
+1498     this.#dispatchUpdateStates({
+1499       hasSelectedEditor: false,
+1500     });
+1501   }
+1502 
+1503   translateSelectedEditors(x, y, noCommit = false) {
+1504     if (!noCommit) {
+1505       this.commitOrRemove();
+1506     }
+1507     if (!this.hasSelection) {
+1508       return;
+1509     }
+1510 
+1511     this.#translation[0] += x;
+1512     this.#translation[1] += y;
+1513     const [totalX, totalY] = this.#translation;
+1514     const editors = [...this.#selectedEditors];
+1515 
+1516     // We don't want to have an undo/redo for each translation so we wait a bit
+1517     // before adding the command to the command manager.
+1518     const TIME_TO_WAIT = 1000;
+1519 
+1520     if (this.#translationTimeoutId) {
+1521       clearTimeout(this.#translationTimeoutId);
+1522     }
+1523 
+1524     this.#translationTimeoutId = setTimeout(() => {
+1525       this.#translationTimeoutId = null;
+1526       this.#translation[0] = this.#translation[1] = 0;
+1527 
+1528       this.addCommands({
+1529         cmd: () => {
+1530           for (const editor of editors) {
+1531             if (this.#allEditors.has(editor.id)) {
+1532               editor.translateInPage(totalX, totalY);
+1533             }
+1534           }
+1535         },
+1536         undo: () => {
+1537           for (const editor of editors) {
+1538             if (this.#allEditors.has(editor.id)) {
+1539               editor.translateInPage(-totalX, -totalY);
+1540             }
+1541           }
+1542         },
+1543         mustExec: false,
+1544       });
+1545     }, TIME_TO_WAIT);
+1546 
+1547     for (const editor of editors) {
+1548       editor.translateInPage(x, y);
+1549     }
+1550   }
+1551 
+1552   /**
+1553    * Set up the drag session for moving the selected editors.
+1554    */
+1555   setUpDragSession() {
+1556     if (!this.hasSelection) {
+1557       return;
+1558     }
+1559     // Avoid to have spurious text selection in the text layer when dragging.
+1560     this.disableUserSelect(true);
+1561     this.#draggingEditors = new Map();
+1562     for (const editor of this.#selectedEditors) {
+1563       this.#draggingEditors.set(editor, {
+1564         savedX: editor.x,
+1565         savedY: editor.y,
+1566         savedPageIndex: editor.parent.pageIndex,
+1567         newX: 0,
+1568         newY: 0,
+1569         newPageIndex: -1,
+1570       });
+1571     }
+1572   }
+1573 
+1574   /**
+1575    * Ends the drag session.
+1576    * @returns {boolean} true if at least one editor has been moved.
+1577    */
+1578   endDragSession() {
+1579     if (!this.#draggingEditors) {
+1580       return false;
+1581     }
+1582     this.disableUserSelect(false);
+1583     const map = this.#draggingEditors;
+1584     this.#draggingEditors = null;
+1585     let mustBeAddedInUndoStack = false;
+1586 
+1587     for (const [{ x, y, parent }, value] of map) {
+1588       value.newX = x;
+1589       value.newY = y;
+1590       value.newPageIndex = parent.pageIndex;
+1591       mustBeAddedInUndoStack ||=
+1592         x !== value.savedX ||
+1593         y !== value.savedY ||
+1594         parent.pageIndex !== value.savedPageIndex;
+1595     }
+1596 
+1597     if (!mustBeAddedInUndoStack) {
+1598       return false;
+1599     }
+1600 
+1601     const move = (editor, x, y, pageIndex) => {
+1602       if (this.#allEditors.has(editor.id)) {
+1603         // The editor can be undone/redone on a page which is not visible (and
+1604         // which potentially has no annotation editor layer), hence we need to
+1605         // use the pageIndex instead of the parent.
+1606         const parent = this.#allLayers.get(pageIndex);
+1607         if (parent) {
+1608           editor._setParentAndPosition(parent, x, y);
+1609         } else {
+1610           editor.pageIndex = pageIndex;
+1611           editor.x = x;
+1612           editor.y = y;
+1613         }
+1614       }
+1615     };
+1616 
+1617     this.addCommands({
+1618       cmd: () => {
+1619         for (const [editor, { newX, newY, newPageIndex }] of map) {
+1620           move(editor, newX, newY, newPageIndex);
+1621         }
+1622       },
+1623       undo: () => {
+1624         for (const [editor, { savedX, savedY, savedPageIndex }] of map) {
+1625           move(editor, savedX, savedY, savedPageIndex);
+1626         }
+1627       },
+1628       mustExec: true,
+1629     });
+1630 
+1631     return true;
+1632   }
+1633 
+1634   /**
+1635    * Drag the set of selected editors.
+1636    * @param {number} tx
+1637    * @param {number} ty
+1638    */
+1639   dragSelectedEditors(tx, ty) {
+1640     if (!this.#draggingEditors) {
+1641       return;
+1642     }
+1643     for (const editor of this.#draggingEditors.keys()) {
+1644       editor.drag(tx, ty);
+1645     }
+1646   }
+1647 
+1648   /**
+1649    * Rebuild the editor (usually on undo/redo actions) on a potentially
+1650    * non-rendered page.
+1651    * @param {AnnotationEditor} editor
+1652    */
+1653   rebuild(editor) {
+1654     if (editor.parent === null) {
+1655       const parent = this.getLayer(editor.pageIndex);
+1656       if (parent) {
+1657         parent.changeParent(editor);
+1658         parent.addOrRebuild(editor);
+1659       } else {
+1660         this.addEditor(editor);
+1661         this.addToAnnotationStorage(editor);
+1662         editor.rebuild();
+1663       }
+1664     } else {
+1665       editor.parent.addOrRebuild(editor);
+1666     }
+1667   }
+1668 
+1669   /**
+1670    * Is the current editor the one passed as argument?
+1671    * @param {AnnotationEditor} editor
+1672    * @returns
+1673    */
+1674   isActive(editor) {
+1675     return this.#activeEditor === editor;
+1676   }
+1677 
+1678   /**
+1679    * Get the current active editor.
+1680    * @returns {AnnotationEditor|null}
+1681    */
+1682   getActive() {
+1683     return this.#activeEditor;
+1684   }
+1685 
+1686   /**
+1687    * Get the current editor mode.
+1688    * @returns {number}
+1689    */
+1690   getMode() {
+1691     return this.#mode;
+1692   }
+1693 
+1694   get imageManager() {
+1695     return shadow(this, "imageManager", new ImageManager());
+1696   }
+1697 }
+1698 
+1699 export {
+1700   AnnotationEditorUIManager,
+1701   bindEvents,
+1702   ColorManager,
+1703   CommandManager,
+1704   KeyboardManager,
+1705   opacityToHex,
+1706 };
+</code>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

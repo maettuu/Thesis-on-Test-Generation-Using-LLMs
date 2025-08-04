@@ -1,0 +1,39 @@
+it("should read highlighted text during editing inside a PDF", async () => {
+  const { PDFDocument, PDFPageProxy } = await import("../../src/display/api.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+  const { DrawLayer } = await import("../../src/display/draw_layer.js");
+
+  const pdfDocument = await PDFDocument.load(await fetch("path_to_your_pdf_file.pdf").then(response => response.arrayBuffer()));
+  const pdfPage = await pdfDocument.getPage(1);
+  const annotationEditorUIManager = new AnnotationEditorUIManager(null, null, null, null, pdfDocument, null, null, null);
+  const drawLayer = new DrawLayer({ pageIndex: 0 });
+  const highlightEditor = new HighlightEditor({});
+
+  drawLayer.setParent(document.createElement("div"));
+  annotationEditorUIManager.addLayer({ addNewEditor: () => {}, pageIndex: 0, div: document.createElement("div") });
+  annotationEditorUIManager.updateMode(AnnotationEditorType.HIGHLIGHT);
+
+  const highlightedText = "This is a highlighted text.";
+  const textNode = document.createElement("span");
+  textNode.textContent = highlightedText;
+  drawLayer.highlight({ box: { x: 0, y: 0, width: 1, height: 1 } }, "yellow", 1);
+  drawLayer.highlightOutline({ box: { x: 0, y: 0, width: 1, height: 1 } });
+
+  const mark = document.createElement("mark");
+  mark.append(document.createTextNode(highlightedText));
+  mark.className = "visuallyHidden";
+  drawLayer.#parent.append(mark);
+
+  const voiceOverText = await new Promise(resolve => {
+    const voiceOver = () => {
+      const text = window.getComputedStyle(mark).visibility === "hidden" ? "" : highlightedText;
+      resolve(text);
+    };
+    mark.addEventListener("mouseover", voiceOver);
+    mark.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    mark.removeEventListener("mouseover", voiceOver);
+  });
+
+  expect(voiceOverText).toBe(highlightedText);
+});

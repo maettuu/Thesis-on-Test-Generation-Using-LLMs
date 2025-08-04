@@ -1,0 +1,56 @@
+<think>
+Okay, I need to write a regression test for the issue where embedded images are not being removed properly in PDF.js. The user provided a patch, and I need to ensure that the test fails before the patch and passes after.
+
+First, I'll look at the problem description. The user mentioned that when opening a PDF and going to page 2, a black pin (pushpin) is visible, but they want to see the image underneath. So the issue is that the pushpin annotation is being displayed even when it shouldn't be.
+
+Looking at the patch, I see changes in two files: annotation.js and annotation_layer.js. In annotation.js, they added handling for 'fillAlpha' (ca) in the FileAttachmentAnnotation class. If fillAlpha is a number between 0 and 1, it's set; otherwise, it's null. In annotation_layer.js, the render method now checks if data.fillAlpha is 0, which would make the trigger (the pin) transparent or hidden.
+
+So the test needs to check whether the pushpin is rendered when fillAlpha is 0. Before the patch, the pin would be visible, but after, it shouldn't.
+
+I'll start by importing the necessary modules. I'll use getDocument from display/api.js and buildGetDocumentParams from test_utils.js to load the test PDF. I'll also need to import Annotation from core/annotation.js since I'm dealing with annotations.
+
+Next, I'll set up the test. I'll load the PDF and navigate to page 2. Then, I'll get the annotations on that page. Since the issue is with the pushpin, I'll filter for annotations of type FILEATTACHMENT.
+
+I'll create a spy for the render method of FileAttachmentAnnotationElement to check if it's called. But more importantly, I need to check the opacity of the trigger element. If fillAlpha is 0, the trigger should have an opacity of 0, making it invisible.
+
+I'll render the page and check the trigger's style. Using a spy, I can ensure that the render method is called and then access the trigger element to get its opacity. If the opacity is 0, the test passes.
+
+I should also handle any potential errors, so I'll wrap the test in a try block and fail on any exceptions.
+
+Putting it all together, the test will load the PDF, check the annotations, and verify that the pushpin is not visible when fillAlpha is 0. This should fail before the patch because the condition wasn't handled, and pass after the patch because the opacity is set correctly.
+</think>
+
+```javascript
+it("should not show pushpin when fillAlpha is 0", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const { Annotation } = await import("../../src/core/annotation.js");
+  
+  try {
+    const loadingTask = getDocument(buildGetDocumentParams('issue16800.pdf'));
+    const { numPages, page } = await loadingTask;
+    await page.init(1);
+    await page.render();
+
+    const annotations = await page.getAnnotations();
+    const pushpinAnnotation = annotations.find(
+      (annotation) => annotation.type === Annotation.Type.FILEATTACHMENT
+    );
+
+    const renderSpy = jest.spyOn(
+      FileAttachmentAnnotationElement.prototype,
+      'render'
+    );
+
+    await page.render();
+    
+    const trigger = renderSpy.mock.results[0].value.#trigger;
+    const expectedOpacity = 0;
+    const actualOpacity = parseInt(trigger.style.opacity) || 1;
+
+    expect(actualOpacity).toBe(expectedOpacity);
+  } catch (error) {
+    fail(error);
+  }
+});
+```

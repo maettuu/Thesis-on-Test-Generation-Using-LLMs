@@ -1,0 +1,85 @@
+<think>
+Okay, I need to write a regression test for the issue where the redo functionality using keyboard shortcuts wasn't working for images, text, or drawings in the PDF. The patch provided modifies the keyboard shortcuts in tools.js, so the test should verify that after the patch, the redo works as expected.
+
+First, I'll look at the test file provided. It's test/unit/annotation_spec.js. I can see that it already imports necessary modules like Annotation, AnnotationFactory, etc. I might need to import some additional modules, but I should stick to what's available.
+
+The test should simulate adding an annotation, undoing it, and then redoing it using the keyboard shortcut. I'll need to check if the annotation is correctly redone after the patch.
+
+I'll start by setting up a PDF document with a page. Using the XRefMock and createIdFactory from test_utils.js should help. Then, I'll create an annotation, add it to the storage, and then trigger an undo. After that, I'll simulate the redo action.
+
+Wait, how do I simulate the keyboard shortcut in the test? Since the code uses a KeyboardManager, perhaps I can trigger the event directly. I'll need to call the redo method of the AnnotationEditorUIManager.
+
+I should set up the AnnotationEditorUIManager instance, attaching it to a mock container and event bus. Then, I'll add an annotation, undo it, and check that it's removed. Then, I'll redo it and check if it's added back.
+
+So the steps are:
+1. Create a PDF document with a page.
+2. Initialize the AnnotationEditorUIManager with the necessary dependencies.
+3. Create an annotation and add it.
+4. Trigger undo to remove the annotation.
+5. Trigger redo to add it back.
+6. Assert that the annotation count changes correctly.
+
+I'll structure the test with these steps. I'll use async/await for any asynchronous operations, like initializing the PDF document.
+
+I should also make sure that the test doesn't have any flaky parts. Using mocks where necessary will help. For example, the container can be a simple div element.
+
+I think I can use the event bus to listen for changes, but in this case, directly calling the methods might be more straightforward.
+
+So, putting it all together, the test will create the necessary setup, perform the actions, and check the state of the annotations before and after undo/redo.
+
+I need to ensure that the test correctly reflects the behavior after the patch. Before the patch, the redo shortcut didn't work on some systems, especially macOS with different key events. The patch adds more key combinations, so the test should cover that.
+
+I'll write the test to simulate a redo using the new key combinations and verify that the annotation is restored. This way, the test will pass after the patch and fail before, ensuring the regression is fixed.
+</think>
+
+```javascript
+it("should redo an annotation using keyboard shortcuts", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { Annotation, AnnotationFactory, MarkupAnnotation } = 
+    await import("../../src/core/annotation.js");
+  const { createIdFactory, XRefMock } = await import("./test_utils.js");
+  
+  // Setup PDF document with one page
+  const xref = new XRefMock();
+  const idFactory = createIdFactory();
+  const pdfDocument = new PDFDocument({
+    xref,
+    idFactory,
+    isBase64Encoded: true,
+    isXpdfEnabled: false,
+  });
+  const pageRef = pdfDocument.addPage();
+  const page = pdfDocument.getPage(pageRef);
+
+  // Setup annotation storage and editor manager
+  const container = document.createElement("div");
+  const eventBus = new (await import("../../src/shared/message_handler.js")).MessageHandler();
+  const annotationStorage = pdfDocument.annotationStorage;
+  const editorUIManager = new (await import("../../src/display/editor/tools.js")).AnnotationEditorUIManager(
+    container,
+    eventBus,
+    pdfDocument,
+    new Map()
+  );
+
+  // Create and add an annotation
+  const annotation = AnnotationFactory.create(AnnotationType.MARKUP, {
+    subtype: MarkupAnnotation,
+    points: [0, 0, 50, 50],
+    text: "Test",
+  });
+  annotationStorage.addAnnotation(annotation);
+
+  // Perform undo
+  editorUIManager.undo();
+
+  // Check if annotation was removed
+  expect(annotationStorage.getAnnotations().length).toBe(0);
+
+  // Perform redo
+  editorUIManager.redo();
+
+  // Verify annotation was restored
+  expect(annotationStorage.getAnnotations().length).toBe(1);
+});
+```

@@ -1,0 +1,32 @@
+it("should render patterns correctly after applying a transform", async () => {
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  const { Util } = await import("../../src/shared/util.js");
+  const { getShadingPattern } = await import("./pattern_helper.js");
+  const { PDFDataRangeTransport } = await import("../../src/display/api.js");
+  const pdfUrl = 'https://github.com/mozilla/pdf.js/files/12795741/test.pdf';
+  const pdfDocument = await PDFDocumentProxy.load({ url: pdfUrl, cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/generic/web/cmaps/', cMapPacked: true });
+  const pdfPage = await pdfDocument.getPage(1);
+  const viewport = pdfPage.getViewport({ scale: 1 });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext('2d');
+  await pdfPage.render({ canvasContext: ctx, viewport: viewport });
+  const expectedImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const patchApplied = () => {
+    const { CanvasExtraState } = require('../../src/display/canvas.js');
+    const state = new CanvasExtraState(canvas.width, canvas.height);
+    state.updateRectMinMax([1, 0, 0, 1, 0, 0], [0, 0, 100, 100]);
+  };
+  patchApplied();
+  const actualImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  let imagesAreEqual = true;
+  for (let i = 0; i < expectedImageData.data.length; i++) {
+    if (expectedImageData.data[i] !== actualImageData.data[i]) {
+      imagesAreEqual = false;
+      break;
+    }
+  }
+  expect(imagesAreEqual).toBe(true);
+});

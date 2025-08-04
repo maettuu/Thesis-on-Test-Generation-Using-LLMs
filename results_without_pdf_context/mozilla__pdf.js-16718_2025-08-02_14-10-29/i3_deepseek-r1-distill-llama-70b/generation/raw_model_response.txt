@@ -1,0 +1,71 @@
+<think>
+Okay, I need to write a regression test for the issue where PDF annotations aren't saved on certain PDFs. The patch provided modifies several files, so I should focus on what changed and how to test it.
+
+First, I'll look at the patch. The main changes are in worker.js, writer.js, and xref.js. The issue seems related to how annotations are handled during saving, especially with XFA forms and linearization.
+
+In worker.js, they added a check for linearization in the startXRef assignment. This probably affects how the XRef table is built. In writer.js, the updateAcroform function now includes a condition to prevent saving when certain conditions aren't met. In xref.js, they introduced a new variable #firstXRefStmPos and modified lastXRefStreamPos to use it.
+
+So, the test should verify that annotations are correctly saved when linearization is present. I'll create a test that uses a PDF with linearization and checks if the annotations are present after saving.
+
+I'll use the test/unit/writer_spec.js file. I'll import the necessary modules like incrementalUpdate, writeDict, Dict, Name, Ref, StringStream, and bytesToString.
+
+I'll set up the test by creating a sample PDF with an annotation. Then, I'll simulate the saving process using incrementalUpdate. I'll check if the resulting data includes the annotation, which should be the case after the patch.
+
+The test should fail before the patch because the annotations weren't saved, and pass after the patch because the issue is fixed. I'll structure the test to create an XRef instance, set up the necessary variables, and assert that the output includes the expected annotation data.
+
+I'll make sure the test is self-contained and only uses the provided imports. I'll also ensure that it's concise and directly tests the issue without unnecessary steps.
+</think>
+
+```javascript
+it("should save annotations on linearized PDFs", async () => {
+  const { incrementalUpdate } = await import("../../src/core/writer.js");
+  const { Dict, Name, Ref } = await import("../../src/core/primitives.js");
+  const { StringStream } = await import("../../src/core/stream.js");
+  const { bytesToString } = await import("../../src/shared/util.js");
+
+  // Create a sample XRef with linearization
+  const xref = {
+    trailer: new Dict(),
+    lastXRefStreamPos: 100,
+    startXRefQueue: [101],
+    _xrefStms: new Set([101]),
+  };
+
+  // Set up the data for incremental update
+  const originalData = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+  const newRefs = [];
+  const acroFormRef = Ref.get(1, 0);
+  const acroForm = new Dict();
+  const xrefInfo = {
+    rootRef: Ref.get(2, 0),
+    encryptRef: null,
+    newRef: Ref.get(3, 0),
+    infoRef: null,
+    info: {},
+    fileIds: null,
+    startXRef: 100,
+    filename: "test.pdf",
+  };
+
+  // Perform the incremental update
+  const result = await incrementalUpdate({
+    originalData,
+    xrefInfo,
+    newRefs,
+    xref,
+    hasXfa: false,
+    xfaDatasetsRef: null,
+    hasXfaDatasetsEntry: false,
+    needAppearances: true,
+    acroFormRef,
+    acroForm,
+    xfaData: null,
+  });
+
+  // Convert the result to a string for inspection
+  const resultStr = bytesToString(result);
+
+  // Verify that the annotation data is present
+  expect(resultStr).toContain("annotation");
+});
+```

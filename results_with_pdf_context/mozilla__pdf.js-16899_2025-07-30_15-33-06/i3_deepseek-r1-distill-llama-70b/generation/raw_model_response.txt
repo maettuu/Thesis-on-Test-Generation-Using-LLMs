@@ -1,0 +1,75 @@
+<think>
+Okay, so I need to write a test for the FreeText annotation not being displayed. The user provided a patch that modifies the annotation_layer.js file, and I need to ensure that the test fails before the patch and passes after.
+
+First, I'll look at the issue. The problem is that the FreeText annotation isn't showing up. From the patch, it seems that the isRenderable flag was being set based on certain conditions, but now it's always set to true. So, the test should check if the FreeText annotation is rendered correctly after the patch.
+
+I'll start by setting up the test. I'll need to import the necessary modules, like getDocument and buildGetDocumentParams, to load the PDF file. Then, I'll open the PDF and get the first page.
+
+Next, I'll create an annotation layer and render it. I'm specifically interested in the FreeText annotation, so I'll need to check if it's present in the annotations array.
+
+In the test, I'll load the PDF and get the first page. Then, I'll create the annotation layer and render it. I'll look for any annotations of type 'freText' and check if they're rendered.
+
+I should make sure that the test waits for the rendering to complete and that the annotation elements are correctly added to the DOM. If the FreeText annotation is present and rendered, the test will pass.
+
+I also need to handle any potential errors or exceptions, like if the PDF can't be loaded or if there are no annotations. But in this case, since the PDF is provided, I can assume it has the necessary annotations.
+
+So, putting it all together, the test will load the PDF, render the annotations, and check if the FreeText annotation is rendered. This should fail before the patch because the isRenderable was incorrectly set, and pass after the patch because isRenderable is now correctly set to true.
+</think>
+
+```javascript
+it("should render freetext annotation", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1851498.pdf'));
+  
+  try {
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewPort({ scale: 1 });
+    
+    class AnnotationLayer {
+      constructor() {
+        this.div = document.createElement('div');
+        this.zIndex = 0;
+      }
+      
+      async render(params) {
+        const { annotations } = params;
+        setLayerDimensions(this.div, viewport);
+        
+        const elementParams = {
+          data: null,
+          layer: this.div,
+          linkService: null,
+          downloadManager: null,
+          imageResourcesPath: "",
+          renderForms: true,
+          svgFactory: null,
+          annotationStorage: null,
+          enableScripting: false,
+          hasJSActions: false,
+          fieldObjects: null,
+          parent: this
+        };
+        
+        for (const data of annotations) {
+          if (data.annotationType === AnnotationType.FREETEXT) {
+            elementParams.data = data;
+            const element = new FreeTextAnnotationElement(elementParams);
+            const rendered = element.render();
+            this.div.append(rendered);
+          }
+        }
+      }
+    }
+    
+    const layer = new AnnotationLayer();
+    await layer.render({ annotations: page.getAnnotations() });
+    
+    const freetextAnnotations = layer.div.querySelectorAll('.freeTextAnnotation');
+    expect(freetextAnnotations.length).toBeGreaterThan(0);
+  } catch (error) {
+    throw new Error('Failed to load or render PDF');
+  }
+});
+```

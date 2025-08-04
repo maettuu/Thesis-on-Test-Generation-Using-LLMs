@@ -1,0 +1,62 @@
+<think>
+Okay, I need to write a regression test for the bug where PDF texts are rendering incorrectly. The patch provided modifies the standard_fonts.js file, adding mappings for GillSansMT fonts to Helvetica. So, the test should check if these fonts are correctly substituted after the patch.
+
+First, I'll create a test PDF that uses GillSansMT, GillSansMT-Bold, etc., and check if the text is displayed correctly. The test will load this PDF and compare the rendered text against the expected output.
+
+I'll use the PDFDocument and PDFPageProxy from the display/api.js module. I'll need to create a test file, maybe using the test_utils.js to generate it. Then, I'll load the PDF, get the first page, and render it.
+
+To get the text, I'll use the TextLayerBuilder from web/text_layer_builder.js. Once the text is extracted, I'll compare it to the expected string. If it matches, the test passes.
+
+I should make sure that the test imports the necessary modules dynamically to avoid issues with Node.js. Also, the test should be self-contained and not rely on external files, so I'll create the PDF content within the test using a blob.
+
+I need to handle the asynchronous operations properly, using async/await for loading the PDF and rendering the page. Finally, the test will assert that the extracted text includes the expected content.
+</think>
+
+```javascript
+it("should correctly render GillSansMT fonts as Helvetica", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { TextLayerBuilder } = await import("../../src/web/text_layer_builder.js");
+  const { createIdFactory } = await import("./test_utils.js");
+
+  // Create a test PDF with GillSansMT fonts
+  const pdfContent = new TextEncoder().encode(`
+    %PDF-1.4
+    1 0 obj
+    <</Type /Catalog /Pages 2 0 R>>
+    endobj
+    2 0 obj
+    <</Type /Pages /Kids [3 0 R] /Count 1>>
+    endobj
+    3 0 obj
+    <</Type /Page /Parent 2 0 R /Resources 4 0 R>>
+    endobj
+    4 0 obj
+    <</Font <</F1 5 0 R>>>
+    endobj
+    5 0 obj
+    <</Type /Font /Subtype /Type1 /BaseFont /GillSansMT>>
+    endobj
+    trailer <</Root 1 0 R>>
+  `);
+  
+  const pdfBlob = new Blob([pdfContent], { type: "application/pdf" });
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+  
+  // Load the PDF document
+  const pdf = await PDFDocument.load({ url: pdfUrl });
+  const page = await pdf.getPage(1);
+  
+  // Render the page and extract text
+  const textLayer = new TextLayerBuilder();
+  const textLayerCanvas = document.createElement("canvas");
+  textLayer.setup(textLayerCanvas);
+  await page.render({ canvasContext: textLayerCanvas.getContext("2d") });
+  
+  const text = await textLayer.getText();
+  
+  // Expected text from the PDF
+  const expectedText = "Hello, World!";
+  
+  expect(text).toContain(expectedText);
+});
+```

@@ -1,0 +1,57 @@
+<think>
+Okay, so I need to write a test for the patch that fixes the issue where a PDF with a non-integer DW isn't rendered correctly. Let me think about how to approach this.
+
+First, I should understand what the patch does. The patch is in evaluator.js, specifically in the PartialEvaluator class. It changes the way the defaultWidth is calculated when the DW value is not an integer. Before the patch, it used Number.isInteger(dw) ? dw : 1000, which would set defaultWidth to 1000 if DW wasn't an integer. The patch changes this to use typeof dw === "number" and then takes the ceiling of dw.
+
+So, the problem was that when DW was a non-integer, it defaulted to 1000, which might not be correct. The patch now uses the ceiling of the number if it's a valid number, which should handle non-integer DW values better.
+
+To test this, I need a PDF where DW is a non-integer. The user provided bug1903731.pdf, so I'll use that. The test should check if the PDF renders correctly after the patch.
+
+I'll start by importing the necessary modules. Since the test is in test/unit/evaluator_spec.js, I can use the existing imports. I'll need to import getDocument and buildGetDocumentParams for loading the PDF.
+
+In the test, I'll load the PDF using getDocument. Then, I'll create a PartialEvaluator instance. I'll need to mock or provide the necessary dependencies, like xref, handler, etc., but maybe I can get away with just initializing it with the required parameters.
+
+The main part is to check if the PDF renders correctly. Since it's a unit test, perhaps I can check if the evaluator processes the PDF without throwing errors related to DW handling. Alternatively, I can compare the output or some state after processing.
+
+Wait, maybe the best way is to ensure that when DW is non-integer, the defaultWidth is set correctly. So in the test, I can create a mock scenario where DW is a non-integer and check if the defaultWidth is the ceiling of that value.
+
+But in the context of the provided code, perhaps the test will load the PDF and check for any errors during rendering. If the patch is correct, the PDF should render without issues.
+
+So, I'll write the test to load the PDF and check if the PartialEvaluator initializes without errors. If it does, the test passes.
+
+I'll structure the test as an async function using Jest's it syntax. I'll import getDocument and buildGetDocumentParams. Then, I'll load the document, get the first page, and create a PartialEvaluator instance. I'll handle any errors and expect that no errors occur during initialization.
+
+I think that's a solid approach. Now, I'll write the code accordingly.
+</think>
+
+```javascript
+it("should handle non-integer DW in PDFs", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  
+  const loadingTask = getDocument(buildGetDocumentParams('bug1903731.pdf'));
+  const document = await loadingTask.promise;
+  const page = await document.getPage(1);
+  
+  const evaluatorOptions = {
+    maxImageSize: -1,
+    disableFontFace: false,
+    ignoreErrors: false,
+  };
+  
+  const partialEvaluator = new PartialEvaluator({
+    xref: new XRefMock(),
+    handler: {},
+    pageIndex: 1,
+    idFactory: createIdFactory(),
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options: evaluatorOptions,
+  });
+  
+  await expect(page.render([{ evaluator: partialEvaluator }])).resolves.not.toThrow();
+});
+```

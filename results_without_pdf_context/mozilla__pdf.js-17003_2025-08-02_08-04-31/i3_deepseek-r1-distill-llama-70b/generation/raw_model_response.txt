@@ -1,0 +1,61 @@
+<think>
+Okay, I need to write a test that verifies the fix for the issue where a warning appears when printing a PDF with an added annotation. The warning was "Unknown field name, falling back to empty field name." 
+
+First, I should understand the problem. The warning occurs because the code is trying to construct a field name for an annotation but can't find the necessary entries, leading to an empty string. This happens when the annotation is being printed, which triggers the code path that generates appearances.
+
+The patch changes how `collectFields` is handled in `AnnotationFactory`. It seems that before the patch, `collectFields` was being checked in a way that caused the warning when printing. The patch adjusts this to properly collect fields only when necessary.
+
+So, the test should simulate adding an annotation, then attempt to print it, and ensure that no warning is logged. 
+
+I'll start by setting up the test environment. I'll create a mock PDF document with an annotation. Then, I'll create an `AnnotationFactory` instance and process the annotation. 
+
+I'll need to mock the necessary dependencies, like the PDF manager and evaluator. Since the issue is related to logging a warning, I'll override the `warn` function to check if it's called.
+
+The test will load the annotation, create it using the factory, and then generate the appearance for printing. If the warning isn't logged, the test passes.
+
+I should structure the test to:
+1. Import necessary modules and set up mocks.
+2. Create a sample annotation structure.
+3. Use `AnnotationFactory` to process the annotation.
+4. Generate the appearance and check for warnings.
+
+I'll use Jest to write the test, using `it` for the test block. I'll also use `jest.spyOn` to monitor the `warn` function and ensure it's not called with the expected message.
+
+Finally, I'll write the test code, making sure it's self-contained and only uses the provided imports.
+</think>
+
+```javascript
+it("should not warn about unknown field names when printing annotations", async () => {
+  const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+  const xref = new XRefMock();
+  const pdfManager = {
+    ensureCatalog: async () => ({}),
+    ensureDoc: async () => ({}),
+    getPage: async () => ({ annotations: [] }),
+  };
+
+  const annotationFactory = new AnnotationFactory();
+  const params = {
+    xref,
+    ref: new Ref(1),
+    annotationGlobals: {},
+    idFactory: createIdFactory(),
+    collectFields: true,
+    pageRef: new Ref(1),
+  };
+
+  const dict = new Dict();
+  const annotation = await annotationFactory.create(...Object.values(params));
+  
+  const evaluator = {
+    xref,
+    options: { isOffscreenCanvasSupported: true },
+    getOperatorList: async () => ({ opList: new OperatorList() }),
+  };
+
+  const result = await annotation._getAppearance(evaluator, new WorkerTask(), RenderingIntentFlag.SAVE, null);
+
+  expect(warnSpy).not.toHaveBeenCalledWith('Unknown field name, falling back to empty field name.');
+});
+```

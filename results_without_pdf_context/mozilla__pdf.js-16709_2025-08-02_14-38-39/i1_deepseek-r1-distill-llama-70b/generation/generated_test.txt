@@ -1,0 +1,49 @@
+it("should redo an annotation using keyboard shortcuts", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { Annotation, AnnotationFactory, MarkupAnnotation } = 
+    await import("../../src/core/annotation.js");
+  const { createIdFactory, XRefMock } = await import("./test_utils.js");
+
+  // Setup PDF document with one page
+  const xref = new XRefMock();
+  const idFactory = createIdFactory();
+  const pdfDocument = new PDFDocument({
+    xref,
+    idFactory,
+    isBase64Encoded: true,
+    isXpdfEnabled: false,
+  });
+  const pageRef = pdfDocument.addPage();
+  const page = pdfDocument.getPage(pageRef);
+
+  // Setup annotation storage and editor manager
+  const container = document.createElement("div");
+  const eventBus = new (await import("../../src/shared/message_handler.js")).MessageHandler();
+  const annotationStorage = pdfDocument.annotationStorage;
+  const editorUIManager = new (await import("../../src/display/editor/tools.js")).AnnotationEditorUIManager(
+    container,
+    eventBus,
+    pdfDocument,
+    new Map()
+  );
+
+  // Create and add an annotation
+  const annotation = AnnotationFactory.create(AnnotationType.MARKUP, {
+    subtype: MarkupAnnotation,
+    points: [0, 0, 50, 50],
+    text: "Test",
+  });
+  annotationStorage.addAnnotation(annotation);
+
+  // Perform undo
+  editorUIManager.undo();
+
+  // Check if annotation was removed
+  expect(annotationStorage.getAnnotations().length).toBe(0);
+
+  // Perform redo
+  editorUIManager.redo();
+
+  // Verify annotation was restored
+  expect(annotationStorage.getAnnotations().length).toBe(1);
+});

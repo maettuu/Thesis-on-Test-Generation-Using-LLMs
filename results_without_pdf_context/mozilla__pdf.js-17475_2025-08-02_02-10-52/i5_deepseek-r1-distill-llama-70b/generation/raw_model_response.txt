@@ -1,0 +1,51 @@
+<think>
+Okay, I need to write a regression test for the issue where the highlight on a cropped PDF isn't visible when saving or printing. The patch provided modifies the `serializeBoxes` and `serializeOutlines` methods in `highlight.js` to include a `rect` parameter, which is used to adjust the coordinates correctly.
+
+First, I should understand what the patch does. It looks like the `serializeBoxes` and `serializeOutlines` methods now take a `rect` parameter, which is used to calculate the correct x and y coordinates. Before the patch, these methods didn't account for the cropped area, so the highlights were drawn outside the visible area when printed or saved.
+
+To test this, I'll create a test that simulates adding a highlight to a cropped PDF. I'll need to set up a PDF document with a cropped page. Then, I'll create a highlight annotation and apply it. After that, I'll save the PDF and check if the highlight is correctly visible.
+
+I'll use `pdf-lib` to create the PDF and `pdfjs` to handle the annotations. I'll import the necessary modules like `PDFDocument`, `PDFPage`, and `AnnotationFactory` from `pdf-lib`. For PDF.js, I'll need `PDFDocument`, `PDFPageProxy`, and `AnnotationFactory`.
+
+The test will follow these steps:
+1. Create a new PDF document with a cropped page.
+2. Create a highlight annotation and add it to the page.
+3. Save the PDF with the annotation.
+4. Load the saved PDF using PDF.js and check if the annotation is rendered correctly.
+
+I'll need to handle the PDF generation and saving, possibly using a temporary file. Then, I'll load this file in PDF.js and check the annotations.
+
+I should make sure that the test doesn't rely on any external files and is self-contained. Also, I need to ensure that the test correctly compares the expected and actual results, failing before the patch and passing after.
+
+I'll structure the test using Jest, with an `it` block. I'll use dynamic imports to include the necessary modules. The test will create a PDF with a cropped page, add a highlight, save it, then load it back to check the annotation's presence.
+
+Finally, I'll write the code, making sure it's concise and only includes the necessary steps to verify the fix.
+</think>
+
+```javascript
+it("should include highlights in cropped PDFs when saving", async () => {
+  const { PDFDocument, PDFPage } = await import("../../src/core/document.js");
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { PDFDocument as PDFJSDocument, PDFPageProxy } = await import("../../src/display/api.js");
+
+  // Create a new PDF document with a cropped page
+  const pdf = new PDFDocument();
+  const page = pdf.addPage([0, 0, 100, 100]); // Cropped page
+
+  // Create and add a highlight annotation
+  const annotation = AnnotationFactory.createHighlight({
+    page,
+    quads: [[0, 0, 10, 0, 10, 10, 0, 10]],
+    color: [1, 0, 0],
+  });
+
+  // Save the PDF with the annotation
+  const pdfBytes = await pdf.save();
+  const pdfJS = await PDFJSDocument.load(pdfBytes.buffer);
+
+  // Verify the annotation is correctly rendered
+  const pageProxy = pdfJS.getPage(0);
+  const annotations = await pageProxy.getAnnotations();
+  expect(annotations.length).toBe(1);
+});
+```

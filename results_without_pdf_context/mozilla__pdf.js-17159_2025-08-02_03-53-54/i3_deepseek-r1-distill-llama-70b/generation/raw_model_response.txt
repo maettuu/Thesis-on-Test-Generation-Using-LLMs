@@ -1,0 +1,83 @@
+<think>
+Okay, I need to create a test that verifies the patch fixes the issue where radio buttons in print view don't reflect their real state. The issue is that in the print view, the radio buttons' state isn't correctly shown. 
+
+First, I should look at the provided patch. The patch modifies the `ButtonWidgetAnnotation` class in `annotation.js`. The change is in the `_processRadioButton` method. Before the patch, it set both `fieldValue` and `buttonValue` to null. After the patch, only `buttonValue` is set to null, leaving `fieldValue` untouched.
+
+So, the problem was that setting `fieldValue` to null caused the state not to update correctly. The patch ensures that `fieldValue` isn't overwritten, so the correct state is retained.
+
+To test this, I need to simulate a radio button annotation and check if its state is correctly reflected after the patch.
+
+I'll start by importing the necessary modules. The test file already imports `AnnotationFactory`, `Annotation`, and other relevant classes, so I can use those.
+
+I'll create a sample PDF with a radio button group. Each radio button will have an export value, like "Yes" and "No". Then, I'll set one of them to be checked (e.g., "Yes") and check if the `fieldValue` correctly reflects this state.
+
+I'll use `XRefMock` to mock the PDF data. I'll create a radio button annotation with the correct structure, including the parent field, export values, and the current state.
+
+After setting up the annotation, I'll create an instance of `ButtonWidgetAnnotation` and check if the `fieldValue` is correctly set to "Yes".
+
+If the test passes, it means the patch correctly retains the `fieldValue`, ensuring the radio button's state is displayed properly in print view.
+</think>
+
+```javascript
+it("should correctly reflect radio button state in print view", async () => {
+  const idFactory = createIdFactory();
+  const xref = new XRefMock(idFactory);
+  const fontData = await fetch(STANDARD_FONT_DATA_URL).then(res => res.arrayBuffer());
+  
+  // Create a radio button annotation
+  const annotationRef = xref.createRef();
+  const dict = new Dict(xref);
+  dict.set("Type", Name.get("Annot"));
+  dict.set("Subtype", Name.get("Widget"));
+  dict.set("FT", Name.get("Btn"));
+  dict.set("F", 0);
+  dict.set("Rect", [0, 0, 100, 100]);
+  dict.set("T", stringToPDFString("Test Radio Button"));
+  dict.set("Parent", new Ref(1));
+  
+  // Create parent field
+  const parentRef = xref.createRef();
+  const parentDict = new Dict(xref);
+  parentDict.set("V", Name.get("Yes"));
+  parentDict.set("Opt", [Name.get("Yes"), Name.get("No")]);
+  
+  xref.put(parentRef, parentDict);
+  xref.put(annotationRef, dict);
+  
+  const annotation = await AnnotationFactory.create(
+    xref,
+    annotationRef,
+    {
+      pdfManager: null,
+      acroForm: new Dict(),
+      xfaDatasets: null,
+      structTreeRoot: null,
+      baseUrl: null,
+      attachments: null
+    },
+    idFactory,
+    true
+  );
+  
+  const buttonAnnotation = new ButtonWidgetAnnotation({
+    dict: annotation.dict,
+    xref: xref,
+    annotationGlobals: {
+      pdfManager: null,
+      acroForm: new Dict(),
+      xfaDatasets: null,
+      structTreeRoot: null,
+      baseUrl: null,
+      attachments: null
+    },
+    id: idFactory.createObjId(),
+    collectFields: true,
+    pageIndex: 0,
+    pageRef: null,
+    evaluatorOptions: {}
+  });
+  
+  // The state should be correctly reflected
+  expect(buttonAnnotation.data.fieldValue).toBe("Yes");
+});
+```

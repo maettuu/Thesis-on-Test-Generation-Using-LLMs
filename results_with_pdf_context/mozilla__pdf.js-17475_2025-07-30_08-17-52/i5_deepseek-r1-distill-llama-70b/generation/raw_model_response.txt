@@ -1,0 +1,67 @@
+<think>
+Okay, I need to write a regression test for the issue where the highlight on a cropped PDF isn't visible when saving or printing. The patch provided modifies the `serializeBoxes` and `serializeOutlines` methods in `highlight.js` to include a `rect` parameter, which is used to adjust the coordinates correctly.
+
+First, I should understand what the patch does. It looks like the `serializeBoxes` and `serializeOutlines` methods now take a `rect` parameter, which is used to calculate the correct x and y coordinates. This probably fixes an issue where the highlights were not positioned correctly when the PDF was cropped, leading to them not being visible when saved or printed.
+
+To write the test, I'll need to:
+
+1. Load the PDF file `bug1872721.pdf` using `getDocument` from `api.js` and `buildGetDocumentParams` from `test_utils.js`.
+2. Get the first page of the document.
+3. Create a highlight annotation on that page. I'll set the color to yellow and position it somewhere on the page, maybe using a quadPoints array to define the rectangle.
+4. Add this annotation to the page's annotations array.
+5. Render the page, which should apply the highlight.
+6. After rendering, check if the annotation's data includes the correct quadPoints and outlines, which were computed using the `rect` parameter.
+
+The test should fail before the patch because the `serializeBoxes` and `serializeOutlines` methods didn't account for the cropped area, so the quadPoints and outlines would be incorrect. After the patch, these should be correct, so the test should pass.
+
+I'll structure the test using Jest's `it` function. I'll use async/await to handle the asynchronous loading of the PDF and the page. I'll also use `expect` to check if the data includes the expected values.
+
+I need to make sure the test is self-contained and doesn't rely on any external dependencies beyond the provided imports. I'll dynamically import the necessary modules to ensure compatibility with Node.js.
+
+So, putting it all together, the test will load the PDF, apply the highlight, render the page, and then verify that the annotation data is correctly computed with the new `rect` parameter.
+</think>
+
+```javascript
+it("should correctly serialize highlight annotations after cropping", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1872721.pdf'));
+  
+  const en = await loadingTask.promise;
+  const pdfDoc = await en.document;
+  const page = await pdfDoc.getPage(1);
+  
+  // Create a new highlight annotation
+  const annotation = {
+    type: 'highlight',
+    color: [1, 1, 0, 0.5], // Yellow with 50% opacity
+    quadPoints: [
+      100, 100, 200, 100, 200, 200, 100, 200, 
+      100, 300, 200, 300, 200, 400, 100, 400
+    ],
+    page: 1
+  };
+  
+  // Add annotation to the page
+  const annotations = await page.getAnnotations();
+  annotations.push(annotation);
+  
+  // Render the page to apply the annotation
+  const viewport = page.getViewPort({ scale: 1 });
+  const renderTask = page.render({
+    viewport,
+    annotationMode: 'highlight',
+    enableWebGL: false
+  });
+  
+  await renderTask.promise;
+  
+  // Get the annotation editor data
+  const editor = new HighlightEditor(annotation, page, viewport);
+  const data = editor.getData();
+  
+  // Verify the quadPoints and outlines are correctly serialized with rect
+  expect(data.quadPoints).toBeDefined();
+  expect(data.outlines).toBeDefined();
+});
+```

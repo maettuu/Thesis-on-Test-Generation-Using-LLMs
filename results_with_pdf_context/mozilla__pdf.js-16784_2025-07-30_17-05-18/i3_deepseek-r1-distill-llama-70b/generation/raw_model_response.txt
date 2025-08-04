@@ -1,0 +1,77 @@
+<think>
+Okay, I need to write a regression test for the issue where SVG images couldn't be resized in pdf.js. The patch provided changes how the ImageManager handles SVG images, so I should focus on that.
+
+First, I'll look at the test file provided. It's test/unit/annotation_spec.js, and it already imports some necessary modules. I can use those, but I might need more for this test.
+
+The test should check if resizing an SVG image works correctly after the patch. I'll need to create an SVG image, add it as an annotation, and then try to resize it.
+
+I'll start by importing the ImageManager and AnnotationEditorUIManager from the correct paths. Then, I'll set up a mock PDF document and other necessary objects like the annotation storage and event bus.
+
+Next, I'll create an SVG image using a data URL. I'll add it as an annotation to the storage. Using the ImageManager, I'll fetch this image and check if it's properly resized.
+
+I'll create an AnnotationEditorUIManager instance and add the editor to a layer. Then, I'll simulate resizing the image by setting its width and height. After that, I'll check if the image's dimensions match the expected resized values.
+
+Finally, I'll write the test case using Jest's it function. The test will fail before the patch because the image wouldn't resize, and pass after the patch because the resizing works.
+</think>
+
+```javascript
+it("should correctly resize SVG images", async () => {
+  const { ImageManager } = await import("../../src/display/editor/tools.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { Annotation } = await import("../../src/core/annotation.js");
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { Ref, Dict } = await import("../../src/core/primitives.js");
+  const { XRefMock } = await import("./test_utils.js");
+
+  const xref = new XRefMock();
+  const pdfDocument = {
+    annotationStorage: {
+      get: () => new Ref(1),
+      add: () => {},
+      remove: () => {},
+      has: () => true,
+    },
+    filterFactory: {},
+  };
+  const eventBus = {
+    _on: () => {},
+    _off: () => {},
+    dispatch: () => {},
+  };
+  const container = {
+    focus: () => {},
+  };
+
+  const imageManager = new ImageManager();
+  const uiManager = new AnnotationEditorUIManager(container, eventBus, pdfDocument, {});
+
+  const svg = `data:image/svg+xml;charset=UTF-8,<svg viewBox="0 0 100 100" width="100" height="100"><rect width="100" height="100" style="fill:red;"/></svg>`;
+  const image = await imageManager.getFromUrl(svg);
+
+  const annotation = AnnotationFactory.create(AnnotationType.INK);
+  annotation.setFlags(AnnotationFlag.HIDDEN);
+  const editor = await annotation.createEditor();
+  editor.annotationElementId = "test-id";
+
+  const layer = {
+    addOrRebuild: () => {},
+    get: () => ({ viewport: {} }),
+  };
+  uiManager.addLayer(layer);
+
+  const svgElement = await image.bitmap;
+  const originalWidth = svgElement.width;
+  const originalHeight = svgElement.height;
+  const resizedWidth = 200;
+  const resizedHeight = 200;
+
+  editor.resize(resizedWidth, resizedHeight);
+
+  const resizedSvg = await imageManager.getFromUrl(svg);
+  const resizedWidthActual = resizedSvg.width;
+  const resizedHeightActual = resizedSvg.height;
+
+  expect(resizedWidthActual).toBe(resizedWidth);
+  expect(resizedHeightActual).toBe(resizedHeight);
+});
+```

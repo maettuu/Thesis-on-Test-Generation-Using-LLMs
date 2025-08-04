@@ -1,0 +1,59 @@
+<think>
+Okay, so I'm trying to figure out how to write a test for the given issue where comments and sticky notes aren't rendering in the PDF viewer. The user provided a patch, and I need to create a test that fails before the patch and passes after.
+
+First, I'll look at the issue description. The user mentioned that in PDF.js versions 4.0.10 and 3.11.174, the annotations aren't showing up, but they worked in 2.5.207. The problem seems to be related to the `noHTML` flag in the annotation code.
+
+Looking at the patch, I see that several classes like `TextAnnotation`, `PopupAnnotation`, `FreeTextAnnotation`, and others have been modified. The main change is setting `this.data.noHTML` to `false` in their constructors. This suggests that the `noHTML` flag was preventing the HTML rendering of these annotations, causing them not to display.
+
+So, the test needs to check if these annotations correctly set `noHTML` to `false`. If they do, the annotations should render properly.
+
+I'll start by importing the necessary modules. The test file already imports `Annotation`, `AnnotationFactory`, and others, so I can use those.
+
+Next, I'll create a mock PDF document with a sample annotation. For example, a text annotation with a comment. I'll set up the XRef, parser, and evaluator to simulate loading the annotation.
+
+Then, I'll create an instance of `AnnotationFactory` and fetch the annotation using the mock data. I'll check if the `noHTML` property is `false` for the annotation data.
+
+The test will assert that `annotation.data.noHTML` is `false`. Before the patch, this might have been `true`, causing the test to fail. After the patch, it should pass.
+
+I'll structure the test using `it` from Jest, making sure it's async because some operations, like parsing, are asynchronous. I'll also ensure the test is self-contained and only tests the specific behavior related to the `noHTML` flag.
+
+Finally, I'll write the code, making sure all necessary variables are initialized and the assertions are clear. This should cover the scenario where the annotations were not rendering due to the `noHTML` flag being set incorrectly.
+</think>
+
+```javascript
+it("should correctly set noHTML to false for text annotations", async () => {
+  const xref = new XRefMock();
+  const parser = new Parser(
+    new Lexer(new StringStream(CMAP_URL), { xref })
+  );
+  const evaluator = new PartialEvaluator({
+    xref,
+    parser,
+    onUnexpectedEnd: () => {},
+  });
+  const idFactory = createIdFactory();
+
+  const annotationFactory = new AnnotationFactory();
+  const dict = new Dict(xref);
+  dict.set("Subtype", Name.get("Text"));
+  dict.set("Contents", "comment1");
+  dict.set("Rect", [0, 0, 100, 100]);
+
+  const annotation = await AnnotationFactory.create(
+    xref,
+    new Ref(1),
+    {
+      pdfManager: {
+        ensureCatalog: async () => ({ acroForm: new Dict(xref) }),
+        ensureDoc: async () => ({}),
+      },
+      annotationGlobals: {},
+      idFactory,
+      collectFields: false,
+    },
+    false
+  );
+
+  expect(annotation.data.noHTML).toBe(false);
+});
+```

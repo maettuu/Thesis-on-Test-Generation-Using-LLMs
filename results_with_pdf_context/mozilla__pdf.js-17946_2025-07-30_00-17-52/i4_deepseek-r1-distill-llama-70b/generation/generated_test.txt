@@ -1,0 +1,45 @@
+it("should render large scanned images", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue17289.pdf'));
+
+  const viewer = {
+    get canvasCtx() {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      return ctx;
+    },
+  };
+
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+  const scale = 1;
+  const viewport = pdfPage.getViewport({ scale });
+
+  await pdfPage.render({
+    viewport,
+    canvasContext: viewer.canvasCtx,
+    renderInteractive: false,
+    disableWebGL: true,
+  });
+
+  const canvas = viewer.canvasCtx.canvas;
+  const imageData = canvas.getContext('2d').getImageData(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  let hasNonTransparentPixel = false;
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    if (imageData.data[i + 3] !== 0) {
+      hasNonTransparentPixel = true;
+      break;
+    }
+  }
+
+  if (!hasNonTransparentPixel) {
+    throw new Error("Image was not rendered");
+  }
+});

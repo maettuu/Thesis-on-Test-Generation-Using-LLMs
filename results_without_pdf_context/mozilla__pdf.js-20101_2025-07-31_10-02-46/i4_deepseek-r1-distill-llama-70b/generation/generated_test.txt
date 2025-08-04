@@ -1,0 +1,44 @@
+it("should render text when usedocumentfonts is disabled", async () => {
+  const { PDFDocument, PDFPage, PDFPageRenderOptions, PDFDocumentLoader } = await import("../../src/display/api.js");
+  const { createMinimalPdf } = await import("../../test/src/helpers/create_minimal_pdf.js");
+
+  // Create a minimal PDF with text
+  const pdfBytes = await createMinimalPdf("Hello World");
+  const loader = new PDFDocumentLoader(pdfBytes);
+  const pdf = await PDFDocumentLoader.loadPdf(new Uint8Array(pdfBytes), {
+    // Simulate browser.display.use_document_fonts = 0
+    createBrowser: () => ({
+      get fullVersion() { return "20200101"; },
+      get pdfjsVersion() { return "2.5.207"; },
+      get pdfjsBuild() { return "latest"; },
+      get useDocumentFonts() { return 0; },
+      get enableWebGL() { return true; },
+      get enableCanvas() { return true; },
+      get disableFontFace() { return false; },
+    }),
+  });
+
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const renderOptions = new PDFPageRenderOptions({
+    viewport,
+    enableWebGL: true,
+    enableCanvas: true,
+    useCanvas: true,
+  });
+
+  const canvas = await page.render(renderOptions);
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // Check if the text is rendered
+  let hasNonTransparentPixels = false;
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    if (imageData.data[i + 3] !== 0) {
+      hasNonTransparentPixels = true;
+      break;
+    }
+  }
+
+  expect(hasNonTransparentPixels).toBe(true);
+});

@@ -1,0 +1,64 @@
+<think>
+Okay, I need to write a regression test for the issue where a PDF with a specific font wasn't generating a text layer. The user provided a patch, and I need to ensure the test fails before the patch and passes after.
+
+First, I'll look at the problem. The PDF has a Type3 font with an invalid font name, causing the text layer not to render. The patch modifies the evaluator.js to handle such cases better.
+
+I should create a test that uses a PDF that triggers this issue. The test will check if the text layer is generated correctly.
+
+Looking at the provided test file, I see it imports necessary modules. I'll need to create a mock PDF with a Type3 font that has an invalid font name.
+
+I'll set up an XRefMock to simulate the PDF structure. The font dictionary should have a FontBBox and return an error when getting the FontDescriptor. This mimics the invalid font name scenario.
+
+I'll then create a PartialEvaluator and call translateFont on it. Without the patch, this should throw a FormatError. With the patch, it should handle it gracefully.
+
+In the test, I'll use a try-catch block. If the evaluator throws an error, the test will fail, indicating the issue isn't resolved. After the patch, the test should pass as the error won't be thrown.
+
+I need to structure the test to mock all necessary dependencies and accurately reflect the conditions that cause the bug. This way, the test will validate the patch's effectiveness.
+</think>
+
+```javascript
+it("should handle Type3 fonts with missing FontDescriptor", async () => {
+  const { XRefMock, createIdFactory } = await import("./test_utils.js");
+  const { Dict, Name } = await import("../../src/core/primitives.js");
+  const { PartialEvaluator } = await import("../../src/core/evaluator.js");
+
+  const xref = new XRefMock();
+  const idFactory = createIdFactory();
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: null,
+    pageIndex: 0,
+    idFactory,
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalColorSpaceCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options: PartialEvaluator.DefaultPartialEvaluatorOptions,
+  });
+
+  const dict = new Dict();
+  dict.set("FontBBox", [0, 0, 0, 0]);
+  
+  try {
+    await evaluator.translateFont({
+      descriptor: null,
+      dict,
+      baseDict: dict,
+      composite: false,
+      type: "Type3",
+      firstChar: 0,
+      lastChar: 0,
+      toUnicode: null,
+      cssFontInfo: null,
+    });
+    throw new Error("Expected FormatError to be thrown");
+  } catch (error) {
+    if (error instanceof FormatError) {
+      // Expected error before patch
+      throw error;
+    }
+  }
+});
+```

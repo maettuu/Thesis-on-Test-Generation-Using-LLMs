@@ -1,0 +1,66 @@
+<think>
+Okay, I need to write a regression test for the issue where CMYK JPEG images weren't being decoded using the ImageDecoder. The patch adds support for this, so the test should fail before the patch and pass after.
+
+First, I'll look at the changes in the patch. In jpeg_stream.js, they added a method canUseImageDecoderCMYK which checks if the ImageDecoder supports 'image/x-jpeg-pdf' type. In the getTransferableImage method, they now check if it's a CMYK image and use the appropriate type.
+
+In jpg.js, the canUseImageDecoder method now returns a jpegInfo object that includes 'cmyk: true' if it's a 4-component image.
+
+So, the test should create a CMYK JPEG image and check if it's correctly decoded using ImageDecoder.
+
+I'll use a sample CMYK JPEG image. I'll set up a test server to serve this image. Then, I'll create a PDFDocument and a page, render it, and check if the image is rendered without errors.
+
+I'll import necessary modules like TestPdfsServer to serve the file, PDFDocumentProxy, and others. I'll disable the worker to run in the main thread for simplicity.
+
+The test will fetch the image, create a PDF document with it, render the first page, and check for any errors during rendering. If the patch works, the image should render correctly, and no exceptions should be thrown.
+
+I'll structure the test with async/await, using try-catch to handle any exceptions. If an exception occurs, the test will fail, indicating the issue isn't resolved.
+
+Finally, I'll write the test as an 'it' block, making sure it's self-contained and uses only the provided imports.
+</think>
+
+```javascript
+it("should decode cmyk jpeg image using ImageDecoder", async () => {
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const { PDFDocumentProxy, PDFPageProxy } = await import("../../src/display/api.js");
+  const server = new TestPdfsServer();
+  try {
+    await server.start();
+    const cmykJpegUrl = server.url("cmyk.jpeg");
+    const response = await fetch(cmykJpegUrl);
+    const arrayBuffer = await response.arrayBuffer();
+    const data = new Uint8Array(arrayBuffer);
+    
+    const transport = new PDFDataRangeTransport(data);
+    const loadingTask = PDFDocumentLoadingTask.create(transport);
+    const pdf = await PDFDocumentProxy.create({
+      loadingTask,
+      isDataLoaded: () => true,
+      isDisposed: false,
+      getProxies: () => ({
+        pages: [PDFPageProxy.create({})],
+      }),
+    });
+    
+    const page = pdf.getPages()[0];
+    const viewport = page.getViewport({ scale: 1 });
+    
+    let exceptionThrown = false;
+    try {
+      await page.render({
+        viewport,
+        renderOption: {
+          renderAnnotations: false,
+          renderForm: false,
+          useImageDecoder: true,
+        },
+      });
+    } catch (e) {
+      exceptionThrown = true;
+    }
+    
+    assert.notOk(exceptionThrown, "Exception thrown when rendering CMYK JPEG");
+  } finally {
+    await server.stop();
+  }
+});
+```

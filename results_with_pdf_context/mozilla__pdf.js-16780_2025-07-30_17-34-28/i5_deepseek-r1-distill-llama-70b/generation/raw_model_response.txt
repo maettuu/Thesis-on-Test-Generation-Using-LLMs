@@ -1,0 +1,48 @@
+<think>
+Okay, I need to write a regression test for the issue where SVG images can't be resized in pdf.js. The patch provided adds a method to check if SVG fits the canvas and modifies how SVG URLs are handled. 
+
+First, I should understand what the patch does. It looks like the patch introduces a static method _checkIfSVGFitsInCanvas which tests if an SVG image maintains its aspect ratio when drawn on a canvas. If it doesn't, it appends a specific parameter to the SVG URL to fix the resizing issue.
+
+So, the test needs to verify that after the patch, resizing an SVG image works correctly. I'll create an SVG image, add it to a PDF, and then check if resizing it doesn't cause any issues.
+
+I'll start by importing the necessary modules. I'll need PDFDocument from 'pdf.js' to create a new PDF document. Then, I'll generate a simple SVG image as a data URL. 
+
+Next, I'll create a PDF page and draw the SVG image on it using the PDF's graphics. I'll set the image's width and height to test resizing. 
+
+After adding the image, I'll save the PDF as a buffer. Then, I'll load this PDF buffer using pdfjsLib's PDFDocument to ensure it can be opened without errors. 
+
+The key part is to check if the image resizes correctly. If the patch works, the image should fit the canvas without preserving the aspect ratio. So, the test expects that after applying the patch, the PDF can be created and opened successfully.
+
+I should make sure the test is self-contained and doesn't rely on external files. Also, I'll use async/await for any promises, like when creating the PDF or loading the document.
+
+Finally, the test will assert that no error occurs during these operations, indicating that the SVG resizing issue is resolved.
+</think>
+
+```javascript
+it("should correctly resize SVG images in PDF", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const svg = `<svg viewBox="0 0 100 100" width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" style="fill:red;"/>
+  </svg>`;
+  const img = new Image();
+  img.src = `data:image/svg+xml;base64,${btoa(svg)}`;
+  
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+  const graphics = page.getGraphics();
+  
+  await new Promise((resolve) => {
+    img.onload = () => {
+      graphics.drawImage(img, 0, 0, 100, 100);
+      resolve();
+    };
+  });
+  
+  const pdfBuffer = await pdf.save();
+  
+  const pdfjsLib = await import("../../src/display/api.js");
+  const pdfDoc = await pdfjsLib.PDFDocument.load(pdfBuffer);
+  
+  expect(pdfDoc).toBeTruthy();
+});
+```

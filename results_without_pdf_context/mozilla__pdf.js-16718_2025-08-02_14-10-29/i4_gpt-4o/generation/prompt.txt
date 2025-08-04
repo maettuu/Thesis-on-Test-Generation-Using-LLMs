@@ -1,0 +1,2533 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+PDF annotations not saved on certain PDFs
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/worker.js b/src/core/worker.js
+--- a/src/core/worker.js
++++ b/src/core/worker.js
+@@ -544,6 +544,7 @@ class WorkerMessageHandler {
+           pdfManager.ensureCatalog("acroForm"),
+           pdfManager.ensureCatalog("acroFormRef"),
+           pdfManager.ensureDoc("startXRef"),
++          pdfManager.ensureDoc("linearization"),
+         ];
+ 
+         const newAnnotationsByPage = !isPureXfa
+@@ -595,6 +596,7 @@ class WorkerMessageHandler {
+           acroForm,
+           acroFormRef,
+           startXRef,
++          linearization,
+           ...refs
+         ]) {
+           let newRefs = [];
+@@ -656,7 +658,9 @@ class WorkerMessageHandler {
+               infoRef: xref.trailer.getRaw("Info") || null,
+               info: infoObj,
+               fileIds: xref.trailer.get("ID") || null,
+-              startXRef: xref.lastXRefStreamPos ?? startXRef,
++              startXRef: linearization
++                ? startXRef
++                : xref.lastXRefStreamPos ?? startXRef,
+               filename,
+             };
+           }
+
+diff --git a/src/core/writer.js b/src/core/writer.js
+--- a/src/core/writer.js
++++ b/src/core/writer.js
+@@ -231,7 +231,7 @@ async function updateAcroform({
+     warn("XFA - Cannot save it");
+   }
+ 
+-  if (!needAppearances && (!hasXfa || !xfaDatasetsRef)) {
++  if (!needAppearances && (!hasXfa || !xfaDatasetsRef || hasXfaDatasetsEntry)) {
+     return;
+   }
+
+diff --git a/src/core/xref.js b/src/core/xref.js
+--- a/src/core/xref.js
++++ b/src/core/xref.js
+@@ -33,6 +33,8 @@ import { BaseStream } from "./base_stream.js";
+ import { CipherTransformFactory } from "./crypto.js";
+ 
+ class XRef {
++  #firstXRefStmPos = null;
++
+   constructor(stream, pdfManager) {
+     this.stream = stream;
+     this.pdfManager = pdfManager;
+@@ -705,6 +707,7 @@ class XRef {
+             // (possible infinite recursion)
+             this._xrefStms.add(obj);
+             this.startXRefQueue.push(obj);
++            this.#firstXRefStmPos ??= obj;
+           }
+         } else if (Number.isInteger(obj)) {
+           // Parse in-stream XRef
+@@ -754,7 +757,10 @@ class XRef {
+   }
+ 
+   get lastXRefStreamPos() {
+-    return this._xrefStms.size > 0 ? Math.max(...this._xrefStms) : null;
++    return (
++      this.#firstXRefStmPos ??
++      (this._xrefStms.size > 0 ? Math.max(...this._xrefStms) : null)
++    );
+   }
+ 
+   getEntry(i) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.9
+- @babel/plugin-transform-modules-commonjs: ^7.22.5
+- @babel/preset-env: ^7.22.9
+- @babel/runtime: ^7.22.6
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.14
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001516
+- canvas: ^2.11.2
+- core-js: ^3.31.1
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.45.0
+- eslint-config-prettier: ^8.8.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.27.5
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.0
+- globals: ^13.20.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.0.2
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.26
+- postcss-dir-pseudo-class: ^8.0.0
+- prettier: ^3.0.0
+- puppeteer: ^20.8.2
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.2
+- stylelint-prettier: ^4.0.0
+- terser: ^5.19.0
+- through2: ^4.0.2
+- ttest: ^4.0.0
+- typescript: ^5.1.6
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- vinyl-fs: ^3.0.3
+- webpack: ^5.88.1
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/worker.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AbortException,
+18   assert,
+19   getVerbosityLevel,
+20   info,
+21   InvalidPDFException,
+22   isNodeJS,
+23   MissingPDFException,
+24   PasswordException,
+25   PromiseCapability,
+26   setVerbosityLevel,
+27   stringToPDFString,
+28   UnexpectedResponseException,
+29   UnknownErrorException,
+30   VerbosityLevel,
+31   warn,
+32 } from "../shared/util.js";
+33 import {
+34   arrayBuffersToBytes,
+35   getNewAnnotationsMap,
+36   XRefParseException,
+37 } from "./core_utils.js";
+38 import { Dict, Ref } from "./primitives.js";
+39 import { LocalPdfManager, NetworkPdfManager } from "./pdf_manager.js";
+40 import { AnnotationFactory } from "./annotation.js";
+41 import { clearGlobalCaches } from "./cleanup_helper.js";
+42 import { incrementalUpdate } from "./writer.js";
+43 import { MessageHandler } from "../shared/message_handler.js";
+44 import { PDFWorkerStream } from "./worker_stream.js";
+45 
+46 class WorkerTask {
+47   constructor(name) {
+48     this.name = name;
+49     this.terminated = false;
+50     this._capability = new PromiseCapability();
+51   }
+52 
+53   get finished() {
+54     return this._capability.promise;
+55   }
+56 
+57   finish() {
+58     this._capability.resolve();
+59   }
+60 
+61   terminate() {
+62     this.terminated = true;
+63   }
+64 
+65   ensureNotTerminated() {
+66     if (this.terminated) {
+67       throw new Error("Worker task was terminated");
+68     }
+69   }
+70 }
+71 
+72 class WorkerMessageHandler {
+73   static setup(handler, port) {
+74     let testMessageProcessed = false;
+75     handler.on("test", function (data) {
+76       if (testMessageProcessed) {
+77         return; // we already processed 'test' message once
+78       }
+79       testMessageProcessed = true;
+80 
+81       // Ensure that `TypedArray`s can be sent to the worker.
+82       handler.send("test", data instanceof Uint8Array);
+83     });
+84 
+85     handler.on("configure", function (data) {
+86       setVerbosityLevel(data.verbosity);
+87     });
+88 
+89     handler.on("GetDocRequest", function (data) {
+90       return WorkerMessageHandler.createDocumentHandler(data, port);
+91     });
+92   }
+93 
+94   static createDocumentHandler(docParams, port) {
+95     // This context is actually holds references on pdfManager and handler,
+96     // until the latter is destroyed.
+97     let pdfManager;
+98     let terminated = false;
+99     let cancelXHRs = null;
+100     const WorkerTasks = new Set();
+101     const verbosity = getVerbosityLevel();
+102 
+103     const { docId, apiVersion } = docParams;
+104     const workerVersion =
+105       typeof PDFJSDev !== "undefined" && !PDFJSDev.test("TESTING")
+106         ? PDFJSDev.eval("BUNDLE_VERSION")
+107         : null;
+108     if (apiVersion !== workerVersion) {
+109       throw new Error(
+110         `The API version "${apiVersion}" does not match ` +
+111           `the Worker version "${workerVersion}".`
+112       );
+113     }
+114 
+115     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+116       // Fail early, and predictably, rather than having (some) fonts fail to
+117       // load/render with slightly cryptic error messages in environments where
+118       // the `Array.prototype` has been *incorrectly* extended.
+119       //
+120       // PLEASE NOTE: We do *not* want to slow down font parsing by adding
+121       //              `hasOwnProperty` checks all over the code-base.
+122       const enumerableProperties = [];
+123       for (const property in []) {
+124         enumerableProperties.push(property);
+125       }
+126       if (enumerableProperties.length) {
+127         throw new Error(
+128           "The `Array.prototype` contains unexpected enumerable properties: " +
+129             enumerableProperties.join(", ") +
+130             "; thus breaking e.g. `for...in` iteration of `Array`s."
+131         );
+132       }
+133     }
+134     const workerHandlerName = docId + "_worker";
+135     let handler = new MessageHandler(workerHandlerName, docId, port);
+136 
+137     function ensureNotTerminated() {
+138       if (terminated) {
+139         throw new Error("Worker was terminated");
+140       }
+141     }
+142 
+143     function startWorkerTask(task) {
+144       WorkerTasks.add(task);
+145     }
+146 
+147     function finishWorkerTask(task) {
+148       task.finish();
+149       WorkerTasks.delete(task);
+150     }
+151 
+152     async function loadDocument(recoveryMode) {
+153       await pdfManager.ensureDoc("checkHeader");
+154       await pdfManager.ensureDoc("parseStartXRef");
+155       await pdfManager.ensureDoc("parse", [recoveryMode]);
+156 
+157       // Check that at least the first page can be successfully loaded,
+158       // since otherwise the XRef table is definitely not valid.
+159       await pdfManager.ensureDoc("checkFirstPage", [recoveryMode]);
+160       // Check that the last page can be successfully loaded, to ensure that
+161       // `numPages` is correct, and fallback to walking the entire /Pages-tree.
+162       await pdfManager.ensureDoc("checkLastPage", [recoveryMode]);
+163 
+164       const isPureXfa = await pdfManager.ensureDoc("isPureXfa");
+165       if (isPureXfa) {
+166         const task = new WorkerTask("loadXfaFonts");
+167         startWorkerTask(task);
+168         await Promise.all([
+169           pdfManager
+170             .loadXfaFonts(handler, task)
+171             .catch(reason => {
+172               // Ignore errors, to allow the document to load.
+173             })
+174             .then(() => finishWorkerTask(task)),
+175           pdfManager.loadXfaImages(),
+176         ]);
+177       }
+178 
+179       const [numPages, fingerprints] = await Promise.all([
+180         pdfManager.ensureDoc("numPages"),
+181         pdfManager.ensureDoc("fingerprints"),
+182       ]);
+183 
+184       // Get htmlForXfa after numPages to avoid to create HTML twice.
+185       const htmlForXfa = isPureXfa
+186         ? await pdfManager.ensureDoc("htmlForXfa")
+187         : null;
+188 
+189       return { numPages, fingerprints, htmlForXfa };
+190     }
+191 
+192     function getPdfManager({
+193       data,
+194       password,
+195       disableAutoFetch,
+196       rangeChunkSize,
+197       length,
+198       docBaseUrl,
+199       enableXfa,
+200       evaluatorOptions,
+201     }) {
+202       const pdfManagerArgs = {
+203         source: null,
+204         disableAutoFetch,
+205         docBaseUrl,
+206         docId,
+207         enableXfa,
+208         evaluatorOptions,
+209         handler,
+210         length,
+211         password,
+212         rangeChunkSize,
+213       };
+214       const pdfManagerCapability = new PromiseCapability();
+215       let newPdfManager;
+216 
+217       if (data) {
+218         try {
+219           pdfManagerArgs.source = data;
+220 
+221           newPdfManager = new LocalPdfManager(pdfManagerArgs);
+222           pdfManagerCapability.resolve(newPdfManager);
+223         } catch (ex) {
+224           pdfManagerCapability.reject(ex);
+225         }
+226         return pdfManagerCapability.promise;
+227       }
+228 
+229       let pdfStream,
+230         cachedChunks = [];
+231       try {
+232         pdfStream = new PDFWorkerStream(handler);
+233       } catch (ex) {
+234         pdfManagerCapability.reject(ex);
+235         return pdfManagerCapability.promise;
+236       }
+237 
+238       const fullRequest = pdfStream.getFullReader();
+239       fullRequest.headersReady
+240         .then(function () {
+241           if (!fullRequest.isRangeSupported) {
+242             return;
+243           }
+244           pdfManagerArgs.source = pdfStream;
+245           pdfManagerArgs.length = fullRequest.contentLength;
+246           // We don't need auto-fetch when streaming is enabled.
+247           pdfManagerArgs.disableAutoFetch ||= fullRequest.isStreamingSupported;
+248 
+249           newPdfManager = new NetworkPdfManager(pdfManagerArgs);
+250           // There may be a chance that `newPdfManager` is not initialized for
+251           // the first few runs of `readchunk` block of code. Be sure to send
+252           // all cached chunks, if any, to chunked_stream via pdf_manager.
+253           for (const chunk of cachedChunks) {
+254             newPdfManager.sendProgressiveData(chunk);
+255           }
+256 
+257           cachedChunks = [];
+258           pdfManagerCapability.resolve(newPdfManager);
+259           cancelXHRs = null;
+260         })
+261         .catch(function (reason) {
+262           pdfManagerCapability.reject(reason);
+263           cancelXHRs = null;
+264         });
+265 
+266       let loaded = 0;
+267       const flushChunks = function () {
+268         const pdfFile = arrayBuffersToBytes(cachedChunks);
+269         if (length && pdfFile.length !== length) {
+270           warn("reported HTTP length is different from actual");
+271         }
+272         // the data is array, instantiating directly from it
+273         try {
+274           pdfManagerArgs.source = pdfFile;
+275 
+276           newPdfManager = new LocalPdfManager(pdfManagerArgs);
+277           pdfManagerCapability.resolve(newPdfManager);
+278         } catch (ex) {
+279           pdfManagerCapability.reject(ex);
+280         }
+281         cachedChunks = [];
+282       };
+283       new Promise(function (resolve, reject) {
+284         const readChunk = function ({ value, done }) {
+285           try {
+286             ensureNotTerminated();
+287             if (done) {
+288               if (!newPdfManager) {
+289                 flushChunks();
+290               }
+291               cancelXHRs = null;
+292               return;
+293             }
+294             if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+295               assert(
+296                 value instanceof ArrayBuffer,
+297                 "readChunk (getPdfManager) - expected an ArrayBuffer."
+298               );
+299             }
+300             loaded += value.byteLength;
+301 
+302             if (!fullRequest.isStreamingSupported) {
+303               handler.send("DocProgress", {
+304                 loaded,
+305                 total: Math.max(loaded, fullRequest.contentLength || 0),
+306               });
+307             }
+308 
+309             if (newPdfManager) {
+310               newPdfManager.sendProgressiveData(value);
+311             } else {
+312               cachedChunks.push(value);
+313             }
+314             fullRequest.read().then(readChunk, reject);
+315           } catch (e) {
+316             reject(e);
+317           }
+318         };
+319         fullRequest.read().then(readChunk, reject);
+320       }).catch(function (e) {
+321         pdfManagerCapability.reject(e);
+322         cancelXHRs = null;
+323       });
+324 
+325       cancelXHRs = function (reason) {
+326         pdfStream.cancelAllRequests(reason);
+327       };
+328 
+329       return pdfManagerCapability.promise;
+330     }
+331 
+332     function setupDoc(data) {
+333       function onSuccess(doc) {
+334         ensureNotTerminated();
+335         handler.send("GetDoc", { pdfInfo: doc });
+336       }
+337 
+338       function onFailure(ex) {
+339         ensureNotTerminated();
+340 
+341         if (ex instanceof PasswordException) {
+342           const task = new WorkerTask(`PasswordException: response ${ex.code}`);
+343           startWorkerTask(task);
+344 
+345           handler
+346             .sendWithPromise("PasswordRequest", ex)
+347             .then(function ({ password }) {
+348               finishWorkerTask(task);
+349               pdfManager.updatePassword(password);
+350               pdfManagerReady();
+351             })
+352             .catch(function () {
+353               finishWorkerTask(task);
+354               handler.send("DocException", ex);
+355             });
+356         } else if (
+357           ex instanceof InvalidPDFException ||
+358           ex instanceof MissingPDFException ||
+359           ex instanceof UnexpectedResponseException ||
+360           ex instanceof UnknownErrorException
+361         ) {
+362           handler.send("DocException", ex);
+363         } else {
+364           handler.send(
+365             "DocException",
+366             new UnknownErrorException(ex.message, ex.toString())
+367           );
+368         }
+369       }
+370 
+371       function pdfManagerReady() {
+372         ensureNotTerminated();
+373 
+374         loadDocument(false).then(onSuccess, function (reason) {
+375           ensureNotTerminated();
+376 
+377           // Try again with recoveryMode == true
+378           if (!(reason instanceof XRefParseException)) {
+379             onFailure(reason);
+380             return;
+381           }
+382           pdfManager.requestLoadedStream().then(function () {
+383             ensureNotTerminated();
+384 
+385             loadDocument(true).then(onSuccess, onFailure);
+386           });
+387         });
+388       }
+389 
+390       ensureNotTerminated();
+391 
+392       getPdfManager(data)
+393         .then(function (newPdfManager) {
+394           if (terminated) {
+395             // We were in a process of setting up the manager, but it got
+396             // terminated in the middle.
+397             newPdfManager.terminate(
+398               new AbortException("Worker was terminated.")
+399             );
+400             throw new Error("Worker was terminated");
+401           }
+402           pdfManager = newPdfManager;
+403 
+404           pdfManager.requestLoadedStream(/* noFetch = */ true).then(stream => {
+405             handler.send("DataLoaded", { length: stream.bytes.byteLength });
+406           });
+407         })
+408         .then(pdfManagerReady, onFailure);
+409     }
+410 
+411     handler.on("GetPage", function (data) {
+412       return pdfManager.getPage(data.pageIndex).then(function (page) {
+413         return Promise.all([
+414           pdfManager.ensure(page, "rotate"),
+415           pdfManager.ensure(page, "ref"),
+416           pdfManager.ensure(page, "userUnit"),
+417           pdfManager.ensure(page, "view"),
+418         ]).then(function ([rotate, ref, userUnit, view]) {
+419           return {
+420             rotate,
+421             ref,
+422             userUnit,
+423             view,
+424           };
+425         });
+426       });
+427     });
+428 
+429     handler.on("GetPageIndex", function (data) {
+430       const pageRef = Ref.get(data.num, data.gen);
+431       return pdfManager.ensureCatalog("getPageIndex", [pageRef]);
+432     });
+433 
+434     handler.on("GetDestinations", function (data) {
+435       return pdfManager.ensureCatalog("destinations");
+436     });
+437 
+438     handler.on("GetDestination", function (data) {
+439       return pdfManager.ensureCatalog("getDestination", [data.id]);
+440     });
+441 
+442     handler.on("GetPageLabels", function (data) {
+443       return pdfManager.ensureCatalog("pageLabels");
+444     });
+445 
+446     handler.on("GetPageLayout", function (data) {
+447       return pdfManager.ensureCatalog("pageLayout");
+448     });
+449 
+450     handler.on("GetPageMode", function (data) {
+451       return pdfManager.ensureCatalog("pageMode");
+452     });
+453 
+454     handler.on("GetViewerPreferences", function (data) {
+455       return pdfManager.ensureCatalog("viewerPreferences");
+456     });
+457 
+458     handler.on("GetOpenAction", function (data) {
+459       return pdfManager.ensureCatalog("openAction");
+460     });
+461 
+462     handler.on("GetAttachments", function (data) {
+463       return pdfManager.ensureCatalog("attachments");
+464     });
+465 
+466     handler.on("GetJavaScript", function (data) {
+467       return pdfManager.ensureCatalog("javaScript");
+468     });
+469 
+470     handler.on("GetDocJSActions", function (data) {
+471       return pdfManager.ensureCatalog("jsActions");
+472     });
+473 
+474     handler.on("GetPageJSActions", function ({ pageIndex }) {
+475       return pdfManager.getPage(pageIndex).then(function (page) {
+476         return pdfManager.ensure(page, "jsActions");
+477       });
+478     });
+479 
+480     handler.on("GetOutline", function (data) {
+481       return pdfManager.ensureCatalog("documentOutline");
+482     });
+483 
+484     handler.on("GetOptionalContentConfig", function (data) {
+485       return pdfManager.ensureCatalog("optionalContentConfig");
+486     });
+487 
+488     handler.on("GetPermissions", function (data) {
+489       return pdfManager.ensureCatalog("permissions");
+490     });
+491 
+492     handler.on("GetMetadata", function (data) {
+493       return Promise.all([
+494         pdfManager.ensureDoc("documentInfo"),
+495         pdfManager.ensureCatalog("metadata"),
+496       ]);
+497     });
+498 
+499     handler.on("GetMarkInfo", function (data) {
+500       return pdfManager.ensureCatalog("markInfo");
+501     });
+502 
+503     handler.on("GetData", function (data) {
+504       return pdfManager.requestLoadedStream().then(function (stream) {
+505         return stream.bytes;
+506       });
+507     });
+508 
+509     handler.on("GetAnnotations", function ({ pageIndex, intent }) {
+510       return pdfManager.getPage(pageIndex).then(function (page) {
+511         const task = new WorkerTask(`GetAnnotations: page ${pageIndex}`);
+512         startWorkerTask(task);
+513 
+514         return page.getAnnotationsData(handler, task, intent).then(
+515           data => {
+516             finishWorkerTask(task);
+517             return data;
+518           },
+519           reason => {
+520             finishWorkerTask(task);
+521             throw reason;
+522           }
+523         );
+524       });
+525     });
+526 
+527     handler.on("GetFieldObjects", function (data) {
+528       return pdfManager.ensureDoc("fieldObjects");
+529     });
+530 
+531     handler.on("HasJSActions", function (data) {
+532       return pdfManager.ensureDoc("hasJSActions");
+533     });
+534 
+535     handler.on("GetCalculationOrderIds", function (data) {
+536       return pdfManager.ensureDoc("calculationOrderIds");
+537     });
+538 
+539     handler.on(
+540       "SaveDocument",
+541       async function ({ isPureXfa, numPages, annotationStorage, filename }) {
+542         const promises = [
+543           pdfManager.requestLoadedStream(),
+544           pdfManager.ensureCatalog("acroForm"),
+545           pdfManager.ensureCatalog("acroFormRef"),
+546           pdfManager.ensureDoc("startXRef"),
+547         ];
+548 
+549         const newAnnotationsByPage = !isPureXfa
+550           ? getNewAnnotationsMap(annotationStorage)
+551           : null;
+552 
+553         const xref = await pdfManager.ensureDoc("xref");
+554 
+555         if (newAnnotationsByPage) {
+556           const imagePromises = AnnotationFactory.generateImages(
+557             annotationStorage.values(),
+558             xref,
+559             pdfManager.evaluatorOptions.isOffscreenCanvasSupported
+560           );
+561 
+562           for (const [pageIndex, annotations] of newAnnotationsByPage) {
+563             promises.push(
+564               pdfManager.getPage(pageIndex).then(page => {
+565                 const task = new WorkerTask(`Save (editor): page ${pageIndex}`);
+566                 return page
+567                   .saveNewAnnotations(handler, task, annotations, imagePromises)
+568                   .finally(function () {
+569                     finishWorkerTask(task);
+570                   });
+571               })
+572             );
+573           }
+574         }
+575 
+576         if (isPureXfa) {
+577           promises.push(pdfManager.serializeXfaData(annotationStorage));
+578         } else {
+579           for (let pageIndex = 0; pageIndex < numPages; pageIndex++) {
+580             promises.push(
+581               pdfManager.getPage(pageIndex).then(function (page) {
+582                 const task = new WorkerTask(`Save: page ${pageIndex}`);
+583                 return page
+584                   .save(handler, task, annotationStorage)
+585                   .finally(function () {
+586                     finishWorkerTask(task);
+587                   });
+588               })
+589             );
+590           }
+591         }
+592 
+593         return Promise.all(promises).then(function ([
+594           stream,
+595           acroForm,
+596           acroFormRef,
+597           startXRef,
+598           ...refs
+599         ]) {
+600           let newRefs = [];
+601           let xfaData = null;
+602           if (isPureXfa) {
+603             xfaData = refs[0];
+604             if (!xfaData) {
+605               return stream.bytes;
+606             }
+607           } else {
+608             newRefs = refs.flat(2);
+609 
+610             if (newRefs.length === 0) {
+611               // No new refs so just return the initial bytes
+612               return stream.bytes;
+613             }
+614           }
+615 
+616           const needAppearances =
+617             acroFormRef &&
+618             acroForm instanceof Dict &&
+619             newRefs.some(ref => ref.needAppearances);
+620 
+621           const xfa = (acroForm instanceof Dict && acroForm.get("XFA")) || null;
+622           let xfaDatasetsRef = null;
+623           let hasXfaDatasetsEntry = false;
+624           if (Array.isArray(xfa)) {
+625             for (let i = 0, ii = xfa.length; i < ii; i += 2) {
+626               if (xfa[i] === "datasets") {
+627                 xfaDatasetsRef = xfa[i + 1];
+628                 hasXfaDatasetsEntry = true;
+629               }
+630             }
+631             if (xfaDatasetsRef === null) {
+632               xfaDatasetsRef = xref.getNewTemporaryRef();
+633             }
+634           } else if (xfa) {
+635             // TODO: Support XFA streams.
+636             warn("Unsupported XFA type.");
+637           }
+638 
+639           let newXrefInfo = Object.create(null);
+640           if (xref.trailer) {
+641             // Get string info from Info in order to compute fileId.
+642             const infoObj = Object.create(null);
+643             const xrefInfo = xref.trailer.get("Info") || null;
+644             if (xrefInfo instanceof Dict) {
+645               xrefInfo.forEach((key, value) => {
+646                 if (typeof value === "string") {
+647                   infoObj[key] = stringToPDFString(value);
+648                 }
+649               });
+650             }
+651 
+652             newXrefInfo = {
+653               rootRef: xref.trailer.getRaw("Root") || null,
+654               encryptRef: xref.trailer.getRaw("Encrypt") || null,
+655               newRef: xref.getNewTemporaryRef(),
+656               infoRef: xref.trailer.getRaw("Info") || null,
+657               info: infoObj,
+658               fileIds: xref.trailer.get("ID") || null,
+659               startXRef: xref.lastXRefStreamPos ?? startXRef,
+660               filename,
+661             };
+662           }
+663 
+664           return incrementalUpdate({
+665             originalData: stream.bytes,
+666             xrefInfo: newXrefInfo,
+667             newRefs,
+668             xref,
+669             hasXfa: !!xfa,
+670             xfaDatasetsRef,
+671             hasXfaDatasetsEntry,
+672             needAppearances,
+673             acroFormRef,
+674             acroForm,
+675             xfaData,
+676           }).finally(() => {
+677             xref.resetNewTemporaryRef();
+678           });
+679         });
+680       }
+681     );
+682 
+683     handler.on("GetOperatorList", function (data, sink) {
+684       const pageIndex = data.pageIndex;
+685       pdfManager.getPage(pageIndex).then(function (page) {
+686         const task = new WorkerTask(`GetOperatorList: page ${pageIndex}`);
+687         startWorkerTask(task);
+688 
+689         // NOTE: Keep this condition in sync with the `info` helper function.
+690         const start = verbosity >= VerbosityLevel.INFOS ? Date.now() : 0;
+691 
+692         // Pre compile the pdf page and fetch the fonts/images.
+693         page
+694           .getOperatorList({
+695             handler,
+696             sink,
+697             task,
+698             intent: data.intent,
+699             cacheKey: data.cacheKey,
+700             annotationStorage: data.annotationStorage,
+701           })
+702           .then(
+703             function (operatorListInfo) {
+704               finishWorkerTask(task);
+705 
+706               if (start) {
+707                 info(
+708                   `page=${pageIndex + 1} - getOperatorList: time=` +
+709                     `${Date.now() - start}ms, len=${operatorListInfo.length}`
+710                 );
+711               }
+712               sink.close();
+713             },
+714             function (reason) {
+715               finishWorkerTask(task);
+716               if (task.terminated) {
+717                 return; // ignoring errors from the terminated thread
+718               }
+719               sink.error(reason);
+720 
+721               // TODO: Should `reason` be re-thrown here (currently that casues
+722               //       "Uncaught exception: ..." messages in the console)?
+723             }
+724           );
+725       });
+726     });
+727 
+728     handler.on("GetTextContent", function (data, sink) {
+729       const { pageIndex, includeMarkedContent, disableNormalization } = data;
+730 
+731       pdfManager.getPage(pageIndex).then(function (page) {
+732         const task = new WorkerTask("GetTextContent: page " + pageIndex);
+733         startWorkerTask(task);
+734 
+735         // NOTE: Keep this condition in sync with the `info` helper function.
+736         const start = verbosity >= VerbosityLevel.INFOS ? Date.now() : 0;
+737 
+738         page
+739           .extractTextContent({
+740             handler,
+741             task,
+742             sink,
+743             includeMarkedContent,
+744             disableNormalization,
+745           })
+746           .then(
+747             function () {
+748               finishWorkerTask(task);
+749 
+750               if (start) {
+751                 info(
+752                   `page=${pageIndex + 1} - getTextContent: time=` +
+753                     `${Date.now() - start}ms`
+754                 );
+755               }
+756               sink.close();
+757             },
+758             function (reason) {
+759               finishWorkerTask(task);
+760               if (task.terminated) {
+761                 return; // ignoring errors from the terminated thread
+762               }
+763               sink.error(reason);
+764 
+765               // TODO: Should `reason` be re-thrown here (currently that casues
+766               //       "Uncaught exception: ..." messages in the console)?
+767             }
+768           );
+769       });
+770     });
+771 
+772     handler.on("GetStructTree", function (data) {
+773       return pdfManager.getPage(data.pageIndex).then(function (page) {
+774         return pdfManager.ensure(page, "getStructTree");
+775       });
+776     });
+777 
+778     handler.on("FontFallback", function (data) {
+779       return pdfManager.fontFallback(data.id, handler);
+780     });
+781 
+782     handler.on("Cleanup", function (data) {
+783       return pdfManager.cleanup(/* manuallyTriggered = */ true);
+784     });
+785 
+786     handler.on("Terminate", function (data) {
+787       terminated = true;
+788 
+789       const waitOn = [];
+790       if (pdfManager) {
+791         pdfManager.terminate(new AbortException("Worker was terminated."));
+792 
+793         const cleanupPromise = pdfManager.cleanup();
+794         waitOn.push(cleanupPromise);
+795 
+796         pdfManager = null;
+797       } else {
+798         clearGlobalCaches();
+799       }
+800       if (cancelXHRs) {
+801         cancelXHRs(new AbortException("Worker was terminated."));
+802       }
+803 
+804       for (const task of WorkerTasks) {
+805         waitOn.push(task.finished);
+806         task.terminate();
+807       }
+808 
+809       return Promise.all(waitOn).then(function () {
+810         // Notice that even if we destroying handler, resolved response promise
+811         // must be sent back.
+812         handler.destroy();
+813         handler = null;
+814       });
+815     });
+816 
+817     handler.on("Ready", function (data) {
+818       setupDoc(docParams);
+819       docParams = null; // we don't need docParams anymore -- saving memory.
+820     });
+821 
+822     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+823       handler.on("GetXFADatasets", function (data) {
+824         return pdfManager.ensureDoc("xfaDatasets");
+825       });
+826       handler.on("GetXRefPrevValue", function (data) {
+827         return pdfManager
+828           .ensureXRef("trailer")
+829           .then(trailer => trailer.get("Prev"));
+830       });
+831       handler.on("GetAnnotArray", function (data) {
+832         return pdfManager.getPage(data.pageIndex).then(function (page) {
+833           return page.annotations.map(a => a.toString());
+834         });
+835       });
+836     }
+837 
+838     return workerHandlerName;
+839   }
+840 
+841   static initializeFromPort(port) {
+842     const handler = new MessageHandler("worker", "main", port);
+843     WorkerMessageHandler.setup(handler, port);
+844     handler.send("ready", null);
+845   }
+846 }
+847 
+848 function isMessagePort(maybePort) {
+849   return (
+850     typeof maybePort.postMessage === "function" && "onmessage" in maybePort
+851   );
+852 }
+853 
+854 // Worker thread (and not Node.js)?
+855 if (
+856   typeof window === "undefined" &&
+857   !isNodeJS &&
+858   typeof self !== "undefined" &&
+859   isMessagePort(self)
+860 ) {
+861   WorkerMessageHandler.initializeFromPort(self);
+862 }
+863 
+864 export { WorkerMessageHandler, WorkerTask };
+File:
+src/core/writer.js
+1 /* Copyright 2020 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { bytesToString, info, stringToBytes, warn } from "../shared/util.js";
+17 import { Dict, isName, Name, Ref } from "./primitives.js";
+18 import {
+19   escapePDFName,
+20   escapeString,
+21   numberToString,
+22   parseXFAPath,
+23 } from "./core_utils.js";
+24 import { SimpleDOMNode, SimpleXMLParser } from "./xml_parser.js";
+25 import { BaseStream } from "./base_stream.js";
+26 import { calculateMD5 } from "./crypto.js";
+27 
+28 async function writeObject(ref, obj, buffer, transform) {
+29   buffer.push(`${ref.num} ${ref.gen} obj\n`);
+30   if (obj instanceof Dict) {
+31     await writeDict(obj, buffer, transform);
+32   } else if (obj instanceof BaseStream) {
+33     await writeStream(obj, buffer, transform);
+34   }
+35   buffer.push("\nendobj\n");
+36 }
+37 
+38 async function writeDict(dict, buffer, transform) {
+39   buffer.push("<<");
+40   for (const key of dict.getKeys()) {
+41     buffer.push(` /${escapePDFName(key)} `);
+42     await writeValue(dict.getRaw(key), buffer, transform);
+43   }
+44   buffer.push(">>");
+45 }
+46 
+47 async function writeStream(stream, buffer, transform) {
+48   let string = stream.getString();
+49   if (transform !== null) {
+50     string = transform.encryptString(string);
+51   }
+52   const { dict } = stream;
+53 
+54   const [filter, params] = await Promise.all([
+55     dict.getAsync("Filter"),
+56     dict.getAsync("DecodeParms"),
+57   ]);
+58 
+59   const filterZero = Array.isArray(filter)
+60     ? await dict.xref.fetchIfRefAsync(filter[0])
+61     : filter;
+62   const isFilterZeroFlateDecode = isName(filterZero, "FlateDecode");
+63 
+64   // If the string is too small there is no real benefit in compressing it.
+65   // The number 256 is arbitrary, but it should be reasonable.
+66   const MIN_LENGTH_FOR_COMPRESSING = 256;
+67 
+68   if (
+69     // eslint-disable-next-line no-undef
+70     typeof CompressionStream !== "undefined" &&
+71     (string.length >= MIN_LENGTH_FOR_COMPRESSING || isFilterZeroFlateDecode)
+72   ) {
+73     try {
+74       const byteArray = stringToBytes(string);
+75       // eslint-disable-next-line no-undef
+76       const cs = new CompressionStream("deflate");
+77       const writer = cs.writable.getWriter();
+78       writer.write(byteArray);
+79       writer.close();
+80 
+81       // Response::text doesn't return the correct data.
+82       const buf = await new Response(cs.readable).arrayBuffer();
+83       string = bytesToString(new Uint8Array(buf));
+84 
+85       let newFilter, newParams;
+86       if (!filter) {
+87         newFilter = Name.get("FlateDecode");
+88       } else if (!isFilterZeroFlateDecode) {
+89         newFilter = Array.isArray(filter)
+90           ? [Name.get("FlateDecode"), ...filter]
+91           : [Name.get("FlateDecode"), filter];
+92         if (params) {
+93           newParams = Array.isArray(params)
+94             ? [null, ...params]
+95             : [null, params];
+96         }
+97       }
+98       if (newFilter) {
+99         dict.set("Filter", newFilter);
+100       }
+101       if (newParams) {
+102         dict.set("DecodeParms", newParams);
+103       }
+104     } catch (ex) {
+105       info(`writeStream - cannot compress data: "${ex}".`);
+106     }
+107   }
+108 
+109   dict.set("Length", string.length);
+110   await writeDict(dict, buffer, transform);
+111   buffer.push(" stream\n", string, "\nendstream");
+112 }
+113 
+114 async function writeArray(array, buffer, transform) {
+115   buffer.push("[");
+116   let first = true;
+117   for (const val of array) {
+118     if (!first) {
+119       buffer.push(" ");
+120     } else {
+121       first = false;
+122     }
+123     await writeValue(val, buffer, transform);
+124   }
+125   buffer.push("]");
+126 }
+127 
+128 async function writeValue(value, buffer, transform) {
+129   if (value instanceof Name) {
+130     buffer.push(`/${escapePDFName(value.name)}`);
+131   } else if (value instanceof Ref) {
+132     buffer.push(`${value.num} ${value.gen} R`);
+133   } else if (Array.isArray(value)) {
+134     await writeArray(value, buffer, transform);
+135   } else if (typeof value === "string") {
+136     if (transform !== null) {
+137       value = transform.encryptString(value);
+138     }
+139     buffer.push(`(${escapeString(value)})`);
+140   } else if (typeof value === "number") {
+141     buffer.push(numberToString(value));
+142   } else if (typeof value === "boolean") {
+143     buffer.push(value.toString());
+144   } else if (value instanceof Dict) {
+145     await writeDict(value, buffer, transform);
+146   } else if (value instanceof BaseStream) {
+147     await writeStream(value, buffer, transform);
+148   } else if (value === null) {
+149     buffer.push("null");
+150   } else {
+151     warn(`Unhandled value in writer: ${typeof value}, please file a bug.`);
+152   }
+153 }
+154 
+155 function writeInt(number, size, offset, buffer) {
+156   for (let i = size + offset - 1; i > offset - 1; i--) {
+157     buffer[i] = number & 0xff;
+158     number >>= 8;
+159   }
+160   return offset + size;
+161 }
+162 
+163 function writeString(string, offset, buffer) {
+164   for (let i = 0, len = string.length; i < len; i++) {
+165     buffer[offset + i] = string.charCodeAt(i) & 0xff;
+166   }
+167 }
+168 
+169 function computeMD5(filesize, xrefInfo) {
+170   const time = Math.floor(Date.now() / 1000);
+171   const filename = xrefInfo.filename || "";
+172   const md5Buffer = [time.toString(), filename, filesize.toString()];
+173   let md5BufferLen = md5Buffer.reduce((a, str) => a + str.length, 0);
+174   for (const value of Object.values(xrefInfo.info)) {
+175     md5Buffer.push(value);
+176     md5BufferLen += value.length;
+177   }
+178 
+179   const array = new Uint8Array(md5BufferLen);
+180   let offset = 0;
+181   for (const str of md5Buffer) {
+182     writeString(str, offset, array);
+183     offset += str.length;
+184   }
+185   return bytesToString(calculateMD5(array));
+186 }
+187 
+188 function writeXFADataForAcroform(str, newRefs) {
+189   const xml = new SimpleXMLParser({ hasAttributes: true }).parseFromString(str);
+190 
+191   for (const { xfa } of newRefs) {
+192     if (!xfa) {
+193       continue;
+194     }
+195     const { path, value } = xfa;
+196     if (!path) {
+197       continue;
+198     }
+199     const nodePath = parseXFAPath(path);
+200     let node = xml.documentElement.searchNode(nodePath, 0);
+201     if (!node && nodePath.length > 1) {
+202       // If we're lucky the last element in the path will identify the node.
+203       node = xml.documentElement.searchNode([nodePath.at(-1)], 0);
+204     }
+205     if (node) {
+206       if (Array.isArray(value)) {
+207         node.childNodes = value.map(val => new SimpleDOMNode("value", val));
+208       } else {
+209         node.childNodes = [new SimpleDOMNode("#text", value)];
+210       }
+211     } else {
+212       warn(`Node not found for path: ${path}`);
+213     }
+214   }
+215   const buffer = [];
+216   xml.documentElement.dump(buffer);
+217   return buffer.join("");
+218 }
+219 
+220 async function updateAcroform({
+221   xref,
+222   acroForm,
+223   acroFormRef,
+224   hasXfa,
+225   hasXfaDatasetsEntry,
+226   xfaDatasetsRef,
+227   needAppearances,
+228   newRefs,
+229 }) {
+230   if (hasXfa && !hasXfaDatasetsEntry && !xfaDatasetsRef) {
+231     warn("XFA - Cannot save it");
+232   }
+233 
+234   if (!needAppearances && (!hasXfa || !xfaDatasetsRef)) {
+235     return;
+236   }
+237 
+238   // Clone the acroForm.
+239   const dict = new Dict(xref);
+240   for (const key of acroForm.getKeys()) {
+241     dict.set(key, acroForm.getRaw(key));
+242   }
+243 
+244   if (hasXfa && !hasXfaDatasetsEntry) {
+245     // We've a XFA array which doesn't contain a datasets entry.
+246     // So we'll update the AcroForm dictionary to have an XFA containing
+247     // the datasets.
+248     const newXfa = acroForm.get("XFA").slice();
+249     newXfa.splice(2, 0, "datasets");
+250     newXfa.splice(3, 0, xfaDatasetsRef);
+251 
+252     dict.set("XFA", newXfa);
+253   }
+254 
+255   if (needAppearances) {
+256     dict.set("NeedAppearances", true);
+257   }
+258 
+259   const encrypt = xref.encrypt;
+260   let transform = null;
+261   if (encrypt) {
+262     transform = encrypt.createCipherTransform(acroFormRef.num, acroFormRef.gen);
+263   }
+264 
+265   const buffer = [];
+266   await writeObject(acroFormRef, dict, buffer, transform);
+267 
+268   newRefs.push({ ref: acroFormRef, data: buffer.join("") });
+269 }
+270 
+271 function updateXFA({ xfaData, xfaDatasetsRef, newRefs, xref }) {
+272   if (xfaData === null) {
+273     const datasets = xref.fetchIfRef(xfaDatasetsRef);
+274     xfaData = writeXFADataForAcroform(datasets.getString(), newRefs);
+275   }
+276 
+277   const encrypt = xref.encrypt;
+278   if (encrypt) {
+279     const transform = encrypt.createCipherTransform(
+280       xfaDatasetsRef.num,
+281       xfaDatasetsRef.gen
+282     );
+283     xfaData = transform.encryptString(xfaData);
+284   }
+285   const data =
+286     `${xfaDatasetsRef.num} ${xfaDatasetsRef.gen} obj\n` +
+287     `<< /Type /EmbeddedFile /Length ${xfaData.length}>>\nstream\n` +
+288     xfaData +
+289     "\nendstream\nendobj\n";
+290 
+291   newRefs.push({ ref: xfaDatasetsRef, data });
+292 }
+293 
+294 async function incrementalUpdate({
+295   originalData,
+296   xrefInfo,
+297   newRefs,
+298   xref = null,
+299   hasXfa = false,
+300   xfaDatasetsRef = null,
+301   hasXfaDatasetsEntry = false,
+302   needAppearances,
+303   acroFormRef = null,
+304   acroForm = null,
+305   xfaData = null,
+306 }) {
+307   await updateAcroform({
+308     xref,
+309     acroForm,
+310     acroFormRef,
+311     hasXfa,
+312     hasXfaDatasetsEntry,
+313     xfaDatasetsRef,
+314     needAppearances,
+315     newRefs,
+316   });
+317 
+318   if (hasXfa) {
+319     updateXFA({
+320       xfaData,
+321       xfaDatasetsRef,
+322       newRefs,
+323       xref,
+324     });
+325   }
+326 
+327   const newXref = new Dict(null);
+328   const refForXrefTable = xrefInfo.newRef;
+329 
+330   let buffer, baseOffset;
+331   const lastByte = originalData.at(-1);
+332   if (lastByte === /* \n */ 0x0a || lastByte === /* \r */ 0x0d) {
+333     buffer = [];
+334     baseOffset = originalData.length;
+335   } else {
+336     // Avoid to concatenate %%EOF with an object definition
+337     buffer = ["\n"];
+338     baseOffset = originalData.length + 1;
+339   }
+340 
+341   newXref.set("Size", refForXrefTable.num + 1);
+342   newXref.set("Prev", xrefInfo.startXRef);
+343   newXref.set("Type", Name.get("XRef"));
+344 
+345   if (xrefInfo.rootRef !== null) {
+346     newXref.set("Root", xrefInfo.rootRef);
+347   }
+348   if (xrefInfo.infoRef !== null) {
+349     newXref.set("Info", xrefInfo.infoRef);
+350   }
+351   if (xrefInfo.encryptRef !== null) {
+352     newXref.set("Encrypt", xrefInfo.encryptRef);
+353   }
+354 
+355   // Add a ref for the new xref and sort them
+356   newRefs.push({ ref: refForXrefTable, data: "" });
+357   newRefs = newRefs.sort((a, b) => {
+358     // compare the refs
+359     return a.ref.num - b.ref.num;
+360   });
+361 
+362   const xrefTableData = [[0, 1, 0xffff]];
+363   const indexes = [0, 1];
+364   let maxOffset = 0;
+365   for (const { ref, data } of newRefs) {
+366     maxOffset = Math.max(maxOffset, baseOffset);
+367     xrefTableData.push([1, baseOffset, Math.min(ref.gen, 0xffff)]);
+368     baseOffset += data.length;
+369     indexes.push(ref.num, 1);
+370     buffer.push(data);
+371   }
+372 
+373   newXref.set("Index", indexes);
+374 
+375   if (Array.isArray(xrefInfo.fileIds) && xrefInfo.fileIds.length > 0) {
+376     const md5 = computeMD5(baseOffset, xrefInfo);
+377     newXref.set("ID", [xrefInfo.fileIds[0], md5]);
+378   }
+379 
+380   const offsetSize = Math.ceil(Math.log2(maxOffset) / 8);
+381   const sizes = [1, offsetSize, 2];
+382   const structSize = sizes[0] + sizes[1] + sizes[2];
+383   const tableLength = structSize * xrefTableData.length;
+384   newXref.set("W", sizes);
+385   newXref.set("Length", tableLength);
+386 
+387   buffer.push(`${refForXrefTable.num} ${refForXrefTable.gen} obj\n`);
+388   await writeDict(newXref, buffer, null);
+389   buffer.push(" stream\n");
+390 
+391   const bufferLen = buffer.reduce((a, str) => a + str.length, 0);
+392   const footer = `\nendstream\nendobj\nstartxref\n${baseOffset}\n%%EOF\n`;
+393   const array = new Uint8Array(
+394     originalData.length + bufferLen + tableLength + footer.length
+395   );
+396 
+397   // Original data
+398   array.set(originalData);
+399   let offset = originalData.length;
+400 
+401   // New data
+402   for (const str of buffer) {
+403     writeString(str, offset, array);
+404     offset += str.length;
+405   }
+406 
+407   // New xref table
+408   for (const [type, objOffset, gen] of xrefTableData) {
+409     offset = writeInt(type, sizes[0], offset, array);
+410     offset = writeInt(objOffset, sizes[1], offset, array);
+411     offset = writeInt(gen, sizes[2], offset, array);
+412   }
+413 
+414   // Add the footer
+415   writeString(footer, offset, array);
+416 
+417   return array;
+418 }
+419 
+420 export { incrementalUpdate, writeDict, writeObject };
+File:
+src/core/xref.js
+1 /* Copyright 2021 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   bytesToString,
+19   FormatError,
+20   info,
+21   InvalidPDFException,
+22   warn,
+23 } from "../shared/util.js";
+24 import { CIRCULAR_REF, Cmd, Dict, isCmd, Ref, RefSet } from "./primitives.js";
+25 import { Lexer, Parser } from "./parser.js";
+26 import {
+27   MissingDataException,
+28   ParserEOFException,
+29   XRefEntryException,
+30   XRefParseException,
+31 } from "./core_utils.js";
+32 import { BaseStream } from "./base_stream.js";
+33 import { CipherTransformFactory } from "./crypto.js";
+34 
+35 class XRef {
+36   constructor(stream, pdfManager) {
+37     this.stream = stream;
+38     this.pdfManager = pdfManager;
+39     this.entries = [];
+40     this._xrefStms = new Set();
+41     this._cacheMap = new Map(); // Prepare the XRef cache.
+42     this._pendingRefs = new RefSet();
+43     this._newPersistentRefNum = null;
+44     this._newTemporaryRefNum = null;
+45   }
+46 
+47   getNewPersistentRef(obj) {
+48     // When printing we don't care that much about the ref number by itself, it
+49     // can increase for ever and it allows to keep some re-usable refs.
+50     if (this._newPersistentRefNum === null) {
+51       this._newPersistentRefNum = this.entries.length || 1;
+52     }
+53     const num = this._newPersistentRefNum++;
+54     this._cacheMap.set(num, obj);
+55     return Ref.get(num, 0);
+56   }
+57 
+58   getNewTemporaryRef() {
+59     // When saving we want to have some minimal numbers.
+60     // Those refs are only created in order to be written in the final pdf
+61     // stream.
+62     if (this._newTemporaryRefNum === null) {
+63       this._newTemporaryRefNum = this.entries.length || 1;
+64     }
+65     return Ref.get(this._newTemporaryRefNum++, 0);
+66   }
+67 
+68   resetNewTemporaryRef() {
+69     // Called once saving is finished.
+70     this._newTemporaryRefNum = null;
+71   }
+72 
+73   setStartXRef(startXRef) {
+74     // Store the starting positions of xref tables as we process them
+75     // so we can recover from missing data errors
+76     this.startXRefQueue = [startXRef];
+77   }
+78 
+79   parse(recoveryMode = false) {
+80     let trailerDict;
+81     if (!recoveryMode) {
+82       trailerDict = this.readXRef();
+83     } else {
+84       warn("Indexing all PDF objects");
+85       trailerDict = this.indexObjects();
+86     }
+87     trailerDict.assignXref(this);
+88     this.trailer = trailerDict;
+89 
+90     let encrypt;
+91     try {
+92       encrypt = trailerDict.get("Encrypt");
+93     } catch (ex) {
+94       if (ex instanceof MissingDataException) {
+95         throw ex;
+96       }
+97       warn(`XRef.parse - Invalid "Encrypt" reference: "${ex}".`);
+98     }
+99     if (encrypt instanceof Dict) {
+100       const ids = trailerDict.get("ID");
+101       const fileId = ids?.length ? ids[0] : "";
+102       // The 'Encrypt' dictionary itself should not be encrypted, and by
+103       // setting `suppressEncryption` we can prevent an infinite loop inside
+104       // of `XRef_fetchUncompressed` if the dictionary contains indirect
+105       // objects (fixes issue7665.pdf).
+106       encrypt.suppressEncryption = true;
+107       this.encrypt = new CipherTransformFactory(
+108         encrypt,
+109         fileId,
+110         this.pdfManager.password
+111       );
+112     }
+113 
+114     // Get the root dictionary (catalog) object, and do some basic validation.
+115     let root;
+116     try {
+117       root = trailerDict.get("Root");
+118     } catch (ex) {
+119       if (ex instanceof MissingDataException) {
+120         throw ex;
+121       }
+122       warn(`XRef.parse - Invalid "Root" reference: "${ex}".`);
+123     }
+124     if (root instanceof Dict) {
+125       try {
+126         const pages = root.get("Pages");
+127         if (pages instanceof Dict) {
+128           this.root = root;
+129           return;
+130         }
+131       } catch (ex) {
+132         if (ex instanceof MissingDataException) {
+133           throw ex;
+134         }
+135         warn(`XRef.parse - Invalid "Pages" reference: "${ex}".`);
+136       }
+137     }
+138 
+139     if (!recoveryMode) {
+140       throw new XRefParseException();
+141     }
+142     // Even recovery failed, there's nothing more we can do here.
+143     throw new InvalidPDFException("Invalid Root reference.");
+144   }
+145 
+146   processXRefTable(parser) {
+147     if (!("tableState" in this)) {
+148       // Stores state of the table as we process it so we can resume
+149       // from middle of table in case of missing data error
+150       this.tableState = {
+151         entryNum: 0,
+152         streamPos: parser.lexer.stream.pos,
+153         parserBuf1: parser.buf1,
+154         parserBuf2: parser.buf2,
+155       };
+156     }
+157 
+158     const obj = this.readXRefTable(parser);
+159 
+160     // Sanity check
+161     if (!isCmd(obj, "trailer")) {
+162       throw new FormatError(
+163         "Invalid XRef table: could not find trailer dictionary"
+164       );
+165     }
+166     // Read trailer dictionary, e.g.
+167     // trailer
+168     //    << /Size 22
+169     //      /Root 20R
+170     //      /Info 10R
+171     //      /ID [ <81b14aafa313db63dbd6f981e49f94f4> ]
+172     //    >>
+173     // The parser goes through the entire stream << ... >> and provides
+174     // a getter interface for the key-value table
+175     let dict = parser.getObj();
+176 
+177     // The pdflib PDF generator can generate a nested trailer dictionary
+178     if (!(dict instanceof Dict) && dict.dict) {
+179       dict = dict.dict;
+180     }
+181     if (!(dict instanceof Dict)) {
+182       throw new FormatError(
+183         "Invalid XRef table: could not parse trailer dictionary"
+184       );
+185     }
+186     delete this.tableState;
+187 
+188     return dict;
+189   }
+190 
+191   readXRefTable(parser) {
+192     // Example of cross-reference table:
+193     // xref
+194     // 0 1                    <-- subsection header (first obj #, obj count)
+195     // 0000000000 65535 f     <-- actual object (offset, generation #, f/n)
+196     // 23 2                   <-- subsection header ... and so on ...
+197     // 0000025518 00002 n
+198     // 0000025635 00000 n
+199     // trailer
+200     // ...
+201 
+202     const stream = parser.lexer.stream;
+203     const tableState = this.tableState;
+204     stream.pos = tableState.streamPos;
+205     parser.buf1 = tableState.parserBuf1;
+206     parser.buf2 = tableState.parserBuf2;
+207 
+208     // Outer loop is over subsection headers
+209     let obj;
+210 
+211     while (true) {
+212       if (!("firstEntryNum" in tableState) || !("entryCount" in tableState)) {
+213         if (isCmd((obj = parser.getObj()), "trailer")) {
+214           break;
+215         }
+216         tableState.firstEntryNum = obj;
+217         tableState.entryCount = parser.getObj();
+218       }
+219 
+220       let first = tableState.firstEntryNum;
+221       const count = tableState.entryCount;
+222       if (!Number.isInteger(first) || !Number.isInteger(count)) {
+223         throw new FormatError(
+224           "Invalid XRef table: wrong types in subsection header"
+225         );
+226       }
+227       // Inner loop is over objects themselves
+228       for (let i = tableState.entryNum; i < count; i++) {
+229         tableState.streamPos = stream.pos;
+230         tableState.entryNum = i;
+231         tableState.parserBuf1 = parser.buf1;
+232         tableState.parserBuf2 = parser.buf2;
+233 
+234         const entry = {};
+235         entry.offset = parser.getObj();
+236         entry.gen = parser.getObj();
+237         const type = parser.getObj();
+238 
+239         if (type instanceof Cmd) {
+240           switch (type.cmd) {
+241             case "f":
+242               entry.free = true;
+243               break;
+244             case "n":
+245               entry.uncompressed = true;
+246               break;
+247           }
+248         }
+249 
+250         // Validate entry obj
+251         if (
+252           !Number.isInteger(entry.offset) ||
+253           !Number.isInteger(entry.gen) ||
+254           !(entry.free || entry.uncompressed)
+255         ) {
+256           throw new FormatError(
+257             `Invalid entry in XRef subsection: ${first}, ${count}`
+258           );
+259         }
+260 
+261         // The first xref table entry, i.e. obj 0, should be free. Attempting
+262         // to adjust an incorrect first obj # (fixes issue 3248 and 7229).
+263         if (i === 0 && entry.free && first === 1) {
+264           first = 0;
+265         }
+266 
+267         if (!this.entries[i + first]) {
+268           this.entries[i + first] = entry;
+269         }
+270       }
+271 
+272       tableState.entryNum = 0;
+273       tableState.streamPos = stream.pos;
+274       tableState.parserBuf1 = parser.buf1;
+275       tableState.parserBuf2 = parser.buf2;
+276       delete tableState.firstEntryNum;
+277       delete tableState.entryCount;
+278     }
+279 
+280     // Sanity check: as per spec, first object must be free
+281     if (this.entries[0] && !this.entries[0].free) {
+282       throw new FormatError("Invalid XRef table: unexpected first object");
+283     }
+284     return obj;
+285   }
+286 
+287   processXRefStream(stream) {
+288     if (!("streamState" in this)) {
+289       // Stores state of the stream as we process it so we can resume
+290       // from middle of stream in case of missing data error
+291       const streamParameters = stream.dict;
+292       const byteWidths = streamParameters.get("W");
+293       let range = streamParameters.get("Index");
+294       if (!range) {
+295         range = [0, streamParameters.get("Size")];
+296       }
+297 
+298       this.streamState = {
+299         entryRanges: range,
+300         byteWidths,
+301         entryNum: 0,
+302         streamPos: stream.pos,
+303       };
+304     }
+305     this.readXRefStream(stream);
+306     delete this.streamState;
+307 
+308     return stream.dict;
+309   }
+310 
+311   readXRefStream(stream) {
+312     const streamState = this.streamState;
+313     stream.pos = streamState.streamPos;
+314 
+315     const [typeFieldWidth, offsetFieldWidth, generationFieldWidth] =
+316       streamState.byteWidths;
+317 
+318     const entryRanges = streamState.entryRanges;
+319     while (entryRanges.length > 0) {
+320       const [first, n] = entryRanges;
+321 
+322       if (!Number.isInteger(first) || !Number.isInteger(n)) {
+323         throw new FormatError(`Invalid XRef range fields: ${first}, ${n}`);
+324       }
+325       if (
+326         !Number.isInteger(typeFieldWidth) ||
+327         !Number.isInteger(offsetFieldWidth) ||
+328         !Number.isInteger(generationFieldWidth)
+329       ) {
+330         throw new FormatError(
+331           `Invalid XRef entry fields length: ${first}, ${n}`
+332         );
+333       }
+334       for (let i = streamState.entryNum; i < n; ++i) {
+335         streamState.entryNum = i;
+336         streamState.streamPos = stream.pos;
+337 
+338         let type = 0,
+339           offset = 0,
+340           generation = 0;
+341         for (let j = 0; j < typeFieldWidth; ++j) {
+342           const typeByte = stream.getByte();
+343           if (typeByte === -1) {
+344             throw new FormatError("Invalid XRef byteWidths 'type'.");
+345           }
+346           type = (type << 8) | typeByte;
+347         }
+348         // if type field is absent, its default value is 1
+349         if (typeFieldWidth === 0) {
+350           type = 1;
+351         }
+352         for (let j = 0; j < offsetFieldWidth; ++j) {
+353           const offsetByte = stream.getByte();
+354           if (offsetByte === -1) {
+355             throw new FormatError("Invalid XRef byteWidths 'offset'.");
+356           }
+357           offset = (offset << 8) | offsetByte;
+358         }
+359         for (let j = 0; j < generationFieldWidth; ++j) {
+360           const generationByte = stream.getByte();
+361           if (generationByte === -1) {
+362             throw new FormatError("Invalid XRef byteWidths 'generation'.");
+363           }
+364           generation = (generation << 8) | generationByte;
+365         }
+366         const entry = {};
+367         entry.offset = offset;
+368         entry.gen = generation;
+369         switch (type) {
+370           case 0:
+371             entry.free = true;
+372             break;
+373           case 1:
+374             entry.uncompressed = true;
+375             break;
+376           case 2:
+377             break;
+378           default:
+379             throw new FormatError(`Invalid XRef entry type: ${type}`);
+380         }
+381         if (!this.entries[first + i]) {
+382           this.entries[first + i] = entry;
+383         }
+384       }
+385 
+386       streamState.entryNum = 0;
+387       streamState.streamPos = stream.pos;
+388       entryRanges.splice(0, 2);
+389     }
+390   }
+391 
+392   indexObjects() {
+393     // Simple scan through the PDF content to find objects,
+394     // trailers and XRef streams.
+395     const TAB = 0x9,
+396       LF = 0xa,
+397       CR = 0xd,
+398       SPACE = 0x20;
+399     const PERCENT = 0x25,
+400       LT = 0x3c;
+401 
+402     function readToken(data, offset) {
+403       let token = "",
+404         ch = data[offset];
+405       while (ch !== LF && ch !== CR && ch !== LT) {
+406         if (++offset >= data.length) {
+407           break;
+408         }
+409         token += String.fromCharCode(ch);
+410         ch = data[offset];
+411       }
+412       return token;
+413     }
+414     function skipUntil(data, offset, what) {
+415       const length = what.length,
+416         dataLength = data.length;
+417       let skipped = 0;
+418       // finding byte sequence
+419       while (offset < dataLength) {
+420         let i = 0;
+421         while (i < length && data[offset + i] === what[i]) {
+422           ++i;
+423         }
+424         if (i >= length) {
+425           break; // sequence found
+426         }
+427         offset++;
+428         skipped++;
+429       }
+430       return skipped;
+431     }
+432     const gEndobjRegExp = /\b(endobj|\d+\s+\d+\s+obj|xref|trailer)\b/g;
+433     const gStartxrefRegExp = /\b(startxref|\d+\s+\d+\s+obj)\b/g;
+434     const objRegExp = /^(\d+)\s+(\d+)\s+obj\b/;
+435 
+436     const trailerBytes = new Uint8Array([116, 114, 97, 105, 108, 101, 114]);
+437     const startxrefBytes = new Uint8Array([
+438       115, 116, 97, 114, 116, 120, 114, 101, 102,
+439     ]);
+440     const xrefBytes = new Uint8Array([47, 88, 82, 101, 102]);
+441 
+442     // Clear out any existing entries, since they may be bogus.
+443     this.entries.length = 0;
+444     this._cacheMap.clear();
+445 
+446     const stream = this.stream;
+447     stream.pos = 0;
+448     const buffer = stream.getBytes(),
+449       bufferStr = bytesToString(buffer),
+450       length = buffer.length;
+451     let position = stream.start;
+452     const trailers = [],
+453       xrefStms = [];
+454     while (position < length) {
+455       let ch = buffer[position];
+456       if (ch === TAB || ch === LF || ch === CR || ch === SPACE) {
+457         ++position;
+458         continue;
+459       }
+460       if (ch === PERCENT) {
+461         // %-comment
+462         do {
+463           ++position;
+464           if (position >= length) {
+465             break;
+466           }
+467           ch = buffer[position];
+468         } while (ch !== LF && ch !== CR);
+469         continue;
+470       }
+471       const token = readToken(buffer, position);
+472       let m;
+473       if (
+474         token.startsWith("xref") &&
+475         (token.length === 4 || /\s/.test(token[4]))
+476       ) {
+477         position += skipUntil(buffer, position, trailerBytes);
+478         trailers.push(position);
+479         position += skipUntil(buffer, position, startxrefBytes);
+480       } else if ((m = objRegExp.exec(token))) {
+481         const num = m[1] | 0,
+482           gen = m[2] | 0;
+483 
+484         const startPos = position + token.length;
+485         let contentLength,
+486           updateEntries = false;
+487         if (!this.entries[num]) {
+488           updateEntries = true;
+489         } else if (this.entries[num].gen === gen) {
+490           // Before overwriting an existing entry, ensure that the new one won't
+491           // cause *immediate* errors when it's accessed (fixes issue13783.pdf).
+492           try {
+493             const parser = new Parser({
+494               lexer: new Lexer(stream.makeSubStream(startPos)),
+495             });
+496             parser.getObj();
+497             updateEntries = true;
+498           } catch (ex) {
+499             if (ex instanceof ParserEOFException) {
+500               warn(`indexObjects -- checking object (${token}): "${ex}".`);
+501             } else {
+502               // The error may come from the `Parser`-instance being initialized
+503               // without an `XRef`-instance (we don't have a usable one yet).
+504               updateEntries = true;
+505             }
+506           }
+507         }
+508         if (updateEntries) {
+509           this.entries[num] = {
+510             offset: position - stream.start,
+511             gen,
+512             uncompressed: true,
+513           };
+514         }
+515 
+516         // Find the next "obj" string, rather than "endobj", to ensure that
+517         // we won't skip over a new 'obj' operator in corrupt files where
+518         // 'endobj' operators are missing (fixes issue9105_reduced.pdf).
+519         gEndobjRegExp.lastIndex = startPos;
+520         const match = gEndobjRegExp.exec(bufferStr);
+521 
+522         if (match) {
+523           const endPos = gEndobjRegExp.lastIndex + 1;
+524           contentLength = endPos - position;
+525 
+526           if (match[1] !== "endobj") {
+527             warn(
+528               `indexObjects: Found "${match[1]}" inside of another "obj", ` +
+529                 'caused by missing "endobj" -- trying to recover.'
+530             );
+531             contentLength -= match[1].length + 1;
+532           }
+533         } else {
+534           contentLength = length - position;
+535         }
+536         const content = buffer.subarray(position, position + contentLength);
+537 
+538         // checking XRef stream suspect
+539         // (it shall have '/XRef' and next char is not a letter)
+540         const xrefTagOffset = skipUntil(content, 0, xrefBytes);
+541         if (xrefTagOffset < contentLength && content[xrefTagOffset + 5] < 64) {
+542           xrefStms.push(position - stream.start);
+543           this._xrefStms.add(position - stream.start); // Avoid recursion
+544         }
+545 
+546         position += contentLength;
+547       } else if (
+548         token.startsWith("trailer") &&
+549         (token.length === 7 || /\s/.test(token[7]))
+550       ) {
+551         trailers.push(position);
+552 
+553         const startPos = position + token.length;
+554         let contentLength;
+555         // Attempt to handle (some) corrupt documents, where no 'startxref'
+556         // operators are present (fixes issue15590.pdf).
+557         gStartxrefRegExp.lastIndex = startPos;
+558         const match = gStartxrefRegExp.exec(bufferStr);
+559 
+560         if (match) {
+561           const endPos = gStartxrefRegExp.lastIndex + 1;
+562           contentLength = endPos - position;
+563 
+564           if (match[1] !== "startxref") {
+565             warn(
+566               `indexObjects: Found "${match[1]}" after "trailer", ` +
+567                 'caused by missing "startxref" -- trying to recover.'
+568             );
+569             contentLength -= match[1].length + 1;
+570           }
+571         } else {
+572           contentLength = length - position;
+573         }
+574         position += contentLength;
+575       } else {
+576         position += token.length + 1;
+577       }
+578     }
+579     // reading XRef streams
+580     for (const xrefStm of xrefStms) {
+581       this.startXRefQueue.push(xrefStm);
+582       this.readXRef(/* recoveryMode */ true);
+583     }
+584 
+585     const trailerDicts = [];
+586     // Pre-parsing the trailers to check if the document is possibly encrypted.
+587     let isEncrypted = false;
+588     for (const trailer of trailers) {
+589       stream.pos = trailer;
+590       const parser = new Parser({
+591         lexer: new Lexer(stream),
+592         xref: this,
+593         allowStreams: true,
+594         recoveryMode: true,
+595       });
+596       const obj = parser.getObj();
+597       if (!isCmd(obj, "trailer")) {
+598         continue;
+599       }
+600       // read the trailer dictionary
+601       const dict = parser.getObj();
+602       if (!(dict instanceof Dict)) {
+603         continue;
+604       }
+605       trailerDicts.push(dict);
+606 
+607       if (dict.has("Encrypt")) {
+608         isEncrypted = true;
+609       }
+610     }
+611 
+612     // finding main trailer
+613     let trailerDict, trailerError;
+614     for (const dict of [...trailerDicts, "genFallback", ...trailerDicts]) {
+615       if (dict === "genFallback") {
+616         if (!trailerError) {
+617           break; // No need to fallback if there were no validation errors.
+618         }
+619         this._generationFallback = true;
+620         continue;
+621       }
+622       // Do some basic validation of the trailer/root dictionary candidate.
+623       let validPagesDict = false;
+624       try {
+625         const rootDict = dict.get("Root");
+626         if (!(rootDict instanceof Dict)) {
+627           continue;
+628         }
+629         const pagesDict = rootDict.get("Pages");
+630         if (!(pagesDict instanceof Dict)) {
+631           continue;
+632         }
+633         const pagesCount = pagesDict.get("Count");
+634         if (Number.isInteger(pagesCount)) {
+635           validPagesDict = true;
+636         }
+637         // The top-level /Pages dictionary isn't obviously corrupt.
+638       } catch (ex) {
+639         trailerError = ex;
+640         continue;
+641       }
+642       // taking the first one with 'ID'
+643       if (
+644         validPagesDict &&
+645         (!isEncrypted || dict.has("Encrypt")) &&
+646         dict.has("ID")
+647       ) {
+648         return dict;
+649       }
+650       // The current dictionary is a candidate, but continue searching.
+651       trailerDict = dict;
+652     }
+653     // No trailer with 'ID', taking last one (if exists).
+654     if (trailerDict) {
+655       return trailerDict;
+656     }
+657     // No trailer dictionary found, taking the "top"-dictionary (if exists).
+658     if (this.topDict) {
+659       return this.topDict;
+660     }
+661     // nothing helps
+662     throw new InvalidPDFException("Invalid PDF structure.");
+663   }
+664 
+665   readXRef(recoveryMode = false) {
+666     const stream = this.stream;
+667     // Keep track of already parsed XRef tables, to prevent an infinite loop
+668     // when parsing corrupt PDF files where e.g. the /Prev entries create a
+669     // circular dependency between tables (fixes bug1393476.pdf).
+670     const startXRefParsedCache = new Set();
+671 
+672     while (this.startXRefQueue.length) {
+673       try {
+674         const startXRef = this.startXRefQueue[0];
+675 
+676         if (startXRefParsedCache.has(startXRef)) {
+677           warn("readXRef - skipping XRef table since it was already parsed.");
+678           this.startXRefQueue.shift();
+679           continue;
+680         }
+681         startXRefParsedCache.add(startXRef);
+682 
+683         stream.pos = startXRef + stream.start;
+684 
+685         const parser = new Parser({
+686           lexer: new Lexer(stream),
+687           xref: this,
+688           allowStreams: true,
+689         });
+690         let obj = parser.getObj();
+691         let dict;
+692 
+693         // Get dictionary
+694         if (isCmd(obj, "xref")) {
+695           // Parse end-of-file XRef
+696           dict = this.processXRefTable(parser);
+697           if (!this.topDict) {
+698             this.topDict = dict;
+699           }
+700 
+701           // Recursively get other XRefs 'XRefStm', if any
+702           obj = dict.get("XRefStm");
+703           if (Number.isInteger(obj) && !this._xrefStms.has(obj)) {
+704             // ignore previously loaded xref streams
+705             // (possible infinite recursion)
+706             this._xrefStms.add(obj);
+707             this.startXRefQueue.push(obj);
+708           }
+709         } else if (Number.isInteger(obj)) {
+710           // Parse in-stream XRef
+711           if (
+712             !Number.isInteger(parser.getObj()) ||
+713             !isCmd(parser.getObj(), "obj") ||
+714             !((obj = parser.getObj()) instanceof BaseStream)
+715           ) {
+716             throw new FormatError("Invalid XRef stream");
+717           }
+718           dict = this.processXRefStream(obj);
+719           if (!this.topDict) {
+720             this.topDict = dict;
+721           }
+722           if (!dict) {
+723             throw new FormatError("Failed to read XRef stream");
+724           }
+725         } else {
+726           throw new FormatError("Invalid XRef stream header");
+727         }
+728 
+729         // Recursively get previous dictionary, if any
+730         obj = dict.get("Prev");
+731         if (Number.isInteger(obj)) {
+732           this.startXRefQueue.push(obj);
+733         } else if (obj instanceof Ref) {
+734           // The spec says Prev must not be a reference, i.e. "/Prev NNN"
+735           // This is a fallback for non-compliant PDFs, i.e. "/Prev NNN 0 R"
+736           this.startXRefQueue.push(obj.num);
+737         }
+738       } catch (e) {
+739         if (e instanceof MissingDataException) {
+740           throw e;
+741         }
+742         info("(while reading XRef): " + e);
+743       }
+744       this.startXRefQueue.shift();
+745     }
+746 
+747     if (this.topDict) {
+748       return this.topDict;
+749     }
+750     if (recoveryMode) {
+751       return undefined;
+752     }
+753     throw new XRefParseException();
+754   }
+755 
+756   get lastXRefStreamPos() {
+757     return this._xrefStms.size > 0 ? Math.max(...this._xrefStms) : null;
+758   }
+759 
+760   getEntry(i) {
+761     const xrefEntry = this.entries[i];
+762     if (xrefEntry && !xrefEntry.free && xrefEntry.offset) {
+763       return xrefEntry;
+764     }
+765     return null;
+766   }
+767 
+768   fetchIfRef(obj, suppressEncryption = false) {
+769     if (obj instanceof Ref) {
+770       return this.fetch(obj, suppressEncryption);
+771     }
+772     return obj;
+773   }
+774 
+775   fetch(ref, suppressEncryption = false) {
+776     if (!(ref instanceof Ref)) {
+777       throw new Error("ref object is not a reference");
+778     }
+779     const num = ref.num;
+780 
+781     // The XRef cache is populated with objects which are obtained through
+782     // `Parser.getObj`, and indirectly via `Lexer.getObj`. Neither of these
+783     // methods should ever return `undefined` (note the `assert` calls below).
+784     const cacheEntry = this._cacheMap.get(num);
+785     if (cacheEntry !== undefined) {
+786       // In documents with Object Streams, it's possible that cached `Dict`s
+787       // have not been assigned an `objId` yet (see e.g. issue3115r.pdf).
+788       if (cacheEntry instanceof Dict && !cacheEntry.objId) {
+789         cacheEntry.objId = ref.toString();
+790       }
+791       return cacheEntry;
+792     }
+793     let xrefEntry = this.getEntry(num);
+794 
+795     if (xrefEntry === null) {
+796       // The referenced entry can be free.
+797       this._cacheMap.set(num, xrefEntry);
+798       return xrefEntry;
+799     }
+800     // Prevent circular references, in corrupt PDF documents, from hanging the
+801     // worker-thread. This relies, implicitly, on the parsing being synchronous.
+802     if (this._pendingRefs.has(ref)) {
+803       this._pendingRefs.remove(ref);
+804 
+805       warn(`Ignoring circular reference: ${ref}.`);
+806       return CIRCULAR_REF;
+807     }
+808     this._pendingRefs.put(ref);
+809 
+810     try {
+811       if (xrefEntry.uncompressed) {
+812         xrefEntry = this.fetchUncompressed(ref, xrefEntry, suppressEncryption);
+813       } else {
+814         xrefEntry = this.fetchCompressed(ref, xrefEntry, suppressEncryption);
+815       }
+816       this._pendingRefs.remove(ref);
+817     } catch (ex) {
+818       this._pendingRefs.remove(ref);
+819       throw ex;
+820     }
+821     if (xrefEntry instanceof Dict) {
+822       xrefEntry.objId = ref.toString();
+823     } else if (xrefEntry instanceof BaseStream) {
+824       xrefEntry.dict.objId = ref.toString();
+825     }
+826     return xrefEntry;
+827   }
+828 
+829   fetchUncompressed(ref, xrefEntry, suppressEncryption = false) {
+830     const gen = ref.gen;
+831     let num = ref.num;
+832     if (xrefEntry.gen !== gen) {
+833       const msg = `Inconsistent generation in XRef: ${ref}`;
+834       // Try falling back to a *previous* generation (fixes issue15577.pdf).
+835       if (this._generationFallback && xrefEntry.gen < gen) {
+836         warn(msg);
+837         return this.fetchUncompressed(
+838           Ref.get(num, xrefEntry.gen),
+839           xrefEntry,
+840           suppressEncryption
+841         );
+842       }
+843       throw new XRefEntryException(msg);
+844     }
+845     const stream = this.stream.makeSubStream(
+846       xrefEntry.offset + this.stream.start
+847     );
+848     const parser = new Parser({
+849       lexer: new Lexer(stream),
+850       xref: this,
+851       allowStreams: true,
+852     });
+853     const obj1 = parser.getObj();
+854     const obj2 = parser.getObj();
+855     const obj3 = parser.getObj();
+856 
+857     if (obj1 !== num || obj2 !== gen || !(obj3 instanceof Cmd)) {
+858       throw new XRefEntryException(`Bad (uncompressed) XRef entry: ${ref}`);
+859     }
+860     if (obj3.cmd !== "obj") {
+861       // some bad PDFs use "obj1234" and really mean 1234
+862       if (obj3.cmd.startsWith("obj")) {
+863         num = parseInt(obj3.cmd.substring(3), 10);
+864         if (!Number.isNaN(num)) {
+865           return num;
+866         }
+867       }
+868       throw new XRefEntryException(`Bad (uncompressed) XRef entry: ${ref}`);
+869     }
+870     if (this.encrypt && !suppressEncryption) {
+871       xrefEntry = parser.getObj(this.encrypt.createCipherTransform(num, gen));
+872     } else {
+873       xrefEntry = parser.getObj();
+874     }
+875     if (!(xrefEntry instanceof BaseStream)) {
+876       if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+877         assert(
+878           xrefEntry !== undefined,
+879           'fetchUncompressed: The "xrefEntry" cannot be undefined.'
+880         );
+881       }
+882       this._cacheMap.set(num, xrefEntry);
+883     }
+884     return xrefEntry;
+885   }
+886 
+887   fetchCompressed(ref, xrefEntry, suppressEncryption = false) {
+888     const tableOffset = xrefEntry.offset;
+889     const stream = this.fetch(Ref.get(tableOffset, 0));
+890     if (!(stream instanceof BaseStream)) {
+891       throw new FormatError("bad ObjStm stream");
+892     }
+893     const first = stream.dict.get("First");
+894     const n = stream.dict.get("N");
+895     if (!Number.isInteger(first) || !Number.isInteger(n)) {
+896       throw new FormatError("invalid first and n parameters for ObjStm stream");
+897     }
+898     let parser = new Parser({
+899       lexer: new Lexer(stream),
+900       xref: this,
+901       allowStreams: true,
+902     });
+903     const nums = new Array(n);
+904     const offsets = new Array(n);
+905     // read the object numbers to populate cache
+906     for (let i = 0; i < n; ++i) {
+907       const num = parser.getObj();
+908       if (!Number.isInteger(num)) {
+909         throw new FormatError(
+910           `invalid object number in the ObjStm stream: ${num}`
+911         );
+912       }
+913       const offset = parser.getObj();
+914       if (!Number.isInteger(offset)) {
+915         throw new FormatError(
+916           `invalid object offset in the ObjStm stream: ${offset}`
+917         );
+918       }
+919       nums[i] = num;
+920       offsets[i] = offset;
+921     }
+922 
+923     const start = (stream.start || 0) + first;
+924     const entries = new Array(n);
+925     // read stream objects for cache
+926     for (let i = 0; i < n; ++i) {
+927       const length = i < n - 1 ? offsets[i + 1] - offsets[i] : undefined;
+928       if (length < 0) {
+929         throw new FormatError("Invalid offset in the ObjStm stream.");
+930       }
+931       parser = new Parser({
+932         lexer: new Lexer(
+933           stream.makeSubStream(start + offsets[i], length, stream.dict)
+934         ),
+935         xref: this,
+936         allowStreams: true,
+937       });
+938 
+939       const obj = parser.getObj();
+940       entries[i] = obj;
+941       if (obj instanceof BaseStream) {
+942         continue;
+943       }
+944       const num = nums[i],
+945         entry = this.entries[num];
+946       if (entry && entry.offset === tableOffset && entry.gen === i) {
+947         if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+948           assert(
+949             obj !== undefined,
+950             'fetchCompressed: The "obj" cannot be undefined.'
+951           );
+952         }
+953         this._cacheMap.set(num, obj);
+954       }
+955     }
+956     xrefEntry = entries[xrefEntry.gen];
+957     if (xrefEntry === undefined) {
+958       throw new XRefEntryException(`Bad (compressed) XRef entry: ${ref}`);
+959     }
+960     return xrefEntry;
+961   }
+962 
+963   async fetchIfRefAsync(obj, suppressEncryption) {
+964     if (obj instanceof Ref) {
+965       return this.fetchAsync(obj, suppressEncryption);
+966     }
+967     return obj;
+968   }
+969 
+970   async fetchAsync(ref, suppressEncryption) {
+971     try {
+972       return this.fetch(ref, suppressEncryption);
+973     } catch (ex) {
+974       if (!(ex instanceof MissingDataException)) {
+975         throw ex;
+976       }
+977       await this.pdfManager.requestRange(ex.begin, ex.end);
+978       return this.fetchAsync(ref, suppressEncryption);
+979     }
+980   }
+981 
+982   getCatalogObj() {
+983     return this.root;
+984   }
+985 }
+986 
+987 export { XRef };
+</code>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

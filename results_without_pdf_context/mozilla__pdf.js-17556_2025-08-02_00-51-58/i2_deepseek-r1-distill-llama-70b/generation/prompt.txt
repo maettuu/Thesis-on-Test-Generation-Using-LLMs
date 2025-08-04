@@ -1,0 +1,758 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Javascript object default properties like `toString` are considered "valid" PDF operators
+Test case: [hello.pdf](https://github.com/mozilla/pdf.js/files/14002259/hello.pdf)
+
+Configuration:
+- Web browser and its version: **Firefox 122.0b5 (Ubuntu snap)**
+- Operating system and its version: **Ubuntu 23.04**
+- PDF.js version: **PDF.js: 4.0.347 [76e3e5202]**
+- Is a browser extension: **no**
+
+Steps to reproduce the problem:
+
+1. Construct a PDF with a stream containing the token `toString` (see example linked above, line 35)
+
+What is the expected behavior?
+
+- Being an invalid operator, it should be ignored.
+
+What went wrong?
+
+![screenshot](https://github.com/mozilla/pdf.js/assets/3109710/dc075c73-1a16-4dd1-99ff-8fa29cb84356)
+
+Potential operator tokens are used as an index into a map (i.e. a standard Javascript object), where certain properties like `id` and `numArgs` are stored. The presence of an element in this map is checked as follows:
+
+https://github.com/mozilla/pdf.js/blob/fce822cde0fb6bab1d976ffcad5623482e18d446/src/core/parser.js#L1289-L1292
+
+(maybe also in other places, I am not super familiar with the codebase)
+
+The problem is that `possibleCommands` (which seems to equal the result of [`opMap`](https://github.com/mozilla/pdf.js/blob/fce822cde0fb6bab1d976ffcad5623482e18d446/src/core/evaluator.js#L4778)) is a regular Javascript object with the `Object` prototype. This means that it has properties like `toString` and `__proto__`. Hence, in these cases `knownCommands[possibleCommand]` will not equal `undefined`, and the operator is assumed to be valid. This then results in an exception later on when further logic attempts to access this operator's properties.
+
+Variants of such a bug could lead to security problems, but this specific one is pretty harmless. Nevertheless it is good to make use of null-prototype objects for cases like this, and/or use a different way of checking operator validity.
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/evaluator.js b/src/core/evaluator.js
+--- a/src/core/evaluator.js
++++ b/src/core/evaluator.js
+@@ -4780,124 +4780,128 @@ class EvaluatorPreprocessor {
+     //
+     // If variableArgs === true: [0, `numArgs`] expected
+     // If variableArgs === false: exactly `numArgs` expected
+-    return shadow(this, "opMap", {
+-      // Graphic state
+-      w: { id: OPS.setLineWidth, numArgs: 1, variableArgs: false },
+-      J: { id: OPS.setLineCap, numArgs: 1, variableArgs: false },
+-      j: { id: OPS.setLineJoin, numArgs: 1, variableArgs: false },
+-      M: { id: OPS.setMiterLimit, numArgs: 1, variableArgs: false },
+-      d: { id: OPS.setDash, numArgs: 2, variableArgs: false },
+-      ri: { id: OPS.setRenderingIntent, numArgs: 1, variableArgs: false },
+-      i: { id: OPS.setFlatness, numArgs: 1, variableArgs: false },
+-      gs: { id: OPS.setGState, numArgs: 1, variableArgs: false },
+-      q: { id: OPS.save, numArgs: 0, variableArgs: false },
+-      Q: { id: OPS.restore, numArgs: 0, variableArgs: false },
+-      cm: { id: OPS.transform, numArgs: 6, variableArgs: false },
+-
+-      // Path
+-      m: { id: OPS.moveTo, numArgs: 2, variableArgs: false },
+-      l: { id: OPS.lineTo, numArgs: 2, variableArgs: false },
+-      c: { id: OPS.curveTo, numArgs: 6, variableArgs: false },
+-      v: { id: OPS.curveTo2, numArgs: 4, variableArgs: false },
+-      y: { id: OPS.curveTo3, numArgs: 4, variableArgs: false },
+-      h: { id: OPS.closePath, numArgs: 0, variableArgs: false },
+-      re: { id: OPS.rectangle, numArgs: 4, variableArgs: false },
+-      S: { id: OPS.stroke, numArgs: 0, variableArgs: false },
+-      s: { id: OPS.closeStroke, numArgs: 0, variableArgs: false },
+-      f: { id: OPS.fill, numArgs: 0, variableArgs: false },
+-      F: { id: OPS.fill, numArgs: 0, variableArgs: false },
+-      "f*": { id: OPS.eoFill, numArgs: 0, variableArgs: false },
+-      B: { id: OPS.fillStroke, numArgs: 0, variableArgs: false },
+-      "B*": { id: OPS.eoFillStroke, numArgs: 0, variableArgs: false },
+-      b: { id: OPS.closeFillStroke, numArgs: 0, variableArgs: false },
+-      "b*": { id: OPS.closeEOFillStroke, numArgs: 0, variableArgs: false },
+-      n: { id: OPS.endPath, numArgs: 0, variableArgs: false },
+-
+-      // Clipping
+-      W: { id: OPS.clip, numArgs: 0, variableArgs: false },
+-      "W*": { id: OPS.eoClip, numArgs: 0, variableArgs: false },
+-
+-      // Text
+-      BT: { id: OPS.beginText, numArgs: 0, variableArgs: false },
+-      ET: { id: OPS.endText, numArgs: 0, variableArgs: false },
+-      Tc: { id: OPS.setCharSpacing, numArgs: 1, variableArgs: false },
+-      Tw: { id: OPS.setWordSpacing, numArgs: 1, variableArgs: false },
+-      Tz: { id: OPS.setHScale, numArgs: 1, variableArgs: false },
+-      TL: { id: OPS.setLeading, numArgs: 1, variableArgs: false },
+-      Tf: { id: OPS.setFont, numArgs: 2, variableArgs: false },
+-      Tr: { id: OPS.setTextRenderingMode, numArgs: 1, variableArgs: false },
+-      Ts: { id: OPS.setTextRise, numArgs: 1, variableArgs: false },
+-      Td: { id: OPS.moveText, numArgs: 2, variableArgs: false },
+-      TD: { id: OPS.setLeadingMoveText, numArgs: 2, variableArgs: false },
+-      Tm: { id: OPS.setTextMatrix, numArgs: 6, variableArgs: false },
+-      "T*": { id: OPS.nextLine, numArgs: 0, variableArgs: false },
+-      Tj: { id: OPS.showText, numArgs: 1, variableArgs: false },
+-      TJ: { id: OPS.showSpacedText, numArgs: 1, variableArgs: false },
+-      "'": { id: OPS.nextLineShowText, numArgs: 1, variableArgs: false },
+-      '"': {
+-        id: OPS.nextLineSetSpacingShowText,
+-        numArgs: 3,
+-        variableArgs: false,
+-      },
+-
+-      // Type3 fonts
+-      d0: { id: OPS.setCharWidth, numArgs: 2, variableArgs: false },
+-      d1: {
+-        id: OPS.setCharWidthAndBounds,
+-        numArgs: 6,
+-        variableArgs: false,
+-      },
+-
+-      // Color
+-      CS: { id: OPS.setStrokeColorSpace, numArgs: 1, variableArgs: false },
+-      cs: { id: OPS.setFillColorSpace, numArgs: 1, variableArgs: false },
+-      SC: { id: OPS.setStrokeColor, numArgs: 4, variableArgs: true },
+-      SCN: { id: OPS.setStrokeColorN, numArgs: 33, variableArgs: true },
+-      sc: { id: OPS.setFillColor, numArgs: 4, variableArgs: true },
+-      scn: { id: OPS.setFillColorN, numArgs: 33, variableArgs: true },
+-      G: { id: OPS.setStrokeGray, numArgs: 1, variableArgs: false },
+-      g: { id: OPS.setFillGray, numArgs: 1, variableArgs: false },
+-      RG: { id: OPS.setStrokeRGBColor, numArgs: 3, variableArgs: false },
+-      rg: { id: OPS.setFillRGBColor, numArgs: 3, variableArgs: false },
+-      K: { id: OPS.setStrokeCMYKColor, numArgs: 4, variableArgs: false },
+-      k: { id: OPS.setFillCMYKColor, numArgs: 4, variableArgs: false },
+-
+-      // Shading
+-      sh: { id: OPS.shadingFill, numArgs: 1, variableArgs: false },
+-
+-      // Images
+-      BI: { id: OPS.beginInlineImage, numArgs: 0, variableArgs: false },
+-      ID: { id: OPS.beginImageData, numArgs: 0, variableArgs: false },
+-      EI: { id: OPS.endInlineImage, numArgs: 1, variableArgs: false },
+-
+-      // XObjects
+-      Do: { id: OPS.paintXObject, numArgs: 1, variableArgs: false },
+-      MP: { id: OPS.markPoint, numArgs: 1, variableArgs: false },
+-      DP: { id: OPS.markPointProps, numArgs: 2, variableArgs: false },
+-      BMC: { id: OPS.beginMarkedContent, numArgs: 1, variableArgs: false },
+-      BDC: {
+-        id: OPS.beginMarkedContentProps,
+-        numArgs: 2,
+-        variableArgs: false,
+-      },
+-      EMC: { id: OPS.endMarkedContent, numArgs: 0, variableArgs: false },
+-
+-      // Compatibility
+-      BX: { id: OPS.beginCompat, numArgs: 0, variableArgs: false },
+-      EX: { id: OPS.endCompat, numArgs: 0, variableArgs: false },
+-
+-      // (reserved partial commands for the lexer)
+-      BM: null,
+-      BD: null,
+-      true: null,
+-      fa: null,
+-      fal: null,
+-      fals: null,
+-      false: null,
+-      nu: null,
+-      nul: null,
+-      null: null,
+-    });
++    return shadow(
++      this,
++      "opMap",
++      Object.assign(Object.create(null), {
++        // Graphic state
++        w: { id: OPS.setLineWidth, numArgs: 1, variableArgs: false },
++        J: { id: OPS.setLineCap, numArgs: 1, variableArgs: false },
++        j: { id: OPS.setLineJoin, numArgs: 1, variableArgs: false },
++        M: { id: OPS.setMiterLimit, numArgs: 1, variableArgs: false },
++        d: { id: OPS.setDash, numArgs: 2, variableArgs: false },
++        ri: { id: OPS.setRenderingIntent, numArgs: 1, variableArgs: false },
++        i: { id: OPS.setFlatness, numArgs: 1, variableArgs: false },
++        gs: { id: OPS.setGState, numArgs: 1, variableArgs: false },
++        q: { id: OPS.save, numArgs: 0, variableArgs: false },
++        Q: { id: OPS.restore, numArgs: 0, variableArgs: false },
++        cm: { id: OPS.transform, numArgs: 6, variableArgs: false },
++
++        // Path
++        m: { id: OPS.moveTo, numArgs: 2, variableArgs: false },
++        l: { id: OPS.lineTo, numArgs: 2, variableArgs: false },
++        c: { id: OPS.curveTo, numArgs: 6, variableArgs: false },
++        v: { id: OPS.curveTo2, numArgs: 4, variableArgs: false },
++        y: { id: OPS.curveTo3, numArgs: 4, variableArgs: false },
++        h: { id: OPS.closePath, numArgs: 0, variableArgs: false },
++        re: { id: OPS.rectangle, numArgs: 4, variableArgs: false },
++        S: { id: OPS.stroke, numArgs: 0, variableArgs: false },
++        s: { id: OPS.closeStroke, numArgs: 0, variableArgs: false },
++        f: { id: OPS.fill, numArgs: 0, variableArgs: false },
++        F: { id: OPS.fill, numArgs: 0, variableArgs: false },
++        "f*": { id: OPS.eoFill, numArgs: 0, variableArgs: false },
++        B: { id: OPS.fillStroke, numArgs: 0, variableArgs: false },
++        "B*": { id: OPS.eoFillStroke, numArgs: 0, variableArgs: false },
++        b: { id: OPS.closeFillStroke, numArgs: 0, variableArgs: false },
++        "b*": { id: OPS.closeEOFillStroke, numArgs: 0, variableArgs: false },
++        n: { id: OPS.endPath, numArgs: 0, variableArgs: false },
++
++        // Clipping
++        W: { id: OPS.clip, numArgs: 0, variableArgs: false },
++        "W*": { id: OPS.eoClip, numArgs: 0, variableArgs: false },
++
++        // Text
++        BT: { id: OPS.beginText, numArgs: 0, variableArgs: false },
++        ET: { id: OPS.endText, numArgs: 0, variableArgs: false },
++        Tc: { id: OPS.setCharSpacing, numArgs: 1, variableArgs: false },
++        Tw: { id: OPS.setWordSpacing, numArgs: 1, variableArgs: false },
++        Tz: { id: OPS.setHScale, numArgs: 1, variableArgs: false },
++        TL: { id: OPS.setLeading, numArgs: 1, variableArgs: false },
++        Tf: { id: OPS.setFont, numArgs: 2, variableArgs: false },
++        Tr: { id: OPS.setTextRenderingMode, numArgs: 1, variableArgs: false },
++        Ts: { id: OPS.setTextRise, numArgs: 1, variableArgs: false },
++        Td: { id: OPS.moveText, numArgs: 2, variableArgs: false },
++        TD: { id: OPS.setLeadingMoveText, numArgs: 2, variableArgs: false },
++        Tm: { id: OPS.setTextMatrix, numArgs: 6, variableArgs: false },
++        "T*": { id: OPS.nextLine, numArgs: 0, variableArgs: false },
++        Tj: { id: OPS.showText, numArgs: 1, variableArgs: false },
++        TJ: { id: OPS.showSpacedText, numArgs: 1, variableArgs: false },
++        "'": { id: OPS.nextLineShowText, numArgs: 1, variableArgs: false },
++        '"': {
++          id: OPS.nextLineSetSpacingShowText,
++          numArgs: 3,
++          variableArgs: false,
++        },
++
++        // Type3 fonts
++        d0: { id: OPS.setCharWidth, numArgs: 2, variableArgs: false },
++        d1: {
++          id: OPS.setCharWidthAndBounds,
++          numArgs: 6,
++          variableArgs: false,
++        },
++
++        // Color
++        CS: { id: OPS.setStrokeColorSpace, numArgs: 1, variableArgs: false },
++        cs: { id: OPS.setFillColorSpace, numArgs: 1, variableArgs: false },
++        SC: { id: OPS.setStrokeColor, numArgs: 4, variableArgs: true },
++        SCN: { id: OPS.setStrokeColorN, numArgs: 33, variableArgs: true },
++        sc: { id: OPS.setFillColor, numArgs: 4, variableArgs: true },
++        scn: { id: OPS.setFillColorN, numArgs: 33, variableArgs: true },
++        G: { id: OPS.setStrokeGray, numArgs: 1, variableArgs: false },
++        g: { id: OPS.setFillGray, numArgs: 1, variableArgs: false },
++        RG: { id: OPS.setStrokeRGBColor, numArgs: 3, variableArgs: false },
++        rg: { id: OPS.setFillRGBColor, numArgs: 3, variableArgs: false },
++        K: { id: OPS.setStrokeCMYKColor, numArgs: 4, variableArgs: false },
++        k: { id: OPS.setFillCMYKColor, numArgs: 4, variableArgs: false },
++
++        // Shading
++        sh: { id: OPS.shadingFill, numArgs: 1, variableArgs: false },
++
++        // Images
++        BI: { id: OPS.beginInlineImage, numArgs: 0, variableArgs: false },
++        ID: { id: OPS.beginImageData, numArgs: 0, variableArgs: false },
++        EI: { id: OPS.endInlineImage, numArgs: 1, variableArgs: false },
++
++        // XObjects
++        Do: { id: OPS.paintXObject, numArgs: 1, variableArgs: false },
++        MP: { id: OPS.markPoint, numArgs: 1, variableArgs: false },
++        DP: { id: OPS.markPointProps, numArgs: 2, variableArgs: false },
++        BMC: { id: OPS.beginMarkedContent, numArgs: 1, variableArgs: false },
++        BDC: {
++          id: OPS.beginMarkedContentProps,
++          numArgs: 2,
++          variableArgs: false,
++        },
++        EMC: { id: OPS.endMarkedContent, numArgs: 0, variableArgs: false },
++
++        // Compatibility
++        BX: { id: OPS.beginCompat, numArgs: 0, variableArgs: false },
++        EX: { id: OPS.endCompat, numArgs: 0, variableArgs: false },
++
++        // (reserved partial commands for the lexer)
++        BM: null,
++        BD: null,
++        true: null,
++        fa: null,
++        fal: null,
++        fals: null,
++        false: null,
++        nu: null,
++        nul: null,
++        null: null,
++      })
++    );
+   }
+ 
+   static MAX_INVALID_PATH_OPS = 10;
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.7
+- @babel/preset-env: ^7.23.8
+- @babel/runtime: ^7.23.8
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @javascript-obfuscator/escodegen: 2.3.0
+- @jazzer.js/core: ^2.1.0
+- acorn: ^8.11.3
+- autoprefixer: ^10.4.17
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001579
+- canvas: ^2.11.2
+- core-js: ^3.35.0
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^50.0.1
+- globals: ^13.24.0
+- gulp: ^4.0.2
+- gulp-cli: ^2.3.0
+- gulp-postcss: ^9.1.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.33
+- postcss-dark-theme-class: ^1.1.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.2.4
+- puppeteer: ^21.7.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.2.0
+- stylelint-prettier: ^5.0.0
+- terser: ^5.27.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.89.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n.js`: L10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/evaluator.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 /* eslint-disable no-var */
+16 
+17 import {
+18   AbortException,
+19   assert,
+20   CMapCompressionType,
+21   FONT_IDENTITY_MATRIX,
+22   FormatError,
+23   IDENTITY_MATRIX,
+24   info,
+25   isArrayEqual,
+26   normalizeUnicode,
+27   OPS,
+28   PromiseCapability,
+29   shadow,
+30   stringToPDFString,
+31   TextRenderingMode,
+32   Util,
+33   warn,
+34 } from "../shared/util.js";
+35 import { CMapFactory, IdentityCMap } from "./cmap.js";
+36 import { Cmd, Dict, EOF, isName, Name, Ref, RefSet } from "./primitives.js";
+37 import { ErrorFont, Font } from "./fonts.js";
+38 import {
+39   getEncoding,
+40   MacRomanEncoding,
+41   StandardEncoding,
+42   SymbolSetEncoding,
+43   WinAnsiEncoding,
+44   ZapfDingbatsEncoding,
+45 } from "./encodings.js";
+46 import {
+47   getFontNameToFileMap,
+48   getSerifFonts,
+49   getStandardFontName,
+50   getStdFontMap,
+51   getSymbolsFonts,
+52   isKnownFontName,
+53 } from "./standard_fonts.js";
+54 import { getTilingPatternIR, Pattern } from "./pattern.js";
+55 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
+56 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
+57 import { isPDFFunction, PDFFunctionFactory } from "./function.js";
+58 import { Lexer, Parser } from "./parser.js";
+59 import {
+60   LocalColorSpaceCache,
+61   LocalGStateCache,
+62   LocalImageCache,
+63   LocalTilingPatternCache,
+64   RegionalImageCache,
+65 } from "./image_utils.js";
+66 import { NullStream, Stream } from "./stream.js";
+67 import { BaseStream } from "./base_stream.js";
+68 import { bidi } from "./bidi.js";
+69 import { ColorSpace } from "./colorspace.js";
+70 import { DecodeStream } from "./decode_stream.js";
+71 import { FontFlags } from "./fonts_utils.js";
+72 import { getFontSubstitution } from "./font_substitutions.js";
+73 import { getGlyphsUnicode } from "./glyphlist.js";
+74 import { getMetrics } from "./metrics.js";
+75 import { getUnicodeForGlyph } from "./unicode.js";
+76 import { ImageResizer } from "./image_resizer.js";
+77 import { MurmurHash3_64 } from "../shared/murmurhash3.js";
+78 import { OperatorList } from "./operator_list.js";
+79 import { PDFImage } from "./image.js";
+80 
+81 const DefaultPartialEvaluatorOptions = Object.freeze({
+82   maxImageSize: -1,
+83   disableFontFace: false,
+84   ignoreErrors: false,
+85   isEvalSupported: true,
+86   isOffscreenCanvasSupported: false,
+87   canvasMaxAreaInBytes: -1,
+88   fontExtraProperties: false,
+89   useSystemFonts: true,
+90   cMapUrl: null,
+91   standardFontDataUrl: null,
+92 });
+93 
+94 const PatternType = {
+95   TILING: 1,
+96   SHADING: 2,
+97 };
+98 
+99 // Optionally avoid sending individual, or very few, text chunks to reduce
+100 // `postMessage` overhead with ReadableStream (see issue 13962).
+101 //
+102 // PLEASE NOTE: This value should *not* be too large (it's used as a lower limit
+103 // in `enqueueChunk`), since that would cause streaming of textContent to become
+104 // essentially useless in practice by sending all (or most) chunks at once.
+105 // Also, a too large value would (indirectly) affect the main-thread `textLayer`
+106 // building negatively by forcing all textContent to be handled at once, which
+107 // could easily end up hurting *overall* performance (e.g. rendering as well).
+108 const TEXT_CHUNK_BATCH_SIZE = 10;
+109 
+110 const deferred = Promise.resolve();
+111 
+112 // Convert PDF blend mode names to HTML5 blend mode names.
+173 
+180 // Trying to minimize Date.now() usage and check every 100 time.
+203 
+4777 class EvaluatorPreprocessor {
+4778   static get opMap() {
+4779     // Specifies properties for each command
+4780     //
+4781     // If variableArgs === true: [0, `numArgs`] expected
+4782     // If variableArgs === false: exactly `numArgs` expected
+4783     return shadow(this, "opMap", {
+4784       // Graphic state
+4785       w: { id: OPS.setLineWidth, numArgs: 1, variableArgs: false },
+4786       J: { id: OPS.setLineCap, numArgs: 1, variableArgs: false },
+4787       j: { id: OPS.setLineJoin, numArgs: 1, variableArgs: false },
+4788       M: { id: OPS.setMiterLimit, numArgs: 1, variableArgs: false },
+4789       d: { id: OPS.setDash, numArgs: 2, variableArgs: false },
+4790       ri: { id: OPS.setRenderingIntent, numArgs: 1, variableArgs: false },
+4791       i: { id: OPS.setFlatness, numArgs: 1, variableArgs: false },
+4792       gs: { id: OPS.setGState, numArgs: 1, variableArgs: false },
+4793       q: { id: OPS.save, numArgs: 0, variableArgs: false },
+4794       Q: { id: OPS.restore, numArgs: 0, variableArgs: false },
+4795       cm: { id: OPS.transform, numArgs: 6, variableArgs: false },
+4796 
+4797       // Path
+4798       m: { id: OPS.moveTo, numArgs: 2, variableArgs: false },
+4799       l: { id: OPS.lineTo, numArgs: 2, variableArgs: false },
+4800       c: { id: OPS.curveTo, numArgs: 6, variableArgs: false },
+4801       v: { id: OPS.curveTo2, numArgs: 4, variableArgs: false },
+4802       y: { id: OPS.curveTo3, numArgs: 4, variableArgs: false },
+4803       h: { id: OPS.closePath, numArgs: 0, variableArgs: false },
+4804       re: { id: OPS.rectangle, numArgs: 4, variableArgs: false },
+4805       S: { id: OPS.stroke, numArgs: 0, variableArgs: false },
+4806       s: { id: OPS.closeStroke, numArgs: 0, variableArgs: false },
+4807       f: { id: OPS.fill, numArgs: 0, variableArgs: false },
+4808       F: { id: OPS.fill, numArgs: 0, variableArgs: false },
+4809       "f*": { id: OPS.eoFill, numArgs: 0, variableArgs: false },
+4810       B: { id: OPS.fillStroke, numArgs: 0, variableArgs: false },
+4811       "B*": { id: OPS.eoFillStroke, numArgs: 0, variableArgs: false },
+4812       b: { id: OPS.closeFillStroke, numArgs: 0, variableArgs: false },
+4813       "b*": { id: OPS.closeEOFillStroke, numArgs: 0, variableArgs: false },
+4814       n: { id: OPS.endPath, numArgs: 0, variableArgs: false },
+4815 
+4816       // Clipping
+4817       W: { id: OPS.clip, numArgs: 0, variableArgs: false },
+4818       "W*": { id: OPS.eoClip, numArgs: 0, variableArgs: false },
+4819 
+4820       // Text
+4821       BT: { id: OPS.beginText, numArgs: 0, variableArgs: false },
+4822       ET: { id: OPS.endText, numArgs: 0, variableArgs: false },
+4823       Tc: { id: OPS.setCharSpacing, numArgs: 1, variableArgs: false },
+4824       Tw: { id: OPS.setWordSpacing, numArgs: 1, variableArgs: false },
+4825       Tz: { id: OPS.setHScale, numArgs: 1, variableArgs: false },
+4826       TL: { id: OPS.setLeading, numArgs: 1, variableArgs: false },
+4827       Tf: { id: OPS.setFont, numArgs: 2, variableArgs: false },
+4828       Tr: { id: OPS.setTextRenderingMode, numArgs: 1, variableArgs: false },
+4829       Ts: { id: OPS.setTextRise, numArgs: 1, variableArgs: false },
+4830       Td: { id: OPS.moveText, numArgs: 2, variableArgs: false },
+4831       TD: { id: OPS.setLeadingMoveText, numArgs: 2, variableArgs: false },
+4832       Tm: { id: OPS.setTextMatrix, numArgs: 6, variableArgs: false },
+4833       "T*": { id: OPS.nextLine, numArgs: 0, variableArgs: false },
+4834       Tj: { id: OPS.showText, numArgs: 1, variableArgs: false },
+4835       TJ: { id: OPS.showSpacedText, numArgs: 1, variableArgs: false },
+4836       "'": { id: OPS.nextLineShowText, numArgs: 1, variableArgs: false },
+4837       '"': {
+4838         id: OPS.nextLineSetSpacingShowText,
+4839         numArgs: 3,
+4840         variableArgs: false,
+4841       },
+4842 
+4843       // Type3 fonts
+4844       d0: { id: OPS.setCharWidth, numArgs: 2, variableArgs: false },
+4845       d1: {
+4846         id: OPS.setCharWidthAndBounds,
+4847         numArgs: 6,
+4848         variableArgs: false,
+4849       },
+4850 
+4851       // Color
+4852       CS: { id: OPS.setStrokeColorSpace, numArgs: 1, variableArgs: false },
+4853       cs: { id: OPS.setFillColorSpace, numArgs: 1, variableArgs: false },
+4854       SC: { id: OPS.setStrokeColor, numArgs: 4, variableArgs: true },
+4855       SCN: { id: OPS.setStrokeColorN, numArgs: 33, variableArgs: true },
+4856       sc: { id: OPS.setFillColor, numArgs: 4, variableArgs: true },
+4857       scn: { id: OPS.setFillColorN, numArgs: 33, variableArgs: true },
+4858       G: { id: OPS.setStrokeGray, numArgs: 1, variableArgs: false },
+4859       g: { id: OPS.setFillGray, numArgs: 1, variableArgs: false },
+4860       RG: { id: OPS.setStrokeRGBColor, numArgs: 3, variableArgs: false },
+4861       rg: { id: OPS.setFillRGBColor, numArgs: 3, variableArgs: false },
+4862       K: { id: OPS.setStrokeCMYKColor, numArgs: 4, variableArgs: false },
+4863       k: { id: OPS.setFillCMYKColor, numArgs: 4, variableArgs: false },
+4864 
+4865       // Shading
+4866       sh: { id: OPS.shadingFill, numArgs: 1, variableArgs: false },
+4867 
+4868       // Images
+4869       BI: { id: OPS.beginInlineImage, numArgs: 0, variableArgs: false },
+4870       ID: { id: OPS.beginImageData, numArgs: 0, variableArgs: false },
+4871       EI: { id: OPS.endInlineImage, numArgs: 1, variableArgs: false },
+4872 
+4873       // XObjects
+4874       Do: { id: OPS.paintXObject, numArgs: 1, variableArgs: false },
+4875       MP: { id: OPS.markPoint, numArgs: 1, variableArgs: false },
+4876       DP: { id: OPS.markPointProps, numArgs: 2, variableArgs: false },
+4877       BMC: { id: OPS.beginMarkedContent, numArgs: 1, variableArgs: false },
+4878       BDC: {
+4879         id: OPS.beginMarkedContentProps,
+4880         numArgs: 2,
+4881         variableArgs: false,
+4882       },
+4883       EMC: { id: OPS.endMarkedContent, numArgs: 0, variableArgs: false },
+4884 
+4885       // Compatibility
+4886       BX: { id: OPS.beginCompat, numArgs: 0, variableArgs: false },
+4887       EX: { id: OPS.endCompat, numArgs: 0, variableArgs: false },
+4888 
+4889       // (reserved partial commands for the lexer)
+4890       BM: null,
+4891       BD: null,
+4892       true: null,
+4893       fa: null,
+4894       fal: null,
+4895       fals: null,
+4896       false: null,
+4897       nu: null,
+4898       nul: null,
+4899       null: null,
+4900     });
+4901   }
+4902 
+4903   static MAX_INVALID_PATH_OPS = 10;
+4904 
+4905   constructor(stream, xref, stateManager = new StateManager()) {
+4906     // TODO(mduan): pass array of knownCommands rather than this.opMap
+4907     // dictionary
+4908     this.parser = new Parser({
+4909       lexer: new Lexer(stream, EvaluatorPreprocessor.opMap),
+4910       xref,
+4911     });
+4912     this.stateManager = stateManager;
+4913     this.nonProcessedArgs = [];
+4914     this._isPathOp = false;
+4915     this._numInvalidPathOPS = 0;
+4916   }
+4917 
+4922   // |operation| is an object with two fields:
+4923   //
+4924   // - |fn| is an out param.
+4925   //
+4926   // - |args| is an inout param. On entry, it should have one of two values.
+4927   //
+4928   //   - An empty array. This indicates that the caller is providing the
+4929   //     array in which the args will be stored in. The caller should use
+4930   //     this value if it can reuse a single array for each call to read().
+4931   //
+4932   //   - |null|. This indicates that the caller needs this function to create
+4933   //     the array in which any args are stored in. If there are zero args,
+4934   //     this function will leave |operation.args| as |null| (thus avoiding
+4935   //     allocations that would occur if we used an empty array to represent
+4936   //     zero arguments). Otherwise, it will replace |null| with a new array
+4937   //     containing the arguments. The caller should use this value if it
+4938   //     cannot reuse an array for each call to read().
+4939   //
+4940   // These two modes are present because this function is very hot and so
+4941   // avoiding allocations where possible is worthwhile.
+4942   //
+5037 
+5051 }
+5052 
+</code>
+
+PR summary:
+<pr_summary>
+Ensure that `EvaluatorPreprocessor.opMap` has a null-prototype (issue 17554)
+This accidentally regressed in PR #16956, sorry about that!
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

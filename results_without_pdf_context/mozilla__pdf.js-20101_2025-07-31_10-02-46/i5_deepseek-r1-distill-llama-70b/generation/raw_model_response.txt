@@ -1,0 +1,51 @@
+<think>
+Okay, I need to write a regression test for the issue where text isn't shown because the browser.display.use_document_fonts setting is disabled. The patch provided modifies the CanvasGraphics class in canvas.js to skip empty paths and adjust how paths are generated when certain conditions are met.
+
+First, I'll start by understanding the problem. When use_document_fonts is set to 0, Firefox disables the use of document fonts, which causes PDF.js to fallback to other methods. The bug occurs because some text paths are empty, leading to missing text. The patch adds checks to skip empty paths and only generate paths when necessary.
+
+To test this, I'll create a test that checks if all text is rendered correctly when use_document_fonts is disabled. The test should simulate the conditions before and after the patch to ensure it fails before and passes after.
+
+I'll use the provided PDF file from the issue. The test will load the PDF, disable document fonts, and check if the expected text is present. I'll need to extract the text from the first page and compare it to an expected string.
+
+I'll structure the test using Jest. I'll import the necessary modules like PDFDocument, PDFPage, and TextLayer. Then, I'll set up the mock for browser.display.use_document_fonts. After loading the PDF and the first page, I'll create a TextLayer and draw it. Finally, I'll extract the text and check if it contains the expected Japanese characters.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll dynamically import the required modules to avoid any issues with Node.js compatibility.
+
+The expected result is that the text should be visible, so the 'expect' statement will check if 'text' includes the expected string. If it does, the test passes, indicating the patch fixed the issue.
+</think>
+
+```javascript
+it("should correctly render text when browser.display.use_document_fonts is disabled", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { PDFPage } = await import("../../src/display/api.js");
+  const { TextLayer } = await import("../../src/display/text_layer.js");
+
+  // Mock browser.display.use_document_fonts setting
+  const originalUseDocumentFonts = globalThis.navigator.webdriver ? 
+    globalThis.browser.display.use_document_fonts : 
+    globalThis.browser.display.use_document_fonts;
+  globalThis.browser.display.use_document_fonts = 0;
+
+  // Load the test PDF
+  const pdfUrl = "https://www.jma.go.jp/jma/press/2507/04a/20250704_asosan.pdf";
+  const pdf = await PDFDocument.load(pdfUrl);
+  const page = await pdf.getPage(1);
+
+  // Create text layer and draw
+  const textLayer = new TextLayer({
+    pageIndex: 0,
+    container: document.createElement('div'),
+  });
+  await textLayer.draw(page);
+
+  // Get the text content
+  const text = await page.getTextContent();
+
+  // Expected text to be present
+  const expectedText = "山";
+  expect(text.items.some(item => item.str === expectedText)).toBe(true);
+
+  // Cleanup
+  await pdf.destroy();
+});
+```

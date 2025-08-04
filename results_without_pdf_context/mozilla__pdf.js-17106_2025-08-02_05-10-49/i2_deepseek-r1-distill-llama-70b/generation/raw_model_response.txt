@@ -1,0 +1,75 @@
+<think>
+Okay, I need to write a regression test for the issue where memory usage balloons when scrolling through a PDF. The patch provided is supposed to fix this by not storing data after cleanup and releasing ImageBitmap data immediately.
+
+First, I should understand the problem. The issue occurs when large images are loaded after the page has been cleaned up, causing unnecessary data to be cached and increasing memory usage. The patch adds a check to see if the page's intent states are empty, indicating cleanup has happened, and then releases the image data.
+
+So, the test needs to simulate this scenario. I'll create a test that loads a PDF, scrolls through it, and checks if the memory doesn't balloon. But how do I measure memory usage in JavaScript? That's tricky. Instead, I can test if the data is being released properly by checking if the image data is cached after cleanup.
+
+I'll use a large image to simulate the scenario. I'll load the PDF, navigate to a page with a large image, then navigate away (triggering cleanup), and then check if the image data is still being held.
+
+I'll use the provided imports, like PDFDocument and PDFPageProxy. I'll set up a fake worker and necessary mocks to simulate the environment.
+
+In the test, I'll:
+
+1. Import necessary modules.
+2. Create a fake worker and other required mocks.
+3. Load a PDF with a large image.
+4. Navigate to the page with the image, which should load it.
+5. Navigate away, triggering cleanup.
+6. Check if the image data is still present in the cache.
+
+If the patch works, after cleanup, the image data should be released, so the cache should not have it. Therefore, the test should assert that the data is not present after cleanup.
+
+I'll structure the test using Jest's async/await syntax. I'll use a large image PDF from the test files. After loading the page and then closing it, I'll check the cache to see if the image is still there. If it's not, the test passes.
+
+I need to make sure all imports are correct and that the test is self-contained without external dependencies beyond what's provided. Also, I'll use dynamic imports to ensure compatibility with Node.js.
+
+So, the test will look something like this: load the PDF, navigate to the page, then close it, and then check if the image is still cached. If the patch is applied, the image should be released, so the test will pass.
+</think>
+
+```javascript
+it("should not cache large images after cleanup", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { XRefMock } = await import("../../src/display/test_utils.js");
+  const { createIdFactory } = await import("../../src/display/test_utils.js");
+
+  const fakeWorker = {
+    sendWithPromise: jest.fn(),
+    on: jest.fn(),
+    off: jest.fn(),
+    postMessage: jest.fn(),
+  };
+
+  const xref = new XRefMock();
+  const idFactory = createIdFactory(0);
+  const largeImageId = idFactory.next().value;
+  const pageId = idFactory.next().value;
+
+  // Mock a large image
+  xref.mockData(largeImageId, {
+    type: "Image",
+    data: new Uint8Array(1024 * 1024 * 4), // 4MB array buffer
+  });
+
+  // Create a PDF document proxy
+  const pdfDocument = new PDFDocument({
+    numPages: 1,
+    pageIndices: [pageId],
+    commonObjs: new Map(),
+    worker: fakeWorker,
+    xref,
+  });
+
+  // Get the page proxy
+  const pageProxy = pdfDocument.getPage(pageId);
+
+  // Simulate loading the page with the large image
+  await pageProxy.startRender();
+
+  // Simulate scrolling away and cleanup
+  pageProxy.close();
+
+  // Check if the large image is still cached
+  expect(pageProxy.objs.has(largeImageId)).toBe(false);
+});
+```

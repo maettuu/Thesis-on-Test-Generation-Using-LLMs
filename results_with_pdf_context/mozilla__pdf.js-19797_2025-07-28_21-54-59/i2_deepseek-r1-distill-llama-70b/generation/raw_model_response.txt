@@ -1,0 +1,78 @@
+<think>
+Okay, I need to write a regression test for the bug where a TypeError occurs when using annotations on a PDF in Safari on iOS. The error is "null is not an object" evaluating 'this.#touchMoveAC.abort()'. The patch provided modifies two files: tools.js and touch_manager.js. 
+
+First, I should understand the issue. The error happens when the user lifts their finger after drawing, triggering an onTouchEnd event. The problem is that this.#touchMoveAC is null, so calling abort() on it throws an error.
+
+Looking at the patch, in touch_manager.js, they've added a check to see if #touchMoveAC exists before aborting. So, the test should ensure that this check is in place and prevents the error.
+
+I need to write a test that simulates the scenario where the bug occurs. The test should run on the original code and fail, then pass after the patch is applied.
+
+I'll create a test that initializes the TouchManager and simulates a touch sequence: touchstart, touchmove, and touchend. In the original code, this should throw an error. After the patch, it shouldn't.
+
+I'll use Jest to write the test. I'll mock the necessary elements and event listeners. The test will check if the touchend event throws an error before the patch and doesn't after.
+
+I need to import the required modules dynamically. Since the test is in Node.js, I'll use the provided import paths. I'll create a mock container element and attach event listeners for touch events.
+
+In the test, I'll set up the TouchManager with the container. Then, I'll simulate a touchstart event with two touches to trigger a pinch gesture. Next, a touchmove event to continue the gesture. Finally, a touchend event to end it. In the original code, this should cause the error because #touchMoveAC is null when touchend is called.
+
+After applying the patch, the same test should not throw an error because the code now checks if #touchMoveAC is not null before aborting.
+
+I'll structure the test to first test the original code, expecting an error, then the patched code without the error. But since the test runs against the patched code, I'll adjust it to ensure the error doesn't occur.
+
+Wait, no. The test should be written to fail before the patch and pass after. So in the test, I'll have to mock the conditions that lead to the error and ensure that the patch fixes it.
+
+Alternatively, perhaps the test should directly test the touchManager's behavior. So, the test will create the touchManager, simulate the events, and check for errors.
+
+I'll write the test using Jest's async/await syntax. I'll import the necessary modules, create the container, set up the touchManager, and then dispatch the events. I'll use a try-catch block to see if an error is thrown.
+
+In the original code, the test should throw the TypeError, and in the patched version, it shouldn't. So the test will assert that no error is thrown after the patch.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll import touch_manager.js and any other necessary modules dynamically.
+
+I think that's the plan. Now, I'll write the test accordingly.
+</think>
+
+```javascript
+it("should not throw when aborting null touchMoveAC", async () => {
+  const { TouchManager } = await import("../../src/display/touch_manager.js");
+  const container = {
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+  };
+
+  const touchManager = new TouchManager({
+    container,
+    isPinchingDisabled: false,
+    isPinchingStopped: false,
+    onPinchStart: jest.fn(),
+    onPinching: jest.fn(),
+    onPinchEnd: jest.fn(),
+    signal: new AbortController().signal,
+  });
+
+  // Mock touch events
+  const touchStartEvt = {
+    touches: [{}, {}],
+    preventDefault: jest.fn(),
+  };
+  const touchMoveEvt = {
+    touches: [{}, {}],
+    preventDefault: jest.fn(),
+  };
+  const touchEndEvt = {
+    touches: [],
+    preventDefault: jest.fn(),
+  };
+
+  // Simulate touch sequence
+  await expect(
+    (async () => {
+      touchManager["#onTouchStart"](touchStartEvt);
+      touchManager["#onTouchMove"](touchMoveEvt);
+      touchManager["#onTouchEnd"](touchEndEvt);
+    })()
+  ).resolves.not.toThrow();
+
+  expect(touchManager["#touchMoveAC"]).toBeNull();
+});
+```

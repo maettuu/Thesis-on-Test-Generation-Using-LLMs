@@ -1,0 +1,63 @@
+<think>
+Okay, I need to write a test that checks if the regression issue with large images in PDFs is fixed. The user provided a patch, and I have to ensure the test passes after the patch is applied but fails before.
+
+First, I'll start by understanding the problem. The issue is that PDF.js isn't rendering large scanned images that other renderers like Atril do. The user provided a sample PDF, so I'll use that in the test.
+
+I'll structure the test using Jest. The test should load the PDF, navigate to the first page, and check if the image is rendered correctly. If the image isn't rendered, the test should fail.
+
+I'll use the `getDocument` function from the PDF.js API to load the PDF. Then, I'll create a viewer and render the first page. After rendering, I'll check the rendered canvas for non-transparent pixels, which indicates the image was rendered.
+
+Before the patch, the test should fail because the image isn't rendered. After applying the patch, the test should pass as the image should now render correctly.
+
+I'll write the test to import necessary modules dynamically, as per the user's instructions. The test will be self-contained, using the provided PDF file for testing.
+
+I'll make sure the test is concise and only checks the specific behavior. It should throw an error if the image isn't rendered, ensuring it fails without the patch and passes with it.
+</think>
+
+```javascript
+it("should render large scanned images", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue17289.pdf'));
+  
+  const viewer = {
+    get canvasCtx() {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      return ctx;
+    },
+  };
+  
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+  const scale = 1;
+  const viewport = pdfPage.getViewport({ scale });
+  
+  await pdfPage.render({
+    viewport,
+    canvasContext: viewer.canvasCtx,
+    renderInteractive: false,
+    disableWebGL: true,
+  });
+  
+  const canvas = viewer.canvasCtx.canvas;
+  const imageData = canvas.getContext('2d').getImageData(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+  
+  let hasNonTransparentPixel = false;
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    if (imageData.data[i + 3] !== 0) {
+      hasNonTransparentPixel = true;
+      break;
+    }
+  }
+  
+  if (!hasNonTransparentPixel) {
+    throw new Error("Image was not rendered");
+  }
+});
+```

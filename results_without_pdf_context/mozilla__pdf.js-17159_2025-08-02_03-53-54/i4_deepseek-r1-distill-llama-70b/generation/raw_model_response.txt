@@ -1,0 +1,75 @@
+<think>
+Okay, I need to write a test that checks if the radio buttons' state is correctly reflected in the PDF form when printed. The issue is that in the print view, the radio buttons don't show their real state. 
+
+First, I should look at the patch provided. The patch is in the file `src/core/annotation.js`, specifically in the `_processRadioButton` method of the `ButtonWidgetAnnotation` class. The change is that `this.data.fieldValue` is no longer being set to `null` at the beginning. 
+
+So, before the patch, the code had `this.data.fieldValue = this.data.buttonValue = null;`. After the patch, it's just `this.data.buttonValue = null;`. This means that `fieldValue` isn't being reset, which might have caused the state not to update correctly.
+
+To test this, I need to create a scenario where a radio button's state is changed and then check if the printed output reflects that change. 
+
+I'll start by importing the necessary modules. I'll need `AnnotationFactory` to create the annotation and `PDFDocument` to load the PDF. 
+
+I'll create a sample PDF with a radio button group. The PDF should have at least two radio buttons, one checked and one unchecked. Then, I'll load this PDF into the test and create the annotation objects.
+
+Next, I'll simulate changing the state of one of the radio buttons. For example, if the first is checked, I'll set it to unchecked and the second to checked. 
+
+Then, I'll generate the print view of the annotation. This involves creating the appearance stream that represents how the annotation looks when printed. 
+
+Finally, I'll check the generated content to ensure that the states are correctly reflected. If the test passes, it means the patch fixed the issue.
+
+I need to structure the test so that it fails without the patch and passes with it. I'll use `expect` statements to compare the expected and actual states of the radio buttons in the printed output.
+</think>
+
+```javascript
+it("should correctly reflect radio button state in print view", async () => {
+  const { PDFDocument } = await import("../../src/display/pdf_document.js");
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+
+  // Create a sample PDF with radio buttons
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+  const radioGroup = pdf.annotation({
+    type: "widget",
+    subtype: "Button",
+    fieldFlags: AnnotationFieldFlag.RADIO,
+    rect: [100, 100, 150, 150],
+    buttonValue: "Off",
+    fieldValue: "Off"
+  });
+  const radio1 = pdf.annotation({
+    type: "widget",
+    subtype: "Button",
+    fieldFlags: AnnotationFieldFlag.RADIO,
+    rect: [100, 200, 150, 250],
+    buttonValue: "Radio1",
+    fieldValue: "Radio1"
+  });
+  const radio2 = pdf.annotation({
+    type: "widget",
+    subtype: "Button",
+    fieldFlags: AnnotationFieldFlag.RADIO,
+    rect: [100, 300, 150, 350],
+    buttonValue: "Radio2",
+    fieldValue: "Radio2"
+  });
+
+  // Load the PDF and create annotations
+  const pdfDoc = await PDFDocument.load(pdf);
+  const annotations = await pdfDoc.getAnnotations();
+  const radioAnnotation = annotations[0];
+
+  // Change the radio button state
+  radioAnnotation.data.fieldValue = "Radio2";
+
+  // Generate print view
+  const printAppearance = await radioAnnotation._getAppearance({
+    evaluator: { xref: pdfDoc.xref },
+    task: null,
+    intent: RenderingIntentFlag.SAVE,
+    annotationStorage: null
+  });
+
+  // Verify the print appearance reflects the correct state
+  expect(printAppearance).toContain("Radio2");
+});
+```

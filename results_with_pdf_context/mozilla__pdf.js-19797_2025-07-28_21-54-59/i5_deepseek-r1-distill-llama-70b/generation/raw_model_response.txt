@@ -1,0 +1,51 @@
+<think>
+Okay, I need to write a regression test for the bug described. The bug is a TypeError that occurs when using annotations on a PDF, particularly on an iPhone with Safari. The error happens when the user tries to draw and lift their finger, causing the app to crash or become unresponsive.
+
+First, I'll look at the patch provided. It modifies two files: tools.js and touch_manager.js. In tools.js, it adds a line to commit or remove the current drawing session when changing modes. In touch_manager.js, it adds a null check before aborting the touchMoveAC, which was causing the error.
+
+The test needs to simulate the scenario where the error occurs. So, I'll set up a test that creates a PDF document, enables annotations, and simulates touch events for drawing. The key is to ensure that after the patch, the error doesn't occur.
+
+I'll start by importing the necessary modules: PDFDocument, AnnotationEditorUIManager, and TouchManager. Then, I'll create a sample PDF document. Since the issue isn't document-specific, a simple one-page PDF should suffice.
+
+Next, I'll set up the annotation editor and touch manager. I'll enable drawing tools and simulate touch events: touchstart, touchmove, and touchend. These events should trigger the drawing process and, in the case of the bug, cause the error.
+
+The test will involve creating a promise that checks for any errors during the touch events. If the patch is correct, the promise should resolve without any errors. I'll also set a timeout to ensure the test doesn't hang indefinitely.
+
+Finally, I'll structure the test using Jest's it function, making sure it's self-contained and only uses the provided imports. The test should fail before the patch and pass after, confirming the fix.
+</think>
+
+```javascript
+it("should not throw null error when drawing annotations", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { TouchManager } = await import("../../src/display/touch_manager.js");
+
+  const pdfDoc = await PDFDocument.load(new Uint8Array());
+  const container = document.createElement("div");
+  const annotationLayer = new AnnotationEditorUIManager(pdfDoc, container);
+  const touchManager = new TouchManager(container);
+
+  // Simulate touch events that would trigger the bug
+  const errorPromise = new Promise(resolve => {
+    try {
+      const touchStartEvent = new TouchEvent("touchstart", { touches: [{}], targetTouches: [{}] });
+      const touchMoveEvent = new TouchEvent("touchmove", { touches: [{}], targetTouches: [{}] });
+      const touchEndEvent = new TouchEvent("touchend", { touches: [], targetTouches: [] });
+
+      annotationLayer.enableDrawing();
+      touchManager.handleEvent(touchStartEvent);
+      touchManager.handleEvent(touchMoveEvent);
+      touchManager.handleEvent(touchEndEvent);
+      resolve();
+    } catch (error) {
+      resolve(error);
+    }
+  });
+
+  await expect(errorPromise).resolves.toBeUndefined();
+
+  // Cleanup
+  pdfDoc.close();
+  container.remove();
+});
+```

@@ -1,0 +1,41 @@
+<think>
+Okay, I need to write a regression test for the bug where the warning "loadFont - translateFont failed: 'TypeError: e.peekBytes is not a function'" occurs when loading a specific PDF. The test should fail before the patch and pass after applying the patch.
+
+First, I'll look at the provided patch. It modifies the evaluator.js file, adding checks to ensure that fontFile is a BaseStream and not empty. If it's not, it throws a FormatError. In the catch block, instead of creating a NullStream, it sets fontFile to null.
+
+So, the test should simulate the scenario where the fontFile is not a stream, triggering the error. I'll need to mock a Dict object to represent the invalid fontFile.
+
+I'll structure the test using Jest. The test will:
+
+1. Import the necessary modules, including the PartialEvaluator from evaluator.js.
+2. Create a mock font descriptor that returns a Dict instead of a Stream.
+3. Use the PartialEvaluator to translate the font, expecting it to handle the invalid fontFile gracefully.
+4. Check that the evaluator doesn't throw an error and doesn't create a NullStream, which would cause the warning.
+
+I'll set up the mock descriptor to return the Dict when 'FontFile' is accessed. Then, I'll call translateFont and expect that the evaluator correctly catches the error and doesn't proceed with a NullStream, thus avoiding the TypeError.
+
+The test will pass if no error is thrown during translation, indicating the patch works as intended.
+</think>
+
+```javascript
+it("should handle invalid fontFile without throwing peekBytes error", async () => {
+  const { PartialEvaluator } = await import("../../src/core/evaluator.js");
+  const { Dict } = await import("../../src/core/primitives.js");
+
+  // Mock font descriptor that returns a Dict instead of Stream
+  const descriptor = {
+    get: () => new Dict()
+  };
+
+  // Create evaluator with ignoreErrors option to prevent exceptions
+  const evaluator = new PartialEvaluator({
+    ignoreErrors: true
+  });
+
+  // Test translation without the patch would throw, with patch it should handle
+  const result = await evaluator.translateFont(descriptor, "fontName", null);
+  
+  // Assert that evaluator didn't create NullStream and handled error properly
+  expect(result).toBeUndefined();
+});
+```

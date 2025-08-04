@@ -1,0 +1,82 @@
+<think>
+Okay, I need to write a regression test for the issue where emojis aren't shown in PDFs. The patch provided addresses this by modifying how Unicode characters are handled, especially those above 0xFFFF. 
+
+First, I should understand what the patch does. It looks like the FakeUnicodeFont class was modified to remove the ToUnicode stream and instead use Identity-H encoding. Also, the codePointIter function was added to iterate over code points correctly, handling those that are represented by two u16 values.
+
+So, the test should check if a PDF with emojis (which are usually beyond 0xFFFF) is rendered correctly. 
+
+I'll create a test that generates a PDF with such characters and checks if they are present in the text content. 
+
+I'll use the FreeTextAnnotation class to create an annotation with the emoji text. Then, I'll render it and check if the text includes the expected characters.
+
+I need to import the necessary modules, set up the PDF document, page, and annotation, then parse the annotation's appearance to extract the text. Finally, I'll assert that the text contains the emojis.
+
+I should make sure the test is self-contained and doesn't rely on external files. Using a string with emojis directly in the test should suffice.
+
+I'll structure the test using Jest syntax, making it async since some operations are asynchronous. I'll import the required classes dynamically to ensure compatibility.
+
+After setting up the annotation and rendering, I'll extract the text and check for the presence of the emojis. If they're there, the test passes, indicating the patch works.
+</think>
+
+```javascript
+it("should render emojis in PDFs correctly", async () => {
+  const { PDFDocument, Page } = await import("../../src/core/document.js");
+  const { FreeTextAnnotation } = await import("../../src/core/annotation.js");
+  const { FakeUnicodeFont } = await import("../../src/core/default_appearance.js");
+
+  // Create a new PDF document
+  const pdf = new PDFDocument();
+  const page = pdf.addPage(new Page());
+
+  // Create a free text annotation with emojis
+  const annotation = new FreeTextAnnotation({
+    xref: pdf.xref,
+    dict: {
+      NT: "FreeText",
+      "T": "Test",
+      "Subj": "Emojis",
+      "Contents": new Uint8Array(),
+      "AP": {},
+      "C": 1,
+      "M": "D:20230101",
+      "F": 0,
+      "P": page.ref,
+      "Rect": [0, 0, 100, 100],
+      "Q": 0,
+      "H": "FitH",
+      "S": "StrikeOut",
+      "Type": "/Annot"
+    },
+    evaluatorOptions: {},
+    data: {
+      hasOwnCanvas: true,
+      defaultAppearanceData: {
+        fontColor: [0, 0, 0],
+        fontSize: 10
+      }
+    }
+  });
+
+  // Set the text content with emojis
+  annotation._contents.str = "👋🏼 Hello, World! 🌍";
+
+  // Render the annotation
+  const fakeFont = new FakeUnicodeFont(pdf.xref, "sans-serif");
+  annotation.appearance = fakeFont.createAppearance(
+    annotation._contents.str,
+    annotation.rectangle,
+    annotation.rotation,
+    10,
+    [0, 0, 0],
+    1
+  );
+
+  // Parse the appearance stream and check for emojis
+  const appearanceStream = annotation.appearance;
+  const textContent = await parseAppearanceStream(appearanceStream, {}, pdf.xref);
+
+  // Verify the text content contains the expected emojis
+  expect(textContent).toContain("👋🏼");
+  expect(textContent).toContain("🌍");
+});
+```

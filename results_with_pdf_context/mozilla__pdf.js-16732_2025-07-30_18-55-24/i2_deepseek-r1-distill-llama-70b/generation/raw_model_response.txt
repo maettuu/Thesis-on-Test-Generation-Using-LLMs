@@ -1,0 +1,88 @@
+<think>
+Okay, I need to write a regression test for the issue where the mouse cursor doesn't change its state when resizing added images or drawings in PDF documents. The test should fail before the patch and pass after applying it.
+
+First, I'll look at the patch provided. It adds resizers around the editor, which means the UI now has elements that allow resizing from different edges. The resizers are created in the `#createResizers` method and added to the DOM. When a user clicks on a resizer, the cursor should change accordingly.
+
+So, the test should check if the cursor changes when hovering over these resizers. I'll need to simulate this interaction.
+
+I'll start by importing the necessary modules. The main editor is in `./editor.js`, and the `AnnotationEditorUIManager` is in `./tools.js`. I'll create an instance of `AnnotationEditorUIManager` and an `AnnotationEditor` with the necessary parameters.
+
+Next, I'll set up the test environment. I'll create a container div and append it to the document body to simulate the UI. Then, I'll initialize the editor and make it resizable by calling `makeResizable()`.
+
+I'll define the expected cursor styles for each resizer. For example, the topLeft resizer should show 'nwse-resize', and the topRight should show 'nesw-resize'. I'll check all eight resizers.
+
+Using `jest.spyOn` and `jest.setTimeout`, I'll simulate the pointer entering each resizer and check if the `style.cursor` property matches the expected value. If any of these checks fail, the test will fail, indicating the issue isn't resolved.
+
+After the patch, the resizers should correctly change the cursor, so the test should pass. Before the patch, the resizers might not exist or not change the cursor, causing the test to fail.
+
+I need to ensure the test is self-contained, so I'll create all necessary elements and initialize the editor within the test block. I'll also make sure to clean up by removing the container div after the test.
+
+Finally, I'll structure the test using async/await and Jest's testing syntax to ensure it runs correctly in the test environment.
+</think>
+
+```javascript
+it("should change cursor when hovering over resizers", async () => {
+  const { AnnotationEditor, AnnotationEditorUIManager } = await import("./editor.js");
+  const { AnnotationEditorUIManager: UIManager } = await import("./tools.js");
+  
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  
+  const uiManager = new UIManager(container, null, null, null);
+  const editor = new AnnotationEditor({
+    parent: {
+      pageWidth: 100,
+      pageHeight: 100,
+      viewport: {
+        rotation: 0,
+        rawDims: { pageWidth: 100, pageHeight: 100 }
+      },
+      addInkEditorIfNeeded: () => {}
+    },
+    parentDimensions: [100, 100],
+    uiManager: uiManager,
+    id: "test",
+    name: "testEditor"
+  });
+  
+  editor.makeResizable();
+  
+  const expectedCursors = {
+    topLeft: "nwse-resize",
+    topRight: "nesw-resize",
+    topMiddle: "ns-resize",
+    middleRight: "ew-resize",
+    bottomRight: "nwse-resize",
+    bottomMiddle: "ns-resize",
+    bottomLeft: "nesw-resize",
+    middleLeft: "ew-resize"
+  };
+  
+  const resizers = editor.#resizersDiv.querySelectorAll(".resizer");
+  
+  for (const [name, cursor] of Object.entries(expectedCursors)) {
+    const resizer = resizers.namedItem(name);
+    jest.spyOn(resizer, "style", {
+      get: () => ({ cursor: "" })
+    });
+    
+    const event = new PointerEvent("pointerenter", {
+      bubbles: true,
+      cancelable: true
+    });
+    
+    await new Promise(resolve => {
+      resizer.addEventListener("pointerenter", () => {
+        expect(resizer.style.cursor).toBe(cursor);
+        resolve();
+      });
+      
+      resizer.dispatchEvent(event);
+      
+      jest.setTimeout(resolve, 100);
+    });
+  }
+  
+  document.body.removeChild(container);
+});
+```

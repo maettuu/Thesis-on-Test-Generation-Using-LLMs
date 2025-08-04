@@ -1,0 +1,55 @@
+<think>
+Okay, I need to write a regression test for the issue where memory usage balloons when scrolling through a PDF. The patch provided modifies the `WorkerTransport` class to release `ImageBitmap` data when cleanup has successfully run. 
+
+First, I should understand what the patch does. It adds a check after the cleanup to see if `pageProxy._intentStates.size` is zero. If so, it closes the `imageData.bitmap` to release memory. This should prevent memory from ballooning by ensuring images are properly released when no longer needed.
+
+To test this, I need to simulate scrolling through a PDF and measure memory usage. I'll create a test that opens a PDF, scrolls through multiple pages, and checks if the memory usage increases excessively.
+
+I'll use `PDFDocument` and `PDFPageProxy` to load a test PDF. I'll generate a large number of pages to simulate extensive scrolling. After each page is rendered, I'll force garbage collection and measure the heap size.
+
+I remember that in Node.js, `v8.getHeapStatistics()` can give memory usage details. I'll track the heap size after each page render. If the patch is effective, the memory should remain relatively stable, not increasing without bound.
+
+I'll set a threshold, say 200MB, to fail the test if exceeded. This ensures that the test catches memory ballooning issues.
+
+I need to import the necessary modules dynamically. The test will be self-contained, so I'll use `import()` for `PDFDocument` and `PDFPageProxy` from the correct paths.
+
+Putting it all together, the test will load the PDF, iterate through pages, collect heap sizes, and assert that the maximum heap size doesn't exceed the threshold. This should fail before the patch and pass after.
+</think>
+
+```javascript
+it("should prevent memory ballooning when scrolling through PDF", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  
+  // Load a test PDF with multiple pages
+  const pdf = await PDFDocument.load(await fetch(`${TEST_PDFS_PATH}with-many-pages.pdf`));
+  
+  // Generate a large number of pages to simulate scrolling
+  const pages = [];
+  for (let i = 0; i < 100; i++) {
+    pages.push(await pdf.getPage(i + 1));
+  }
+  
+  // Track memory usage
+  const heapSizes = [];
+  for (const page of pages) {
+    // Render the page
+    const pageProxy = new PDFPageProxy(page);
+    await pageProxy.render();
+    
+    // Force cleanup
+    pageProxy.cleanup();
+    
+    // Measure heap size after cleanup
+    const heapStats = v8.getHeapStatistics();
+    heapSizes.push(heapStats.used_heap_size);
+    
+    // Release references
+    pageProxy.objs.clear();
+  }
+  
+  // Check if memory usage remains stable
+  const maxHeapSize = Math.max(...heapSizes);
+  expect(maxHeapSize).toBeLessThan(200 * 1024 * 1024); // 200MB threshold
+});
+```

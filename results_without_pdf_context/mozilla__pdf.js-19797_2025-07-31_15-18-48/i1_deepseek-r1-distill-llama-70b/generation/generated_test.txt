@@ -1,0 +1,59 @@
+it("should handle touch events without crashing when touchMoveAC is null", async () => {
+  const { PDFWorker } = await import("../../src/display/api.js");
+  const { TouchManager } = await import("../../src/display/touch_manager.js");
+
+  // Setup a simple PDF document for testing
+  const pdfDocument = await getDocument({
+    data: new Uint8Array(),
+    fingerprint: "test-pdf",
+    length: 0,
+  });
+
+  // Create a container and viewer for the test
+  const container = {
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  const viewer = {
+    get pageView() {
+      return {
+        get viewport() {
+          return { width: 100, height: 100 };
+        },
+      };
+    },
+  };
+
+  // Create TouchManager instance
+  const touchManager = new TouchManager({
+    container,
+    signal: new AbortController().signal,
+  });
+
+  // Test touch events that could trigger the error
+  const done = () => {
+    return new Promise(resolve => {
+      const touchStart = new Event("touchstart");
+      const touchMove = new Event("touchmove");
+      const touchEnd = new Event("touchend");
+
+      touchManager.#onTouchStart(touchStart);
+      touchManager.#onTouchMove(touchMove);
+
+      // Ensure #touchMoveAC is null when handling touchend
+      const originalTouchMoveAC = touchManager.#touchMoveAC;
+      touchManager.#touchMoveAC = null;
+
+      const handleTouchEnd = () => {
+        touchManager.#onTouchEnd(touchEnd);
+        resolve();
+      };
+
+      touchManager.#container.addEventListener("touchend", handleTouchEnd, { once: true });
+      touchManager.#container.dispatchEvent(touchEnd);
+    });
+  };
+
+  // Verify that no error is thrown during touch handling
+  await expect(done()).resolves.not.toThrow();
+});

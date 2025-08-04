@@ -1,0 +1,52 @@
+<think>
+Okay, I need to write a regression test for the bug where the PolygonAnnotation fill isn't rendered in PDF.js. The test should fail before the patch and pass after. 
+
+First, I'll use the provided PDF file, issue20062.pdf, which has a polygon with both stroke and fill. I'll import getDocument from the API and buildGetDocumentParams from test_utils.js.
+
+I'll load the PDF and get the first page. Then, I'll create a canvas element to render it. I'll set the scale to 1 and render the page.
+
+Next, I need to check if the fill is present. Since the fill color is white, I'll look for white pixels in the area where the polygon is. I'll get the canvas context and extract the image data.
+
+I'll check the pixel at the center of the canvas, which should be white if the fill is correct. Before the patch, this pixel would be transparent, so the test would fail. After the patch, it should be white, making the test pass.
+
+I'll write the test using Jest, using async/await for the operations. The test will fetch the PDF, render it, and check the pixel color. If the alpha channel is 255 (white), it passes; else, it fails.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll structure the code as per the example, ensuring only the necessary steps are included.
+</think>
+
+```javascript
+it("should render polygon annotation with fill color", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue20062.pdf'));
+  
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const scale = 1;
+  const viewport = page.getViewport({ scale });
+  
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport,
+    scale,
+  });
+  
+  await renderTask.promise;
+  
+  const expectedFillColor = 'rgb(255, 255, 255)';
+  const fillColor = context.getImageData(
+    Math.floor(canvas.width / 2),
+    Math.floor(canvas.height / 2),
+    1,
+    1
+  ).data;
+  
+  expect(fillColor[3]).toBe(255);
+});
+```

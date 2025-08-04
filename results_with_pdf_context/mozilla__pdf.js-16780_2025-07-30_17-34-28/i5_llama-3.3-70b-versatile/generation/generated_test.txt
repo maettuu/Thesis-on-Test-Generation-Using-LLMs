@@ -1,0 +1,44 @@
+it("should resize SVG images horizontallyvertically in pdfjs", async () => {
+  const { PDFDocument, PDFPage } = await import("../../src/core/document.js");
+  const { AnnotationEditorUIManager, ImageManager } = await import("../../src/display/editor/tools.js");
+  const { DOMCanvasFactory } = await import("../../src/display/display_utils.js");
+
+  const pdfDoc = await PDFDocument.load(await (await import("../../src/display/api.js")).PDFDocumentLoadingTask.fromData(new Uint8Array([/* your test pdf file */])));
+  const page = pdfDoc.getPage(1);
+  const canvasFactory = new DOMCanvasFactory();
+  const annotationEditor = new AnnotationEditorUIManager(page, canvasFactory);
+
+  const svgImage = `data:image/svg+xml;charset=UTF-8,<svg viewBox="0 0 100 100" width="100" height="100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" style="fill:red;"/></svg>`;
+
+  const imageManager = new ImageManager();
+  const imageElement = new Image();
+  imageElement.src = svgImage;
+
+  await new Promise((resolve) => {
+    imageElement.onload = resolve;
+  });
+
+  const canvas = canvasFactory.createCanvas(100, 200);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(imageElement, 0, 0, 100, 200);
+
+  const actualImageData = ctx.getImageData(0, 0, 100, 200).data;
+  const expectedImageData = new Uint8ClampedArray(100 * 200 * 4);
+
+  for (let i = 0; i < expectedImageData.length; i += 4) {
+    expectedImageData[i] = 255; // red
+    expectedImageData[i + 1] = 0; // green
+    expectedImageData[i + 2] = 0; // blue
+    expectedImageData[i + 3] = 255; // alpha
+  }
+
+  let imagesAreEqual = true;
+  for (let i = 0; i < actualImageData.length; i++) {
+    if (actualImageData[i] !== expectedImageData[i]) {
+      imagesAreEqual = false;
+      break;
+    }
+  }
+
+  expect(imagesAreEqual).toBe(true);
+});

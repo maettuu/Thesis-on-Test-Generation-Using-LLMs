@@ -1,0 +1,67 @@
+<think>
+Okay, I need to write a regression test for the issue where rendering a PDF with many pages is slow. The patch provided modifies the MessageHandler class to handle messages more efficiently by queuing and postponing execution, especially when tasks are cancelled. 
+
+First, I should understand what the patch does. It adds properties like #cancelledStreamIds, #executorRunning, #isPostponed, and #queue to the MessageHandler. The _onComObjOnMessage method now pushes data into a queue and uses an executor to process them. This should help in skipping unnecessary tasks, especially when a cancel task is encountered.
+
+The test needs to simulate a scenario where multiple messages are sent, including a cancel message. Before the patch, the worker would process all tasks immediately, leading to slow rendering. After the patch, the worker should queue tasks and skip those that are cancelled.
+
+I'll structure the test as follows:
+
+1. Create a MessageHandler instance with a mock comObj that can send messages.
+2. Simulate sending multiple messages, including a cancel message in between.
+3. Check if the message handler correctly skips the cancelled task.
+
+I'll use Jest for the test, so I'll mock the necessary methods. I'll track the number of times postMessage is called and ensure that the cancelled task doesn't result in a callback.
+
+In the test, I'll import MessageHandler from the correct path. Then, I'll set up a mock comObj with addEventListener and postMessage. I'll send several messages, including a cancel, and check if the callbacks are correctly handled.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll use async/await for promises and track the results to assert the expected behavior.
+</think>
+
+```javascript
+it("should skip cancelled tasks in worker", async () => {
+  const { MessageHandler } = await import("../../src/shared/message_handler.js");
+  const mockComObj = {
+    addEventListener: jest.fn(),
+    postMessage: jest.fn(),
+  };
+  
+  const handler = new MessageHandler("test-source", "test-target", mockComObj);
+  
+  const messages = [
+    { action: "renderPage", data: { page: 1 } },
+    { action: "renderPage", data: { page: 2 }, stream: StreamKind.CANCEL, streamId: "cancel1" },
+    { action: "renderPage", data: { page: 3 } },
+  ];
+  
+  let callbackCount = 0;
+  const expectedData = { pagesRendered: 2 };
+  
+  await new Promise(resolve => {
+    mockComObj.addEventListener.mock.calls[0][1]({
+      data: messages[0],
+    });
+    mockComObj.addEventListener.mock.calls[0][1]({
+      data: messages[1],
+    });
+    mockComObj.addEventListener.mock.calls[0][1]({
+      data: messages[2],
+    });
+    
+    handler.actionHandler.renderPage = jest.fn((data) => {
+      callbackCount++;
+      return Promise.resolve(expectedData);
+    });
+    
+    const check = () => {
+      expect(callbackCount).toBe(2);
+      expect(mockComObj.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expectedData })
+      );
+      resolve();
+    };
+    
+    setTimeout(check, 0);
+  });
+});
+```

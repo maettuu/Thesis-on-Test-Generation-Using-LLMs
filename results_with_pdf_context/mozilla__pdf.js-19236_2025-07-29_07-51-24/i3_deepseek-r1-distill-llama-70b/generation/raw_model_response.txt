@@ -1,0 +1,55 @@
+<think>
+Okay, I need to write a regression test for the bug where font fallback doesn't work on the node-js/legacy build. The issue is that when rendering a PDF with HelveticaLTStd font, it doesn't fall back correctly, resulting in missing text.
+
+First, I'll look at the provided patch. It adds a mapping for "HelveticaLTStd-Bold" to "Helvetica-Bold" in the standard_fonts.js file. This means that when the PDF uses HelveticaLTStd-Bold, it should now fall back to Helvetica-Bold.
+
+Next, I need to create a test that checks if this fallback works. The test should render a page of the PDF and check if the text is present. If the fallback works, the text should be rendered correctly.
+
+I'll use the existing test setup. I'll import getDocument and buildGetDocumentParams to load the PDF. Then, I'll create a new PDFDocumentLoadingTask and wait for it to load.
+
+Once the document is loaded, I'll get the first page and render it into a canvas. I'll set the rendering options to use the fallback fonts.
+
+After rendering, I'll check the canvas for non-empty pixels. If the text is present, the canvas won't be blank. I'll use a helper function, arePixelsNonEmpty, to verify this.
+
+I need to make sure the test fails before the patch and passes after. So, the test should correctly detect whether the fallback is working by checking the rendered output.
+
+I should also handle any potential rendering issues by using a timeout, just in case the rendering takes a bit longer.
+
+Putting it all together, the test will load the PDF, render the page, and check for the presence of text. This should validate that the font fallback is working as intended after the patch.
+</think>
+
+```javascript
+it("should properly fall back to standard fonts when HelveticaLTStd is missing", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue19234.pdf'));
+  
+  const { numPages } = await loadingTask;
+  const document = await loadingTask.promise;
+  const page = await document.getPage(1);
+  
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  const viewport = page.getViewport({ scale: 1 });
+  
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport,
+    renderingOptions: {
+      useFallbackFonts: true,
+    },
+  });
+  
+  await renderTask.promise;
+  
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const arePixelsNonEmpty = () => {
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i + 3] > 0) return true;
+    }
+    return false;
+  };
+  
+  expect(arePixelsNonEmpty()).toBe(true);
+});
+```

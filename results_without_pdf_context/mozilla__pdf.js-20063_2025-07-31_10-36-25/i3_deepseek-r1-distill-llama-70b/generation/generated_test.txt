@@ -1,0 +1,47 @@
+it("should render filled polygon annotations correctly", async () => {
+  const xref = new XRefMock();
+  const pdfManager = {
+    ensureCatalog: async () => ({}),
+    getPage: async () => ({}),
+    ensureDoc: async () => ({ numPages: 1 }),
+  };
+
+  const annotationDict = new Dict();
+  annotationDict.set("Subtype", new Name("Polygon"));
+  annotationDict.set("Rect", [0, 0, 100, 100]);
+  annotationDict.set("Vertices", new Float32Array([0, 0, 100, 0, 100, 100, 0, 100]));
+  annotationDict.set("IC", new Name("yellow"));
+  annotationDict.set("C", new Name("black"));
+  annotationDict.set("CA", 1);
+
+  const params = {
+    xref,
+    ref: new Ref(1),
+    annotationGlobals: {
+      pdfManager,
+      acroForm: new Dict(),
+      structTreeRoot: new Dict(),
+      baseUrl: new Dict(),
+      attachments: new Dict(),
+      globalColorSpaceCache: new Dict(),
+    },
+    evaluatorOptions: {},
+  };
+
+  const annotation = await AnnotationFactory.create(params);
+
+  const operatorList = await annotation.getOperatorList(
+    new PartialEvaluator(),
+    new WorkerTask(),
+    RenderingIntentFlag.DISPLAY,
+    null,
+    null
+  );
+
+  const expectedFillOperator = "f";
+  const actualOperators = operatorList.opList.ops
+    .map(op => op.cmd)
+    .join("");
+
+  expect(actualOperators).toContain(expectedFillOperator);
+});

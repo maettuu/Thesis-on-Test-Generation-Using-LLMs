@@ -1,0 +1,47 @@
+<think>
+Okay, I need to write a regression test for the issue where the top and bottom images aren't displayed in the PDF file. The patch provided modifies the evaluator.js and operator_list.js files. Let me understand what the patch does.
+
+Looking at the patch, in evaluator.js, they added a hasMask variable which checks if the dictionary has "SMask" or "Mask". This is used in several places to determine if masking is applied. Then, in operator_list.js, the addImageOps function was updated to handle hasMask by adding save, setGState, and restore operations. This suggests that images with masks were not being rendered correctly before because the necessary operations were missing.
+
+So, the test should check if images with masks are now displayed correctly. I'll create a test that generates a PDF with such images and checks if they render properly.
+
+I'll use the PDFDocument from the imports to create a simple PDF with an image that has a mask. Then, I'll use PDFPageProxy to render the page and check if the image is present.
+
+I need to import the necessary modules dynamically. I'll use PDFDocument and PDFPageProxy. The test will create a new PDF, add an image with a mask, save it, and then load it back to check rendering.
+
+I'll structure the test with an async function. After setting up the PDF, I'll create a page and draw the image. Then, I'll save the PDF and load it using getDocument. Finally, I'll render the first page and check if the image is present by looking for the drawImage operation in the operator list.
+
+This should ensure that the test fails before the patch because the images with masks aren't rendered, and passes after the patch because the necessary operations are added.
+</think>
+
+```javascript
+it("should display images with masks in PDF files", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  const { OperatorList } = await import("../../src/core/operator_list.js");
+
+  // Create a simple PDF with an image that has a mask
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+  const xref = pdf.xref;
+  const imageRef = pdf.ref();
+  const image = pdf.image();
+  image.hasMask = true;
+
+  // Draw the image on the page
+  page.drawImage(image, 100, 100, 200, 200);
+
+  // Save the PDF
+  const pdfBuffer = await pdf.save();
+
+  // Load the PDF back
+  const pdfDoc = await PDFDocument.load(pdfBuffer);
+  const pageProxy = (await pdfDoc.getPage(1)) as PDFPageProxy;
+
+  // Render the page and check if the image is present
+  const operatorList = await pageProxy.getOperatorList();
+  const drawImageOps = operatorList.ops.some(op => op.fn === OPS.drawImage);
+
+  expect(drawImageOps).toBe(true);
+});
+```

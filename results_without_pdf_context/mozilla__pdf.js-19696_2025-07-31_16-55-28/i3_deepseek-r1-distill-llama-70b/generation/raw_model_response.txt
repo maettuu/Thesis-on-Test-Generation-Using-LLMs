@@ -1,0 +1,66 @@
+<think>
+Okay, I need to write a regression test for the issue where the £ symbol isn't displaying correctly in PDF.js. The user provided a patch that adds a line to the standard_fonts.js file, specifically in the getSupplementalGlyphMapForCalibri function. The patch maps t[940] to 163, which should fix the incorrect display of the £ symbol.
+
+First, I should understand the problem. The £ symbol, which is U+00A3, was showing up as α-with-tonos (U+03AC). This suggests that the glyph mapping was incorrect before the patch. The patch corrects this by setting the correct glyph index for the £ symbol.
+
+Now, I need to create a test that will fail before the patch and pass after. The test should open a PDF containing the £ symbol and check if it's rendered correctly.
+
+Looking at the test file, I can see that it's using Jest and already imports necessary modules. I can reuse the setup for creating a PDF document using the TestPdfsServer. I'll need to create a test PDF that includes the £ symbol. Since I don't have the actual file, I'll simulate it by creating a PDF with that character.
+
+I'll use the TestPdfsServer to serve the test PDF. Then, I'll use the getDocument function from pdf.js to load the PDF. Once the document is loaded, I'll get the first page and render it.
+
+To check the rendering, I'll extract the text from the page. The £ symbol should be present in the text. If the patch is correct, the text should include '£'; otherwise, it might include the wrong character.
+
+I'll write an async test using Jest's it function. The test will:
+
+1. Start the test server.
+2. Fetch the test PDF.
+3. Get the document and the first page.
+4. Render the page and extract the text.
+5. Check if the text includes '£'.
+
+If the test passes after the patch, it means the £ symbol is correctly rendered. If it fails before the patch, it confirms the bug exists.
+
+I should make sure all necessary imports are included. The test should be self-contained and only test the specific behavior without relying on external dependencies beyond what's already imported.
+
+I also need to handle any potential errors, like the PDF failing to load or the text extraction failing. Wrapping the test in a try-catch block might help, but I'll let Jest handle the assertions.
+
+So, the test will look something like this: start the server, fetch the PDF, load the document, get the page, render it, extract text, and assert that '£' is present.
+
+I think that's a solid approach. Now, I'll write the code accordingly, making sure to use the correct imports and structure as per the example.
+</think>
+
+```javascript
+it("should correctly render £ symbol (U+00A3) as £ instead of α-with-tonos", async () => {
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const server = new TestPdfsServer();
+  const pdfPath = `${TEST_PDFS_PATH}/PoundSymbol.pdf`;
+  
+  try {
+    await server.start();
+    const { pdfDocument } = await getDocument({
+      url: `${server.url}${pdfPath}`,
+      transport: new PDFDataRangeTransport({
+        fetch: fetchDataDOM,
+      }),
+    });
+    
+    const page = await pdfDocument.getPage(1);
+    const viewport = new PageViewport(page, { scale: 1 });
+    const renderTask = page.render({
+      viewport,
+      renderOption: { flags: 5 },
+    });
+    
+    await renderTask.promise;
+    
+    const textContent = await page.getTextContent();
+    const expected = "£";
+    const actual = textContent.items[0].str;
+    
+    expect(actual).toContain(expected);
+  } finally {
+    await server.stop();
+  }
+});
+```

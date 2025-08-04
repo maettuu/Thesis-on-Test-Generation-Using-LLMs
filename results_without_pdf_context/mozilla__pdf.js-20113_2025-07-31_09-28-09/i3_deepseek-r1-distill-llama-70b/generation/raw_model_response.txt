@@ -1,0 +1,41 @@
+<think>
+Okay, I need to write a regression test for the issue where printing an HTML spec page to PDF can't be opened in Firefox. The patch provided is in xref.js, so the test should verify that this specific problem is resolved.
+
+First, I'll look at the patch. It adds code to fix the xref table entries where the generation number doesn't match the index. This should prevent issues when generating PDFs that Firefox can't open.
+
+I'll use the existing test file, test/unit/api_spec.js, and add a new test case. I need to import necessary modules. Since I'm dealing with PDFs, I'll use TestPdfsServer to serve test files. I'll also need to import getDocument from the display API.
+
+The test will create a server, fetch the problematic PDF, and attempt to load it. Before the patch, this should throw an error. After the patch, it should load without issues.
+
+I'll structure the test with try-catch blocks. If the PDF can't be loaded, it should fail. The test will be self-contained, using async/await for promises.
+
+I'll make sure to clean up by stopping the server after the test. The test will only have the necessary imports and steps to verify the fix.
+</think>
+
+```javascript
+it("should correctly handle xref generation numbers to prevent invalid PDFs", async () => {
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const { getDocument } = await import("../../src/display/api.js");
+
+  const server = new TestPdfsServer();
+  try {
+    // Use a known PDF that triggers the xref generation issue
+    const pdfPath = `${TEST_PDFS_PATH}/issue-1978317.pdf`;
+    const loadingTask = getDocument({
+      url: server.urlFor(pdfPath),
+      httpHeaders: { "X-Test-Source": "unitTest" },
+    });
+
+    const pdfDoc = await loadingTask.promise;
+    const expectedError = new InvalidPDFException("Invalid PDF structure");
+    const actualError = await pdfDoc.loadError;
+
+    assert strictEqual(actualError, undefined,
+      `Expected PDF to load without error, but got: ${actualError}`);
+  } catch (error) {
+    throw new Error(`PDF failed to load: ${error.message}`);
+  } finally {
+    await server.stop();
+  }
+});
+```

@@ -1,0 +1,917 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Slow rendering of a PDF with a lot of pages
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/shared/message_handler.js b/src/shared/message_handler.js
+--- a/src/shared/message_handler.js
++++ b/src/shared/message_handler.js
+@@ -70,6 +70,14 @@ function wrapReason(reason) {
+ }
+ 
+ class MessageHandler {
++  #cancelledStreamIds = new Set();
++
++  #executorRunning = false;
++
++  #isPostponed = false;
++
++  #queue = [];
++
+   constructor(sourceName, targetName, comObj) {
+     this.sourceName = sourceName;
+     this.targetName = targetName;
+@@ -81,71 +89,116 @@ class MessageHandler {
+     this.callbackCapabilities = Object.create(null);
+     this.actionHandler = Object.create(null);
+ 
+-    this._onComObjOnMessage = event => {
+-      const data = event.data;
+-      if (data.targetName !== this.sourceName) {
+-        return;
+-      }
+-      if (data.stream) {
+-        this.#processStreamMessage(data);
+-        return;
+-      }
+-      if (data.callback) {
+-        const callbackId = data.callbackId;
+-        const capability = this.callbackCapabilities[callbackId];
+-        if (!capability) {
+-          throw new Error(`Cannot resolve callback ${callbackId}`);
++    this._onComObjOnMessage = ({ data }) => {
++      if (data.targetName === this.sourceName) {
++        // The meesages in the worker queue are processed with a
++        // higher priority than the tasks in the event queue.
++        // So, postponing the task execution, will ensure that the message
++        // queue is drained.
++        // If at some point we've a cancelled task (e.g. GetOperatorList),
++        // we're able to skip the task execution with the same streamId.
++        this.#queue.push(data);
++        this.#isPostponed ||= data.action === "GetOperatorList";
++        if (data.stream === StreamKind.CANCEL) {
++          this.#cancelledStreamIds.add(data.streamId);
+         }
+-        delete this.callbackCapabilities[callbackId];
+-
+-        if (data.callback === CallbackKind.DATA) {
+-          capability.resolve(data.data);
+-        } else if (data.callback === CallbackKind.ERROR) {
+-          capability.reject(wrapReason(data.reason));
+-        } else {
+-          throw new Error("Unexpected callback case");
++        if (!this.#executorRunning) {
++          this.#executorRunning = true;
++          this.#postponeExecution();
+         }
+-        return;
+       }
+-      const action = this.actionHandler[data.action];
+-      if (!action) {
+-        throw new Error(`Unknown action from worker: ${data.action}`);
++    };
++    comObj.addEventListener("message", this._onComObjOnMessage);
++  }
++
++  #postponeExecution() {
++    if (this.#isPostponed) {
++      setTimeout(this.#executor.bind(this), 0);
++    } else {
++      this.#executor();
++    }
++  }
++
++  #executor() {
++    if (this.#queue.length === 0) {
++      this.#cancelledStreamIds.clear();
++      this.#executorRunning = false;
++      return;
++    }
++
++    const data = this.#queue.shift();
++    const { stream, streamId } = data;
++
++    if (stream) {
++      if (
++        stream === StreamKind.CANCEL ||
++        !this.#cancelledStreamIds.has(streamId)
++      ) {
++        this.#processStreamMessage(data);
+       }
+-      if (data.callbackId) {
+-        const cbSourceName = this.sourceName;
+-        const cbTargetName = data.sourceName;
++      this.#postponeExecution();
++      return;
++    }
+ 
+-        new Promise(function (resolve) {
+-          resolve(action(data.data));
+-        }).then(
+-          function (result) {
+-            comObj.postMessage({
+-              sourceName: cbSourceName,
+-              targetName: cbTargetName,
+-              callback: CallbackKind.DATA,
+-              callbackId: data.callbackId,
+-              data: result,
+-            });
+-          },
+-          function (reason) {
+-            comObj.postMessage({
+-              sourceName: cbSourceName,
+-              targetName: cbTargetName,
+-              callback: CallbackKind.ERROR,
+-              callbackId: data.callbackId,
+-              reason: wrapReason(reason),
+-            });
+-          }
+-        );
+-        return;
++    if (streamId && this.#cancelledStreamIds.has(streamId)) {
++      this.#postponeExecution();
++      return;
++    }
++
++    if (data.callback) {
++      const callbackId = data.callbackId;
++      const capability = this.callbackCapabilities[callbackId];
++      if (!capability) {
++        throw new Error(`Cannot resolve callback ${callbackId}`);
+       }
+-      if (data.streamId) {
+-        this.#createStreamSink(data);
+-        return;
++      delete this.callbackCapabilities[callbackId];
++
++      if (data.callback === CallbackKind.DATA) {
++        capability.resolve(data.data);
++      } else if (data.callback === CallbackKind.ERROR) {
++        capability.reject(wrapReason(data.reason));
++      } else {
++        throw new Error("Unexpected callback case");
+       }
++      this.#postponeExecution();
++      return;
++    }
++    const action = this.actionHandler[data.action];
++    if (!action) {
++      throw new Error(`Unknown action from worker: ${data.action}`);
++    }
++    if (data.callbackId) {
++      const cbSourceName = this.sourceName;
++      const cbTargetName = data.sourceName;
++
++      new Promise(function (resolve) {
++        resolve(action(data.data));
++      }).then(
++        result => {
++          this.comObj.postMessage({
++            sourceName: cbSourceName,
++            targetName: cbTargetName,
++            callback: CallbackKind.DATA,
++            callbackId: data.callbackId,
++            data: result,
++          });
++        },
++        reason => {
++          this.comObj.postMessage({
++            sourceName: cbSourceName,
++            targetName: cbTargetName,
++            callback: CallbackKind.ERROR,
++            callbackId: data.callbackId,
++            reason: wrapReason(reason),
++          });
++        }
++      );
++    } else if (data.streamId) {
++      this.#createStreamSink(data);
++    } else {
+       action(data.data);
+-    };
+-    comObj.addEventListener("message", this._onComObjOnMessage);
++    }
++    this.#postponeExecution();
+   }
+ 
+   on(actionName, handler) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.3
+- @babel/preset-env: ^7.23.3
+- @babel/runtime: ^7.23.4
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @javascript-obfuscator/escodegen: 2.3.0
+- @jazzer.js/core: ^2.1.0
+- acorn: ^8.11.2
+- autoprefixer: ^10.4.16
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001564
+- canvas: ^2.11.2
+- core-js: ^3.33.3
+- cross-env: ^7.0.3
+- eslint: ^8.54.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.0
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.1
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^49.0.0
+- globals: ^13.23.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.31
+- postcss-dark-theme-class: ^1.0.0
+- postcss-dir-pseudo-class: ^8.0.0
+- postcss-discard-comments: ^6.0.0
+- postcss-nesting: ^12.0.1
+- prettier: ^3.1.0
+- puppeteer: ^21.6.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.11.0
+- stylelint-prettier: ^4.1.0
+- terser: ^5.24.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.2
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.89.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n.js`: L10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/shared/message_handler.js
+1 /* Copyright 2018 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AbortException,
+18   assert,
+19   MissingPDFException,
+20   PasswordException,
+21   PromiseCapability,
+22   UnexpectedResponseException,
+23   UnknownErrorException,
+24   unreachable,
+25 } from "./util.js";
+26 
+27 const CallbackKind = {
+28   UNKNOWN: 0,
+29   DATA: 1,
+30   ERROR: 2,
+31 };
+32 
+33 const StreamKind = {
+34   UNKNOWN: 0,
+35   CANCEL: 1,
+36   CANCEL_COMPLETE: 2,
+37   CLOSE: 3,
+38   ENQUEUE: 4,
+39   ERROR: 5,
+40   PULL: 6,
+41   PULL_COMPLETE: 7,
+42   START_COMPLETE: 8,
+43 };
+44 
+45 function wrapReason(reason) {
+46   if (
+47     !(
+48       reason instanceof Error ||
+49       (typeof reason === "object" && reason !== null)
+50     )
+51   ) {
+52     unreachable(
+53       'wrapReason: Expected "reason" to be a (possibly cloned) Error.'
+54     );
+55   }
+56   switch (reason.name) {
+57     case "AbortException":
+58       return new AbortException(reason.message);
+59     case "MissingPDFException":
+60       return new MissingPDFException(reason.message);
+61     case "PasswordException":
+62       return new PasswordException(reason.message, reason.code);
+63     case "UnexpectedResponseException":
+64       return new UnexpectedResponseException(reason.message, reason.status);
+65     case "UnknownErrorException":
+66       return new UnknownErrorException(reason.message, reason.details);
+67     default:
+68       return new UnknownErrorException(reason.message, reason.toString());
+69   }
+70 }
+71 
+72 class MessageHandler {
+73   constructor(sourceName, targetName, comObj) {
+74     this.sourceName = sourceName;
+75     this.targetName = targetName;
+76     this.comObj = comObj;
+77     this.callbackId = 1;
+78     this.streamId = 1;
+79     this.streamSinks = Object.create(null);
+80     this.streamControllers = Object.create(null);
+81     this.callbackCapabilities = Object.create(null);
+82     this.actionHandler = Object.create(null);
+83 
+84     this._onComObjOnMessage = event => {
+85       const data = event.data;
+86       if (data.targetName !== this.sourceName) {
+87         return;
+88       }
+89       if (data.stream) {
+90         this.#processStreamMessage(data);
+91         return;
+92       }
+93       if (data.callback) {
+94         const callbackId = data.callbackId;
+95         const capability = this.callbackCapabilities[callbackId];
+96         if (!capability) {
+97           throw new Error(`Cannot resolve callback ${callbackId}`);
+98         }
+99         delete this.callbackCapabilities[callbackId];
+100 
+101         if (data.callback === CallbackKind.DATA) {
+102           capability.resolve(data.data);
+103         } else if (data.callback === CallbackKind.ERROR) {
+104           capability.reject(wrapReason(data.reason));
+105         } else {
+106           throw new Error("Unexpected callback case");
+107         }
+108         return;
+109       }
+110       const action = this.actionHandler[data.action];
+111       if (!action) {
+112         throw new Error(`Unknown action from worker: ${data.action}`);
+113       }
+114       if (data.callbackId) {
+115         const cbSourceName = this.sourceName;
+116         const cbTargetName = data.sourceName;
+117 
+118         new Promise(function (resolve) {
+119           resolve(action(data.data));
+120         }).then(
+121           function (result) {
+122             comObj.postMessage({
+123               sourceName: cbSourceName,
+124               targetName: cbTargetName,
+125               callback: CallbackKind.DATA,
+126               callbackId: data.callbackId,
+127               data: result,
+128             });
+129           },
+130           function (reason) {
+131             comObj.postMessage({
+132               sourceName: cbSourceName,
+133               targetName: cbTargetName,
+134               callback: CallbackKind.ERROR,
+135               callbackId: data.callbackId,
+136               reason: wrapReason(reason),
+137             });
+138           }
+139         );
+140         return;
+141       }
+142       if (data.streamId) {
+143         this.#createStreamSink(data);
+144         return;
+145       }
+146       action(data.data);
+147     };
+148     comObj.addEventListener("message", this._onComObjOnMessage);
+149   }
+150 
+151   on(actionName, handler) {
+152     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+153       assert(
+154         typeof handler === "function",
+155         'MessageHandler.on: Expected "handler" to be a function.'
+156       );
+157     }
+158     const ah = this.actionHandler;
+159     if (ah[actionName]) {
+160       throw new Error(`There is already an actionName called "${actionName}"`);
+161     }
+162     ah[actionName] = handler;
+163   }
+164 
+165   /**
+166    * Sends a message to the comObj to invoke the action with the supplied data.
+167    * @param {string} actionName - Action to call.
+168    * @param {JSON} data - JSON data to send.
+169    * @param {Array} [transfers] - List of transfers/ArrayBuffers.
+170    */
+171   send(actionName, data, transfers) {
+172     this.comObj.postMessage(
+173       {
+174         sourceName: this.sourceName,
+175         targetName: this.targetName,
+176         action: actionName,
+177         data,
+178       },
+179       transfers
+180     );
+181   }
+182 
+183   /**
+184    * Sends a message to the comObj to invoke the action with the supplied data.
+185    * Expects that the other side will callback with the response.
+186    * @param {string} actionName - Action to call.
+187    * @param {JSON} data - JSON data to send.
+188    * @param {Array} [transfers] - List of transfers/ArrayBuffers.
+189    * @returns {Promise} Promise to be resolved with response data.
+190    */
+191   sendWithPromise(actionName, data, transfers) {
+192     const callbackId = this.callbackId++;
+193     const capability = new PromiseCapability();
+194     this.callbackCapabilities[callbackId] = capability;
+195     try {
+196       this.comObj.postMessage(
+197         {
+198           sourceName: this.sourceName,
+199           targetName: this.targetName,
+200           action: actionName,
+201           callbackId,
+202           data,
+203         },
+204         transfers
+205       );
+206     } catch (ex) {
+207       capability.reject(ex);
+208     }
+209     return capability.promise;
+210   }
+211 
+212   /**
+213    * Sends a message to the comObj to invoke the action with the supplied data.
+214    * Expect that the other side will callback to signal 'start_complete'.
+215    * @param {string} actionName - Action to call.
+216    * @param {JSON} data - JSON data to send.
+217    * @param {Object} queueingStrategy - Strategy to signal backpressure based on
+218    *                 internal queue.
+219    * @param {Array} [transfers] - List of transfers/ArrayBuffers.
+220    * @returns {ReadableStream} ReadableStream to read data in chunks.
+221    */
+222   sendWithStream(actionName, data, queueingStrategy, transfers) {
+223     const streamId = this.streamId++,
+224       sourceName = this.sourceName,
+225       targetName = this.targetName,
+226       comObj = this.comObj;
+227 
+228     return new ReadableStream(
+229       {
+230         start: controller => {
+231           const startCapability = new PromiseCapability();
+232           this.streamControllers[streamId] = {
+233             controller,
+234             startCall: startCapability,
+235             pullCall: null,
+236             cancelCall: null,
+237             isClosed: false,
+238           };
+239           comObj.postMessage(
+240             {
+241               sourceName,
+242               targetName,
+243               action: actionName,
+244               streamId,
+245               data,
+246               desiredSize: controller.desiredSize,
+247             },
+248             transfers
+249           );
+250           // Return Promise for Async process, to signal success/failure.
+251           return startCapability.promise;
+252         },
+253 
+254         pull: controller => {
+255           const pullCapability = new PromiseCapability();
+256           this.streamControllers[streamId].pullCall = pullCapability;
+257           comObj.postMessage({
+258             sourceName,
+259             targetName,
+260             stream: StreamKind.PULL,
+261             streamId,
+262             desiredSize: controller.desiredSize,
+263           });
+264           // Returning Promise will not call "pull"
+265           // again until current pull is resolved.
+266           return pullCapability.promise;
+267         },
+268 
+269         cancel: reason => {
+270           assert(reason instanceof Error, "cancel must have a valid reason");
+271           const cancelCapability = new PromiseCapability();
+272           this.streamControllers[streamId].cancelCall = cancelCapability;
+273           this.streamControllers[streamId].isClosed = true;
+274           comObj.postMessage({
+275             sourceName,
+276             targetName,
+277             stream: StreamKind.CANCEL,
+278             streamId,
+279             reason: wrapReason(reason),
+280           });
+281           // Return Promise to signal success or failure.
+282           return cancelCapability.promise;
+283         },
+284       },
+285       queueingStrategy
+286     );
+287   }
+288 
+289   #createStreamSink(data) {
+290     const streamId = data.streamId,
+291       sourceName = this.sourceName,
+292       targetName = data.sourceName,
+293       comObj = this.comObj;
+294     const self = this,
+295       action = this.actionHandler[data.action];
+296 
+297     const streamSink = {
+298       enqueue(chunk, size = 1, transfers) {
+299         if (this.isCancelled) {
+300           return;
+301         }
+302         const lastDesiredSize = this.desiredSize;
+303         this.desiredSize -= size;
+304         // Enqueue decreases the desiredSize property of sink,
+305         // so when it changes from positive to negative,
+306         // set ready as unresolved promise.
+307         if (lastDesiredSize > 0 && this.desiredSize <= 0) {
+308           this.sinkCapability = new PromiseCapability();
+309           this.ready = this.sinkCapability.promise;
+310         }
+311         comObj.postMessage(
+312           {
+313             sourceName,
+314             targetName,
+315             stream: StreamKind.ENQUEUE,
+316             streamId,
+317             chunk,
+318           },
+319           transfers
+320         );
+321       },
+322 
+323       close() {
+324         if (this.isCancelled) {
+325           return;
+326         }
+327         this.isCancelled = true;
+328         comObj.postMessage({
+329           sourceName,
+330           targetName,
+331           stream: StreamKind.CLOSE,
+332           streamId,
+333         });
+334         delete self.streamSinks[streamId];
+335       },
+336 
+337       error(reason) {
+338         assert(reason instanceof Error, "error must have a valid reason");
+339         if (this.isCancelled) {
+340           return;
+341         }
+342         this.isCancelled = true;
+343         comObj.postMessage({
+344           sourceName,
+345           targetName,
+346           stream: StreamKind.ERROR,
+347           streamId,
+348           reason: wrapReason(reason),
+349         });
+350       },
+351 
+352       sinkCapability: new PromiseCapability(),
+353       onPull: null,
+354       onCancel: null,
+355       isCancelled: false,
+356       desiredSize: data.desiredSize,
+357       ready: null,
+358     };
+359 
+360     streamSink.sinkCapability.resolve();
+361     streamSink.ready = streamSink.sinkCapability.promise;
+362     this.streamSinks[streamId] = streamSink;
+363 
+364     new Promise(function (resolve) {
+365       resolve(action(data.data, streamSink));
+366     }).then(
+367       function () {
+368         comObj.postMessage({
+369           sourceName,
+370           targetName,
+371           stream: StreamKind.START_COMPLETE,
+372           streamId,
+373           success: true,
+374         });
+375       },
+376       function (reason) {
+377         comObj.postMessage({
+378           sourceName,
+379           targetName,
+380           stream: StreamKind.START_COMPLETE,
+381           streamId,
+382           reason: wrapReason(reason),
+383         });
+384       }
+385     );
+386   }
+387 
+388   #processStreamMessage(data) {
+389     const streamId = data.streamId,
+390       sourceName = this.sourceName,
+391       targetName = data.sourceName,
+392       comObj = this.comObj;
+393     const streamController = this.streamControllers[streamId],
+394       streamSink = this.streamSinks[streamId];
+395 
+396     switch (data.stream) {
+397       case StreamKind.START_COMPLETE:
+398         if (data.success) {
+399           streamController.startCall.resolve();
+400         } else {
+401           streamController.startCall.reject(wrapReason(data.reason));
+402         }
+403         break;
+404       case StreamKind.PULL_COMPLETE:
+405         if (data.success) {
+406           streamController.pullCall.resolve();
+407         } else {
+408           streamController.pullCall.reject(wrapReason(data.reason));
+409         }
+410         break;
+411       case StreamKind.PULL:
+412         // Ignore any pull after close is called.
+413         if (!streamSink) {
+414           comObj.postMessage({
+415             sourceName,
+416             targetName,
+417             stream: StreamKind.PULL_COMPLETE,
+418             streamId,
+419             success: true,
+420           });
+421           break;
+422         }
+423         // Pull increases the desiredSize property of sink, so when it changes
+424         // from negative to positive, set ready property as resolved promise.
+425         if (streamSink.desiredSize <= 0 && data.desiredSize > 0) {
+426           streamSink.sinkCapability.resolve();
+427         }
+428         // Reset desiredSize property of sink on every pull.
+429         streamSink.desiredSize = data.desiredSize;
+430 
+431         new Promise(function (resolve) {
+432           resolve(streamSink.onPull?.());
+433         }).then(
+434           function () {
+435             comObj.postMessage({
+436               sourceName,
+437               targetName,
+438               stream: StreamKind.PULL_COMPLETE,
+439               streamId,
+440               success: true,
+441             });
+442           },
+443           function (reason) {
+444             comObj.postMessage({
+445               sourceName,
+446               targetName,
+447               stream: StreamKind.PULL_COMPLETE,
+448               streamId,
+449               reason: wrapReason(reason),
+450             });
+451           }
+452         );
+453         break;
+454       case StreamKind.ENQUEUE:
+455         assert(streamController, "enqueue should have stream controller");
+456         if (streamController.isClosed) {
+457           break;
+458         }
+459         streamController.controller.enqueue(data.chunk);
+460         break;
+461       case StreamKind.CLOSE:
+462         assert(streamController, "close should have stream controller");
+463         if (streamController.isClosed) {
+464           break;
+465         }
+466         streamController.isClosed = true;
+467         streamController.controller.close();
+468         this.#deleteStreamController(streamController, streamId);
+469         break;
+470       case StreamKind.ERROR:
+471         assert(streamController, "error should have stream controller");
+472         streamController.controller.error(wrapReason(data.reason));
+473         this.#deleteStreamController(streamController, streamId);
+474         break;
+475       case StreamKind.CANCEL_COMPLETE:
+476         if (data.success) {
+477           streamController.cancelCall.resolve();
+478         } else {
+479           streamController.cancelCall.reject(wrapReason(data.reason));
+480         }
+481         this.#deleteStreamController(streamController, streamId);
+482         break;
+483       case StreamKind.CANCEL:
+484         if (!streamSink) {
+485           break;
+486         }
+487 
+488         new Promise(function (resolve) {
+489           resolve(streamSink.onCancel?.(wrapReason(data.reason)));
+490         }).then(
+491           function () {
+492             comObj.postMessage({
+493               sourceName,
+494               targetName,
+495               stream: StreamKind.CANCEL_COMPLETE,
+496               streamId,
+497               success: true,
+498             });
+499           },
+500           function (reason) {
+501             comObj.postMessage({
+502               sourceName,
+503               targetName,
+504               stream: StreamKind.CANCEL_COMPLETE,
+505               streamId,
+506               reason: wrapReason(reason),
+507             });
+508           }
+509         );
+510         streamSink.sinkCapability.reject(wrapReason(data.reason));
+511         streamSink.isCancelled = true;
+512         delete this.streamSinks[streamId];
+513         break;
+514       default:
+515         throw new Error("Unexpected stream case");
+516     }
+517   }
+518 
+519   async #deleteStreamController(streamController, streamId) {
+520     // Delete the `streamController` only when the start, pull, and cancel
+521     // capabilities have settled, to prevent `TypeError`s.
+522     await Promise.allSettled([
+523       streamController.startCall?.promise,
+524       streamController.pullCall?.promise,
+525       streamController.cancelCall?.promise,
+526     ]);
+527     delete this.streamControllers[streamId];
+528   }
+529 
+530   destroy() {
+531     this.comObj.removeEventListener("message", this._onComObjOnMessage);
+532   }
+533 }
+534 
+535 export { MessageHandler };
+</code>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

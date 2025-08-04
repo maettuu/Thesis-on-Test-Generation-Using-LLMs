@@ -1,0 +1,43 @@
+<think>
+Okay, I need to write a regression test for the bug where the signature page of a digitally signed PDF doesn't render correctly. The user provided a patch that modifies the StreamsSequenceStream constructor in decode_stream.js. My task is to create a test that fails before the patch and passes after.
+
+First, I'll look at the patch. It adds a line that filters the streams to include only those that are instances of BaseStream. This suggests that before the patch, non-BaseStream instances were causing issues when constructing StreamsSequenceStream.
+
+So, the test should simulate a scenario where a stream that's not a BaseStream is passed. Without the patch, this should cause an error, and with the patch, it should handle it gracefully.
+
+I'll structure the test using Jest. I'll import necessary modules like Dict, Stream, and PredictorStream. Then, I'll create a test case where I pass a non-BaseStream object to StreamsSequenceStream.
+
+In the test, I'll create a StreamsSequenceStream with a stream that's not a BaseStream. Before the patch, this should throw an error because the constructor didn't filter streams. After the patch, it should not throw because it ignores non-BaseStream instances.
+
+I'll use async/await for any asynchronous operations, like getting the document. I'll also need to load the specific PDF file provided, which is 'issue18973.pdf'.
+
+I'll write the test to check if the streams are correctly filtered. If the test doesn't throw an error after the patch, it means the issue is resolved.
+
+So, the test will create a StreamsSequenceStream with a non-BaseStream, and expect it not to throw an error, indicating the patch works.
+</think>
+
+```javascript
+it("should handle non-BaseStream instances in StreamsSequenceStream", async () => {
+  const { Dict } = await import("../../src/core/primitives.js");
+  const { PredictorStream } = await import("../../src/core/predictor_stream.js");
+  const { Stream } = await import("../../src/core/stream.js");
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+
+  // Create a test stream that is not a BaseStream
+  class TestStream extends Stream {
+    constructor() {
+      super();
+      this.dict = new Dict();
+    }
+  }
+
+  // Create a StreamsSequenceStream with a mix of valid and invalid streams
+  const streams = [new TestStream(), new PredictorStream(new Stream(new Uint8Array(0)))];
+  const sss = new StreamsSequenceStream(streams);
+
+  // Without the patch, this would throw an error
+  // With the patch, it should handle the invalid stream gracefully
+  await expect(sss.readBlock()).resolves.not.toThrow();
+});
+```

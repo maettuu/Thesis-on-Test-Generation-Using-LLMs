@@ -1,0 +1,31 @@
+it("should skip cancelled tasks to improve rendering performance", async () => {
+  const { MessageHandler } = await import("../../src/shared/message_handler.js");
+  const { PDFDocumentProxy, getDocument } = await import("../../src/display/api.js");
+  const { PDFNodeStream } = await import("../../src/display/node_stream.js");
+  const { createReadStream } = await import("fs");
+  const { join } = await import("path");
+
+  const pdfPath = join(__dirname, "test.pdf");
+  const data = new Uint8Array(await new Promise((resolve, reject) => {
+    const chunks = [];
+    createReadStream(pdfPath)
+      .on("data", chunk => chunks.push(chunk))
+      .on("end", () => resolve(Buffer.concat(chunks)))
+      .on("error", reject);
+  }));
+
+  const loadingTask = getDocument({ data });
+  const pdfDocument = await loadingTask.promise;
+  const page = await pdfDocument.getPage(1);
+
+  const messageHandler = new MessageHandler("main", "worker", new PDFNodeStream());
+  const renderTask = page.render({ canvasContext: null, viewport: page.getViewport({ scale: 1 }) });
+
+  let cancelled = false;
+  renderTask.onCancel = () => { cancelled = true; };
+  renderTask.cancel();
+
+  await renderTask.promise.catch(() => {});
+
+  expect(cancelled).toBe(true);
+});

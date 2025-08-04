@@ -1,0 +1,3393 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+17.26 - 6.25% pdfpaint bug1245391_reduced.pdf / pdfpaint bug857031.pdf + 11 more (Linux, OSX, Windows) regression on Tue April 8 2025
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/font_renderer.js b/src/core/font_renderer.js
+--- a/src/core/font_renderer.js
++++ b/src/core/font_renderer.js
+@@ -745,12 +745,9 @@ class Commands {
+ 
+   add(cmd, args) {
+     if (args) {
+-      const [a, b, c, d, e, f] = this.currentTransform;
++      const { currentTransform } = this;
+       for (let i = 0, ii = args.length; i < ii; i += 2) {
+-        const x = args[i];
+-        const y = args[i + 1];
+-        args[i] = a * x + c * y + e;
+-        args[i + 1] = b * x + d * y + f;
++        Util.applyTransform(args, currentTransform, i);
+       }
+       this.cmds.push(`${cmd}${args.join(" ")}`);
+     } else {
+
+diff --git a/src/core/operator_list.js b/src/core/operator_list.js
+--- a/src/core/operator_list.js
++++ b/src/core/operator_list.js
+@@ -524,11 +524,11 @@ addState(
+       switch (buffer[k++]) {
+         case DrawOPS.moveTo:
+         case DrawOPS.lineTo:
+-          Util.applyTransform(buffer.subarray(k), transform);
++          Util.applyTransform(buffer, transform, k);
+           k += 2;
+           break;
+         case DrawOPS.curveTo:
+-          Util.applyTransformToBezier(buffer.subarray(k), transform);
++          Util.applyTransformToBezier(buffer, transform, k);
+           k += 6;
+           break;
+       }
+
+diff --git a/src/shared/util.js b/src/shared/util.js
+--- a/src/shared/util.js
++++ b/src/shared/util.js
+@@ -730,15 +730,14 @@ class Util {
+   }
+ 
+   // For 2d affine transforms
+-  static applyTransform(p, m) {
+-    const p0 = p[0];
+-    const p1 = p[1];
+-    p[0] = p0 * m[0] + p1 * m[2] + m[4];
+-    p[1] = p0 * m[1] + p1 * m[3] + m[5];
++  static applyTransform(p, m, pos = 0) {
++    const p0 = p[pos];
++    const p1 = p[pos + 1];
++    p[pos] = p0 * m[0] + p1 * m[2] + m[4];
++    p[pos + 1] = p0 * m[1] + p1 * m[3] + m[5];
+   }
+ 
+-  // For 2d affine transforms
+-  static applyTransformToBezier(p, transform) {
++  static applyTransformToBezier(p, transform, pos = 0) {
+     const m0 = transform[0];
+     const m1 = transform[1];
+     const m2 = transform[2];
+@@ -746,10 +745,10 @@ class Util {
+     const m4 = transform[4];
+     const m5 = transform[5];
+     for (let i = 0; i < 6; i += 2) {
+-      const pI = p[i];
+-      const pI1 = p[i + 1];
+-      p[i] = pI * m0 + pI1 * m2 + m4;
+-      p[i + 1] = pI * m1 + pI1 * m3 + m5;
++      const pI = p[pos + i];
++      const pI1 = p[pos + i + 1];
++      p[pos + i] = pI * m0 + pI1 * m2 + m4;
++      p[pos + i + 1] = pI * m1 + pI1 * m3 + m5;
+     }
+   }
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.10
+- @babel/preset-env: ^7.26.9
+- @babel/runtime: ^7.27.0
+- @fluent/bundle: ^0.19.1
+- @fluent/dom: ^0.10.1
+- @metalsmith/layouts: ^3.0.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.69
+- @types/node: ^22.14.1
+- autoprefixer: ^10.4.21
+- babel-loader: ^10.0.0
+- caniuse-lite: ^1.0.30001713
+- core-js: ^3.41.0
+- eslint: ^9.24.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.11.0
+- eslint-plugin-prettier: ^5.2.6
+- eslint-plugin-unicorn: ^58.0.0
+- globals: ^16.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.6.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.3
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.5.3
+- puppeteer: ^24.6.1
+- stylelint: ^16.18.0
+- stylelint-prettier: ^5.0.3
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.14
+- tsc-alias: ^1.8.15
+- ttest: ^4.0.0
+- typescript: ^5.8.3
+- vinyl: ^3.0.0
+- webpack: ^5.99.5
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20.16.0
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/calculate_md5.js`: calculateMD5
+- `../../src/core/calculate_sha256.js`: calculateSHA256
+- `../../src/core/calculate_sha_other.js`: calculateSHA384, calculateSHA512
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/colorspace_utils.js`: ColorSpaceUtils
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalColorSpaceCache, GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, isValidExplicitDest, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, DrawOPS, FeatureTest, FormatError, ImageKind, InvalidPDFException, MathClamp, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/font_renderer.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   bytesToString,
+19   FONT_IDENTITY_MATRIX,
+20   FormatError,
+21   unreachable,
+22   Util,
+23   warn,
+24 } from "../shared/util.js";
+25 import {
+26   isNumberArray,
+27   readInt16,
+28   readInt8,
+29   readUint16,
+30   readUint32,
+31 } from "./core_utils.js";
+32 import { CFFParser } from "./cff_parser.js";
+33 import { getGlyphsUnicode } from "./glyphlist.js";
+34 import { StandardEncoding } from "./encodings.js";
+35 import { Stream } from "./stream.js";
+36 
+37 // TODO: use DataView and its methods.
+38 
+39 function getFloat214(data, offset) {
+40   return readInt16(data, offset) / 16384;
+41 }
+42 
+43 function getSubroutineBias(subrs) {
+44   const numSubrs = subrs.length;
+45   let bias = 32768;
+46   if (numSubrs < 1240) {
+47     bias = 107;
+48   } else if (numSubrs < 33900) {
+49     bias = 1131;
+50   }
+51   return bias;
+52 }
+53 
+54 function parseCmap(data, start, end) {
+55   const offset =
+56     readUint16(data, start + 2) === 1
+57       ? readUint32(data, start + 8)
+58       : readUint32(data, start + 16);
+59   const format = readUint16(data, start + offset);
+60   let ranges, p, i;
+61   if (format === 4) {
+62     readUint16(data, start + offset + 2); // length
+63     const segCount = readUint16(data, start + offset + 6) >> 1;
+64     p = start + offset + 14;
+65     ranges = [];
+66     for (i = 0; i < segCount; i++, p += 2) {
+67       ranges[i] = { end: readUint16(data, p) };
+68     }
+69     p += 2;
+70     for (i = 0; i < segCount; i++, p += 2) {
+71       ranges[i].start = readUint16(data, p);
+72     }
+73     for (i = 0; i < segCount; i++, p += 2) {
+74       ranges[i].idDelta = readUint16(data, p);
+75     }
+76     for (i = 0; i < segCount; i++, p += 2) {
+77       let idOffset = readUint16(data, p);
+78       if (idOffset === 0) {
+79         continue;
+80       }
+81       ranges[i].ids = [];
+82       for (let j = 0, jj = ranges[i].end - ranges[i].start + 1; j < jj; j++) {
+83         ranges[i].ids[j] = readUint16(data, p + idOffset);
+84         idOffset += 2;
+85       }
+86     }
+87     return ranges;
+88   } else if (format === 12) {
+89     const groups = readUint32(data, start + offset + 12);
+90     p = start + offset + 16;
+91     ranges = [];
+92     for (i = 0; i < groups; i++) {
+93       start = readUint32(data, p);
+94       ranges.push({
+95         start,
+96         end: readUint32(data, p + 4),
+97         idDelta: readUint32(data, p + 8) - start,
+98       });
+99       p += 12;
+100     }
+101     return ranges;
+102   }
+103   throw new FormatError(`unsupported cmap: ${format}`);
+104 }
+105 
+106 function parseCff(data, start, end, seacAnalysisEnabled) {
+107   const properties = {};
+108   const parser = new CFFParser(
+109     new Stream(data, start, end - start),
+110     properties,
+111     seacAnalysisEnabled
+112   );
+113   const cff = parser.parse();
+114   return {
+115     glyphs: cff.charStrings.objects,
+116     subrs: cff.topDict.privateDict?.subrsIndex?.objects,
+117     gsubrs: cff.globalSubrIndex?.objects,
+118     isCFFCIDFont: cff.isCIDFont,
+119     fdSelect: cff.fdSelect,
+120     fdArray: cff.fdArray,
+121   };
+122 }
+123 
+124 function parseGlyfTable(glyf, loca, isGlyphLocationsLong) {
+125   let itemSize, itemDecode;
+126   if (isGlyphLocationsLong) {
+127     itemSize = 4;
+128     itemDecode = readUint32;
+129   } else {
+130     itemSize = 2;
+131     itemDecode = (data, offset) => 2 * readUint16(data, offset);
+132   }
+133   const glyphs = [];
+134   let startOffset = itemDecode(loca, 0);
+135   for (let j = itemSize; j < loca.length; j += itemSize) {
+136     const endOffset = itemDecode(loca, j);
+137     glyphs.push(glyf.subarray(startOffset, endOffset));
+138     startOffset = endOffset;
+139   }
+140   return glyphs;
+141 }
+142 
+143 function lookupCmap(ranges, unicode) {
+144   const code = unicode.codePointAt(0);
+145   let gid = 0,
+146     l = 0,
+147     r = ranges.length - 1;
+148   while (l < r) {
+149     const c = (l + r + 1) >> 1;
+150     if (code < ranges[c].start) {
+151       r = c - 1;
+152     } else {
+153       l = c;
+154     }
+155   }
+156   if (ranges[l].start <= code && code <= ranges[l].end) {
+157     gid =
+158       (ranges[l].idDelta +
+159         (ranges[l].ids ? ranges[l].ids[code - ranges[l].start] : code)) &
+160       0xffff;
+161   }
+162   return {
+163     charCode: code,
+164     glyphId: gid,
+165   };
+166 }
+167 
+168 function compileGlyf(code, cmds, font) {
+169   function moveTo(x, y) {
+170     if (firstPoint) {
+171       // Close the current subpath in adding a straight line to the first point.
+172       cmds.add("L", firstPoint);
+173     }
+174     firstPoint = [x, y];
+175     cmds.add("M", [x, y]);
+176   }
+177   function lineTo(x, y) {
+178     cmds.add("L", [x, y]);
+179   }
+180   function quadraticCurveTo(xa, ya, x, y) {
+181     cmds.add("Q", [xa, ya, x, y]);
+182   }
+183 
+184   let i = 0;
+185   const numberOfContours = readInt16(code, i);
+186   let flags;
+187   let firstPoint = null;
+188   let x = 0,
+189     y = 0;
+190   i += 10;
+191   if (numberOfContours < 0) {
+192     // composite glyph
+193     do {
+194       flags = readUint16(code, i);
+195       const glyphIndex = readUint16(code, i + 2);
+196       i += 4;
+197       let arg1, arg2;
+198       if (flags & 0x01) {
+199         if (flags & 0x02) {
+200           arg1 = readInt16(code, i);
+201           arg2 = readInt16(code, i + 2);
+202         } else {
+203           arg1 = readUint16(code, i);
+204           arg2 = readUint16(code, i + 2);
+205         }
+206         i += 4;
+207       } else if (flags & 0x02) {
+208         arg1 = readInt8(code, i++);
+209         arg2 = readInt8(code, i++);
+210       } else {
+211         arg1 = code[i++];
+212         arg2 = code[i++];
+213       }
+214       if (flags & 0x02) {
+215         x = arg1;
+216         y = arg2;
+217       } else {
+218         x = 0;
+219         y = 0;
+220       }
+221       let scaleX = 1,
+222         scaleY = 1,
+223         scale01 = 0,
+224         scale10 = 0;
+225       if (flags & 0x08) {
+226         scaleX = scaleY = getFloat214(code, i);
+227         i += 2;
+228       } else if (flags & 0x40) {
+229         scaleX = getFloat214(code, i);
+230         scaleY = getFloat214(code, i + 2);
+231         i += 4;
+232       } else if (flags & 0x80) {
+233         scaleX = getFloat214(code, i);
+234         scale01 = getFloat214(code, i + 2);
+235         scale10 = getFloat214(code, i + 4);
+236         scaleY = getFloat214(code, i + 6);
+237         i += 8;
+238       }
+239       const subglyph = font.glyphs[glyphIndex];
+240       if (subglyph) {
+241         // TODO: the transform should be applied only if there is a scale:
+242         // https://github.com/freetype/freetype/blob/edd4fedc5427cf1cf1f4b045e53ff91eb282e9d4/src/truetype/ttgload.c#L1205
+243         cmds.save();
+244         cmds.transform([scaleX, scale01, scale10, scaleY, x, y]);
+245 
+246         if (!(flags & 0x02)) {
+247           // TODO: we must use arg1 and arg2 to make something similar to:
+248           // https://github.com/freetype/freetype/blob/edd4fedc5427cf1cf1f4b045e53ff91eb282e9d4/src/truetype/ttgload.c#L1209
+249         }
+250         compileGlyf(subglyph, cmds, font);
+251         cmds.restore();
+252       }
+253     } while (flags & 0x20);
+254   } else {
+255     // simple glyph
+256     const endPtsOfContours = [];
+257     let j, jj;
+258     for (j = 0; j < numberOfContours; j++) {
+259       endPtsOfContours.push(readUint16(code, i));
+260       i += 2;
+261     }
+262     const instructionLength = readUint16(code, i);
+263     i += 2 + instructionLength; // skipping the instructions
+264     const numberOfPoints = endPtsOfContours.at(-1) + 1;
+265     const points = [];
+266     while (points.length < numberOfPoints) {
+267       flags = code[i++];
+268       let repeat = 1;
+269       if (flags & 0x08) {
+270         repeat += code[i++];
+271       }
+272       while (repeat-- > 0) {
+273         points.push({ flags });
+274       }
+275     }
+276     for (j = 0; j < numberOfPoints; j++) {
+277       switch (points[j].flags & 0x12) {
+278         case 0x00:
+279           x += readInt16(code, i);
+280           i += 2;
+281           break;
+282         case 0x02:
+283           x -= code[i++];
+284           break;
+285         case 0x12:
+286           x += code[i++];
+287           break;
+288       }
+289       points[j].x = x;
+290     }
+291     for (j = 0; j < numberOfPoints; j++) {
+292       switch (points[j].flags & 0x24) {
+293         case 0x00:
+294           y += readInt16(code, i);
+295           i += 2;
+296           break;
+297         case 0x04:
+298           y -= code[i++];
+299           break;
+300         case 0x24:
+301           y += code[i++];
+302           break;
+303       }
+304       points[j].y = y;
+305     }
+306 
+307     let startPoint = 0;
+308     for (i = 0; i < numberOfContours; i++) {
+309       const endPoint = endPtsOfContours[i];
+310       // contours might have implicit points, which is located in the middle
+311       // between two neighboring off-curve points
+312       const contour = points.slice(startPoint, endPoint + 1);
+313       if (contour[0].flags & 1) {
+314         contour.push(contour[0]); // using start point at the contour end
+315       } else if (contour.at(-1).flags & 1) {
+316         // first is off-curve point, trying to use one from the end
+317         contour.unshift(contour.at(-1));
+318       } else {
+319         // start and end are off-curve points, creating implicit one
+320         const p = {
+321           flags: 1,
+322           x: (contour[0].x + contour.at(-1).x) / 2,
+323           y: (contour[0].y + contour.at(-1).y) / 2,
+324         };
+325         contour.unshift(p);
+326         contour.push(p);
+327       }
+328       moveTo(contour[0].x, contour[0].y);
+329       for (j = 1, jj = contour.length; j < jj; j++) {
+330         if (contour[j].flags & 1) {
+331           lineTo(contour[j].x, contour[j].y);
+332         } else if (contour[j + 1].flags & 1) {
+333           quadraticCurveTo(
+334             contour[j].x,
+335             contour[j].y,
+336             contour[j + 1].x,
+337             contour[j + 1].y
+338           );
+339           j++;
+340         } else {
+341           quadraticCurveTo(
+342             contour[j].x,
+343             contour[j].y,
+344             (contour[j].x + contour[j + 1].x) / 2,
+345             (contour[j].y + contour[j + 1].y) / 2
+346           );
+347         }
+348       }
+349       startPoint = endPoint + 1;
+350     }
+351   }
+352 }
+353 
+354 function compileCharString(charStringCode, cmds, font, glyphId) {
+355   function moveTo(x, y) {
+356     if (firstPoint) {
+357       // Close the current subpath in adding a straight line to the first point.
+358       cmds.add("L", firstPoint);
+359     }
+360     firstPoint = [x, y];
+361     cmds.add("M", [x, y]);
+362   }
+363   function lineTo(x, y) {
+364     cmds.add("L", [x, y]);
+365   }
+366   function bezierCurveTo(x1, y1, x2, y2, x, y) {
+367     cmds.add("C", [x1, y1, x2, y2, x, y]);
+368   }
+369 
+370   const stack = [];
+371   let x = 0,
+372     y = 0;
+373   let stems = 0;
+374   let firstPoint = null;
+375 
+376   function parse(code) {
+377     let i = 0;
+378     while (i < code.length) {
+379       let stackClean = false;
+380       let v = code[i++];
+381       let xa, xb, ya, yb, y1, y2, y3, n, subrCode;
+382       switch (v) {
+383         case 1: // hstem
+384           stems += stack.length >> 1;
+385           stackClean = true;
+386           break;
+387         case 3: // vstem
+388           stems += stack.length >> 1;
+389           stackClean = true;
+390           break;
+391         case 4: // vmoveto
+392           y += stack.pop();
+393           moveTo(x, y);
+394           stackClean = true;
+395           break;
+396         case 5: // rlineto
+397           while (stack.length > 0) {
+398             x += stack.shift();
+399             y += stack.shift();
+400             lineTo(x, y);
+401           }
+402           break;
+403         case 6: // hlineto
+404           while (stack.length > 0) {
+405             x += stack.shift();
+406             lineTo(x, y);
+407             if (stack.length === 0) {
+408               break;
+409             }
+410             y += stack.shift();
+411             lineTo(x, y);
+412           }
+413           break;
+414         case 7: // vlineto
+415           while (stack.length > 0) {
+416             y += stack.shift();
+417             lineTo(x, y);
+418             if (stack.length === 0) {
+419               break;
+420             }
+421             x += stack.shift();
+422             lineTo(x, y);
+423           }
+424           break;
+425         case 8: // rrcurveto
+426           while (stack.length > 0) {
+427             xa = x + stack.shift();
+428             ya = y + stack.shift();
+429             xb = xa + stack.shift();
+430             yb = ya + stack.shift();
+431             x = xb + stack.shift();
+432             y = yb + stack.shift();
+433             bezierCurveTo(xa, ya, xb, yb, x, y);
+434           }
+435           break;
+436         case 10: // callsubr
+437           n = stack.pop();
+438           subrCode = null;
+439           if (font.isCFFCIDFont) {
+440             const fdIndex = font.fdSelect.getFDIndex(glyphId);
+441             if (fdIndex >= 0 && fdIndex < font.fdArray.length) {
+442               const fontDict = font.fdArray[fdIndex];
+443               let subrs;
+444               if (fontDict.privateDict?.subrsIndex) {
+445                 subrs = fontDict.privateDict.subrsIndex.objects;
+446               }
+447               if (subrs) {
+448                 // Add subroutine bias.
+449                 n += getSubroutineBias(subrs);
+450                 subrCode = subrs[n];
+451               }
+452             } else {
+453               warn("Invalid fd index for glyph index.");
+454             }
+455           } else {
+456             subrCode = font.subrs[n + font.subrsBias];
+457           }
+458           if (subrCode) {
+459             parse(subrCode);
+460           }
+461           break;
+462         case 11: // return
+463           return;
+464         case 12:
+465           v = code[i++];
+466           switch (v) {
+467             case 34: // flex
+468               xa = x + stack.shift();
+469               xb = xa + stack.shift();
+470               y1 = y + stack.shift();
+471               x = xb + stack.shift();
+472               bezierCurveTo(xa, y, xb, y1, x, y1);
+473               xa = x + stack.shift();
+474               xb = xa + stack.shift();
+475               x = xb + stack.shift();
+476               bezierCurveTo(xa, y1, xb, y, x, y);
+477               break;
+478             case 35: // flex
+479               xa = x + stack.shift();
+480               ya = y + stack.shift();
+481               xb = xa + stack.shift();
+482               yb = ya + stack.shift();
+483               x = xb + stack.shift();
+484               y = yb + stack.shift();
+485               bezierCurveTo(xa, ya, xb, yb, x, y);
+486               xa = x + stack.shift();
+487               ya = y + stack.shift();
+488               xb = xa + stack.shift();
+489               yb = ya + stack.shift();
+490               x = xb + stack.shift();
+491               y = yb + stack.shift();
+492               bezierCurveTo(xa, ya, xb, yb, x, y);
+493               stack.pop(); // fd
+494               break;
+495             case 36: // hflex1
+496               xa = x + stack.shift();
+497               y1 = y + stack.shift();
+498               xb = xa + stack.shift();
+499               y2 = y1 + stack.shift();
+500               x = xb + stack.shift();
+501               bezierCurveTo(xa, y1, xb, y2, x, y2);
+502               xa = x + stack.shift();
+503               xb = xa + stack.shift();
+504               y3 = y2 + stack.shift();
+505               x = xb + stack.shift();
+506               bezierCurveTo(xa, y2, xb, y3, x, y);
+507               break;
+508             case 37: // flex1
+509               const x0 = x,
+510                 y0 = y;
+511               xa = x + stack.shift();
+512               ya = y + stack.shift();
+513               xb = xa + stack.shift();
+514               yb = ya + stack.shift();
+515               x = xb + stack.shift();
+516               y = yb + stack.shift();
+517               bezierCurveTo(xa, ya, xb, yb, x, y);
+518               xa = x + stack.shift();
+519               ya = y + stack.shift();
+520               xb = xa + stack.shift();
+521               yb = ya + stack.shift();
+522               x = xb;
+523               y = yb;
+524               if (Math.abs(x - x0) > Math.abs(y - y0)) {
+525                 x += stack.shift();
+526               } else {
+527                 y += stack.shift();
+528               }
+529               bezierCurveTo(xa, ya, xb, yb, x, y);
+530               break;
+531             default:
+532               throw new FormatError(`unknown operator: 12 ${v}`);
+533           }
+534           break;
+535         case 14: // endchar
+536           if (stack.length >= 4) {
+537             const achar = stack.pop();
+538             const bchar = stack.pop();
+539             y = stack.pop();
+540             x = stack.pop();
+541             cmds.save();
+542             cmds.translate(x, y);
+543             let cmap = lookupCmap(
+544               font.cmap,
+545               String.fromCharCode(font.glyphNameMap[StandardEncoding[achar]])
+546             );
+547             compileCharString(
+548               font.glyphs[cmap.glyphId],
+549               cmds,
+550               font,
+551               cmap.glyphId
+552             );
+553             cmds.restore();
+554 
+555             cmap = lookupCmap(
+556               font.cmap,
+557               String.fromCharCode(font.glyphNameMap[StandardEncoding[bchar]])
+558             );
+559             compileCharString(
+560               font.glyphs[cmap.glyphId],
+561               cmds,
+562               font,
+563               cmap.glyphId
+564             );
+565           }
+566           return;
+567         case 18: // hstemhm
+568           stems += stack.length >> 1;
+569           stackClean = true;
+570           break;
+571         case 19: // hintmask
+572           stems += stack.length >> 1;
+573           i += (stems + 7) >> 3;
+574           stackClean = true;
+575           break;
+576         case 20: // cntrmask
+577           stems += stack.length >> 1;
+578           i += (stems + 7) >> 3;
+579           stackClean = true;
+580           break;
+581         case 21: // rmoveto
+582           y += stack.pop();
+583           x += stack.pop();
+584           moveTo(x, y);
+585           stackClean = true;
+586           break;
+587         case 22: // hmoveto
+588           x += stack.pop();
+589           moveTo(x, y);
+590           stackClean = true;
+591           break;
+592         case 23: // vstemhm
+593           stems += stack.length >> 1;
+594           stackClean = true;
+595           break;
+596         case 24: // rcurveline
+597           while (stack.length > 2) {
+598             xa = x + stack.shift();
+599             ya = y + stack.shift();
+600             xb = xa + stack.shift();
+601             yb = ya + stack.shift();
+602             x = xb + stack.shift();
+603             y = yb + stack.shift();
+604             bezierCurveTo(xa, ya, xb, yb, x, y);
+605           }
+606           x += stack.shift();
+607           y += stack.shift();
+608           lineTo(x, y);
+609           break;
+610         case 25: // rlinecurve
+611           while (stack.length > 6) {
+612             x += stack.shift();
+613             y += stack.shift();
+614             lineTo(x, y);
+615           }
+616           xa = x + stack.shift();
+617           ya = y + stack.shift();
+618           xb = xa + stack.shift();
+619           yb = ya + stack.shift();
+620           x = xb + stack.shift();
+621           y = yb + stack.shift();
+622           bezierCurveTo(xa, ya, xb, yb, x, y);
+623           break;
+624         case 26: // vvcurveto
+625           if (stack.length % 2) {
+626             x += stack.shift();
+627           }
+628           while (stack.length > 0) {
+629             xa = x;
+630             ya = y + stack.shift();
+631             xb = xa + stack.shift();
+632             yb = ya + stack.shift();
+633             x = xb;
+634             y = yb + stack.shift();
+635             bezierCurveTo(xa, ya, xb, yb, x, y);
+636           }
+637           break;
+638         case 27: // hhcurveto
+639           if (stack.length % 2) {
+640             y += stack.shift();
+641           }
+642           while (stack.length > 0) {
+643             xa = x + stack.shift();
+644             ya = y;
+645             xb = xa + stack.shift();
+646             yb = ya + stack.shift();
+647             x = xb + stack.shift();
+648             y = yb;
+649             bezierCurveTo(xa, ya, xb, yb, x, y);
+650           }
+651           break;
+652         case 28:
+653           stack.push(readInt16(code, i));
+654           i += 2;
+655           break;
+656         case 29: // callgsubr
+657           n = stack.pop() + font.gsubrsBias;
+658           subrCode = font.gsubrs[n];
+659           if (subrCode) {
+660             parse(subrCode);
+661           }
+662           break;
+663         case 30: // vhcurveto
+664           while (stack.length > 0) {
+665             xa = x;
+666             ya = y + stack.shift();
+667             xb = xa + stack.shift();
+668             yb = ya + stack.shift();
+669             x = xb + stack.shift();
+670             y = yb + (stack.length === 1 ? stack.shift() : 0);
+671             bezierCurveTo(xa, ya, xb, yb, x, y);
+672             if (stack.length === 0) {
+673               break;
+674             }
+675 
+676             xa = x + stack.shift();
+677             ya = y;
+678             xb = xa + stack.shift();
+679             yb = ya + stack.shift();
+680             y = yb + stack.shift();
+681             x = xb + (stack.length === 1 ? stack.shift() : 0);
+682             bezierCurveTo(xa, ya, xb, yb, x, y);
+683           }
+684           break;
+685         case 31: // hvcurveto
+686           while (stack.length > 0) {
+687             xa = x + stack.shift();
+688             ya = y;
+689             xb = xa + stack.shift();
+690             yb = ya + stack.shift();
+691             y = yb + stack.shift();
+692             x = xb + (stack.length === 1 ? stack.shift() : 0);
+693             bezierCurveTo(xa, ya, xb, yb, x, y);
+694             if (stack.length === 0) {
+695               break;
+696             }
+697 
+698             xa = x;
+699             ya = y + stack.shift();
+700             xb = xa + stack.shift();
+701             yb = ya + stack.shift();
+702             x = xb + stack.shift();
+703             y = yb + (stack.length === 1 ? stack.shift() : 0);
+704             bezierCurveTo(xa, ya, xb, yb, x, y);
+705           }
+706           break;
+707         default:
+708           if (v < 32) {
+709             throw new FormatError(`unknown operator: ${v}`);
+710           }
+711           if (v < 247) {
+712             stack.push(v - 139);
+713           } else if (v < 251) {
+714             stack.push((v - 247) * 256 + code[i++] + 108);
+715           } else if (v < 255) {
+716             stack.push(-(v - 251) * 256 - code[i++] - 108);
+717           } else {
+718             stack.push(
+719               ((code[i] << 24) |
+720                 (code[i + 1] << 16) |
+721                 (code[i + 2] << 8) |
+722                 code[i + 3]) /
+723                 65536
+724             );
+725             i += 4;
+726           }
+727           break;
+728       }
+729       if (stackClean) {
+730         stack.length = 0;
+731       }
+732     }
+733   }
+734   parse(charStringCode);
+735 }
+736 
+737 const NOOP = "";
+738 
+739 class Commands {
+740   cmds = [];
+741 
+742   transformStack = [];
+743 
+744   currentTransform = [1, 0, 0, 1, 0, 0];
+745 
+746   add(cmd, args) {
+747     if (args) {
+748       const [a, b, c, d, e, f] = this.currentTransform;
+749       for (let i = 0, ii = args.length; i < ii; i += 2) {
+750         const x = args[i];
+751         const y = args[i + 1];
+752         args[i] = a * x + c * y + e;
+753         args[i + 1] = b * x + d * y + f;
+754       }
+755       this.cmds.push(`${cmd}${args.join(" ")}`);
+756     } else {
+757       this.cmds.push(cmd);
+758     }
+759   }
+760 
+761   transform(transf) {
+762     this.currentTransform = Util.transform(this.currentTransform, transf);
+763   }
+764 
+765   translate(x, y) {
+766     this.transform([1, 0, 0, 1, x, y]);
+767   }
+768 
+769   save() {
+770     this.transformStack.push(this.currentTransform.slice());
+771   }
+772 
+773   restore() {
+774     this.currentTransform = this.transformStack.pop() || [1, 0, 0, 1, 0, 0];
+775   }
+776 
+777   getSVG() {
+778     return this.cmds.join("");
+779   }
+780 }
+781 
+782 class CompiledFont {
+783   constructor(fontMatrix) {
+784     if (
+785       (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) &&
+786       this.constructor === CompiledFont
+787     ) {
+788       unreachable("Cannot initialize CompiledFont.");
+789     }
+790     this.fontMatrix = fontMatrix;
+791 
+792     this.compiledGlyphs = Object.create(null);
+793     this.compiledCharCodeToGlyphId = Object.create(null);
+794   }
+795 
+796   getPathJs(unicode) {
+797     const { charCode, glyphId } = lookupCmap(this.cmap, unicode);
+798     let fn = this.compiledGlyphs[glyphId],
+799       compileEx;
+800     if (fn === undefined) {
+801       try {
+802         fn = this.compileGlyph(this.glyphs[glyphId], glyphId);
+803       } catch (ex) {
+804         fn = NOOP; // Avoid attempting to re-compile a corrupt glyph.
+805 
+806         compileEx = ex;
+807       }
+808       this.compiledGlyphs[glyphId] = fn;
+809     }
+810     this.compiledCharCodeToGlyphId[charCode] ??= glyphId;
+811 
+812     if (compileEx) {
+813       throw compileEx;
+814     }
+815     return fn;
+816   }
+817 
+818   compileGlyph(code, glyphId) {
+819     if (!code?.length || code[0] === 14) {
+820       return NOOP;
+821     }
+822 
+823     let fontMatrix = this.fontMatrix;
+824     if (this.isCFFCIDFont) {
+825       // Top DICT's FontMatrix can be ignored because CFFCompiler always
+826       // removes it and copies to FDArray DICTs.
+827       const fdIndex = this.fdSelect.getFDIndex(glyphId);
+828       if (fdIndex >= 0 && fdIndex < this.fdArray.length) {
+829         const fontDict = this.fdArray[fdIndex];
+830         fontMatrix = fontDict.getByName("FontMatrix") || FONT_IDENTITY_MATRIX;
+831       } else {
+832         warn("Invalid fd index for glyph index.");
+833       }
+834     }
+835     assert(isNumberArray(fontMatrix, 6), "Expected a valid fontMatrix.");
+836 
+837     const cmds = new Commands();
+838     cmds.transform(fontMatrix.slice());
+839     this.compileGlyphImpl(code, cmds, glyphId);
+840     cmds.add("Z");
+841 
+842     return cmds.getSVG();
+843   }
+844 
+845   compileGlyphImpl() {
+846     unreachable("Children classes should implement this.");
+847   }
+848 
+849   hasBuiltPath(unicode) {
+850     const { charCode, glyphId } = lookupCmap(this.cmap, unicode);
+851     return (
+852       this.compiledGlyphs[glyphId] !== undefined &&
+853       this.compiledCharCodeToGlyphId[charCode] !== undefined
+854     );
+855   }
+856 }
+857 
+858 class TrueTypeCompiled extends CompiledFont {
+859   constructor(glyphs, cmap, fontMatrix) {
+860     super(fontMatrix || [0.000488, 0, 0, 0.000488, 0, 0]);
+861 
+862     this.glyphs = glyphs;
+863     this.cmap = cmap;
+864   }
+865 
+866   compileGlyphImpl(code, cmds) {
+867     compileGlyf(code, cmds, this);
+868   }
+869 }
+870 
+871 class Type2Compiled extends CompiledFont {
+872   constructor(cffInfo, cmap, fontMatrix) {
+873     super(fontMatrix || [0.001, 0, 0, 0.001, 0, 0]);
+874 
+875     this.glyphs = cffInfo.glyphs;
+876     this.gsubrs = cffInfo.gsubrs || [];
+877     this.subrs = cffInfo.subrs || [];
+878     this.cmap = cmap;
+879     this.glyphNameMap = getGlyphsUnicode();
+880 
+881     this.gsubrsBias = getSubroutineBias(this.gsubrs);
+882     this.subrsBias = getSubroutineBias(this.subrs);
+883 
+884     this.isCFFCIDFont = cffInfo.isCFFCIDFont;
+885     this.fdSelect = cffInfo.fdSelect;
+886     this.fdArray = cffInfo.fdArray;
+887   }
+888 
+889   compileGlyphImpl(code, cmds, glyphId) {
+890     compileCharString(code, cmds, this, glyphId);
+891   }
+892 }
+893 
+894 class FontRendererFactory {
+895   static create(font, seacAnalysisEnabled) {
+896     const data = new Uint8Array(font.data);
+897     let cmap, glyf, loca, cff, indexToLocFormat, unitsPerEm;
+898     const numTables = readUint16(data, 4);
+899     for (let i = 0, p = 12; i < numTables; i++, p += 16) {
+900       const tag = bytesToString(data.subarray(p, p + 4));
+901       const offset = readUint32(data, p + 8);
+902       const length = readUint32(data, p + 12);
+903       switch (tag) {
+904         case "cmap":
+905           cmap = parseCmap(data, offset, offset + length);
+906           break;
+907         case "glyf":
+908           glyf = data.subarray(offset, offset + length);
+909           break;
+910         case "loca":
+911           loca = data.subarray(offset, offset + length);
+912           break;
+913         case "head":
+914           unitsPerEm = readUint16(data, offset + 18);
+915           indexToLocFormat = readUint16(data, offset + 50);
+916           break;
+917         case "CFF ":
+918           cff = parseCff(data, offset, offset + length, seacAnalysisEnabled);
+919           break;
+920       }
+921     }
+922 
+923     if (glyf) {
+924       const fontMatrix = !unitsPerEm
+925         ? font.fontMatrix
+926         : [1 / unitsPerEm, 0, 0, 1 / unitsPerEm, 0, 0];
+927       return new TrueTypeCompiled(
+928         parseGlyfTable(glyf, loca, indexToLocFormat),
+929         cmap,
+930         fontMatrix
+931       );
+932     }
+933     return new Type2Compiled(cff, cmap, font.fontMatrix);
+934   }
+935 }
+936 
+937 export { FontRendererFactory };
+File:
+src/core/operator_list.js
+1 /* Copyright 2017 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   DrawOPS,
+18   ImageKind,
+19   OPS,
+20   RenderingIntentFlag,
+21   Util,
+22   warn,
+23 } from "../shared/util.js";
+24 
+25 function addState(parentState, pattern, checkFn, iterateFn, processFn) {
+26   let state = parentState;
+27   for (let i = 0, ii = pattern.length - 1; i < ii; i++) {
+28     const item = pattern[i];
+29     state = state[item] ||= [];
+30   }
+31   state[pattern.at(-1)] = {
+32     checkFn,
+33     iterateFn,
+34     processFn,
+35   };
+36 }
+37 
+38 const InitialState = [];
+39 
+40 // This replaces (save, transform, paintInlineImageXObject, restore)+
+41 // sequences with one |paintInlineImageXObjectGroup| operation.
+42 addState(
+43   InitialState,
+44   [OPS.save, OPS.transform, OPS.paintInlineImageXObject, OPS.restore],
+45   null,
+46   function iterateInlineImageGroup(context, i) {
+47     const fnArray = context.fnArray;
+48     const iFirstSave = context.iCurr - 3;
+49     const pos = (i - iFirstSave) % 4;
+50     switch (pos) {
+51       case 0:
+52         return fnArray[i] === OPS.save;
+53       case 1:
+54         return fnArray[i] === OPS.transform;
+55       case 2:
+56         return fnArray[i] === OPS.paintInlineImageXObject;
+57       case 3:
+58         return fnArray[i] === OPS.restore;
+59     }
+60     throw new Error(`iterateInlineImageGroup - invalid pos: ${pos}`);
+61   },
+62   function foundInlineImageGroup(context, i) {
+63     const MIN_IMAGES_IN_INLINE_IMAGES_BLOCK = 10;
+64     const MAX_IMAGES_IN_INLINE_IMAGES_BLOCK = 200;
+65     const MAX_WIDTH = 1000;
+66     const IMAGE_PADDING = 1;
+67 
+68     const fnArray = context.fnArray,
+69       argsArray = context.argsArray;
+70     const curr = context.iCurr;
+71     const iFirstSave = curr - 3;
+72     const iFirstTransform = curr - 2;
+73     const iFirstPIIXO = curr - 1;
+74 
+75     const count = Math.min(
+76       Math.floor((i - iFirstSave) / 4),
+77       MAX_IMAGES_IN_INLINE_IMAGES_BLOCK
+78     );
+79     if (count < MIN_IMAGES_IN_INLINE_IMAGES_BLOCK) {
+80       return i - ((i - iFirstSave) % 4);
+81     }
+82 
+83     // assuming that heights of those image is too small (~1 pixel)
+84     // packing as much as possible by lines
+85     let maxX = 0;
+86     const map = [];
+87     let maxLineHeight = 0;
+88     let currentX = IMAGE_PADDING,
+89       currentY = IMAGE_PADDING;
+90     for (let q = 0; q < count; q++) {
+91       const transform = argsArray[iFirstTransform + (q << 2)];
+92       const img = argsArray[iFirstPIIXO + (q << 2)][0];
+93       if (currentX + img.width > MAX_WIDTH) {
+94         // starting new line
+95         maxX = Math.max(maxX, currentX);
+96         currentY += maxLineHeight + 2 * IMAGE_PADDING;
+97         currentX = 0;
+98         maxLineHeight = 0;
+99       }
+100       map.push({
+101         transform,
+102         x: currentX,
+103         y: currentY,
+104         w: img.width,
+105         h: img.height,
+106       });
+107       currentX += img.width + 2 * IMAGE_PADDING;
+108       maxLineHeight = Math.max(maxLineHeight, img.height);
+109     }
+110     const imgWidth = Math.max(maxX, currentX) + IMAGE_PADDING;
+111     const imgHeight = currentY + maxLineHeight + IMAGE_PADDING;
+112     const imgData = new Uint8Array(imgWidth * imgHeight * 4);
+113     const imgRowSize = imgWidth << 2;
+114     for (let q = 0; q < count; q++) {
+115       const data = argsArray[iFirstPIIXO + (q << 2)][0].data;
+116       // Copy image by lines and extends pixels into padding.
+117       const rowSize = map[q].w << 2;
+118       let dataOffset = 0;
+119       let offset = (map[q].x + map[q].y * imgWidth) << 2;
+120       imgData.set(data.subarray(0, rowSize), offset - imgRowSize);
+121       for (let k = 0, kk = map[q].h; k < kk; k++) {
+122         imgData.set(data.subarray(dataOffset, dataOffset + rowSize), offset);
+123         dataOffset += rowSize;
+124         offset += imgRowSize;
+125       }
+126       imgData.set(data.subarray(dataOffset - rowSize, dataOffset), offset);
+127       while (offset >= 0) {
+128         data[offset - 4] = data[offset];
+129         data[offset - 3] = data[offset + 1];
+130         data[offset - 2] = data[offset + 2];
+131         data[offset - 1] = data[offset + 3];
+132         data[offset + rowSize] = data[offset + rowSize - 4];
+133         data[offset + rowSize + 1] = data[offset + rowSize - 3];
+134         data[offset + rowSize + 2] = data[offset + rowSize - 2];
+135         data[offset + rowSize + 3] = data[offset + rowSize - 1];
+136         offset -= imgRowSize;
+137       }
+138     }
+139 
+140     const img = {
+141       width: imgWidth,
+142       height: imgHeight,
+143     };
+144     if (context.isOffscreenCanvasSupported) {
+145       const canvas = new OffscreenCanvas(imgWidth, imgHeight);
+146       const ctx = canvas.getContext("2d");
+147       ctx.putImageData(
+148         new ImageData(
+149           new Uint8ClampedArray(imgData.buffer),
+150           imgWidth,
+151           imgHeight
+152         ),
+153         0,
+154         0
+155       );
+156       img.bitmap = canvas.transferToImageBitmap();
+157       img.data = null;
+158     } else {
+159       img.kind = ImageKind.RGBA_32BPP;
+160       img.data = imgData;
+161     }
+162 
+163     // Replace queue items.
+164     fnArray.splice(iFirstSave, count * 4, OPS.paintInlineImageXObjectGroup);
+165     argsArray.splice(iFirstSave, count * 4, [img, map]);
+166 
+167     return iFirstSave + 1;
+168   }
+169 );
+170 
+171 // This replaces (save, transform, paintImageMaskXObject, restore)+
+172 // sequences with one |paintImageMaskXObjectGroup| or one
+173 // |paintImageMaskXObjectRepeat| operation.
+174 addState(
+175   InitialState,
+176   [OPS.save, OPS.transform, OPS.paintImageMaskXObject, OPS.restore],
+177   null,
+178   function iterateImageMaskGroup(context, i) {
+179     const fnArray = context.fnArray;
+180     const iFirstSave = context.iCurr - 3;
+181     const pos = (i - iFirstSave) % 4;
+182     switch (pos) {
+183       case 0:
+184         return fnArray[i] === OPS.save;
+185       case 1:
+186         return fnArray[i] === OPS.transform;
+187       case 2:
+188         return fnArray[i] === OPS.paintImageMaskXObject;
+189       case 3:
+190         return fnArray[i] === OPS.restore;
+191     }
+192     throw new Error(`iterateImageMaskGroup - invalid pos: ${pos}`);
+193   },
+194   function foundImageMaskGroup(context, i) {
+195     const MIN_IMAGES_IN_MASKS_BLOCK = 10;
+196     const MAX_IMAGES_IN_MASKS_BLOCK = 100;
+197     const MAX_SAME_IMAGES_IN_MASKS_BLOCK = 1000;
+198 
+199     const fnArray = context.fnArray,
+200       argsArray = context.argsArray;
+201     const curr = context.iCurr;
+202     const iFirstSave = curr - 3;
+203     const iFirstTransform = curr - 2;
+204     const iFirstPIMXO = curr - 1;
+205 
+206     // At this point, i is the index of the first op past the last valid
+207     // quartet.
+208     let count = Math.floor((i - iFirstSave) / 4);
+209     if (count < MIN_IMAGES_IN_MASKS_BLOCK) {
+210       return i - ((i - iFirstSave) % 4);
+211     }
+212 
+213     let isSameImage = false;
+214     let iTransform, transformArgs;
+215     const firstPIMXOArg0 = argsArray[iFirstPIMXO][0];
+216     const firstTransformArg0 = argsArray[iFirstTransform][0],
+217       firstTransformArg1 = argsArray[iFirstTransform][1],
+218       firstTransformArg2 = argsArray[iFirstTransform][2],
+219       firstTransformArg3 = argsArray[iFirstTransform][3];
+220 
+221     if (firstTransformArg1 === firstTransformArg2) {
+222       isSameImage = true;
+223       iTransform = iFirstTransform + 4;
+224       let iPIMXO = iFirstPIMXO + 4;
+225       for (let q = 1; q < count; q++, iTransform += 4, iPIMXO += 4) {
+226         transformArgs = argsArray[iTransform];
+227         if (
+228           argsArray[iPIMXO][0] !== firstPIMXOArg0 ||
+229           transformArgs[0] !== firstTransformArg0 ||
+230           transformArgs[1] !== firstTransformArg1 ||
+231           transformArgs[2] !== firstTransformArg2 ||
+232           transformArgs[3] !== firstTransformArg3
+233         ) {
+234           if (q < MIN_IMAGES_IN_MASKS_BLOCK) {
+235             isSameImage = false;
+236           } else {
+237             count = q;
+238           }
+239           break; // different image or transform
+240         }
+241       }
+242     }
+243 
+244     if (isSameImage) {
+245       count = Math.min(count, MAX_SAME_IMAGES_IN_MASKS_BLOCK);
+246       const positions = new Float32Array(count * 2);
+247       iTransform = iFirstTransform;
+248       for (let q = 0; q < count; q++, iTransform += 4) {
+249         transformArgs = argsArray[iTransform];
+250         positions[q << 1] = transformArgs[4];
+251         positions[(q << 1) + 1] = transformArgs[5];
+252       }
+253 
+254       // Replace queue items.
+255       fnArray.splice(iFirstSave, count * 4, OPS.paintImageMaskXObjectRepeat);
+256       argsArray.splice(iFirstSave, count * 4, [
+257         firstPIMXOArg0,
+258         firstTransformArg0,
+259         firstTransformArg1,
+260         firstTransformArg2,
+261         firstTransformArg3,
+262         positions,
+263       ]);
+264     } else {
+265       count = Math.min(count, MAX_IMAGES_IN_MASKS_BLOCK);
+266       const images = [];
+267       for (let q = 0; q < count; q++) {
+268         transformArgs = argsArray[iFirstTransform + (q << 2)];
+269         const maskParams = argsArray[iFirstPIMXO + (q << 2)][0];
+270         images.push({
+271           data: maskParams.data,
+272           width: maskParams.width,
+273           height: maskParams.height,
+274           interpolate: maskParams.interpolate,
+275           count: maskParams.count,
+276           transform: transformArgs,
+277         });
+278       }
+279 
+280       // Replace queue items.
+281       fnArray.splice(iFirstSave, count * 4, OPS.paintImageMaskXObjectGroup);
+282       argsArray.splice(iFirstSave, count * 4, [images]);
+283     }
+284 
+285     return iFirstSave + 1;
+286   }
+287 );
+288 
+289 // This replaces (save, transform, paintImageXObject, restore)+ sequences
+290 // with one paintImageXObjectRepeat operation, if the |transform| and
+291 // |paintImageXObjectRepeat| ops are appropriate.
+292 addState(
+293   InitialState,
+294   [OPS.save, OPS.transform, OPS.paintImageXObject, OPS.restore],
+295   function (context) {
+296     const argsArray = context.argsArray;
+297     const iFirstTransform = context.iCurr - 2;
+298     return (
+299       argsArray[iFirstTransform][1] === 0 && argsArray[iFirstTransform][2] === 0
+300     );
+301   },
+302   function iterateImageGroup(context, i) {
+303     const fnArray = context.fnArray,
+304       argsArray = context.argsArray;
+305     const iFirstSave = context.iCurr - 3;
+306     const pos = (i - iFirstSave) % 4;
+307     switch (pos) {
+308       case 0:
+309         return fnArray[i] === OPS.save;
+310       case 1:
+311         if (fnArray[i] !== OPS.transform) {
+312           return false;
+313         }
+314         const iFirstTransform = context.iCurr - 2;
+315         const firstTransformArg0 = argsArray[iFirstTransform][0];
+316         const firstTransformArg3 = argsArray[iFirstTransform][3];
+317         if (
+318           argsArray[i][0] !== firstTransformArg0 ||
+319           argsArray[i][1] !== 0 ||
+320           argsArray[i][2] !== 0 ||
+321           argsArray[i][3] !== firstTransformArg3
+322         ) {
+323           return false; // transforms don't match
+324         }
+325         return true;
+326       case 2:
+327         if (fnArray[i] !== OPS.paintImageXObject) {
+328           return false;
+329         }
+330         const iFirstPIXO = context.iCurr - 1;
+331         const firstPIXOArg0 = argsArray[iFirstPIXO][0];
+332         if (argsArray[i][0] !== firstPIXOArg0) {
+333           return false; // images don't match
+334         }
+335         return true;
+336       case 3:
+337         return fnArray[i] === OPS.restore;
+338     }
+339     throw new Error(`iterateImageGroup - invalid pos: ${pos}`);
+340   },
+341   function (context, i) {
+342     const MIN_IMAGES_IN_BLOCK = 3;
+343     const MAX_IMAGES_IN_BLOCK = 1000;
+344 
+345     const fnArray = context.fnArray,
+346       argsArray = context.argsArray;
+347     const curr = context.iCurr;
+348     const iFirstSave = curr - 3;
+349     const iFirstTransform = curr - 2;
+350     const iFirstPIXO = curr - 1;
+351     const firstPIXOArg0 = argsArray[iFirstPIXO][0];
+352     const firstTransformArg0 = argsArray[iFirstTransform][0];
+353     const firstTransformArg3 = argsArray[iFirstTransform][3];
+354 
+355     // At this point, i is the index of the first op past the last valid
+356     // quartet.
+357     const count = Math.min(
+358       Math.floor((i - iFirstSave) / 4),
+359       MAX_IMAGES_IN_BLOCK
+360     );
+361     if (count < MIN_IMAGES_IN_BLOCK) {
+362       return i - ((i - iFirstSave) % 4);
+363     }
+364 
+365     // Extract the (x,y) positions from all of the matching transforms.
+366     const positions = new Float32Array(count * 2);
+367     let iTransform = iFirstTransform;
+368     for (let q = 0; q < count; q++, iTransform += 4) {
+369       const transformArgs = argsArray[iTransform];
+370       positions[q << 1] = transformArgs[4];
+371       positions[(q << 1) + 1] = transformArgs[5];
+372     }
+373 
+374     // Replace queue items.
+375     const args = [
+376       firstPIXOArg0,
+377       firstTransformArg0,
+378       firstTransformArg3,
+379       positions,
+380     ];
+381     fnArray.splice(iFirstSave, count * 4, OPS.paintImageXObjectRepeat);
+382     argsArray.splice(iFirstSave, count * 4, args);
+383 
+384     return iFirstSave + 1;
+385   }
+386 );
+387 
+388 // This replaces (beginText, setFont, setTextMatrix, showText, endText)+
+389 // sequences with (beginText, setFont, (setTextMatrix, showText)+, endText)+
+390 // sequences, if the font for each one is the same.
+391 addState(
+392   InitialState,
+393   [OPS.beginText, OPS.setFont, OPS.setTextMatrix, OPS.showText, OPS.endText],
+394   null,
+395   function iterateShowTextGroup(context, i) {
+396     const fnArray = context.fnArray,
+397       argsArray = context.argsArray;
+398     const iFirstSave = context.iCurr - 4;
+399     const pos = (i - iFirstSave) % 5;
+400     switch (pos) {
+401       case 0:
+402         return fnArray[i] === OPS.beginText;
+403       case 1:
+404         return fnArray[i] === OPS.setFont;
+405       case 2:
+406         return fnArray[i] === OPS.setTextMatrix;
+407       case 3:
+408         if (fnArray[i] !== OPS.showText) {
+409           return false;
+410         }
+411         const iFirstSetFont = context.iCurr - 3;
+412         const firstSetFontArg0 = argsArray[iFirstSetFont][0];
+413         const firstSetFontArg1 = argsArray[iFirstSetFont][1];
+414         if (
+415           argsArray[i][0] !== firstSetFontArg0 ||
+416           argsArray[i][1] !== firstSetFontArg1
+417         ) {
+418           return false; // fonts don't match
+419         }
+420         return true;
+421       case 4:
+422         return fnArray[i] === OPS.endText;
+423     }
+424     throw new Error(`iterateShowTextGroup - invalid pos: ${pos}`);
+425   },
+426   function (context, i) {
+427     const MIN_CHARS_IN_BLOCK = 3;
+428     const MAX_CHARS_IN_BLOCK = 1000;
+429 
+430     const fnArray = context.fnArray,
+431       argsArray = context.argsArray;
+432     const curr = context.iCurr;
+433     const iFirstBeginText = curr - 4;
+434     const iFirstSetFont = curr - 3;
+435     const iFirstSetTextMatrix = curr - 2;
+436     const iFirstShowText = curr - 1;
+437     const iFirstEndText = curr;
+438     const firstSetFontArg0 = argsArray[iFirstSetFont][0];
+439     const firstSetFontArg1 = argsArray[iFirstSetFont][1];
+440 
+441     // At this point, i is the index of the first op past the last valid
+442     // quintet.
+443     let count = Math.min(
+444       Math.floor((i - iFirstBeginText) / 5),
+445       MAX_CHARS_IN_BLOCK
+446     );
+447     if (count < MIN_CHARS_IN_BLOCK) {
+448       return i - ((i - iFirstBeginText) % 5);
+449     }
+450 
+451     // If the preceding quintet is (<something>, setFont, setTextMatrix,
+452     // showText, endText), include that as well. (E.g. <something> might be
+453     // |dependency|.)
+454     let iFirst = iFirstBeginText;
+455     if (
+456       iFirstBeginText >= 4 &&
+457       fnArray[iFirstBeginText - 4] === fnArray[iFirstSetFont] &&
+458       fnArray[iFirstBeginText - 3] === fnArray[iFirstSetTextMatrix] &&
+459       fnArray[iFirstBeginText - 2] === fnArray[iFirstShowText] &&
+460       fnArray[iFirstBeginText - 1] === fnArray[iFirstEndText] &&
+461       argsArray[iFirstBeginText - 4][0] === firstSetFontArg0 &&
+462       argsArray[iFirstBeginText - 4][1] === firstSetFontArg1
+463     ) {
+464       count++;
+465       iFirst -= 5;
+466     }
+467 
+468     // Remove (endText, beginText, setFont) trios.
+469     let iEndText = iFirst + 4;
+470     for (let q = 1; q < count; q++) {
+471       fnArray.splice(iEndText, 3);
+472       argsArray.splice(iEndText, 3);
+473       iEndText += 2;
+474     }
+475 
+476     return iEndText + 1;
+477   }
+478 );
+479 
+480 // This replaces (save, transform, constructPath, restore)
+481 // sequences with |constructPath| operation.
+482 addState(
+483   InitialState,
+484   [OPS.save, OPS.transform, OPS.constructPath, OPS.restore],
+485   context => {
+486     const argsArray = context.argsArray;
+487     const iFirstConstructPath = context.iCurr - 1;
+488     const op = argsArray[iFirstConstructPath][0];
+489 
+490     // When stroking the transform has to be applied to the line width too.
+491     // So we can only optimize if the transform is an identity.
+492     if (
+493       op !== OPS.stroke &&
+494       op !== OPS.closeStroke &&
+495       op !== OPS.fillStroke &&
+496       op !== OPS.eoFillStroke &&
+497       op !== OPS.closeFillStroke &&
+498       op !== OPS.closeEOFillStroke
+499     ) {
+500       return true;
+501     }
+502     const iFirstTransform = context.iCurr - 2;
+503     const transform = argsArray[iFirstTransform];
+504     return (
+505       transform[0] === 1 &&
+506       transform[1] === 0 &&
+507       transform[2] === 0 &&
+508       transform[3] === 1
+509     );
+510   },
+511   () => false,
+512   (context, i) => {
+513     const { fnArray, argsArray } = context;
+514     const curr = context.iCurr;
+515     const iFirstSave = curr - 3;
+516     const iFirstTransform = curr - 2;
+517     const iFirstConstructPath = curr - 1;
+518     const args = argsArray[iFirstConstructPath];
+519     const transform = argsArray[iFirstTransform];
+520     const [, [buffer], minMax] = args;
+521 
+522     Util.scaleMinMax(transform, minMax);
+523     for (let k = 0, kk = buffer.length; k < kk; ) {
+524       switch (buffer[k++]) {
+525         case DrawOPS.moveTo:
+526         case DrawOPS.lineTo:
+527           Util.applyTransform(buffer.subarray(k), transform);
+528           k += 2;
+529           break;
+530         case DrawOPS.curveTo:
+531           Util.applyTransformToBezier(buffer.subarray(k), transform);
+532           k += 6;
+533           break;
+534       }
+535     }
+536     // Replace queue items.
+537     fnArray.splice(iFirstSave, 4, OPS.constructPath);
+538     argsArray.splice(iFirstSave, 4, args);
+539 
+540     return iFirstSave + 1;
+541   }
+542 );
+543 
+544 class NullOptimizer {
+545   constructor(queue) {
+546     this.queue = queue;
+547   }
+548 
+549   _optimize() {}
+550 
+551   push(fn, args) {
+552     this.queue.fnArray.push(fn);
+553     this.queue.argsArray.push(args);
+554     this._optimize();
+555   }
+556 
+557   flush() {}
+558 
+559   reset() {}
+560 }
+561 
+562 class QueueOptimizer extends NullOptimizer {
+563   constructor(queue) {
+564     super(queue);
+565     this.state = null;
+566     this.context = {
+567       iCurr: 0,
+568       fnArray: queue.fnArray,
+569       argsArray: queue.argsArray,
+570       isOffscreenCanvasSupported: OperatorList.isOffscreenCanvasSupported,
+571     };
+572     this.match = null;
+573     this.lastProcessed = 0;
+574   }
+575 
+576   _optimize() {
+577     // Process new fnArray item(s) chunk.
+578     const fnArray = this.queue.fnArray;
+579     let i = this.lastProcessed,
+580       ii = fnArray.length;
+581     let state = this.state;
+582     let match = this.match;
+583     if (!state && !match && i + 1 === ii && !InitialState[fnArray[i]]) {
+584       // Micro-optimization for the common case: last item is not
+585       // optimizable, just skipping it.
+586       this.lastProcessed = ii;
+587       return;
+588     }
+589 
+590     const context = this.context;
+591     while (i < ii) {
+592       if (match) {
+593         // Already find a block of potentially optimizable items, iterating...
+594         const iterate = (0, match.iterateFn)(context, i);
+595         if (iterate) {
+596           i++;
+597           continue;
+598         }
+599         // Found last items for the block, processing...
+600         i = (0, match.processFn)(context, i + 1);
+601         ii = fnArray.length;
+602         match = null;
+603         state = null;
+604         if (i >= ii) {
+605           break;
+606         }
+607       }
+608       // Find the potentially optimizable items.
+609       state = (state || InitialState)[fnArray[i]];
+610       if (!state || Array.isArray(state)) {
+611         i++;
+612         continue;
+613       }
+614       // Found a start of the block based on addState rules.
+615       context.iCurr = i;
+616       i++;
+617       if (state.checkFn && !(0, state.checkFn)(context)) {
+618         // Check failed, continue search...
+619         state = null;
+620         continue;
+621       }
+622       match = state;
+623       state = null;
+624     }
+625     this.state = state;
+626     this.match = match;
+627     this.lastProcessed = i;
+628   }
+629 
+630   flush() {
+631     while (this.match) {
+632       const length = this.queue.fnArray.length;
+633       this.lastProcessed = (0, this.match.processFn)(this.context, length);
+634       this.match = null;
+635       this.state = null;
+636       // Repeat optimization until all chunks are exhausted.
+637       this._optimize();
+638     }
+639   }
+640 
+641   reset() {
+642     this.state = null;
+643     this.match = null;
+644     this.lastProcessed = 0;
+645   }
+646 }
+647 
+648 class OperatorList {
+649   static CHUNK_SIZE = 1000;
+650 
+651   // Close to chunk size.
+652   static CHUNK_SIZE_ABOUT = this.CHUNK_SIZE - 5;
+653 
+654   static isOffscreenCanvasSupported = false;
+655 
+656   constructor(intent = 0, streamSink) {
+657     this._streamSink = streamSink;
+658     this.fnArray = [];
+659     this.argsArray = [];
+660     this.optimizer =
+661       streamSink && !(intent & RenderingIntentFlag.OPLIST)
+662         ? new QueueOptimizer(this)
+663         : new NullOptimizer(this);
+664     this.dependencies = new Set();
+665     this._totalLength = 0;
+666     this.weight = 0;
+667     this._resolved = streamSink ? null : Promise.resolve();
+668   }
+669 
+670   static setOptions({ isOffscreenCanvasSupported }) {
+671     this.isOffscreenCanvasSupported = isOffscreenCanvasSupported;
+672   }
+673 
+674   get length() {
+675     return this.argsArray.length;
+676   }
+677 
+678   get ready() {
+679     return this._resolved || this._streamSink.ready;
+680   }
+681 
+682   /**
+683    * @type {number} The total length of the entire operator list, since
+684    *                `this.length === 0` after flushing.
+685    */
+686   get totalLength() {
+687     return this._totalLength + this.length;
+688   }
+689 
+690   addOp(fn, args) {
+691     this.optimizer.push(fn, args);
+692     this.weight++;
+693     if (this._streamSink) {
+694       if (this.weight >= OperatorList.CHUNK_SIZE) {
+695         this.flush();
+696       } else if (
+697         this.weight >= OperatorList.CHUNK_SIZE_ABOUT &&
+698         (fn === OPS.restore || fn === OPS.endText)
+699       ) {
+700         // Heuristic to flush on boundary of restore or endText.
+701         this.flush();
+702       }
+703     }
+704   }
+705 
+706   addImageOps(fn, args, optionalContent, hasMask = false) {
+707     if (hasMask) {
+708       this.addOp(OPS.save);
+709       this.addOp(OPS.setGState, [[["SMask", false]]]);
+710     }
+711     if (optionalContent !== undefined) {
+712       this.addOp(OPS.beginMarkedContentProps, ["OC", optionalContent]);
+713     }
+714 
+715     this.addOp(fn, args);
+716 
+717     if (optionalContent !== undefined) {
+718       this.addOp(OPS.endMarkedContent, []);
+719     }
+720     if (hasMask) {
+721       this.addOp(OPS.restore);
+722     }
+723   }
+724 
+725   addDependency(dependency) {
+726     if (this.dependencies.has(dependency)) {
+727       return;
+728     }
+729     this.dependencies.add(dependency);
+730     this.addOp(OPS.dependency, [dependency]);
+731   }
+732 
+733   addDependencies(dependencies) {
+734     for (const dependency of dependencies) {
+735       this.addDependency(dependency);
+736     }
+737   }
+738 
+739   addOpList(opList) {
+740     if (!(opList instanceof OperatorList)) {
+741       warn('addOpList - ignoring invalid "opList" parameter.');
+742       return;
+743     }
+744     for (const dependency of opList.dependencies) {
+745       this.dependencies.add(dependency);
+746     }
+747     for (let i = 0, ii = opList.length; i < ii; i++) {
+748       this.addOp(opList.fnArray[i], opList.argsArray[i]);
+749     }
+750   }
+751 
+752   getIR() {
+753     return {
+754       fnArray: this.fnArray,
+755       argsArray: this.argsArray,
+756       length: this.length,
+757     };
+758   }
+759 
+760   get _transfers() {
+761     const transfers = [];
+762     const { fnArray, argsArray, length } = this;
+763     for (let i = 0; i < length; i++) {
+764       switch (fnArray[i]) {
+765         case OPS.paintInlineImageXObject:
+766         case OPS.paintInlineImageXObjectGroup:
+767         case OPS.paintImageMaskXObject: {
+768           const { bitmap, data } = argsArray[i][0]; // First parameter in imgData.
+769           if (bitmap || data?.buffer) {
+770             transfers.push(bitmap || data.buffer);
+771           }
+772           break;
+773         }
+774         case OPS.constructPath: {
+775           const [, [data], minMax] = argsArray[i];
+776           if (data) {
+777             transfers.push(data.buffer, minMax.buffer);
+778           }
+779           break;
+780         }
+781         case OPS.paintFormXObjectBegin:
+782           const [matrix, bbox] = argsArray[i];
+783           if (matrix) {
+784             transfers.push(matrix.buffer);
+785           }
+786           if (bbox) {
+787             transfers.push(bbox.buffer);
+788           }
+789           break;
+790         case OPS.setTextMatrix:
+791           transfers.push(argsArray[i][0].buffer);
+792           break;
+793       }
+794     }
+795     return transfers;
+796   }
+797 
+798   flush(lastChunk = false, separateAnnots = null) {
+799     this.optimizer.flush();
+800     const length = this.length;
+801     this._totalLength += length;
+802 
+803     this._streamSink.enqueue(
+804       {
+805         fnArray: this.fnArray,
+806         argsArray: this.argsArray,
+807         lastChunk,
+808         separateAnnots,
+809         length,
+810       },
+811       1,
+812       this._transfers
+813     );
+814 
+815     this.dependencies.clear();
+816     this.fnArray.length = 0;
+817     this.argsArray.length = 0;
+818     this.weight = 0;
+819     this.optimizer.reset();
+820   }
+821 }
+822 
+823 export { OperatorList };
+File:
+src/shared/util.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 /* globals process */
+16 
+17 // NW.js / Electron is a browser context, but copies some Node.js objects; see
+18 // http://docs.nwjs.io/en/latest/For%20Users/Advanced/JavaScript%20Contexts%20in%20NW.js/#access-nodejs-and-nwjs-api-in-browser-context
+19 // https://www.electronjs.org/docs/api/process#processversionselectron-readonly
+20 // https://www.electronjs.org/docs/api/process#processtype-readonly
+21 const isNodeJS =
+22   (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+23   typeof process === "object" &&
+24   process + "" === "[object process]" &&
+25   !process.versions.nw &&
+26   !(process.versions.electron && process.type && process.type !== "browser");
+27 
+28 const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
+29 
+30 // Represent the percentage of the height of a single-line field over
+31 // the font size. Acrobat seems to use this value.
+32 const LINE_FACTOR = 1.35;
+33 const LINE_DESCENT_FACTOR = 0.35;
+34 const BASELINE_FACTOR = LINE_DESCENT_FACTOR / LINE_FACTOR;
+35 
+36 /**
+37  * Refer to the `WorkerTransport.getRenderingIntent`-method in the API, to see
+38  * how these flags are being used:
+39  *  - ANY, DISPLAY, and PRINT are the normal rendering intents, note the
+40  *    `PDFPageProxy.{render, getOperatorList, getAnnotations}`-methods.
+41  *  - SAVE is used, on the worker-thread, when saving modified annotations.
+42  *  - ANNOTATIONS_FORMS, ANNOTATIONS_STORAGE, ANNOTATIONS_DISABLE control which
+43  *    annotations are rendered onto the canvas (i.e. by being included in the
+44  *    operatorList), note the `PDFPageProxy.{render, getOperatorList}`-methods
+45  *    and their `annotationMode`-option.
+46  *  - IS_EDITING is used when editing is active in the viewer.
+47  *  - OPLIST is used with the `PDFPageProxy.getOperatorList`-method, note the
+48  *    `OperatorList`-constructor (on the worker-thread).
+49  */
+50 const RenderingIntentFlag = {
+51   ANY: 0x01,
+52   DISPLAY: 0x02,
+53   PRINT: 0x04,
+54   SAVE: 0x08,
+55   ANNOTATIONS_FORMS: 0x10,
+56   ANNOTATIONS_STORAGE: 0x20,
+57   ANNOTATIONS_DISABLE: 0x40,
+58   IS_EDITING: 0x80,
+59   OPLIST: 0x100,
+60 };
+61 
+62 const AnnotationMode = {
+63   DISABLE: 0,
+64   ENABLE: 1,
+65   ENABLE_FORMS: 2,
+66   ENABLE_STORAGE: 3,
+67 };
+68 
+69 const AnnotationEditorPrefix = "pdfjs_internal_editor_";
+70 
+71 const AnnotationEditorType = {
+72   DISABLE: -1,
+73   NONE: 0,
+74   FREETEXT: 3,
+75   HIGHLIGHT: 9,
+76   STAMP: 13,
+77   INK: 15,
+78   SIGNATURE: 101,
+79 };
+80 
+81 const AnnotationEditorParamsType = {
+82   RESIZE: 1,
+83   CREATE: 2,
+84   FREETEXT_SIZE: 11,
+85   FREETEXT_COLOR: 12,
+86   FREETEXT_OPACITY: 13,
+87   INK_COLOR: 21,
+88   INK_THICKNESS: 22,
+89   INK_OPACITY: 23,
+90   HIGHLIGHT_COLOR: 31,
+91   HIGHLIGHT_DEFAULT_COLOR: 32,
+92   HIGHLIGHT_THICKNESS: 33,
+93   HIGHLIGHT_FREE: 34,
+94   HIGHLIGHT_SHOW_ALL: 35,
+95   DRAW_STEP: 41,
+96 };
+97 
+98 // Permission flags from Table 22, Section 7.6.3.2 of the PDF specification.
+99 const PermissionFlag = {
+100   PRINT: 0x04,
+101   MODIFY_CONTENTS: 0x08,
+102   COPY: 0x10,
+103   MODIFY_ANNOTATIONS: 0x20,
+104   FILL_INTERACTIVE_FORMS: 0x100,
+105   COPY_FOR_ACCESSIBILITY: 0x200,
+106   ASSEMBLE: 0x400,
+107   PRINT_HIGH_QUALITY: 0x800,
+108 };
+109 
+110 const TextRenderingMode = {
+111   FILL: 0,
+112   STROKE: 1,
+113   FILL_STROKE: 2,
+114   INVISIBLE: 3,
+115   FILL_ADD_TO_PATH: 4,
+116   STROKE_ADD_TO_PATH: 5,
+117   FILL_STROKE_ADD_TO_PATH: 6,
+118   ADD_TO_PATH: 7,
+119   FILL_STROKE_MASK: 3,
+120   ADD_TO_PATH_FLAG: 4,
+121 };
+122 
+123 const ImageKind = {
+124   GRAYSCALE_1BPP: 1,
+125   RGB_24BPP: 2,
+126   RGBA_32BPP: 3,
+127 };
+128 
+129 const AnnotationType = {
+130   TEXT: 1,
+131   LINK: 2,
+132   FREETEXT: 3,
+133   LINE: 4,
+134   SQUARE: 5,
+135   CIRCLE: 6,
+136   POLYGON: 7,
+137   POLYLINE: 8,
+138   HIGHLIGHT: 9,
+139   UNDERLINE: 10,
+140   SQUIGGLY: 11,
+141   STRIKEOUT: 12,
+142   STAMP: 13,
+143   CARET: 14,
+144   INK: 15,
+145   POPUP: 16,
+146   FILEATTACHMENT: 17,
+147   SOUND: 18,
+148   MOVIE: 19,
+149   WIDGET: 20,
+150   SCREEN: 21,
+151   PRINTERMARK: 22,
+152   TRAPNET: 23,
+153   WATERMARK: 24,
+154   THREED: 25,
+155   REDACT: 26,
+156 };
+157 
+158 const AnnotationReplyType = {
+159   GROUP: "Group",
+160   REPLY: "R",
+161 };
+162 
+163 const AnnotationFlag = {
+164   INVISIBLE: 0x01,
+165   HIDDEN: 0x02,
+166   PRINT: 0x04,
+167   NOZOOM: 0x08,
+168   NOROTATE: 0x10,
+169   NOVIEW: 0x20,
+170   READONLY: 0x40,
+171   LOCKED: 0x80,
+172   TOGGLENOVIEW: 0x100,
+173   LOCKEDCONTENTS: 0x200,
+174 };
+175 
+176 const AnnotationFieldFlag = {
+177   READONLY: 0x0000001,
+178   REQUIRED: 0x0000002,
+179   NOEXPORT: 0x0000004,
+180   MULTILINE: 0x0001000,
+181   PASSWORD: 0x0002000,
+182   NOTOGGLETOOFF: 0x0004000,
+183   RADIO: 0x0008000,
+184   PUSHBUTTON: 0x0010000,
+185   COMBO: 0x0020000,
+186   EDIT: 0x0040000,
+187   SORT: 0x0080000,
+188   FILESELECT: 0x0100000,
+189   MULTISELECT: 0x0200000,
+190   DONOTSPELLCHECK: 0x0400000,
+191   DONOTSCROLL: 0x0800000,
+192   COMB: 0x1000000,
+193   RICHTEXT: 0x2000000,
+194   RADIOSINUNISON: 0x2000000,
+195   COMMITONSELCHANGE: 0x4000000,
+196 };
+197 
+198 const AnnotationBorderStyleType = {
+199   SOLID: 1,
+200   DASHED: 2,
+201   BEVELED: 3,
+202   INSET: 4,
+203   UNDERLINE: 5,
+204 };
+205 
+206 const AnnotationActionEventType = {
+207   E: "Mouse Enter",
+208   X: "Mouse Exit",
+209   D: "Mouse Down",
+210   U: "Mouse Up",
+211   Fo: "Focus",
+212   Bl: "Blur",
+213   PO: "PageOpen",
+214   PC: "PageClose",
+215   PV: "PageVisible",
+216   PI: "PageInvisible",
+217   K: "Keystroke",
+218   F: "Format",
+219   V: "Validate",
+220   C: "Calculate",
+221 };
+222 
+223 const DocumentActionEventType = {
+224   WC: "WillClose",
+225   WS: "WillSave",
+226   DS: "DidSave",
+227   WP: "WillPrint",
+228   DP: "DidPrint",
+229 };
+230 
+231 const PageActionEventType = {
+232   O: "PageOpen",
+233   C: "PageClose",
+234 };
+235 
+236 const VerbosityLevel = {
+237   ERRORS: 0,
+238   WARNINGS: 1,
+239   INFOS: 5,
+240 };
+241 
+242 // All the possible operations for an operator list.
+243 const OPS = {
+244   // Intentionally start from 1 so it is easy to spot bad operators that will be
+245   // 0's.
+246   // PLEASE NOTE: We purposely keep any removed operators commented out, since
+247   //              re-numbering the list would risk breaking third-party users.
+248   dependency: 1,
+249   setLineWidth: 2,
+250   setLineCap: 3,
+251   setLineJoin: 4,
+252   setMiterLimit: 5,
+253   setDash: 6,
+254   setRenderingIntent: 7,
+255   setFlatness: 8,
+256   setGState: 9,
+257   save: 10,
+258   restore: 11,
+259   transform: 12,
+260   moveTo: 13,
+261   lineTo: 14,
+262   curveTo: 15,
+263   curveTo2: 16,
+264   curveTo3: 17,
+265   closePath: 18,
+266   rectangle: 19,
+267   stroke: 20,
+268   closeStroke: 21,
+269   fill: 22,
+270   eoFill: 23,
+271   fillStroke: 24,
+272   eoFillStroke: 25,
+273   closeFillStroke: 26,
+274   closeEOFillStroke: 27,
+275   endPath: 28,
+276   clip: 29,
+277   eoClip: 30,
+278   beginText: 31,
+279   endText: 32,
+280   setCharSpacing: 33,
+281   setWordSpacing: 34,
+282   setHScale: 35,
+283   setLeading: 36,
+284   setFont: 37,
+285   setTextRenderingMode: 38,
+286   setTextRise: 39,
+287   moveText: 40,
+288   setLeadingMoveText: 41,
+289   setTextMatrix: 42,
+290   nextLine: 43,
+291   showText: 44,
+292   showSpacedText: 45,
+293   nextLineShowText: 46,
+294   nextLineSetSpacingShowText: 47,
+295   setCharWidth: 48,
+296   setCharWidthAndBounds: 49,
+297   setStrokeColorSpace: 50,
+298   setFillColorSpace: 51,
+299   setStrokeColor: 52,
+300   setStrokeColorN: 53,
+301   setFillColor: 54,
+302   setFillColorN: 55,
+303   setStrokeGray: 56,
+304   setFillGray: 57,
+305   setStrokeRGBColor: 58,
+306   setFillRGBColor: 59,
+307   setStrokeCMYKColor: 60,
+308   setFillCMYKColor: 61,
+309   shadingFill: 62,
+310   beginInlineImage: 63,
+311   beginImageData: 64,
+312   endInlineImage: 65,
+313   paintXObject: 66,
+314   markPoint: 67,
+315   markPointProps: 68,
+316   beginMarkedContent: 69,
+317   beginMarkedContentProps: 70,
+318   endMarkedContent: 71,
+319   beginCompat: 72,
+320   endCompat: 73,
+321   paintFormXObjectBegin: 74,
+322   paintFormXObjectEnd: 75,
+323   beginGroup: 76,
+324   endGroup: 77,
+325   // beginAnnotations: 78,
+326   // endAnnotations: 79,
+327   beginAnnotation: 80,
+328   endAnnotation: 81,
+329   // paintJpegXObject: 82,
+330   paintImageMaskXObject: 83,
+331   paintImageMaskXObjectGroup: 84,
+332   paintImageXObject: 85,
+333   paintInlineImageXObject: 86,
+334   paintInlineImageXObjectGroup: 87,
+335   paintImageXObjectRepeat: 88,
+336   paintImageMaskXObjectRepeat: 89,
+337   paintSolidColorImageMask: 90,
+338   constructPath: 91,
+339   setStrokeTransparent: 92,
+340   setFillTransparent: 93,
+341   rawFillPath: 94,
+342 };
+343 
+344 // In order to have a switch statement that is fast (i.e. which use a jump
+345 // table), we need to have the OPS in a contiguous range.
+346 const DrawOPS = {
+347   moveTo: 0,
+348   lineTo: 1,
+349   curveTo: 2,
+350   closePath: 3,
+351 };
+352 
+353 const PasswordResponses = {
+354   NEED_PASSWORD: 1,
+355   INCORRECT_PASSWORD: 2,
+356 };
+357 
+358 let verbosity = VerbosityLevel.WARNINGS;
+359 
+360 function setVerbosityLevel(level) {
+361   if (Number.isInteger(level)) {
+362     verbosity = level;
+363   }
+364 }
+365 
+366 function getVerbosityLevel() {
+367   return verbosity;
+368 }
+369 
+370 // A notice for devs. These are good for things that are helpful to devs, such
+371 // as warning that Workers were disabled, which is important to devs but not
+372 // end users.
+373 function info(msg) {
+374   if (verbosity >= VerbosityLevel.INFOS) {
+375     // eslint-disable-next-line no-console
+376     console.log(`Info: ${msg}`);
+377   }
+378 }
+379 
+380 // Non-fatal warnings.
+381 function warn(msg) {
+382   if (verbosity >= VerbosityLevel.WARNINGS) {
+383     // eslint-disable-next-line no-console
+384     console.log(`Warning: ${msg}`);
+385   }
+386 }
+387 
+388 function unreachable(msg) {
+389   throw new Error(msg);
+390 }
+391 
+392 function assert(cond, msg) {
+393   if (!cond) {
+394     unreachable(msg);
+395   }
+396 }
+397 
+398 // Checks if URLs use one of the allowed protocols, e.g. to avoid XSS.
+399 function _isValidProtocol(url) {
+400   switch (url?.protocol) {
+401     case "http:":
+402     case "https:":
+403     case "ftp:":
+404     case "mailto:":
+405     case "tel:":
+406       return true;
+407     default:
+408       return false;
+409   }
+410 }
+411 
+412 /**
+413  * Attempts to create a valid absolute URL.
+414  *
+415  * @param {URL|string} url - An absolute, or relative, URL.
+416  * @param {URL|string} [baseUrl] - An absolute URL.
+417  * @param {Object} [options]
+418  * @returns Either a valid {URL}, or `null` otherwise.
+419  */
+420 function createValidAbsoluteUrl(url, baseUrl = null, options = null) {
+421   if (!url) {
+422     return null;
+423   }
+424   if (options && typeof url === "string") {
+425     // Let URLs beginning with "www." default to using the "http://" protocol.
+426     if (options.addDefaultProtocol && url.startsWith("www.")) {
+427       const dots = url.match(/\./g);
+428       // Avoid accidentally matching a *relative* URL pointing to a file named
+429       // e.g. "www.pdf" or similar.
+430       if (dots?.length >= 2) {
+431         url = `http://${url}`;
+432       }
+433     }
+434 
+435     // According to ISO 32000-1:2008, section 12.6.4.7, URIs should be encoded
+436     // in 7-bit ASCII. Some bad PDFs use UTF-8 encoding; see bug 1122280.
+437     if (options.tryConvertEncoding) {
+438       try {
+439         url = stringToUTF8String(url);
+440       } catch {}
+441     }
+442   }
+443 
+444   const absoluteUrl = baseUrl ? URL.parse(url, baseUrl) : URL.parse(url);
+445   return _isValidProtocol(absoluteUrl) ? absoluteUrl : null;
+446 }
+447 
+448 function shadow(obj, prop, value, nonSerializable = false) {
+449   if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+450     assert(
+451       prop in obj,
+452       `shadow: Property "${prop && prop.toString()}" not found in object.`
+453     );
+454   }
+455   Object.defineProperty(obj, prop, {
+456     value,
+457     enumerable: !nonSerializable,
+458     configurable: true,
+459     writable: false,
+460   });
+461   return value;
+462 }
+463 
+464 /**
+465  * @type {any}
+466  */
+467 const BaseException = (function BaseExceptionClosure() {
+468   // eslint-disable-next-line no-shadow
+469   function BaseException(message, name) {
+470     if (
+471       (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) &&
+472       this.constructor === BaseException
+473     ) {
+474       unreachable("Cannot initialize BaseException.");
+475     }
+476     this.message = message;
+477     this.name = name;
+478   }
+479   BaseException.prototype = new Error();
+480   BaseException.constructor = BaseException;
+481 
+482   return BaseException;
+483 })();
+484 
+485 class PasswordException extends BaseException {
+486   constructor(msg, code) {
+487     super(msg, "PasswordException");
+488     this.code = code;
+489   }
+490 }
+491 
+492 class UnknownErrorException extends BaseException {
+493   constructor(msg, details) {
+494     super(msg, "UnknownErrorException");
+495     this.details = details;
+496   }
+497 }
+498 
+499 class InvalidPDFException extends BaseException {
+500   constructor(msg) {
+501     super(msg, "InvalidPDFException");
+502   }
+503 }
+504 
+505 class ResponseException extends BaseException {
+506   constructor(msg, status, missing) {
+507     super(msg, "ResponseException");
+508     this.status = status;
+509     this.missing = missing;
+510   }
+511 }
+512 
+513 /**
+514  * Error caused during parsing PDF data.
+515  */
+516 class FormatError extends BaseException {
+517   constructor(msg) {
+518     super(msg, "FormatError");
+519   }
+520 }
+521 
+522 /**
+523  * Error used to indicate task cancellation.
+524  */
+525 class AbortException extends BaseException {
+526   constructor(msg) {
+527     super(msg, "AbortException");
+528   }
+529 }
+530 
+531 function bytesToString(bytes) {
+532   if (typeof bytes !== "object" || bytes?.length === undefined) {
+533     unreachable("Invalid argument for bytesToString");
+534   }
+535   const length = bytes.length;
+536   const MAX_ARGUMENT_COUNT = 8192;
+537   if (length < MAX_ARGUMENT_COUNT) {
+538     return String.fromCharCode.apply(null, bytes);
+539   }
+540   const strBuf = [];
+541   for (let i = 0; i < length; i += MAX_ARGUMENT_COUNT) {
+542     const chunkEnd = Math.min(i + MAX_ARGUMENT_COUNT, length);
+543     const chunk = bytes.subarray(i, chunkEnd);
+544     strBuf.push(String.fromCharCode.apply(null, chunk));
+545   }
+546   return strBuf.join("");
+547 }
+548 
+549 function stringToBytes(str) {
+550   if (typeof str !== "string") {
+551     unreachable("Invalid argument for stringToBytes");
+552   }
+553   const length = str.length;
+554   const bytes = new Uint8Array(length);
+555   for (let i = 0; i < length; ++i) {
+556     bytes[i] = str.charCodeAt(i) & 0xff;
+557   }
+558   return bytes;
+559 }
+560 
+561 function string32(value) {
+562   if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+563     assert(
+564       typeof value === "number" && Math.abs(value) < 2 ** 32,
+565       `string32: Unexpected input "${value}".`
+566     );
+567   }
+568   return String.fromCharCode(
+569     (value >> 24) & 0xff,
+570     (value >> 16) & 0xff,
+571     (value >> 8) & 0xff,
+572     value & 0xff
+573   );
+574 }
+575 
+576 function objectSize(obj) {
+577   return Object.keys(obj).length;
+578 }
+579 
+580 // Checks the endianness of the platform.
+581 function isLittleEndian() {
+582   const buffer8 = new Uint8Array(4);
+583   buffer8[0] = 1;
+584   const view32 = new Uint32Array(buffer8.buffer, 0, 1);
+585   return view32[0] === 1;
+586 }
+587 
+588 // Checks if it's possible to eval JS expressions.
+589 function isEvalSupported() {
+590   try {
+591     new Function(""); // eslint-disable-line no-new, no-new-func
+592     return true;
+593   } catch {
+594     return false;
+595   }
+596 }
+597 
+598 class FeatureTest {
+599   static get isLittleEndian() {
+600     return shadow(this, "isLittleEndian", isLittleEndian());
+601   }
+602 
+603   static get isEvalSupported() {
+604     return shadow(this, "isEvalSupported", isEvalSupported());
+605   }
+606 
+607   static get isOffscreenCanvasSupported() {
+608     return shadow(
+609       this,
+610       "isOffscreenCanvasSupported",
+611       typeof OffscreenCanvas !== "undefined"
+612     );
+613   }
+614 
+615   static get isImageDecoderSupported() {
+616     return shadow(
+617       this,
+618       "isImageDecoderSupported",
+619       typeof ImageDecoder !== "undefined"
+620     );
+621   }
+622 
+623   static get platform() {
+624     if (
+625       (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+626       (typeof navigator !== "undefined" &&
+627         typeof navigator?.platform === "string" &&
+628         typeof navigator?.userAgent === "string")
+629     ) {
+630       const { platform, userAgent } = navigator;
+631 
+632       return shadow(this, "platform", {
+633         isAndroid: userAgent.includes("Android"),
+634         isLinux: platform.includes("Linux"),
+635         isMac: platform.includes("Mac"),
+636         isWindows: platform.includes("Win"),
+637         isFirefox:
+638           (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+639           userAgent.includes("Firefox"),
+640       });
+641     }
+642     return shadow(this, "platform", {
+643       isAndroid: false,
+644       isLinux: false,
+645       isMac: false,
+646       isWindows: false,
+647       isFirefox: false,
+648     });
+649   }
+650 
+651   static get isCSSRoundSupported() {
+652     return shadow(
+653       this,
+654       "isCSSRoundSupported",
+655       globalThis.CSS?.supports?.("width: round(1.5px, 1px)")
+656     );
+657   }
+658 }
+659 
+660 const hexNumbers = Array.from(Array(256).keys(), n =>
+661   n.toString(16).padStart(2, "0")
+662 );
+663 
+664 class Util {
+665   static makeHexColor(r, g, b) {
+666     return `#${hexNumbers[r]}${hexNumbers[g]}${hexNumbers[b]}`;
+667   }
+668 
+669   // Apply a scaling matrix to some min/max values.
+670   // If a scaling factor is negative then min and max must be
+671   // swapped.
+672   static scaleMinMax(transform, minMax) {
+673     let temp;
+674     if (transform[0]) {
+675       if (transform[0] < 0) {
+676         temp = minMax[0];
+677         minMax[0] = minMax[2];
+678         minMax[2] = temp;
+679       }
+680       minMax[0] *= transform[0];
+681       minMax[2] *= transform[0];
+682 
+683       if (transform[3] < 0) {
+684         temp = minMax[1];
+685         minMax[1] = minMax[3];
+686         minMax[3] = temp;
+687       }
+688       minMax[1] *= transform[3];
+689       minMax[3] *= transform[3];
+690     } else {
+691       temp = minMax[0];
+692       minMax[0] = minMax[1];
+693       minMax[1] = temp;
+694       temp = minMax[2];
+695       minMax[2] = minMax[3];
+696       minMax[3] = temp;
+697 
+698       if (transform[1] < 0) {
+699         temp = minMax[1];
+700         minMax[1] = minMax[3];
+701         minMax[3] = temp;
+702       }
+703       minMax[1] *= transform[1];
+704       minMax[3] *= transform[1];
+705 
+706       if (transform[2] < 0) {
+707         temp = minMax[0];
+708         minMax[0] = minMax[2];
+709         minMax[2] = temp;
+710       }
+711       minMax[0] *= transform[2];
+712       minMax[2] *= transform[2];
+713     }
+714     minMax[0] += transform[4];
+715     minMax[1] += transform[5];
+716     minMax[2] += transform[4];
+717     minMax[3] += transform[5];
+718   }
+719 
+720   // Concatenates two transformation matrices together and returns the result.
+721   static transform(m1, m2) {
+722     return [
+723       m1[0] * m2[0] + m1[2] * m2[1],
+724       m1[1] * m2[0] + m1[3] * m2[1],
+725       m1[0] * m2[2] + m1[2] * m2[3],
+726       m1[1] * m2[2] + m1[3] * m2[3],
+727       m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+728       m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+729     ];
+730   }
+731 
+732   // For 2d affine transforms
+733   static applyTransform(p, m) {
+734     const p0 = p[0];
+735     const p1 = p[1];
+736     p[0] = p0 * m[0] + p1 * m[2] + m[4];
+737     p[1] = p0 * m[1] + p1 * m[3] + m[5];
+738   }
+739 
+740   // For 2d affine transforms
+741   static applyTransformToBezier(p, transform) {
+742     const m0 = transform[0];
+743     const m1 = transform[1];
+744     const m2 = transform[2];
+745     const m3 = transform[3];
+746     const m4 = transform[4];
+747     const m5 = transform[5];
+748     for (let i = 0; i < 6; i += 2) {
+749       const pI = p[i];
+750       const pI1 = p[i + 1];
+751       p[i] = pI * m0 + pI1 * m2 + m4;
+752       p[i + 1] = pI * m1 + pI1 * m3 + m5;
+753     }
+754   }
+755 
+756   static applyInverseTransform(p, m) {
+757     const p0 = p[0];
+758     const p1 = p[1];
+759     const d = m[0] * m[3] - m[1] * m[2];
+760     p[0] = (p0 * m[3] - p1 * m[2] + m[2] * m[5] - m[4] * m[3]) / d;
+761     p[1] = (-p0 * m[1] + p1 * m[0] + m[4] * m[1] - m[5] * m[0]) / d;
+762   }
+763 
+764   // Applies the transform to the rectangle and finds the minimum axially
+765   // aligned bounding box.
+766   static axialAlignedBoundingBox(rect, transform, output) {
+767     const m0 = transform[0];
+768     const m1 = transform[1];
+769     const m2 = transform[2];
+770     const m3 = transform[3];
+771     const m4 = transform[4];
+772     const m5 = transform[5];
+773     const r0 = rect[0];
+774     const r1 = rect[1];
+775     const r2 = rect[2];
+776     const r3 = rect[3];
+777 
+778     let a0 = m0 * r0 + m4;
+779     let a2 = a0;
+780     let a1 = m0 * r2 + m4;
+781     let a3 = a1;
+782     let b0 = m3 * r1 + m5;
+783     let b2 = b0;
+784     let b1 = m3 * r3 + m5;
+785     let b3 = b1;
+786 
+787     if (m1 !== 0 || m2 !== 0) {
+788       // Non-scaling matrix: shouldn't be frequent.
+789       const m1r0 = m1 * r0;
+790       const m1r2 = m1 * r2;
+791       const m2r1 = m2 * r1;
+792       const m2r3 = m2 * r3;
+793       a0 += m2r1;
+794       a3 += m2r1;
+795       a1 += m2r3;
+796       a2 += m2r3;
+797       b0 += m1r0;
+798       b3 += m1r0;
+799       b1 += m1r2;
+800       b2 += m1r2;
+801     }
+802 
+803     output[0] = Math.min(output[0], a0, a1, a2, a3);
+804     output[1] = Math.min(output[1], b0, b1, b2, b3);
+805     output[2] = Math.max(output[2], a0, a1, a2, a3);
+806     output[3] = Math.max(output[3], b0, b1, b2, b3);
+807   }
+808 
+809   static inverseTransform(m) {
+810     const d = m[0] * m[3] - m[1] * m[2];
+811     return [
+812       m[3] / d,
+813       -m[1] / d,
+814       -m[2] / d,
+815       m[0] / d,
+816       (m[2] * m[5] - m[4] * m[3]) / d,
+817       (m[4] * m[1] - m[5] * m[0]) / d,
+818     ];
+819   }
+820 
+821   // This calculation uses Singular Value Decomposition.
+822   // The SVD can be represented with formula A = USV. We are interested in the
+823   // matrix S here because it represents the scale values.
+824   static singularValueDecompose2dScale(matrix, output) {
+825     const m0 = matrix[0];
+826     const m1 = matrix[1];
+827     const m2 = matrix[2];
+828     const m3 = matrix[3];
+829     // Multiply matrix m with its transpose.
+830     const a = m0 ** 2 + m1 ** 2;
+831     const b = m0 * m2 + m1 * m3;
+832     const c = m2 ** 2 + m3 ** 2;
+833 
+834     // Solve the second degree polynomial to get roots.
+835     const first = (a + c) / 2;
+836     const second = Math.sqrt(first ** 2 - (a * c - b ** 2));
+837     output[0] = Math.sqrt(first + second || 1);
+838     output[1] = Math.sqrt(first - second || 1);
+839   }
+840 
+841   // Normalize rectangle rect=[x1, y1, x2, y2] so that (x1,y1) < (x2,y2)
+842   // For coordinate systems whose origin lies in the bottom-left, this
+843   // means normalization to (BL,TR) ordering. For systems with origin in the
+844   // top-left, this means (TL,BR) ordering.
+845   static normalizeRect(rect) {
+846     const r = rect.slice(0); // clone rect
+847     if (rect[0] > rect[2]) {
+848       r[0] = rect[2];
+849       r[2] = rect[0];
+850     }
+851     if (rect[1] > rect[3]) {
+852       r[1] = rect[3];
+853       r[3] = rect[1];
+854     }
+855     return r;
+856   }
+857 
+858   // Returns a rectangle [x1, y1, x2, y2] corresponding to the
+859   // intersection of rect1 and rect2. If no intersection, returns 'null'
+860   // The rectangle coordinates of rect1, rect2 should be [x1, y1, x2, y2]
+861   static intersect(rect1, rect2) {
+862     const xLow = Math.max(
+863       Math.min(rect1[0], rect1[2]),
+864       Math.min(rect2[0], rect2[2])
+865     );
+866     const xHigh = Math.min(
+867       Math.max(rect1[0], rect1[2]),
+868       Math.max(rect2[0], rect2[2])
+869     );
+870     if (xLow > xHigh) {
+871       return null;
+872     }
+873     const yLow = Math.max(
+874       Math.min(rect1[1], rect1[3]),
+875       Math.min(rect2[1], rect2[3])
+876     );
+877     const yHigh = Math.min(
+878       Math.max(rect1[1], rect1[3]),
+879       Math.max(rect2[1], rect2[3])
+880     );
+881     if (yLow > yHigh) {
+882       return null;
+883     }
+884 
+885     return [xLow, yLow, xHigh, yHigh];
+886   }
+887 
+888   static pointBoundingBox(x, y, minMax) {
+889     minMax[0] = Math.min(minMax[0], x);
+890     minMax[1] = Math.min(minMax[1], y);
+891     minMax[2] = Math.max(minMax[2], x);
+892     minMax[3] = Math.max(minMax[3], y);
+893   }
+894 
+895   static rectBoundingBox(x0, y0, x1, y1, minMax) {
+896     minMax[0] = Math.min(minMax[0], x0, x1);
+897     minMax[1] = Math.min(minMax[1], y0, y1);
+898     minMax[2] = Math.max(minMax[2], x0, x1);
+899     minMax[3] = Math.max(minMax[3], y0, y1);
+900   }
+901 
+902   static #getExtremumOnCurve(x0, x1, x2, x3, y0, y1, y2, y3, t, minMax) {
+903     if (t <= 0 || t >= 1) {
+904       return;
+905     }
+906     const mt = 1 - t;
+907     const tt = t * t;
+908     const ttt = tt * t;
+909     const x = mt * (mt * (mt * x0 + 3 * t * x1) + 3 * tt * x2) + ttt * x3;
+910     const y = mt * (mt * (mt * y0 + 3 * t * y1) + 3 * tt * y2) + ttt * y3;
+911     minMax[0] = Math.min(minMax[0], x);
+912     minMax[1] = Math.min(minMax[1], y);
+913     minMax[2] = Math.max(minMax[2], x);
+914     minMax[3] = Math.max(minMax[3], y);
+915   }
+916 
+917   static #getExtremum(x0, x1, x2, x3, y0, y1, y2, y3, a, b, c, minMax) {
+918     if (Math.abs(a) < 1e-12) {
+919       if (Math.abs(b) >= 1e-12) {
+920         this.#getExtremumOnCurve(
+921           x0,
+922           x1,
+923           x2,
+924           x3,
+925           y0,
+926           y1,
+927           y2,
+928           y3,
+929           -c / b,
+930           minMax
+931         );
+932       }
+933       return;
+934     }
+935 
+936     const delta = b ** 2 - 4 * c * a;
+937     if (delta < 0) {
+938       return;
+939     }
+940     const sqrtDelta = Math.sqrt(delta);
+941     const a2 = 2 * a;
+942     this.#getExtremumOnCurve(
+943       x0,
+944       x1,
+945       x2,
+946       x3,
+947       y0,
+948       y1,
+949       y2,
+950       y3,
+951       (-b + sqrtDelta) / a2,
+952       minMax
+953     );
+954     this.#getExtremumOnCurve(
+955       x0,
+956       x1,
+957       x2,
+958       x3,
+959       y0,
+960       y1,
+961       y2,
+962       y3,
+963       (-b - sqrtDelta) / a2,
+964       minMax
+965     );
+966   }
+967 
+968   // From https://github.com/adobe-webplatform/Snap.svg/blob/b365287722a72526000ac4bfcf0ce4cac2faa015/src/path.js#L852
+969   static bezierBoundingBox(x0, y0, x1, y1, x2, y2, x3, y3, minMax) {
+970     minMax[0] = Math.min(minMax[0], x0, x3);
+971     minMax[1] = Math.min(minMax[1], y0, y3);
+972     minMax[2] = Math.max(minMax[2], x0, x3);
+973     minMax[3] = Math.max(minMax[3], y0, y3);
+974 
+975     this.#getExtremum(
+976       x0,
+977       x1,
+978       x2,
+979       x3,
+980       y0,
+981       y1,
+982       y2,
+983       y3,
+984       3 * (-x0 + 3 * (x1 - x2) + x3),
+985       6 * (x0 - 2 * x1 + x2),
+986       3 * (x1 - x0),
+987       minMax
+988     );
+989     this.#getExtremum(
+990       x0,
+991       x1,
+992       x2,
+993       x3,
+994       y0,
+995       y1,
+996       y2,
+997       y3,
+998       3 * (-y0 + 3 * (y1 - y2) + y3),
+999       6 * (y0 - 2 * y1 + y2),
+1000       3 * (y1 - y0),
+1001       minMax
+1002     );
+1003   }
+1004 }
+1005 
+1006 const PDFStringTranslateTable = [
+1007   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x2d8,
+1008   0x2c7, 0x2c6, 0x2d9, 0x2dd, 0x2db, 0x2da, 0x2dc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+1009   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+1010   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+1011   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+1012   0, 0, 0, 0, 0, 0, 0, 0, 0x2022, 0x2020, 0x2021, 0x2026, 0x2014, 0x2013, 0x192,
+1013   0x2044, 0x2039, 0x203a, 0x2212, 0x2030, 0x201e, 0x201c, 0x201d, 0x2018,
+1014   0x2019, 0x201a, 0x2122, 0xfb01, 0xfb02, 0x141, 0x152, 0x160, 0x178, 0x17d,
+1015   0x131, 0x142, 0x153, 0x161, 0x17e, 0, 0x20ac,
+1016 ];
+1017 
+1018 function stringToPDFString(str) {
+1019   // See section 7.9.2.2 Text String Type.
+1020   // The string can contain some language codes bracketed with 0x0b,
+1021   // so we must remove them.
+1022   if (str[0] >= "\xEF") {
+1023     let encoding;
+1024     if (str[0] === "\xFE" && str[1] === "\xFF") {
+1025       encoding = "utf-16be";
+1026       if (str.length % 2 === 1) {
+1027         str = str.slice(0, -1);
+1028       }
+1029     } else if (str[0] === "\xFF" && str[1] === "\xFE") {
+1030       encoding = "utf-16le";
+1031       if (str.length % 2 === 1) {
+1032         str = str.slice(0, -1);
+1033       }
+1034     } else if (str[0] === "\xEF" && str[1] === "\xBB" && str[2] === "\xBF") {
+1035       encoding = "utf-8";
+1036     }
+1037 
+1038     if (encoding) {
+1039       try {
+1040         const decoder = new TextDecoder(encoding, { fatal: true });
+1041         const buffer = stringToBytes(str);
+1042         const decoded = decoder.decode(buffer);
+1043         if (!decoded.includes("\x1b")) {
+1044           return decoded;
+1045         }
+1046         return decoded.replaceAll(/\x1b[^\x1b]*(?:\x1b|$)/g, "");
+1047       } catch (ex) {
+1048         warn(`stringToPDFString: "${ex}".`);
+1049       }
+1050     }
+1051   }
+1052   // ISO Latin 1
+1053   const strBuf = [];
+1054   for (let i = 0, ii = str.length; i < ii; i++) {
+1055     const charCode = str.charCodeAt(i);
+1056     if (charCode === 0x1b) {
+1057       // eslint-disable-next-line no-empty
+1058       while (++i < ii && str.charCodeAt(i) !== 0x1b) {}
+1059       continue;
+1060     }
+1061     const code = PDFStringTranslateTable[charCode];
+1062     strBuf.push(code ? String.fromCharCode(code) : str.charAt(i));
+1063   }
+1064   return strBuf.join("");
+1065 }
+1066 
+1067 function stringToUTF8String(str) {
+1068   return decodeURIComponent(escape(str));
+1069 }
+1070 
+1071 function utf8StringToString(str) {
+1072   return unescape(encodeURIComponent(str));
+1073 }
+1074 
+1075 function isArrayEqual(arr1, arr2) {
+1076   if (arr1.length !== arr2.length) {
+1077     return false;
+1078   }
+1079   for (let i = 0, ii = arr1.length; i < ii; i++) {
+1080     if (arr1[i] !== arr2[i]) {
+1081       return false;
+1082     }
+1083   }
+1084   return true;
+1085 }
+1086 
+1087 function getModificationDate(date = new Date()) {
+1088   const buffer = [
+1089     date.getUTCFullYear().toString(),
+1090     (date.getUTCMonth() + 1).toString().padStart(2, "0"),
+1091     date.getUTCDate().toString().padStart(2, "0"),
+1092     date.getUTCHours().toString().padStart(2, "0"),
+1093     date.getUTCMinutes().toString().padStart(2, "0"),
+1094     date.getUTCSeconds().toString().padStart(2, "0"),
+1095   ];
+1096 
+1097   return buffer.join("");
+1098 }
+1099 
+1100 let NormalizeRegex = null;
+1101 let NormalizationMap = null;
+1102 function normalizeUnicode(str) {
+1103   if (!NormalizeRegex) {
+1104     // In order to generate the following regex:
+1105     //  - create a PDF containing all the chars in the range 0000-FFFF with
+1106     //    a NFKC which is different of the char.
+1107     //  - copy and paste all those chars and get the ones where NFKC is
+1108     //    required.
+1109     // It appears that most the chars here contain some ligatures.
+1110     NormalizeRegex =
+1111       /([\u00a0\u00b5\u037e\u0eb3\u2000-\u200a\u202f\u2126\ufb00-\ufb04\ufb06\ufb20-\ufb36\ufb38-\ufb3c\ufb3e\ufb40-\ufb41\ufb43-\ufb44\ufb46-\ufba1\ufba4-\ufba9\ufbae-\ufbb1\ufbd3-\ufbdc\ufbde-\ufbe7\ufbea-\ufbf8\ufbfc-\ufbfd\ufc00-\ufc5d\ufc64-\ufcf1\ufcf5-\ufd3d\ufd88\ufdf4\ufdfa-\ufdfb\ufe71\ufe77\ufe79\ufe7b\ufe7d]+)|(\ufb05+)/gu;
+1112     NormalizationMap = new Map([["ﬅ", "ſt"]]);
+1113   }
+1114   return str.replaceAll(NormalizeRegex, (_, p1, p2) =>
+1115     p1 ? p1.normalize("NFKC") : NormalizationMap.get(p2)
+1116   );
+1117 }
+1118 
+1119 function getUuid() {
+1120   if (
+1121     (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+1122     typeof crypto.randomUUID === "function"
+1123   ) {
+1124     return crypto.randomUUID();
+1125   }
+1126   const buf = new Uint8Array(32);
+1127   crypto.getRandomValues(buf);
+1128   return bytesToString(buf);
+1129 }
+1130 
+1131 const AnnotationPrefix = "pdfjs_internal_id_";
+1132 
+1133 function _isValidExplicitDest(validRef, validName, dest) {
+1134   if (!Array.isArray(dest) || dest.length < 2) {
+1135     return false;
+1136   }
+1137   const [page, zoom, ...args] = dest;
+1138   if (!validRef(page) && !Number.isInteger(page)) {
+1139     return false;
+1140   }
+1141   if (!validName(zoom)) {
+1142     return false;
+1143   }
+1144   const argsLen = args.length;
+1145   let allowNull = true;
+1146   switch (zoom.name) {
+1147     case "XYZ":
+1148       if (argsLen < 2 || argsLen > 3) {
+1149         return false;
+1150       }
+1151       break;
+1152     case "Fit":
+1153     case "FitB":
+1154       return argsLen === 0;
+1155     case "FitH":
+1156     case "FitBH":
+1157     case "FitV":
+1158     case "FitBV":
+1159       if (argsLen > 1) {
+1160         return false;
+1161       }
+1162       break;
+1163     case "FitR":
+1164       if (argsLen !== 4) {
+1165         return false;
+1166       }
+1167       allowNull = false;
+1168       break;
+1169     default:
+1170       return false;
+1171   }
+1172   for (const arg of args) {
+1173     if (typeof arg === "number" || (allowNull && arg === null)) {
+1174       continue;
+1175     }
+1176     return false;
+1177   }
+1178   return true;
+1179 }
+1180 
+1181 // TOOD: Replace all occurrences of this function with `Math.clamp` once
+1182 //       https://github.com/tc39/proposal-math-clamp/ is generally available.
+1183 function MathClamp(v, min, max) {
+1184   return Math.min(Math.max(v, min), max);
+1185 }
+1186 
+1187 // TODO: Remove this once `Uint8Array.prototype.toHex` is generally available.
+1188 function toHexUtil(arr) {
+1189   if (Uint8Array.prototype.toHex) {
+1190     return arr.toHex();
+1191   }
+1192   return Array.from(arr, num => hexNumbers[num]).join("");
+1193 }
+1194 
+1195 // TODO: Remove this once `Uint8Array.prototype.toBase64` is generally
+1196 //       available.
+1197 function toBase64Util(arr) {
+1198   if (Uint8Array.prototype.toBase64) {
+1199     return arr.toBase64();
+1200   }
+1201   return btoa(bytesToString(arr));
+1202 }
+1203 
+1204 // TODO: Remove this once `Uint8Array.fromBase64` is generally available.
+1205 function fromBase64Util(str) {
+1206   if (Uint8Array.fromBase64) {
+1207     return Uint8Array.fromBase64(str);
+1208   }
+1209   return stringToBytes(atob(str));
+1210 }
+1211 
+1212 // TODO: Remove this once https://bugzilla.mozilla.org/show_bug.cgi?id=1928493
+1213 //       is fixed.
+1214 if (
+1215   (typeof PDFJSDev === "undefined" || PDFJSDev.test("SKIP_BABEL")) &&
+1216   typeof Promise.try !== "function"
+1217 ) {
+1218   Promise.try = function (fn, ...args) {
+1219     return new Promise(resolve => {
+1220       resolve(fn(...args));
+1221     });
+1222   };
+1223 }
+1224 
+1225 // TODO: Remove this once the `javascript.options.experimental.math_sumprecise`
+1226 //       preference is removed from Firefox.
+1227 if (typeof Math.sumPrecise !== "function") {
+1228   // Note that this isn't a "proper" polyfill, but since we're only using it to
+1229   // replace `Array.prototype.reduce()` invocations it should be fine.
+1230   Math.sumPrecise = function (numbers) {
+1231     return numbers.reduce((a, b) => a + b, 0);
+1232   };
+1233 }
+1234 
+1235 if (
+1236   typeof PDFJSDev !== "undefined" &&
+1237   !PDFJSDev.test("SKIP_BABEL") &&
+1238   typeof AbortSignal.any !== "function"
+1239 ) {
+1240   AbortSignal.any = function (iterable) {
+1241     const ac = new AbortController();
+1242     const { signal } = ac;
+1243 
+1244     // Return immediately if any of the signals are already aborted.
+1245     for (const s of iterable) {
+1246       if (s.aborted) {
+1247         ac.abort(s.reason);
+1248         return signal;
+1249       }
+1250     }
+1251     // Register "abort" listeners for all signals.
+1252     for (const s of iterable) {
+1253       s.addEventListener(
+1254         "abort",
+1255         () => {
+1256           ac.abort(s.reason);
+1257         },
+1258         { signal } // Automatically remove the listener.
+1259       );
+1260     }
+1261 
+1262     return signal;
+1263   };
+1264 }
+1265 
+1266 export {
+1267   _isValidExplicitDest,
+1268   AbortException,
+1269   AnnotationActionEventType,
+1270   AnnotationBorderStyleType,
+1271   AnnotationEditorParamsType,
+1272   AnnotationEditorPrefix,
+1273   AnnotationEditorType,
+1274   AnnotationFieldFlag,
+1275   AnnotationFlag,
+1276   AnnotationMode,
+1277   AnnotationPrefix,
+1278   AnnotationReplyType,
+1279   AnnotationType,
+1280   assert,
+1281   BaseException,
+1282   BASELINE_FACTOR,
+1283   bytesToString,
+1284   createValidAbsoluteUrl,
+1285   DocumentActionEventType,
+1286   DrawOPS,
+1287   FeatureTest,
+1288   FONT_IDENTITY_MATRIX,
+1289   FormatError,
+1290   fromBase64Util,
+1291   getModificationDate,
+1292   getUuid,
+1293   getVerbosityLevel,
+1294   hexNumbers,
+1295   ImageKind,
+1296   info,
+1297   InvalidPDFException,
+1298   isArrayEqual,
+1299   isNodeJS,
+1300   LINE_DESCENT_FACTOR,
+1301   LINE_FACTOR,
+1302   MathClamp,
+1303   normalizeUnicode,
+1304   objectSize,
+1305   OPS,
+1306   PageActionEventType,
+1307   PasswordException,
+1308   PasswordResponses,
+1309   PermissionFlag,
+1310   RenderingIntentFlag,
+1311   ResponseException,
+1312   setVerbosityLevel,
+1313   shadow,
+1314   string32,
+1315   stringToBytes,
+1316   stringToPDFString,
+1317   stringToUTF8String,
+1318   TextRenderingMode,
+1319   toBase64Util,
+1320   toHexUtil,
+1321   UnknownErrorException,
+1322   unreachable,
+1323   utf8StringToString,
+1324   Util,
+1325   VerbosityLevel,
+1326   warn,
+1327 };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/util_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  BaseException,
+  bytesToString,
+  createValidAbsoluteUrl,
+  getModificationDate,
+  getUuid,
+  string32,
+  stringToBytes,
+  stringToPDFString,
+} from "../../src/shared/util.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

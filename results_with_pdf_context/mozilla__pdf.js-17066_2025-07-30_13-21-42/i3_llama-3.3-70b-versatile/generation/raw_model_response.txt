@@ -1,0 +1,28 @@
+```javascript
+it("should render read-only form fields when AnnotationMode is ENABLED", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue17064_readonly.pdf'));
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+  const viewport = pdfPage.getViewport({ scale: 1 });
+  const annotationLayer = new (await import('../../src/display/annotation_layer.js')).AnnotationLayer({
+    div: document.createElement('div'),
+    page: pdfPage,
+    viewport: viewport,
+    linkService: null,
+    downloadManager: null,
+    annotationStorage: null,
+    renderForms: false,
+  });
+  const annotations = await pdfPage.getAnnotations();
+  await annotationLayer.render({ annotations, viewport, renderForms: true, annotationMode: AnnotationMode.ENABLED });
+  const textWidgetAnnotations = annotations.filter(annotation => annotation.subtype === AnnotationType.WIDGET && annotation.fieldType === 'Tx');
+  const readOnlyTextWidgetAnnotations = textWidgetAnnotations.filter(annotation => annotation.flags & 0x0002); // 0x0002 is the flag for read-only
+  const renderedReadOnlyTextWidgets = readOnlyTextWidgetAnnotations.map(annotation => annotationLayer.getEditableAnnotation(annotation.id));
+  expect(renderedReadOnlyTextWidgets.length).toBeGreaterThan(0);
+  for (const renderedAnnotation of renderedReadOnlyTextWidgets) {
+    expect(renderedAnnotation.container.hidden).toBe(false);
+  }
+});
+```

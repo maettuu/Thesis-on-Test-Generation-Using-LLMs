@@ -1,0 +1,59 @@
+<think>
+Okay, I need to write a regression test for the issue where radio buttons in print view don't reflect their real state on the PDF form. The patch provided modifies the `_processRadioButton` method in `annotation.js`. 
+
+First, I should understand what the patch does. Before the patch, the code set both `this.data.fieldValue` and `this.data.buttonValue` to null. The patch removes `this.data.fieldValue = null`, so only `buttonValue` is set. This change likely ensures that the radio button's state is correctly read from the parent field's `V` entry.
+
+To test this, I need a PDF that has radio buttons with a parent field. The test should check if the radio button's state is correctly reflected. 
+
+I'll create a test PDF where the radio button's parent field has a value. I'll use `pdf-lib` to generate this PDF. Then, I'll write a test that opens this PDF, gets the annotation, and checks if the `buttonValue` is correctly set.
+
+In the test, I'll import `PDFDocument` and `PDFPage` from `api.js`. I'll also import `Annotation` from `annotation.js` to create the annotation. I'll generate a PDF with a radio button where the parent's `V` entry is set to a name object, say "Radio1".
+
+In the test function, I'll load the PDF, get the first page, and the annotations. I'll create a `ButtonWidgetAnnotation` instance with the appropriate parameters. Then, I'll check if `data.buttonValue` equals "Radio1". If it does, the test passes.
+
+I need to ensure that this test fails before the patch because, without the fix, `fieldValue` might not be correctly set from the parent's `V` entry. After the patch, `buttonValue` should correctly reflect the state.
+
+I should structure the test as an `it` block, using async/await for asynchronous operations. I'll make sure to handle any potential errors and clean up the PDF document after the test.
+
+So, putting it all together, the test will generate a specific PDF, load it, and verify the radio button's state is correctly read after the patch.
+</think>
+
+```javascript
+it("should correctly reflect radio button state in print view", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { Annotation } = await import("../../src/core/annotation.js");
+  const { Name } = await import("../../src/core/primitives.js");
+
+  // Create a sample PDF with radio buttons
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+  const annotation = new ButtonWidgetAnnotation({
+    dict: {
+      get: (key) => {
+        if (key === "Parent") {
+          const parentDict = new Dict();
+          parentDict.set("V", new Name("Radio1"));
+          return parentDict;
+        }
+        return null;
+      }
+    },
+    page,
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+  });
+
+  // Process the radio button annotation
+  await annotation._processRadioButton({
+    dict: annotation.dict,
+    page,
+  });
+
+  // Verify the button value is correctly set from the parent field's V entry
+  expect(annotation.data.buttonValue).toBe("Radio1");
+
+  await pdf.close();
+});
+```

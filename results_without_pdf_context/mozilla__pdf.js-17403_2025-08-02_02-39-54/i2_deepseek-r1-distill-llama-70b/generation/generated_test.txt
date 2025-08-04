@@ -1,0 +1,74 @@
+it("should skip rendering tasks when cancelled", async () => {
+  const { MessageHandler, StreamKind } = await import("../../src/shared/message_handler.js");
+  const { PDFWorker } = await import("../../src/display/api.js");
+
+  const worker = new PDFWorker();
+  const mainHandler = new MessageHandler("main", "worker", worker);
+  const workerHandler = new MessageHandler("worker", "main", worker);
+
+  let renderTaskProcessed = false;
+  let cancelTaskProcessed = false;
+
+  const originalPostMessage = worker.postMessage.bind(worker);
+
+  worker.postMessage = (message) => {
+    if (message.action === "RenderTask") {
+      renderTaskProcessed = true;
+    } else if (message.action === "CancelTask") {
+      cancelTaskProcessed = true;
+    }
+    return originalPostMessage(message);
+  };
+
+  // Simulate sending a render task
+  workerHandler.on("RenderTask", () => {
+    return new Promise((resolve) => {
+      resolve({ status: "completed" });
+    });
+  });
+
+  // Send a render action
+  mainHandler.actionHandler["RenderTask"] = () => {
+    return Promise.resolve();
+  };
+
+  // Send a cancel action
+  mainHandler.actionHandler["CancelTask"] = () => {
+    return Promise.resolve();
+  };
+
+  // Simulate worker messages
+  worker.onmessage = ({ data }) => {
+    if (data.action === "RenderTask") {
+      workerHandler._onComObjOnMessage({ data });
+    } else if (data.action === "CancelTask") {
+      workerHandler._onComObjOnMessage({ data });
+    }
+  };
+
+  // Execute the test scenario
+  await mainHandler.on("RenderTask", () => {
+    worker.postMessage({
+      sourceName: "main",
+      targetName: "worker",
+      action: "RenderTask",
+      data: {}
+    });
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  await mainHandler.on("CancelTask", () => {
+    worker.postMessage({
+      sourceName: "main",
+      targetName: "worker",
+      action: "CancelTask",
+      data: {}
+    });
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  expect(renderTaskProcessed).toBe(false);
+  expect(cancelTaskProcessed).toBe(true);
+});

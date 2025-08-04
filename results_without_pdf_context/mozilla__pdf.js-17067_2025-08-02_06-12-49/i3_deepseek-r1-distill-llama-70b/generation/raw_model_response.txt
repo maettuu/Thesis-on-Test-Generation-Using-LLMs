@@ -1,0 +1,55 @@
+<think>
+Okay, I need to write a test for the issue where applying a transform breaks the pattern in PDF.js. The user provided a patch that modifies the updateRectMinMax method in canvas.js. My test should fail before the patch and pass after applying it.
+
+First, I'll look at the existing test file, test/unit/api_spec.js. It imports necessary modules, so I can use those. I need to create a test that checks the rendering of a PDF with patterns after a transform.
+
+I'll start by importing the necessary modules. I'll need getDocument from display/api.js and assert from the test_utils.js. Then, I'll set up a PDF document using getDocument with the test PDF provided by the user.
+
+Next, I'll create a test case using it() from mocha. In the test, I'll load the PDF and the specific page. I'll render the page into a canvas element. After rendering, I'll check if the canvas has the expected pattern.
+
+The expected behavior is that the pattern should be rendered correctly without breaking. So, I'll compare the actual pixel data from the canvas to the expected values. If they match, the test passes; otherwise, it fails.
+
+I'll use a small 1x1 pixel check to see if the pattern is correctly applied. If the patch is correct, the pixel should match the expected color. Before the patch, this check would fail, and after, it should pass.
+
+I'll also handle any potential errors and ensure the test cleans up properly, like closing the PDF document after the test.
+
+Finally, I'll structure the test as an async function, using await for asynchronous operations like getting the PDF document and rendering the page. I'll make sure to return the test promise so that mocha can handle it correctly.
+</think>
+
+```javascript
+it("should render patterns correctly after transform", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { assert } = await import("./test_utils.js");
+  
+  // Load test PDF with pattern issue
+  const pdf = await getDocument({
+    url: `${TEST_PDFS_PATH}/test.pdf`,
+    rangeSize: 64,
+    cMapUrl: CMAP_URL,
+    extension: true,
+  });
+  
+  try {
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    
+    // Create canvas to render the page
+    const canvas = document.createElement("canvas");
+    const renderTask = page.render({
+      canvasContext: canvas.getContext("2d"),
+      viewport,
+    });
+    
+    await renderTask.promise;
+    
+    // Verify the pattern is rendered correctly
+    const ctx = canvas.getContext("2d");
+    const expectedColor = [255, 0, 0, 255]; // Expected red color at specific position
+    const actualData = ctx.getImageData(100, 100, 1, 1).data;
+    
+    assert.deepEqual(actualData, expectedColor, "Pattern rendered correctly");
+  } finally {
+    await pdf.close();
+  }
+});
+```

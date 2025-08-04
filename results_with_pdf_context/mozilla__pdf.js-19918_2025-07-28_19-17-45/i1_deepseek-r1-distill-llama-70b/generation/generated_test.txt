@@ -1,0 +1,32 @@
+it("should decode CMYK JPEG images using ImageDecoder", async () => {
+  const { JpegStream } = await import("../../src/core/jpeg_stream.js");
+  const { JpegImage } = await import("../../src/core/jpg.js");
+  const { fetchData } = await import("../../src/display/display_utils.js");
+
+  async function createJpegStream(data) {
+    const arrayBuffer = await data.arrayBuffer();
+    const stream = new globalThis.ReadableStream({
+      start(controller) {
+        controller.enqueue(arrayBuffer);
+        controller.close();
+      },
+    });
+    return new JpegStream(stream, arrayBuffer.byteLength);
+  }
+
+  // Test with non-CMYK image (should work)
+  const nonCmykImage = await fetchData(`${TEST_PDFS_PATH}image/jpeg-rgb-144.jpg`);
+  const nonCmykStream = await createJpegStream(nonCmykImage);
+  const nonCmykResult = await nonCmykStream.getTransferableImage();
+  expect(nonCmykResult).not.toBeNull();
+
+  // Test with CMYK image (should now work)
+  const cmykImage = await fetchData(`${TEST_PDFS_PATH}image/cmyk.jpg`);
+  const cmykStream = await createJpegStream(cmykImage);
+  const cmykResult = await cmykStream.getTransferableImage();
+  expect(cmykResult).not.toBeNull();
+
+  // Cleanup
+  nonCmykStream.close();
+  cmykStream.close();
+});

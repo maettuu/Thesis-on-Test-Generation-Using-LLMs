@@ -1,0 +1,72 @@
+<think>
+Okay, I need to write a regression test for the issue where pasting an image from the clipboard wasn't supported in editing mode. The patch adds functionality to handle image pasting, so the test should fail before the patch and pass after.
+
+First, I'll look at the existing code. The test file is editor_spec.js, which currently only imports CommandManager. I'll need to import the necessary classes like AnnotationEditorUIManager, StampEditor, and others from their respective files.
+
+I'll set up a mock environment. Create a container element, a viewer object, an event bus, and a PDF document. Since this is a unit test, I'll mock these objects to focus on the UI manager's paste method.
+
+Next, I'll initialize the AnnotationEditorUIManager with these mocks. I'll set up the current layer and ensure that the UI manager has the necessary editor types registered, including StampEditor.
+
+I'll create a mock clipboard event. The clipboardData should have an item that's an image file, like a PNG. I'll use a data URL for a red dot as the image source.
+
+I'll simulate the paste event by calling the UI manager's paste method with the mock event. Then, I'll check if the current layer has the new editor added. Specifically, I'll look for an instance of StampEditor in the layer's editors.
+
+If the test passes after the patch, it means the paste functionality is working as intended. Before the patch, this test should fail because the code didn't handle image pasting.
+
+I need to make sure all mocks are correctly set up and that the test is self-contained. I'll use async/await for any promises and ensure that the test doesn't rely on external dependencies beyond the provided imports.
+
+Finally, I'll write the test block, making sure it's concise and only tests the specific regression issue.
+</think>
+
+```javascript
+it("should support pasting an image from clipboard in editing mode", async () => {
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { StampEditor } = await import("../../src/display/editor/stamp.js");
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+
+  // Mock DOM elements and dependencies
+  const container = document.createElement("div");
+  const viewer = { get pages() { return [{}]; } };
+  const eventBus = { _on: () => {}, _off: () => {} };
+  const pdfDocument = { annotationStorage: {} };
+  const pageColors = {};
+
+  // Initialize UI manager
+  const uiManager = new AnnotationEditorUIManager(container, viewer, eventBus, pdfDocument, pageColors);
+
+  // Create a mock layer with editors
+  const layer = new AnnotationEditorLayer({
+    uiManager: uiManager,
+    pageIndex: 0,
+    div: container,
+    accessibilityManager: {},
+    annotationLayer: {},
+    viewport: {},
+    l10n: {},
+  });
+
+  // Mock current layer and editor types
+  uiManager.currentLayer = layer;
+  uiManager.registerEditorTypes([StampEditor]);
+
+  // Mock clipboard event with image data
+  const clipboardData = {
+    items: [
+      new DataTransferItem(
+        "image/png",
+        new File(["data:image/png;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cG9seWdvbiBwb2ludHM9IjUwLDAgMTAwLDUwIDUwLDEwMCAwLDUwIiBmaWxsPSIjZmZmIi8+PC9zdmc+"], "red-dot.png")
+      )
+    ],
+    getData: () => "image/png"
+  };
+
+  // Simulate paste event
+  const event = { clipboardData, preventDefault: () => {} };
+  uiManager.paste(event);
+
+  // Verify that a new StampEditor was created and added to the layer
+  expect(layer.editors.size).toBeGreaterThan(0);
+  const editor = layer.editors.values().next().value;
+  expect(editor).toBeInstanceOf(StampEditor);
+});
+```

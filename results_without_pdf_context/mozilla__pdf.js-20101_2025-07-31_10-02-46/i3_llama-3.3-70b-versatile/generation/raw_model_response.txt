@@ -1,0 +1,41 @@
+```javascript
+it("should render text correctly when browser.display.use_document_fonts is set to 0", async () => {
+  const { CanvasGraphics } = await import("../../src/display/canvas.js");
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Lexer, Parser } = await import("../../src/core/parser.js");
+  const { StringStream } = await import("../../src/core/stream.js");
+  const { writeChanges } = await import("../../src/core/writer.js");
+  const { XRefMock } = await import("./test_utils.js");
+
+  const pdfData = await fetch("https://www.jma.go.jp/jma/press/2507/04a/20250704_asosan.pdf").then(response => response.arrayBuffer());
+  const pdfDocument = await PDFDocument.load(pdfData, { cMapUrl: CMAP_URL, cMapPacked: true, standardFontDataUrl: STANDARD_FONT_DATA_URL });
+  const page = await pdfDocument.getPage(1);
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  const canvasGraphics = new CanvasGraphics(ctx, new Map(), new Map(), { create: () => ({ context: ctx, canvas }) }, {}, {});
+
+  const renderTask = page.render({
+    canvasContext: ctx,
+    viewport: page.getViewport({ scale: 1 }),
+  });
+
+  await renderTask.promise;
+
+  const text = ctx.canvas.toDataURL();
+  const expectedText = "Some text from the PDF"; // Replace with actual expected text
+  const actualText = await getTextFromCanvas(canvas);
+  expect(actualText).toContain(expectedText);
+});
+
+async function getTextFromCanvas(canvas) {
+  const ctx = canvas.getContext("2d");
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const text = [];
+  for (let i = 0; i < pixels.length; i += 4) {
+    if (pixels[i + 3] !== 0) {
+      text.push(String.fromCharCode(pixels[i]));
+    }
+  }
+  return text.join("");
+}
+```

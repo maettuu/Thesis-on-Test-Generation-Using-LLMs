@@ -1,0 +1,86 @@
+<think>
+Okay, I need to write a regression test for the bug where the PolygonAnnotation fill isn't rendered in PDF.js. The test should fail before the patch and pass after. 
+
+First, I'll look at the provided patch. It modifies the PolylineAnnotation class in annotation.js. The changes introduce handling of fillColor and determine the operator based on whether the fill and stroke colors are the same.
+
+So, the test should check if both fill and stroke are rendered correctly. I'll create a test PDF with a polygon annotation that has both fill and stroke. Then, I'll use PDF.js to render it and check the output.
+
+I'll need to set up a test server to serve the PDF. Using the TestPdfsServer from test_utils.js makes sense. I'll create a PDF with a square polygon, set fill and stroke colors, and ensure the annotation is correctly added.
+
+In the test, I'll load the PDF and render the page. Then, I'll use a canvas to draw the page and get the pixel data. I'll check specific pixels to see if they match the expected fill and stroke colors.
+
+Before the patch, the fill color wasn't rendered, so the pixels would only show the stroke. After the patch, both fill and stroke should be present, so the pixels should reflect that.
+
+I'll structure the test using Jest. I'll import the necessary modules dynamically to ensure compatibility. The test will load the PDF, render it, and compare the pixel data against the expected values.
+
+I need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. Also, I'll handle any potential errors during loading or rendering.
+
+Finally, I'll write the test function, making sure it's concise and directly tests the fill and stroke rendering of the polygon annotation.
+</think>
+
+```javascript
+it("should render polygon annotation with both fill and stroke colors", async () => {
+  const { TestPdfsServer } = await import("../../test_utils.js");
+  const { PDFDocument, Page } = await import("../../src/core/document.js");
+  const { Annotation, MarkupAnnotation } = await import("../../src/core/annotation.js");
+
+  const server = new TestPdfsServer();
+  const pdfPath = server.addPdf(
+    "test.pdf",
+    `
+      %PDF-1.4
+      1 0 obj
+        <</Type /Catalog /Pages 2 0 R>>
+      endobj
+      2 0 obj
+        <</Type /Pages /Kids [3 0 R] /Count 1>>
+      endobj
+      3 0 obj
+        <</Type /Page /Parent 2 0 R /Resources 4 0 R /Contents []>>
+      endobj
+      4 0 obj
+        <</Type /Resources /ExtGState <</G1 5 0 R>>>
+      endobj
+      5 0 obj
+        <</Type /ExtGState /CA 1 /CA 1>>
+      endobj
+      6 0 obj
+        <</Type /Annot /Subtype /Polygon /Vertices [0 0 0 1 1 1 1 0] /IC [255 0 0] /CA 0.5>>
+      endobj
+    `
+  );
+
+  const pdf = await PDFDocument.load(await fetch(pdfPath).then((res) => res.blob()));
+  const page = await pdf.getPage(1);
+  const annotation = new MarkupAnnotation();
+  const render = await page.render({
+    viewport: page.getViewport({ scale: 1 }),
+    annotationMode: "all",
+  });
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  await render.renderCanvas(ctx);
+
+  const expectedFillColor = [255, 0, 0];
+  const expectedStrokeColor = [0, 0, 0];
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+  // Check fill color (red) in the center of the polygon
+  const center = {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+  };
+  const centerPixel = ctx.getImageData(center.x, center.y, 1, 1).data;
+
+  expect(centerPixel[0]).toBe(expectedFillColor[0]);
+  expect(centerPixel[1]).toBe(expectedFillColor[1]);
+  expect(centerPixel[2]).toBe(expectedFillColor[2]);
+
+  // Check stroke color (black) on the border
+  const edgePixel = ctx.getImageData(canvas.width - 1, canvas.height - 1, 1, 1).data;
+  expect(edgePixel[0]).toBe(expectedStrokeColor[0]);
+  expect(edgePixel[1]).toBe(expectedStrokeColor[1]);
+  expect(edgePixel[2]).toBe(expectedStrokeColor[2]);
+});
+```

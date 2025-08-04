@@ -1,0 +1,57 @@
+<think>
+Okay, I need to write a regression test for the issue where PDF.js couldn't decode CMYK JPEG images using the ImageDecoder. The patch provided adds support for this, so the test should fail before the patch and pass after.
+
+First, I should understand what the patch does. It looks like the JpegStream class now has a method canUseImageDecoderCMYK which checks if the ImageDecoder supports 'image/x-jpeg-pdf' type. If it does, it uses that for CMYK images.
+
+So, the test needs to verify that when a CMYK JPEG is provided, the ImageDecoder is used correctly.
+
+I'll create a test that loads a CMYK JPEG image. Before the patch, this should return null because the decoder couldn't handle CMYK. After the patch, it should return a valid image.
+
+I'll structure the test using Jest. I'll import the necessary modules like JpegImage and JpegStream. Then, I'll create a sample CMYK JPEG data. I'll need to check if the environment supports ImageDecoder, maybe using FeatureTest.isImageDecoderSupported.
+
+In the test, I'll set up JpegStream's isImageDecoderSupported to true. Then, I'll call canUseImageDecoder on JpegImage with the sample data and appropriate colorTransform. If it returns non-null, that means it can use the ImageDecoder for CMYK.
+
+I should also handle cases where the browser doesn't support ImageDecoder by skipping the test or using a try-catch block.
+
+Wait, but in the code, the canUseImageDecoder function in JpegImage returns null for 4 components (CMYK) before the patch. After the patch, it should return an object with cmyk: true.
+
+So, the test will generate a CMYK JPEG, call canUseImageDecoder, and check if it returns the correct info.
+
+I'll need to create a sample CMYK JPEG data. Maybe I can construct a minimal one or use an existing test image. But for simplicity, perhaps I can create a mock data that represents a CMYK JPEG.
+
+I'll write the test to expect that after the patch, canUseImageDecoder returns an object with cmyk: true, allowing the ImageDecoder to be used.
+
+I should also ensure that the test doesn't rely on external files, so using an inline data URI might be better.
+
+Putting it all together, the test will import the necessary modules, set up the environment, create a CMYK JPEG data, and assert that the canUseImageDecoder function behaves as expected after the patch.
+</think>
+
+```javascript
+it("should use ImageDecoder for CMYK JPEG images", async () => {
+  const { JpegImage, JpegStream } = await import("./jpg.js");
+  const { shadow } = await import("../shared/util.js");
+
+  // Setup: Enable ImageDecoder support
+  JpegStream.setOptions({ isImageDecoderSupported: true });
+
+  // Create a sample CMYK JPEG data (this is a minimal CMYK JPEG for testing)
+  const cmykJpegData = new Uint8Array([
+    0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x18, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFF, 0xFE, 0x00, 0x18, 0x32, 0x43, 0x53, 0x4D, 0x4F, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF,
+    0xC0, 0x00, 0x11, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFF, 0xC4, 0x00, 0x14, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFF, 0xC4, 0x00, 0x14, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xD9
+  ]);
+
+  // Test the canUseImageDecoder function with CMYK data
+  const result = await JpegImage.canUseImageDecoder(cmykJpegData);
+
+  // After the patch, canUseImageDecoder should return an object with cmyk: true
+  // for CMYK images when ImageDecoder is supported
+  expect(result).toEqual({ cmyk: true });
+});
+```

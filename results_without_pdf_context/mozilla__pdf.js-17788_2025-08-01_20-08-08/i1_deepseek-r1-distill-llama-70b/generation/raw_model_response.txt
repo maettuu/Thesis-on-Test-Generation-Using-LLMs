@@ -1,0 +1,52 @@
+<think>
+Okay, I need to write a regression test for the issue where Voice Over doesn't read highlighted text during editing inside a PDF. The patch provided makes some changes to the code, so I should figure out how to test if the issue is resolved.
+
+First, I'll look at the patch. It adds some ARIA attributes and modifies the highlight display. Specifically, in `highlight.js`, when the highlight is rendered, it appends a `<mark>` element with the text and sets it to be visually hidden. This should make the text available to screen readers without changing the visual appearance.
+
+So, the test needs to check if the highlighted text is correctly exposed to assistive technologies. I'll use the existing test file `test/unit/pdf_spec.js` and add a new test case.
+
+I'll start by importing the necessary modules. I already have `AnnotationEditorUIManager` and `DrawLayer` imported, so I can use them. I'll also need to create a PDF document for testing, perhaps using `build` from `../../src/display/api.js`.
+
+In the test, I'll set up a simple PDF with a single page containing some text. Then, I'll initialize the `AnnotationEditorUIManager` and create a text layer to display the text. I'll simulate a text selection and apply a highlight using the `highlightSelection` method.
+
+After applying the highlight, I'll check the DOM structure. I expect a `<mark>` element with the class `visuallyHidden` containing the selected text. I'll query the DOM to see if this element exists and if it has the correct text.
+
+If the test finds this element with the right properties, it means the patch is working, and the text is accessible. If not, the test will fail, indicating the issue isn't resolved.
+
+I should also ensure that the test doesn't rely on any UI elements beyond what's necessary and that it's self-contained. I'll use async/await for any promises, like when building the PDF document.
+
+Putting it all together, the test will create a PDF, apply a highlight, and verify the DOM structure reflects the expected accessibility changes.
+</think>
+
+```javascript
+it("should expose highlighted text to screen readers", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const pdf = await build({
+    url: "test.pdf",
+    cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@2.7.570/build/generic/web/cmaps/",
+    workerSrc: "../../src/worker.js",
+  });
+  const page = await pdf.getPage(1);
+  const textLayer = await page.getTextContent();
+  
+  const container = document.createElement("div");
+  const editorUI = new AnnotationEditorUIManager(
+    container,
+    null,
+    null,
+    null,
+    pdf,
+    null,
+    null,
+    null
+  );
+  
+  editorUI.highlightSelection();
+  
+  const selection = document.getSelection();
+  const markElement = container.querySelector(".visuallyHidden");
+  
+  expect(markElement).toBeTruthy();
+  expect(markElement.textContent).toBe("highlighted text");
+});
+```

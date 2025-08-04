@@ -1,0 +1,49 @@
+<think>
+Okay, so I need to write a regression test for this bug where the PDF.js library is throwing an error when trying to load a specific font. The error is "Warning: loadFont - translateFont failed: 'TypeError: e.peekBytes is not a function'". From the issue description, it looks like the problem is in the getFontFileType function, where 'e' is a Dict instead of a Stream, causing peekBytes to fail.
+
+First, I should understand what the patch does. The patch modifies the evaluator.js file. It adds checks to ensure that fontFile is a Stream and not empty. If it's not a Stream or is empty, it throws a FormatError. This should prevent the code from proceeding with invalid font files, which would cause the TypeError.
+
+So, the test needs to simulate a scenario where fontFile is not a Stream. I'll create a Dict object for fontFile to mimic this condition. Then, when translateFont is called, it should throw a FormatError because fontFile is not a Stream.
+
+I'll use the existing test setup in evaluator_spec.js. I'll import the necessary modules like PartialEvaluator, Dict, Name, and FormatError. Then, I'll create a mock XRef and set up the evaluator with the options to ignore errors as false.
+
+In the test case, I'll set up a descriptor with a fontFile that's a Dict instead of a Stream. When translateFont is called with this setup, it should throw a FormatError because the fontFile is invalid.
+
+I need to make sure that the test only checks for this specific error and doesn't include unnecessary details. The test should be self-contained and only test this particular scenario.
+
+So, putting it all together, the test will create a PartialEvaluator instance, set up the descriptor with an invalid fontFile, and then call translateFont. It should expect a FormatError to be thrown, which means the patch is working as intended.
+</think>
+
+```javascript
+it("should throw FormatError when fontFile is not a Stream", async () => {
+  const { PartialEvaluator, Dict, Name, FormatError } = await import("../../src/core/evaluator.js");
+  const xref = new XRefMock();
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: null,
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: null,
+    builtInCMapCache: null,
+    standardFontDataCache: null,
+    globalImageCache: null,
+    systemFontCache: null,
+    options: { ignoreErrors: false }
+  });
+
+  const descriptor = new Dict();
+  descriptor.set("FontFile", new Dict()); // Not a Stream
+
+  await expect(evaluator.translateFont({
+    descriptor,
+    dict: new Dict(),
+    baseDict: new Dict(),
+    composite: false,
+    type: "Type3",
+    firstChar: 0,
+    lastChar: 0,
+    toUnicode: null,
+    cssFontInfo: null
+  })).rejects.toThrow(FormatError);
+});
+```

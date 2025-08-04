@@ -1,0 +1,42 @@
+<think>
+Okay, I need to write a test that verifies the patch resolves the issue where large images in PDFs aren't rendered by PDF.js. The user provided a specific example PDF, example.pdf, which isn't rendering correctly. 
+
+First, I should understand the problem. The issue is that PDF.js fails to render scanned book pages that other viewers like Atril do. The console logs show errors related to JPX decoding, specifically an "Invalid tag tree" error. The patch provided replaces the JPX decoding logic with a new implementation using OpenJPEG, which should handle these cases better.
+
+My task is to create a test that fails before the patch and passes after. I'll use the provided test file as a starting point. 
+
+I'll need to set up a test that loads the example PDF, attempts to render it, and checks if the image is correctly decoded. Since the test is in Node.js, I'll use the PDFDocumentProxy and PDFPageProxy to load the PDF and access the first page.
+
+I'll create a test block using Jest's it function. The test will:
+
+1. Import the necessary modules, including PDFDocument from the display API.
+2. Set up a mock XRef to simulate the PDF data.
+3. Fetch the example PDF file, which I assume is available at a specific path.
+4. Load the PDF document and get the first page.
+5. Try to render the page and check if an error is thrown.
+
+Before the patch, rendering the page should throw an error due to the invalid tag tree. After the patch, the error should no longer occur, indicating successful rendering.
+
+I need to handle any errors that occur during rendering and assert that no error is thrown after the patch. This way, the test will pass once the issue is fixed.
+</think>
+
+```javascript
+it("should render large JPX images without throwing Invalid tag tree error", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const xref = new XRefMock();
+  const loader = {
+    fetch: async (url) => {
+      const response = await fetch("example.pdf");
+      return {
+        arrayBuffer: () => response.arrayBuffer(),
+        bytes: () => response.arrayBuffer(),
+      };
+    },
+  };
+  
+  const pdf = await PDFDocument.load(xref, loader);
+  const page = await pdf.getPage(1);
+  
+  await expect(page.render()).rejects.not.toThrowError("Invalid tag tree");
+});
+```

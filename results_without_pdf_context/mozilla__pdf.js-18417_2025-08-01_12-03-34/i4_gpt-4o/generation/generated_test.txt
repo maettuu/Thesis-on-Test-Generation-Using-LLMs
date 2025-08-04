@@ -1,0 +1,29 @@
+it("should render PDF with correct transparency filters in Firefox when base href is present", async () => {
+  const { DOMFilterFactory } = await import("../../src/display/display_utils.js");
+  const { PDFDocumentProxy, getDocument } = await import("../../src/display/api.js");
+  const { createTemporaryNodeServer } = await import("./test_utils.js");
+
+  const server = await createTemporaryNodeServer();
+  const url = `${server.url}/test.pdf`;
+  const loadingTask = getDocument(url);
+  const pdfDocument = await loadingTask.promise;
+  const page = await pdfDocument.getPage(1);
+
+  const canvasFactory = new DOMFilterFactory({ docId: "test" });
+  const viewport = page.getViewport({ scale: 1 });
+  const canvasAndContext = canvasFactory.create(viewport.width, viewport.height);
+  const renderContext = {
+    canvasContext: canvasAndContext.context,
+    viewport: viewport,
+  };
+
+  await page.render(renderContext).promise;
+
+  const expected = "rgba(0, 0, 0, 0.5)"; // Expected transparency color
+  const actual = canvasAndContext.context.getImageData(0, 0, 1, 1).data;
+  const actualColor = `rgba(${actual[0]}, ${actual[1]}, ${actual[2]}, ${actual[3] / 255})`;
+
+  expect(actualColor).toBe(expected);
+
+  server.stop();
+});

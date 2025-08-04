@@ -1,0 +1,55 @@
+it("should redo an annotation using the correct keyboard shortcut", async () => {
+  const { AnnotationEditorUIManager, CommandManager } = await import("../../src/display/editor/tools.js");
+  const { createIdFactory } = await import("./test_utils.js");
+  const { Annotation, MarkupAnnotation } = await import("../../src/core/annotation.js");
+
+  const idFactory = createIdFactory();
+  const mockDoc = {
+    annotationStorage: new Map(),
+    filterFactory: {},
+  };
+  const uiManager = new AnnotationEditorUIManager({
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    focus: () => {},
+  }, {
+    _on: () => {},
+    _off: () => {},
+  }, mockDoc, {});
+
+  const annotation = new MarkupAnnotation({
+    annotationId: idFactory.next().value,
+    type: "underline",
+    quads: [],
+  });
+
+  // Initialize editor mode
+  uiManager.updateMode(AnnotationEditorType.FREE_TEXT);
+
+  // Add annotation
+  const cmd = () => {
+    uiManager.currentLayer.addAnnotation(annotation);
+  };
+  const undoCmd = () => {
+    uiManager.currentLayer.removeAnnotation(annotation);
+  };
+
+  uiManager.addCommands({ cmd, undo: undoCmd, mustExec: true });
+
+  // Commit initial state
+  await annotation.commit();
+
+  // Perform undo
+  uiManager.undo();
+
+  // Simulate redo keyboard shortcut
+  const redoEvent = new KeyboardEvent("keydown", {
+    key: "y",
+    ctrlKey: true,
+    metaKey: false,
+  });
+  uiManager.keydown(redoEvent);
+
+  // Verify annotation was properly redone
+  expect(mockDoc.annotationStorage.has(annotation.annotationId)).toBe(true);
+});

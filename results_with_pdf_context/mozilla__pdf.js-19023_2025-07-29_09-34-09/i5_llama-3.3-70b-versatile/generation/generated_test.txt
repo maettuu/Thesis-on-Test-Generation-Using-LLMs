@@ -1,0 +1,48 @@
+it("should apply gradient when stroking text", async () => {
+  const { DefaultCanvasFactory } = await import("../../src/display/api.js");
+  const { CanvasGraphics, TextRenderingMode } = await import("../../src/display/canvas.js");
+  const { getTopLeftPixel } = await import("./test_utils.js");
+  const canvasFactory = new DefaultCanvasFactory();
+  const { canvas, context } = canvasFactory.create(100, 100);
+  // Fill background white.
+  context.fillStyle = "white";
+  context.fillRect(0, 0, 100, 100);
+  // Create a fake strokeColor that returns a linear gradient.
+  const fakeStrokeColor = {
+    getPattern: (ctx) => {
+      const grad = ctx.createLinearGradient(10, 10, 90, 10);
+      grad.addColorStop(0, "blue");
+      grad.addColorStop(1, "red");
+      return grad;
+    }
+  };
+  // Create a fake font object that draws a simple rectangle path.
+  const fakeFont = {
+    missingFile: false,
+    disableFontFace: false,
+    getPathGenerator: () => {
+      return (ctx, size) => {
+        // Draw a rectangle representing the glyph outline.
+        ctx.rect(10, 10, 80, 80);
+      };
+    }
+  };
+  // Create a CanvasGraphics instance.
+  const cg = new CanvasGraphics(context, {}, {});
+  // Configure the graphics state to use stroke mode with a gradient.
+  cg.current.font = fakeFont;
+  cg.current.fontSize = 50;
+  cg.current.fontSizeScale = 1;
+  cg.current.textRenderingMode = TextRenderingMode.STROKE;
+  cg.current.lineWidth = 10;
+  cg.current.patternStroke = true;
+  cg.current.strokeColor = fakeStrokeColor;
+  // Render a fake glyph.
+  cg.showText([{ fontChar: "A", width: 500 }]);
+  // Extract a pixel from the stroked area.
+  const pixelData = context.getImageData(15, 15, 1, 1).data;
+  // Pre-patch, the stroke would be rendered as black; post-patch, the gradient is applied.
+  if (pixelData[0] === 0 && pixelData[1] === 0 && pixelData[2] === 0) {
+    throw new Error("Gradient stroke not applied");
+  }
+});

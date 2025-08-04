@@ -1,0 +1,66 @@
+<think>
+Okay, I need to write a regression test for the patch that changes the style of the line and resizers around a selected editor. The patch modifies the editor.js, freetext.js, and ink.js files. 
+
+First, I should understand what the patch does. From the patch, I see that the static method initialize in AnnotationEditor is now setting _borderLineWidth by reading a CSS variable. Also, the setposition method now adjusts the position based on this border width to prevent resizers from being cut off.
+
+So the bug before the patch was that the resizers might get cut off because the editor's position didn't account for the border width. The test should check if this is fixed.
+
+I'll create a test that checks the positioning after the patch. I'll need to mock the CSS variable --outline-width to a specific value, say 2px, to see if the translation is correctly applied.
+
+I'll create a test case where an editor is initialized, and after moving or setting the position, the left and top styles include the border width adjustment.
+
+I'll use Jest with Playwright for browser interaction. I'll set up a simple HTML page with the necessary CSS variables. Then, I'll create an instance of the editor, move it, and check the style properties.
+
+I need to import the required modules, set up the page, mock the CSS, create the editor, and assert the styles. The test should fail before the patch because the styles won't include the border adjustment, and pass after the patch.
+
+I'll structure the test with async/await, using describe and it blocks. The test will navigate to the test page, set the CSS variable, create the editor, move it, and check the styles.
+
+I should make sure the test is self-contained and doesn't rely on external dependencies beyond the provided imports. I'll use dynamic imports for compatibility with Node.js.
+
+Finally, I'll write the test code, ensuring it's concise and directly tests the behavior fixed by the patch.
+</think>
+
+```javascript
+describe("Editor Resizer Style", () => {
+  it("should adjust editor position accounting for border width", async () => {
+    const { AnnotationEditor } = await import("../../src/display/editor/editor.js");
+    const { FreeTextEditor } = await import("../../src/display/editor/freetext.js");
+
+    // Set up test page with CSS variable
+    const html = `
+      <html>
+        <head>
+          <style>
+            :root {
+              --outline-width: 2px;
+            }
+          </style>
+        </head>
+        <body></body>
+      </html>
+    `;
+    const page = await browser.newPage({ content: html });
+
+    // Initialize editor
+    const editor = new FreeTextEditor({
+      parent: { viewport: { rotation: 0, width: 100, height: 100 } },
+      uiManager: {},
+      id: "test-editor"
+    });
+
+    // Mock getBoundingClientRect to simulate movement
+    editor.div.getBoundingClientRect = () => ({ x: 10, y: 20 });
+
+    // Trigger position update
+    editor.drag(5, 5);
+    editor.fixAndSetPosition();
+
+    // Verify position includes border width adjustment
+    const expectedLeft = (10 + 2) / 100; // Border width is 2px
+    const expectedTop = (20 + 2) / 100;
+
+    assert.strictEqual(editor.div.style.left, `${expectedLeft.toFixed(2)}%`);
+    assert.strictEqual(editor.div.style.top, `${expectedTop.toFixed(2)}%`);
+  });
+});
+```

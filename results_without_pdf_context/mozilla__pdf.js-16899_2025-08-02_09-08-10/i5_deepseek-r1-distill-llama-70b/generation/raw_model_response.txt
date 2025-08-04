@@ -1,0 +1,49 @@
+<think>
+Okay, I need to write a regression test for the issue where the FreeText annotation isn't displayed. The patch provided makes several changes, so I should understand what those changes do and how they fix the problem.
+
+Looking at the patch, I see that a new static method `_hasPopupData` is added to `AnnotationElement`. This method checks if any of the popup-related data (title, contents, richText) is present. Then, a getter `hasPopupData` is added which uses this method.
+
+In the constructors of various annotation elements like `TextAnnotationElement`, `FreeTextAnnotationElement`, etc., the `isRenderable` parameter is changed from a conditional check to simply `true`. This means that these elements will now always be renderable, which probably fixes the issue where they weren't showing up when they should.
+
+Additionally, in the `render` methods of these elements, the condition for creating the popup is updated. Previously, it checked if `!this.data.popupRef`, but now it also checks `this.hasPopupData`. This ensures that the popup is only created if there's data to display, which might have been the issue causing the FreeText annotation not to show.
+
+So, the test needs to verify that when a FreeText annotation has popup data, it is rendered correctly. I'll create a test that generates a FreeText annotation with some content and checks if it's displayed.
+
+I'll use `PDFDocumentLoadingTask` to load a test PDF. Since the actual PDF isn't provided, I'll assume a sample one. Then, I'll get the first page and its annotation layer. I'll create a FreeText annotation with title and content, add it to the layer, and render it.
+
+After rendering, I'll check if the popup is created. Since the patch ensures that the popup is created when `hasPopupData` is true, the test should pass if the popup exists after rendering.
+
+I need to make sure the test is self-contained, uses the correct imports, and follows the structure provided. I'll import `PDFDocumentLoadingTask` and `AnnotationLayer` from the specified paths. I'll set up the test to fail if the popup isn't created, ensuring that the patch resolves the issue.
+</think>
+
+```javascript
+it("should display FreeText annotation with content", async () => {
+  const { PDFDocumentLoadingTask } = await import("../../src/display/api.js");
+  const { AnnotationLayer } = await import("../../src/display/annotation_layer.js");
+  const { Annotation } = await import("../../src/core/annotation.js");
+
+  // Load a test PDF document
+  const pdf = await PDFDocumentLoadingTask.load("../src/test/pdfs/annotation-test.pdf");
+  const page = await pdf.getPage(1);
+  const annotationLayer = new AnnotationLayer({
+    page,
+    annotations: [],
+    renderInteractiveForms: true
+  });
+
+  // Create a FreeText annotation with content
+  const freeTextAnnotation = new Annotation({
+    type: "FreeText",
+    titleObj: { str: "Test Title" },
+    contentsObj: { str: "Test Content" },
+    richText: { str: "<p>Test Rich Text</p>" }
+  });
+
+  annotationLayer.annotations.add(freeTextAnnotation);
+  await annotationLayer.render();
+
+  // Verify that the popup is created and visible
+  const popup = annotationLayer._popup;
+  expect(popup).toBeTruthy();
+});
+```

@@ -1,0 +1,75 @@
+<think>
+Okay, I need to write a regression test for the issue where a context menu entry was added to highlight and comment on text selection in a PDF. The test should fail before the patch and pass after.
+
+First, I'll look at the patch provided. It seems that the main changes are in the toolbar.js and tools.js files. The HighlightToolbar class was renamed to FloatingToolbar, and a new commentButton was added alongside the highlightButton. The UI Manager now has a commentSelection method.
+
+So, the test needs to check if both highlight and comment options appear in the context menu after selecting text. Before the patch, the comment option wasn't there, so the test should fail. After the patch, both should be present.
+
+I'll structure the test using Jest. I'll create a dummy PDF document and set up the necessary UI Manager and event listeners. Then, I'll trigger a contextmenu event on a text selection. I'll check if both menu items are added to the context menu.
+
+I'll import the required modules dynamically, like AnnotationEditorUIManager and FloatingToolbar. I'll set up a PDF page with a text layer. Then, I'll simulate a text selection and trigger the context menu event.
+
+I'll use Jest's expect to check if both 'highlight' and 'comment' menu items are present. If they are, the test passes; otherwise, it fails.
+
+I need to make sure the test is self-contained and doesn't rely on external dependencies beyond the provided imports. I'll structure the test with async/await for dynamic imports and use event listeners to capture the menu creation.
+
+Finally, I'll write the test code, ensuring it only includes the necessary steps and imports, and that it accurately reflects the changes made in the patch.
+</think>
+
+```javascript
+it("should add highlight and comment options to context menu", async () => {
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { FloatingToolbar } = await import("../../src/display/editor/toolbar.js");
+  
+  const uiManager = new AnnotationEditorUIManager();
+  const textLayer = {
+    closest: () => ({
+      getBoundingClientRect: () => ({ top: 0, left: 0, right: 100, bottom: 100 }),
+    }),
+  };
+  
+  const mockDispatch = jest.fn();
+  document.dispatchEvent = mockDispatch;
+  
+  const selection = {
+    isCollapsed: false,
+    anchorNode: {},
+    rangeCount: 1,
+  };
+  
+  const getSelectionSpy = jest.spyOn(global, "getSelection").mockReturnValue(selection);
+  
+  const contextMenuEvent = new Event("contextmenu");
+  contextMenuEvent.initMouseEvent(
+    "contextmenu",
+    true,
+    true,
+    window,
+    0,
+    0,
+    0,
+    0,
+    0,
+    false,
+    false,
+    false,
+    false,
+    0,
+    null
+  );
+  
+  document.dispatchEvent(contextMenuEvent);
+  
+  const menuCreated = await new Promise(resolve => {
+    const listener = ({ detail }) => {
+      if (detail.type === "highlightSelection") {
+        resolve(true);
+      }
+    };
+    document.addEventListener("menu-creation", listener);
+    document.dispatchEvent(contextMenuEvent);
+  });
+  
+  expect(menuCreated).toBe(true);
+});
+```

@@ -1,0 +1,58 @@
+```javascript
+it("should save PDF annotations correctly on certain PDFs", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { LocalPdfManager } = await import("../../src/core/pdf_manager.js");
+  const { Ref } = await import("../../src/core/primitives.js");
+  const { incrementalUpdate } = await import("../../src/core/writer.js");
+
+  const pdfData = new Uint8Array([/* PDF data bytes */]);
+  const pdfManager = new LocalPdfManager({
+    source: pdfData,
+    docId: "test-doc",
+    handler: null,
+  });
+
+  const pdfDocument = await PDFDocument.load(pdfManager);
+  const page = await pdfDocument.getPage(0);
+  const annotations = await page.getAnnotationsData();
+
+  const annotationStorage = new Map();
+  annotationStorage.set("1R", { value: "Test annotation" });
+
+  const stream = await pdfManager.requestLoadedStream();
+  const xref = await pdfManager.ensureDoc("xref");
+  const acroForm = await pdfManager.ensureCatalog("acroForm");
+  const acroFormRef = new Ref(1, 0);
+
+  const newRefs = [];
+  const xrefInfo = {
+    rootRef: xref.trailer.getRaw("Root"),
+    encryptRef: xref.trailer.getRaw("Encrypt"),
+    newRef: xref.getNewTemporaryRef(),
+    infoRef: xref.trailer.getRaw("Info"),
+    info: {},
+    fileIds: xref.trailer.get("ID"),
+    startXRef: xref.lastXRefStreamPos,
+    filename: "test.pdf",
+  };
+
+  const updatedPdf = await incrementalUpdate({
+    originalData: stream.bytes,
+    xrefInfo,
+    newRefs,
+    xref,
+    hasXfa: false,
+    xfaDatasetsRef: null,
+    hasXfaDatasetsEntry: false,
+    needAppearances: true,
+    acroFormRef,
+    acroForm,
+    xfaData: null,
+  });
+
+  const expectedAnnotation = "Test annotation";
+  const actualAnnotation = annotations[0].value;
+
+  expect(actualAnnotation).toBe(expectedAnnotation);
+});
+```

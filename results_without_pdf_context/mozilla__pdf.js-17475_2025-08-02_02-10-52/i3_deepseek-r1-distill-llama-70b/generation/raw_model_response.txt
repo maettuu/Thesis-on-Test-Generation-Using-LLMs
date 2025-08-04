@@ -1,0 +1,55 @@
+<think>
+Okay, I need to write a regression test for the issue where the highlight on a cropped PDF isn't visible when saving or printing. The patch provided modifies the `serializeBoxes` and `serializeOutlines` methods in `highlight.js` to include the translation parameters `tx` and `ty`. 
+
+First, I should understand what the patch does. It looks like the patch adds `rect` parameters to these methods, which are used to calculate the correct coordinates for the highlight boxes and outlines. This probably fixes an issue where the highlights were being drawn at incorrect positions, especially when the PDF is cropped.
+
+Now, for the test. I need to create a test that fails before the patch and passes after. The test should verify that the highlight's quad points are correctly calculated considering the crop rectangle.
+
+I'll use the provided test file `test/unit/pdf_spec.js` as a starting point. I'll import the necessary modules, including `HighlightEditor` from `src/display/editor/highlight.js`.
+
+I'll set up a test case where a PDF with a crop box is loaded. Then, I'll create a highlight annotation and serialize it. The key is to check if the quad points in the serialized data correctly account for the crop.
+
+In the test, I'll create a mock `pageDimensions` to simulate a cropped page. Then, I'll instantiate `HighlightEditor` with some boxes. After serializing, I'll extract the quad points and verify that they include the translation values (`tx` and `ty`) from the crop. Without the patch, these values wouldn't be added, causing the quad points to be incorrect.
+
+So, the test will compare the actual quad points against the expected ones that include the crop offsets. If the patch is applied, the quad points should match the expected values, making the test pass. Without the patch, they won't match, causing the test to fail.
+
+I'll structure the test with `it("should correctly serialize highlight boxes with crop", async () => { ... })`. Inside, I'll set up the necessary mocks and assertions to validate the quad points.
+
+I need to make sure all variables are correctly initialized and that the test is self-contained. I'll also ensure that I'm using the provided imports without adding new dependencies.
+
+Finally, I'll write the test code, making sure it's concise and only tests the specific behavior affected by the patch.
+</think>
+
+```javascript
+it("should correctly serialize highlight boxes with crop", async () => {
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+  
+  // Mock page dimensions to simulate a cropped page
+  const pageDimensions = [100, 100]; // pageWidth, pageHeight
+  const editor = new HighlightEditor({
+    boxes: [{x: 0.5, y: 0.5, width: 0.2, height: 0.2}],
+    pageDimensions: pageDimensions,
+    x: 0.1,
+    y: 0.1,
+    width: 0.8,
+    height: 0.8,
+  });
+
+  // Serialize boxes with crop
+  const quadPoints = editor.#serializeBoxes([20, 30]); // tx=20, ty=30
+  
+  // Expected quadPoints after applying crop
+  const expectedQuadPoints = [
+    20 + 0.5 * 100,  // x
+    30 + 0.5 * 100,  // y
+    20 + (0.5 + 0.2) * 100, // x + width
+    30 + 0.5 * 100,  // y
+    20 + 0.5 * 100,  // x
+    30 + (0.5 + 0.2) * 100, // y + height
+    20 + (0.5 + 0.2) * 100, // x + width
+    30 + (0.5 + 0.2) * 100  // y + height
+  ];
+  
+  assert.deepEqual(quadPoints, expectedQuadPoints);
+});
+```

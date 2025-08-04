@@ -1,0 +1,106 @@
+<think>
+Okay, I need to write a test that verifies the mouse cursor changes correctly when resizing an image or drawing in a PDF document. The issue is that before the patch, the cursor didn't change based on which edge the user was resizing from. The patch should fix this by introducing resizers that update the cursor appropriately.
+
+First, I'll look at the existing code. The patch adds resizers in the `AnnotationEditor` class. These resizers are created in the `#createResizers` method and handle pointer events to change the cursor. Each resizer is a div with a class like "resizer topLeft", etc.
+
+I need to simulate resizing from different edges and check if the cursor changes. I'll use Jest and Puppeteer for this end-to-end test. Puppeteer can control a headless browser, allowing me to interact with the page and check the cursor styles.
+
+I'll start by setting up a simple HTML page that includes the necessary PDF.js code. Then, I'll create an image editor, trigger a mouse move event over the resizer, and check the cursor style. I'll test each edge (top, bottom, left, right) to ensure the correct cursor is displayed.
+
+I'll write an async test function that uses `it` from Jest. Inside, I'll import the necessary classes using dynamic imports to ensure compatibility with Node.js. I'll set up the HTML content, create a PDF document, and add an image editor. Then, I'll use Puppeteer to navigate to the test page, click on the editor to activate it, and move the mouse over each resizer to check the cursor.
+
+Each check involves moving the mouse to the resizer's position, waiting for the cursor to change, and then asserting that the cursor style matches the expected one (like 'n-resize' for top). I'll test all four edges to cover all cases.
+
+I need to make sure that the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll structure the test to clean up properly after each check to avoid interference between tests.
+
+Finally, I'll write the test code as a single `it` block, ensuring it's concise and directly addresses the issue.
+</think>
+
+```javascript
+it("should change cursor when resizing from different edges", async () => {
+  const { AnnotationEditor, InkEditor, StampEditor } = await import("../../src/display/editor/editor.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  
+  // Setup test HTML content
+  const htmlContent = `
+    <html>
+      <head>
+        <style>
+          .resizer {
+            width: 15px;
+            height: 15px;
+            position: absolute;
+            z-index: 100;
+          }
+          .resizer.topLeft { cursor: nw-resize; }
+          .resizer.topRight { cursor: ne-resize; }
+          .resizer.bottomRight { cursor: se-resize; }
+          .resizer.bottomLeft { cursor: sw-resize; }
+          .resizer.topMiddle { cursor: n-resize; }
+          .resizer.middleRight { cursor: e-resize; }
+          .resizer.bottomMiddle { cursor: s-resize; }
+          .resizer.middleLeft { cursor: w-resize; }
+        </style>
+      </head>
+      <body></body>
+    </html>
+  `;
+
+  // Create test page and editor
+  const page = await new Promise(resolve => {
+    const server = require('http').createServer((req, res) => {
+      res.writeHead(200, {'Content-Type': 'text/html'});
+      res.end(htmlContent);
+    }).listen(0, 'localhost', () => {
+      const port = server.address().port;
+      resolve(`http://localhost:${port}`);
+    });
+  });
+
+  // Initialize editor and page
+  const editor = new StampEditor({
+    parent: {},
+    id: 'test-editor',
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    rotation: 0,
+    pageDimensions: [100, 100],
+    pageTranslation: [0, 0]
+  });
+
+  // Test cursor changes
+  const puppeteer = require('puppeteer');
+  const browser = await puppeteer.launch();
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(page);
+
+  // Click to activate editor
+  await page.click('#test-editor');
+
+  // Test top edge
+  await page.hover('.resizers .topLeft');
+  const topCursor = await page.evaluate(() => window.getComputedStyle(document.querySelector('.resizers .topLeft')).cursor);
+  expect(topCursor).toBe('nw-resize');
+
+  // Test right edge
+  await page.hover('.resizers .topRight');
+  const rightCursor = await page.evaluate(() => window.getComputedStyle(document.querySelector('.resizers .topRight')).cursor);
+  expect(rightCursor).toBe('ne-resize');
+
+  // Test bottom edge
+  await page.hover('.resizers .bottomRight');
+  const bottomCursor = await page.evaluate(() => window.getComputedStyle(document.querySelector('.resizers .bottomRight')).cursor);
+  expect(bottomCursor).toBe('se-resize');
+
+  // Test left edge
+  await page.hover('.resizers .bottomLeft');
+  const leftCursor = await page.evaluate(() => window.getComputedStyle(document.querySelector('.resizers .bottomLeft')).cursor);
+  expect(leftCursor).toBe('sw-resize');
+
+  // Cleanup
+  await browser.close();
+});
+```

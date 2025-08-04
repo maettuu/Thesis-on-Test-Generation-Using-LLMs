@@ -1,0 +1,46 @@
+<think>
+Okay, I need to write a regression test for the issue where OpenJPEG warnings don't respect the PDF.js verbosity levels. The patch provided modifies the JpxImage.decode method to pass the warn function from PDF.js, so the test should ensure that this change works as intended.
+
+First, I'll look at the existing test file, test/unit/pdf.image_decoders_spec.js. It already imports JpxError and JpxImage, so I can use those. I also see that it imports getVerbosityLevel, setVerbosityLevel, and VerbosityLevel from shared/util.js, which I'll need to control the verbosity during the test.
+
+The goal is to test that when the verbosity is set to a level that should suppress warnings, the OpenJPEG warnings are not logged. So, I'll need to mock the console.warn function to check if it's called.
+
+I'll structure the test as follows:
+1. Set the verbosity level to a low level, like 'error', which should suppress warnings.
+2. Mock console.warn to track if it's called.
+3. Decode a JPX image using JpxImage.decode, which should trigger an OpenJPEG warning.
+4. After decoding, check that console.warn was not called, indicating the warning was suppressed.
+
+I should use async/await since the decode method is likely asynchronous. I'll create a test image data URL for a minimal JPX file to trigger the decode. I'll use a try-catch block to handle any errors during decoding.
+
+So, the test will:
+- Import necessary modules.
+- Set verbosity to 'error'.
+- Mock console.warn.
+- Fetch or create a sample JPX file.
+- Decode it and check for warnings.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll also ensure that the test fails before the patch because, without the warn function being passed, the console.warn would be called, and the test expects it not to be called. After the patch, the test should pass because the warnings are now properly suppressed based on the verbosity level.
+</think>
+
+```javascript
+it("should respect verbosity level when issuing OpenJPEG warnings", async () => {
+  const originalVerbosity = getVerbosityLevel();
+  const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+  try {
+    setVerbosityLevel(VerbosityLevel.error);
+    
+    const testData = new TextEncoder('utf-8').encode('/* jpx data */');
+    const result = await JpxImage.decode(testData);
+    
+    expect(warnSpy).not.toHaveBeenCalled();
+  } catch (error) {
+    console.error('Error during JPX decoding:', error);
+    throw error;
+  } finally {
+    setVerbosityLevel(originalVerbosity);
+    warnSpy.mockRestore();
+  }
+});
+```

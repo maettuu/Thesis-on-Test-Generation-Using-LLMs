@@ -1,0 +1,40 @@
+it("should handle multiple messages without blocking", async () => {
+  const port = new LoopbackPort();
+  const messageHandler = new MessageHandler("source", "target", port);
+
+  let counter = 0;
+  let done = false;
+
+  function simpleAction(data) {
+    return data;
+  }
+
+  messageHandler.on("testAction", simpleAction);
+
+  const results = [];
+
+  // Create 50 promises to simulate a lot of messages
+  const promises = Array.from({ length: 50 }).map(async (_, i) => {
+    const result = await new Promise((resolve, reject) => {
+      port.postMessage({
+        targetName: "source",
+        sourceName: "target",
+        action: "testAction",
+        data: { id: i },
+        callbackId: i,
+        callback: 1
+      });
+    });
+    results.push(result);
+    counter++;
+
+    if (counter === 50) {
+      done = true;
+    }
+  });
+
+  await Promise.all(promises);
+  await new Promise(resolve => resolve(done));
+
+  expect(counter).toBe(50);
+});

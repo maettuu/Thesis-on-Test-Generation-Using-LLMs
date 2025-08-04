@@ -1,0 +1,38 @@
+it("should render top and bottom images in pdf file", async () => {
+  const xref = new XRefMock();
+  const handler = {
+    send: jest.fn(),
+    sendWithPromise: jest.fn(),
+  };
+  const idFactory = createIdFactory();
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler,
+    pageIndex: 0,
+    idFactory,
+  });
+  const dict = new Dict();
+  dict.set("Subtype", new Name("Image"));
+  dict.set("Width", 100);
+  dict.set("Height", 100);
+  dict.set("ColorSpace", new Name("DeviceRGB"));
+  dict.set("BitsPerComponent", 8);
+  dict.set("Filter", new Name("DCTDecode"));
+  const stream = new Stream(new StringStream("")));
+  xref.fetch = jest.fn().mockReturnValueOnce(dict);
+  xref.fetchIfRef = jest.fn().mockReturnValueOnce(stream);
+  const operatorList = new OperatorList();
+  await evaluator.buildPaintImageXObject({
+    resources: new Dict(),
+    image: stream,
+    operatorList,
+    cacheKey: "test",
+    localImageCache: new Map(),
+    localColorSpaceCache: new Map(),
+  });
+  expect(handler.send).toHaveBeenCalledTimes(1);
+  expect(handler.send).toHaveBeenCalledWith(
+    "commonobj",
+    expect.arrayContaining(["test", "Image", expect.anything()])
+  );
+});

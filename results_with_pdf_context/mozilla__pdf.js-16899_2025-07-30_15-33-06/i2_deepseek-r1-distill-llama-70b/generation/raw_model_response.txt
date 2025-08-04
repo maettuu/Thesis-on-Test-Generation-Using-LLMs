@@ -1,0 +1,52 @@
+<think>
+Okay, I need to write a regression test for the issue where the FreeText annotation isn't displayed. The patch provided makes changes to the annotation_layer.js file, so I should focus on testing that specific behavior.
+
+First, I should understand what the patch does. From the patch, it looks like several classes like TextAnnotationElement, FreeTextAnnotationElement, and others had their constructors modified. The main change is that the isRenderable parameter is now set to true by default, which means these annotations should always render something, even if they don't have popup data.
+
+The problem before the patch was that FreeText annotations without popup data weren't being displayed. So the test needs to check if after the patch, these annotations are rendered correctly.
+
+I'll use the provided PDF file, bug1851498.pdf, which presumably contains a FreeText annotation without popup data. The test will load this PDF and check if the FreeText annotation is rendered.
+
+I'll structure the test using Jest. I'll import the necessary modules: getDocument from display/api.js and buildGetDocumentParams from test_utils.js. Then, I'll load the PDF and get the first page.
+
+Next, I'll create an AnnotationLayer instance for that page. The key part is checking if the FreeText annotation is rendered. I'll look for elements with the class "freeTextAnnotation" in the DOM. If such elements exist, it means the annotation was rendered.
+
+So the test will perform the following steps:
+1. Load the PDF document.
+2. Get the first page and its annotation layer.
+3. Render the annotations.
+4. Check if a FreeText annotation element exists in the DOM.
+
+If the test passes after the patch, it means the FreeText annotation is now displayed correctly when it should be.
+</think>
+
+```javascript
+it("should render freetext annotation without popup data", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1851498.pdf'));
+  
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const annotationLayer = new (await import("./annotation_layer.js")).AnnotationLayer({
+    page,
+    linkService: { eventBus: { dispatch: () => {} } },
+    downloadManager: { download: () => Promise.resolve() },
+    imageResourcesPath: "",
+    renderForms: false,
+    svgFactory: new (await import("./display_utils.js")).DOMSVGFactory(),
+    annotationStorage: new (await import("./annotation_storage.js")).AnnotationStorage(),
+    enableScripting: false,
+    hasJSActions: false,
+    fieldObjects: [],
+    parent: null,
+  });
+
+  const container = document.createElement("div");
+  annotationLayer.render(container);
+  
+  const freeTextAnnotation = container.querySelector(".freeTextAnnotation");
+  
+  expect(freeTextAnnotation).toBeTruthy();
+});
+```

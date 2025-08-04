@@ -1,0 +1,574 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Support decoding cmyk jpeg image in using ImageDecoder
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/jpeg_stream.js b/src/core/jpeg_stream.js
+--- a/src/core/jpeg_stream.js
++++ b/src/core/jpeg_stream.js
+@@ -44,6 +44,16 @@ class JpegStream extends DecodeStream {
+     );
+   }
+ 
++  static get canUseImageDecoderCMYK() {
++    return shadow(
++      this,
++      "canUseImageDecoderCMYK",
++      this.#isImageDecoderSupported
++        ? ImageDecoder.isTypeSupported("image/x-jpeg-pdf")
++        : Promise.resolve(false)
++    );
++  }
++
+   static setOptions({ isImageDecoderSupported = false }) {
+     this.#isImageDecoderSupported = isImageDecoderSupported;
+   }
+@@ -171,6 +181,14 @@ class JpegStream extends DecodeStream {
+       if (!useImageDecoder) {
+         return null;
+       }
++      let type = "image/jpeg";
++      if (useImageDecoder.cmyk) {
++        if (await JpegStream.canUseImageDecoderCMYK) {
++          type = "image/x-jpeg-pdf";
++        } else {
++          return null;
++        }
++      }
+       if (useImageDecoder.exifStart) {
+         // Replace the entire EXIF-block with dummy data, to ensure that a
+         // non-default EXIF orientation won't cause the image to be rotated
+@@ -182,7 +200,7 @@ class JpegStream extends DecodeStream {
+       }
+       decoder = new ImageDecoder({
+         data,
+-        type: "image/jpeg",
++        type,
+         preferAnimation: false,
+       });
+
+diff --git a/src/core/jpg.js b/src/core/jpg.js
+--- a/src/core/jpg.js
++++ b/src/core/jpg.js
+@@ -810,7 +810,7 @@ class JpegImage {
+   }
+ 
+   static canUseImageDecoder(data, colorTransform = -1) {
+-    let exifOffsets = null;
++    const jpegInfo = Object.create(null);
+     let offset = 0;
+     let numComponents = null;
+     let fileMarker = readUint16(data, offset);
+@@ -838,12 +838,13 @@ class JpegImage {
+             appData[4] === 0 &&
+             appData[5] === 0
+           ) {
+-            if (exifOffsets) {
++            if (jpegInfo.exifStart) {
+               throw new JpegError("Duplicate EXIF-blocks found.");
+             }
+             // Don't do the EXIF-block replacement here, see `JpegStream`,
+             // since that can modify the original PDF document.
+-            exifOffsets = { exifStart: oldOffset + 6, exifEnd: newOffset };
++            jpegInfo.exifStart = oldOffset + 6;
++            jpegInfo.exifEnd = newOffset;
+           }
+           fileMarker = readUint16(data, offset);
+           offset += 2;
+@@ -868,13 +869,13 @@ class JpegImage {
+       fileMarker = readUint16(data, offset);
+       offset += 2;
+     }
+-    if (numComponents === 4) {
+-      return null;
+-    }
+     if (numComponents === 3 && colorTransform === 0) {
+       return null;
+     }
+-    return exifOffsets || {};
++    if (numComponents === 4) {
++      jpegInfo.cmyk = true;
++    }
++    return jpegInfo;
+   }
+ 
+   parse(data, { dnlScanLines = null } = {}) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.10
+- @babel/preset-env: ^7.26.9
+- @babel/runtime: ^7.27.0
+- @csstools/postcss-light-dark-function: ^2.0.8
+- @fluent/bundle: ^0.19.1
+- @fluent/dom: ^0.10.1
+- @metalsmith/layouts: ^3.0.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.69
+- @types/node: ^22.15.2
+- autoprefixer: ^10.4.21
+- babel-loader: ^10.0.0
+- caniuse-lite: ^1.0.30001715
+- core-js: ^3.41.0
+- eslint: ^9.25.1
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.12.3
+- eslint-plugin-prettier: ^5.2.6
+- eslint-plugin-unicorn: ^58.0.0
+- globals: ^16.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.6.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.3
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.5.3
+- puppeteer: ^24.7.2
+- stylelint: ^16.19.1
+- stylelint-prettier: ^5.0.3
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.14
+- tsc-alias: ^1.8.15
+- ttest: ^4.0.0
+- typescript: ^5.8.3
+- vinyl: ^3.0.0
+- webpack: ^5.99.7
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20.16.0 || >=22.3.0
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/calculate_md5.js`: calculateMD5
+- `../../src/core/calculate_sha256.js`: calculateSHA256
+- `../../src/core/calculate_sha_other.js`: calculateSHA384, calculateSHA512
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/colorspace_utils.js`: ColorSpaceUtils
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalColorSpaceCache, GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, isValidExplicitDest, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, DrawOPS, FeatureTest, FormatError, ImageKind, InvalidPDFException, MathClamp, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util, updateUrlHash
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/jpeg_stream.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { FeatureTest, shadow, warn } from "../shared/util.js";
+17 import { DecodeStream } from "./decode_stream.js";
+18 import { Dict } from "./primitives.js";
+19 import { JpegImage } from "./jpg.js";
+20 
+21 /**
+22  * For JPEG's we use a library to decode these images and the stream behaves
+23  * like all the other DecodeStreams.
+24  */
+25 class JpegStream extends DecodeStream {
+26   static #isImageDecoderSupported = FeatureTest.isImageDecoderSupported;
+27 
+28   constructor(stream, maybeLength, params) {
+29     super(maybeLength);
+30 
+31     this.stream = stream;
+32     this.dict = stream.dict;
+33     this.maybeLength = maybeLength;
+34     this.params = params;
+35   }
+36 
+144   async getTransferableImage() {
+145     if (!(await JpegStream.canUseImageDecoder)) {
+146       return null;
+147     }
+148     const jpegOptions = this.jpegOptions;
+149     if (jpegOptions.decodeTransform) {
+150       // TODO: We could decode the image thanks to ImageDecoder and then
+151       // get the pixels with copyTo and apply the decodeTransform.
+152       return null;
+153     }
+154     let decoder;
+155     try {
+156       // TODO: If the stream is Flate & DCT we could try to just pipe the
+157       // the DecompressionStream into the ImageDecoder: it'll avoid the
+158       // intermediate ArrayBuffer.
+159       const bytes =
+160         (this.canAsyncDecodeImageFromBuffer &&
+161           (await this.stream.asyncGetBytes())) ||
+162         this.bytes;
+163       if (!bytes) {
+164         return null;
+165       }
+166       let data = this.#skipUselessBytes(bytes);
+167       const useImageDecoder = JpegImage.canUseImageDecoder(
+168         data,
+169         jpegOptions.colorTransform
+170       );
+171       if (!useImageDecoder) {
+172         return null;
+173       }
+174       if (useImageDecoder.exifStart) {
+175         // Replace the entire EXIF-block with dummy data, to ensure that a
+176         // non-default EXIF orientation won't cause the image to be rotated
+177         // when using `ImageDecoder` (fixes bug1942064.pdf).
+178         //
+179         // Copy the data first, to avoid modifying the original PDF document.
+180         data = data.slice();
+181         data.fill(0x00, useImageDecoder.exifStart, useImageDecoder.exifEnd);
+182       }
+183       decoder = new ImageDecoder({
+184         data,
+185         type: "image/jpeg",
+186         preferAnimation: false,
+187       });
+188 
+189       return (await decoder.decode()).image;
+190     } catch (reason) {
+191       warn(`getTransferableImage - failed: "${reason}".`);
+192       return null;
+193     } finally {
+194       decoder?.close();
+195     }
+196   }
+197 }
+198 
+File:
+src/core/jpg.js
+1 /* Copyright 2014 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the 'License');
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an 'AS IS' BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { assert, BaseException, warn } from "../shared/util.js";
+17 import { ColorSpaceUtils } from "./colorspace_utils.js";
+18 import { DeviceCmykCS } from "./colorspace.js";
+19 import { grayToRGBA } from "../shared/image_utils.js";
+20 import { readUint16 } from "./core_utils.js";
+21 
+54 // prettier-ignore
+55 const dctZigZag = new Uint8Array([
+56    0,
+57    1,  8,
+58   16,  9,  2,
+59    3, 10, 17, 24,
+60   32, 25, 18, 11, 4,
+61    5, 12, 19, 26, 33, 40,
+62   48, 41, 34, 27, 20, 13,  6,
+63    7, 14, 21, 28, 35, 42, 49, 56,
+64   57, 50, 43, 36, 29, 22, 15,
+65   23, 30, 37, 44, 51, 58,
+66   59, 52, 45, 38, 31,
+67   39, 46, 53, 60,
+68   61, 54, 47,
+69   55, 62,
+70   63
+71 ]);
+72 
+73 const dctCos1 = 4017; // cos(pi/16)
+74 const dctSin1 = 799; // sin(pi/16)
+75 const dctCos3 = 3406; // cos(3*pi/16)
+76 const dctSin3 = 2276; // sin(3*pi/16)
+77 const dctCos6 = 1567; // cos(6*pi/16)
+78 const dctSin6 = 3784; // sin(6*pi/16)
+79 const dctSqrt2 = 5793; // sqrt(2)
+80 const dctSqrt1d2 = 2896; // sqrt(2) / 2
+81 
+461 // A port of poppler's IDCT method which in turn is taken from:
+462 //   Christoph Loeffler, Adriaan Ligtenberg, George S. Moschytz,
+463 //   'Practical Fast 1-D DCT Algorithms with 11 Multiplications',
+464 //   IEEE Intl. Conf. on Acoustics, Speech & Signal Processing, 1989,
+465 //   988-991.
+705 
+806 class JpegImage {
+807   constructor({ decodeTransform = null, colorTransform = -1 } = {}) {
+808     this._decodeTransform = decodeTransform;
+809     this._colorTransform = colorTransform;
+810   }
+811 
+812   static canUseImageDecoder(data, colorTransform = -1) {
+813     let exifOffsets = null;
+814     let offset = 0;
+815     let numComponents = null;
+816     let fileMarker = readUint16(data, offset);
+817     offset += 2;
+818     if (fileMarker !== /* SOI (Start of Image) = */ 0xffd8) {
+819       throw new JpegError("SOI not found");
+820     }
+821     fileMarker = readUint16(data, offset);
+822     offset += 2;
+823 
+824     markerLoop: while (fileMarker !== /* EOI (End of Image) = */ 0xffd9) {
+825       switch (fileMarker) {
+826         case 0xffe1: // APP1 - Exif
+827           // TODO: Remove this once https://github.com/w3c/webcodecs/issues/870
+828           //       is fixed.
+829           const { appData, oldOffset, newOffset } = readDataBlock(data, offset);
+830           offset = newOffset;
+831 
+832           // 'Exif\x00\x00'
+833           if (
+834             appData[0] === 0x45 &&
+835             appData[1] === 0x78 &&
+836             appData[2] === 0x69 &&
+837             appData[3] === 0x66 &&
+838             appData[4] === 0 &&
+839             appData[5] === 0
+840           ) {
+841             if (exifOffsets) {
+842               throw new JpegError("Duplicate EXIF-blocks found.");
+843             }
+844             // Don't do the EXIF-block replacement here, see `JpegStream`,
+845             // since that can modify the original PDF document.
+846             exifOffsets = { exifStart: oldOffset + 6, exifEnd: newOffset };
+847           }
+848           fileMarker = readUint16(data, offset);
+849           offset += 2;
+850           continue;
+851         case 0xffc0: // SOF0 (Start of Frame, Baseline DCT)
+852         case 0xffc1: // SOF1 (Start of Frame, Extended DCT)
+853         case 0xffc2: // SOF2 (Start of Frame, Progressive DCT)
+854           // Skip marker length.
+855           // Skip precision.
+856           // Skip scanLines.
+857           // Skip samplesPerLine.
+858           numComponents = data[offset + (2 + 1 + 2 + 2)];
+859           break markerLoop;
+860         case 0xffff: // Fill bytes
+861           if (data[offset] !== 0xff) {
+862             // Avoid skipping a valid marker.
+863             offset--;
+864           }
+865           break;
+866       }
+867       offset = skipData(data, offset);
+868       fileMarker = readUint16(data, offset);
+869       offset += 2;
+870     }
+871     if (numComponents === 4) {
+872       return null;
+873     }
+874     if (numComponents === 3 && colorTransform === 0) {
+875       return null;
+876     }
+877     return exifOffsets || {};
+878   }
+879 
+1419 }
+1420 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/api_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  AnnotationEditorType,
+  AnnotationMode,
+  AnnotationType,
+  DrawOPS,
+  ImageKind,
+  InvalidPDFException,
+  isNodeJS,
+  objectSize,
+  OPS,
+  PasswordException,
+  PasswordResponses,
+  PermissionFlag,
+  ResponseException,
+  UnknownErrorException,
+} from "../../src/shared/util.js";
+import {
+  buildGetDocumentParams,
+  CMAP_URL,
+  DefaultFileReaderFactory,
+  getCrossOriginHostname,
+  TEST_PDFS_PATH,
+  TestPdfsServer,
+} from "./test_utils.js";
+import {
+  fetchData as fetchDataDOM,
+  PageViewport,
+  RenderingCancelledException,
+  StatTimer,
+} from "../../src/display/display_utils.js";
+import {
+  getDocument,
+  PDFDataRangeTransport,
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  PDFWorker,
+  RenderTask,
+} from "../../src/display/api.js";
+import { AutoPrintRegExp } from "../../web/ui_utils.js";
+import { GlobalImageCache } from "../../src/core/image_utils.js";
+import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
+import { Metadata } from "../../src/display/metadata.js";
+const WORKER_SRC = "../../build/generic/build/pdf.worker.mjs";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

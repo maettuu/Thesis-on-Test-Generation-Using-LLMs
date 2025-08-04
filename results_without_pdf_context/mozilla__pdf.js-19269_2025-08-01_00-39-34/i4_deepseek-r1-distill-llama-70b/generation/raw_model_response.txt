@@ -1,0 +1,80 @@
+<think>
+Okay, I need to write a test that checks if the patch fixes the issue where top and bottom images are not displayed in the PDF. The patch modifies the evaluator.js and operator_list.js files. 
+
+First, I should understand the issue. The problem is that some images, specifically top and bottom ones, aren't showing up in the generated PDF. The patch likely addresses how images are processed, especially those with masks or certain dimensions.
+
+Looking at the patch, in evaluator.js, the addImageOps function is modified to include a hasMask parameter. This suggests that images with masks are now handled differently. Also, in operator_list.js, the addImageOps function is updated to conditionally add save and restore operations when a mask is present.
+
+So, the test should create a PDF with images that have masks and check if they are correctly rendered. I'll need a sample PDF that includes such images. Maybe create a simple PDF with a masked image at the top and bottom.
+
+I'll use pdf-lib.js to create the PDF. I'll add a top image and a bottom image, each with a mask. Then, I'll render the PDF and check if both images are present.
+
+In the test, I'll use the fetchMock to serve the test PDF. Then, I'll get the document and render the first page. After rendering, I'll check the operator list for the expected operations, ensuring that the save and restore are correctly added for masked images.
+
+I need to import the necessary modules: pdfjsLib from the correct path, and fetchMock for mocking the PDF fetch. 
+
+The test should be self-contained, so I'll create the PDF in-memory. I'll add two images with masks and ensure they are placed at the top and bottom of the page.
+
+After rendering, I'll check the operator list for the presence of the save and restore operations around the paintImageMaskXObject calls. This will confirm that the patch correctly adds these operations, ensuring the images are displayed.
+
+I should structure the test with async/await, using Jest's it function. I'll mock the PDF fetch to return my test PDF. Then, I'll get the document, render the page, and analyze the operator list.
+
+Finally, I'll assert that the operator list contains the expected operations, indicating that the top and bottom images are rendered correctly.
+</think>
+
+```javascript
+it("should render top and bottom images with masks", async () => {
+  const { pdfjsLib } = await import("../../src/core/pdfjsLib.js");
+  const { PDFDocument } = pdfjsLib;
+  const { OPS } = await import("../../src/core/evaluator.js");
+
+  // Create a test PDF with top and bottom images
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+  
+  // Create top image with mask
+  const topImage = new pdf.Image();
+  topImage.scale(1, 1);
+  topImage.setMask("auto");
+  
+  // Create bottom image with mask
+  const bottomImage = new pdf.Image();
+  bottomImage.scale(1, 1);
+  bottomImage.setMask("auto");
+  
+  page.drawImage(topImage, 0, 0);
+  page.drawImage(bottomImage, 0, 500);
+
+  // Mock the PDF fetch
+  const pdfData = await pdf.writeAsync();
+  const pdfBlob = new Blob([pdfData.buffer], { type: "application/pdf" });
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+
+  global.fetch = jest.fn(() =>
+    Promise.resolve({ blob: () => Promise.resolve(pdfBlob) })
+  );
+
+  // Load the document and render the page
+  const loadingTask = pdfjsLib.getDocument(pdfUrl);
+  const document = await loadingTask.promise;
+  const pageProxy = await document.getPage(1);
+  const operatorList = await pageProxy.getOperatorList();
+
+  // Check if the operator list includes the expected operations for top and bottom images
+  const expectedOps = [
+    OPS.save,
+    OPS.setGState,
+    OPS.paintImageMaskXObject,
+    OPS.restore,
+    OPS.save,
+    OPS.setGState,
+    OPS.paintImageMaskXObject,
+    OPS.restore
+  ];
+
+  expect(operatorList.fnArray).toContain(OPS.save);
+  expect(operatorList.fnArray).toContain(OPS.setGState);
+  expect(operatorList.fnArray).toContain(OPS.paintImageMaskXObject);
+  expect(operatorList.fnArray).toContain(OPS.restore);
+});
+```

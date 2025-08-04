@@ -1,0 +1,51 @@
+<think>
+Okay, I need to write a regression test for the issue where rendering a PDF with a lot of pages is slow. The patch provided modifies the MessageHandler class to introduce queueing and postponing of tasks, which should improve performance by prioritizing message processing.
+
+First, I should understand what the patch does. It adds properties like #cancelledStreamIds, #executorRunning, #isPostponed, and #queue to the MessageHandler. The _onComObjOnMessage method now queues incoming messages and uses an executor to process them. The executor runs in a way that postpones execution if needed, which should prevent the main thread from being blocked by a large number of messages.
+
+The test needs to verify that with the patch, processing multiple messages is handled more efficiently. So, I'll create a test that sends a large number of messages and checks if they are processed correctly without causing performance issues.
+
+I'll set up a LoopbackPort to simulate the communication. The MessageHandler will be initialized with this port. Then, I'll define an action handler that simply returns the data it receives. I'll send 1000 messages, each with a unique ID, using the sendWithPromise method.
+
+I'll track the number of resolved promises. If all promises resolve correctly, it means the messages were processed as expected. I'll also measure the time taken to process all messages and ensure it's within a reasonable threshold, though the exact time might vary, so I'll set a generous limit, say 500ms.
+
+I need to make sure that without the patch, this test would fail because the messages might not be processed efficiently, leading to timeouts or unhandled promises. With the patch, the queueing mechanism should handle the messages more smoothly, allowing all of them to resolve properly.
+
+I'll structure the test using async/await and Promise.all to wait for all messages to be processed. I'll also handle any errors that might occur during the processing.
+
+So, the test will:
+1. Import necessary modules.
+2. Create a LoopbackPort and initialize the MessageHandler.
+3. Register an action handler.
+4. Send 1000 messages and collect promises.
+5. Wait for all promises to resolve and check the count.
+6. Measure the time and ensure it's within the expected limit.
+
+This should effectively test whether the patch improves the handling of a large number of messages, thus addressing the slow rendering issue.
+</think>
+
+it("should handle many messages efficiently", async () => {
+  const { LoopbackPort } = await import("../../src/display/api.js");
+  const port = new LoopbackPort();
+  const messageHandler = new MessageHandler("source", "target", port);
+  const results = [];
+  
+  messageHandler.on("testAction", () => ({
+    data: "Test data",
+  }));
+  
+  const promises = [];
+  for (let i = 0; i < 1000; i++) {
+    const promise = messageHandler.sendWithPromise("testAction", {
+      id: i,
+    });
+    promises.push(promise);
+  }
+  
+  const startTime = Date.now();
+  await Promise.all(promises);
+  const endTime = Date.now();
+  
+  expect(promises.length).toBe(1000);
+  expect(endTime - startTime).toBeLessThan(500);
+});

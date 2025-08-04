@@ -1,0 +1,51 @@
+<think>
+Okay, so I need to write a regression test for the issue where PDF annotations aren't saved on certain PDFs. The user provided the patch, and I need to make sure the test fails before the patch and passes after.
+
+First, I'll look at the patch details. The changes are in worker.js, writer.js, and xref.js. The main issue seems to be with how the XRef handles the start position, especially when dealing with linearization. The patch adds 'ensureDoc("linearization")' and modifies how startXRef is determined.
+
+I remember that linearization is a feature that allows PDFs to be viewed in a web browser before the entire file is downloaded. So, the problem might be related to how the XRef is being processed in such cases.
+
+Looking at the test file provided, it's in test/unit/writer_spec.js. It imports some primitives, writer functions, and stream. I can use this file to write the test.
+
+The test needs to load the specific PDF file, bug1844572.pdf, which has the issue. Then, it should attempt to save annotations and check if the saved data is correct.
+
+I'll structure the test using Jest. I'll use getDocument from display/api.js to load the PDF and buildGetDocumentParams from test_utils.js to set up the loading parameters.
+
+In the test, I'll:
+
+1. Load the PDF document.
+2. Get the first page.
+3. Create some test annotations.
+4. Save the document with these annotations.
+5. Check if the annotations were correctly saved by looking for specific patterns in the output.
+
+I'll use a regular expression to verify that the expected patterns exist in the saved data. This ensures that the annotations are present and correctly formatted.
+
+I should make sure the test is self-contained and only tests the specific issue. Also, I'll need to handle any potential errors during loading or processing.
+
+Finally, the test should fail before applying the patch because the annotations aren't saved, and pass after the patch is applied. This confirms that the patch resolves the issue.
+</think>
+
+```javascript
+it("should save annotations on linearized PDFs", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1844572.pdf'));
+  
+  const { numPages } = await loadingTask.promise;
+  const page = await loadingTask.getDocument().getPage(0);
+  const annotations = [
+    {
+      type: "highlight",
+      quads: [[0, 0, 100, 0, 100, 100, 0, 100]],
+      color: "#FF0000",
+      content: "Test annotation"
+    }
+  ];
+  
+  const savedData = await page.saveAnnotations(annotations);
+  const expectedPattern = /\/Annots\s*\[\s*<</s*.*?>>\s*\]/;
+  
+  expect(bytesToString(savedData)).toMatch(expectedPattern);
+});
+```

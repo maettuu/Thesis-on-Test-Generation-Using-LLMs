@@ -1,0 +1,87 @@
+<think>
+Okay, I need to write a regression test for the issue where the redo shortcut wasn't working for images, text, or drawings in the PDF editor. The patch involves modifying the keyboard shortcuts in the tools.js file, so the test should verify that after the patch, the redo functionality works as expected.
+
+First, I should understand the problem. Before the patch, using the redo shortcut (like Ctrl+Y or Cmd+Shift+Z on Mac) didn't work for annotations. The patch updated the keyboard shortcuts to include more variations, especially handling cases where the key might be uppercase, which could happen on different OS versions.
+
+Now, I need to create a test that fails before the patch and passes after. The test should simulate adding an annotation, undoing it, and then redoing it using the shortcut.
+
+Looking at the existing test file, I see that it imports necessary modules, including AnnotationEditorUIManager and CommandManager. I can use these to set up the test scenario.
+
+I'll structure the test as follows:
+1. Create a mock PDF document and setup the annotation editor UI manager.
+2. Simulate adding an annotation (e.g., a free text annotation).
+3. Trigger an undo operation.
+4. Trigger a redo operation using the affected shortcut.
+5. Verify that the annotation is correctly redone by checking if it exists in the storage.
+
+I need to ensure that the test uses the correct keyboard events and that the CommandManager properly handles the redo command after the patch.
+
+I'll also need to mock the necessary dependencies, like the PDF document and the annotation storage, to isolate the test.
+
+So, the test will:
+- Create a mock document and initialize the UI manager.
+- Add a free text annotation and commit it.
+- Undo the action.
+- Dispatch a keydown event with the redo shortcut.
+- Check if the annotation is restored in the storage.
+
+This should cover the scenario and validate the fix.
+</think>
+
+```javascript
+it("should redo an annotation using the correct keyboard shortcut", async () => {
+  const { AnnotationEditorUIManager, CommandManager } = await import("../../src/display/editor/tools.js");
+  const { createIdFactory } = await import("./test_utils.js");
+  const { Annotation, MarkupAnnotation } = await import("../../src/core/annotation.js");
+
+  const idFactory = createIdFactory();
+  const mockDoc = {
+    annotationStorage: new Map(),
+    filterFactory: {},
+  };
+  const uiManager = new AnnotationEditorUIManager({
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    focus: () => {},
+  }, {
+    _on: () => {},
+    _off: () => {},
+  }, mockDoc, {});
+
+  const annotation = new MarkupAnnotation({
+    annotationId: idFactory.next().value,
+    type: "underline",
+    quads: [],
+  });
+
+  // Initialize editor mode
+  uiManager.updateMode(AnnotationEditorType.FREE_TEXT);
+  
+  // Add annotation
+  const cmd = () => {
+    uiManager.currentLayer.addAnnotation(annotation);
+  };
+  const undoCmd = () => {
+    uiManager.currentLayer.removeAnnotation(annotation);
+  };
+  
+  uiManager.addCommands({ cmd, undo: undoCmd, mustExec: true });
+
+  // Commit initial state
+  await annotation.commit();
+
+  // Perform undo
+  uiManager.undo();
+
+  // Simulate redo keyboard shortcut
+  const redoEvent = new KeyboardEvent("keydown", {
+    key: "y",
+    ctrlKey: true,
+    metaKey: false,
+  });
+  uiManager.keydown(redoEvent);
+
+  // Verify annotation was properly redone
+  expect(mockDoc.annotationStorage.has(annotation.annotationId)).toBe(true);
+});
+```

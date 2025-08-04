@@ -1,0 +1,55 @@
+it("should correctly copy and resize DeviceRGBA images with and without alpha pre‐blending", async () => {
+  const { default: assert } = await import("assert");
+  const { Name } = await import("../../src/core/primitives.js");
+  const { ColorSpace } = await import("../../src/core/colorspace.js");
+  const { XRefMock } = await import("./test_utils.js");
+  const { PDFFunctionFactory } = await import("../../src/core/function.js");
+
+  // Create a DeviceRGBA color space.
+  const cs = ColorSpace.parse({
+    cs: Name.get("DeviceRGBA"),
+    xref: new XRefMock(),
+    resources: null,
+    pdfFunctionFactory: new PDFFunctionFactory(),
+    localColorSpaceCache: {},
+  });
+
+  // Prepare a 2x2 RGBA image source.
+  // Each pixel is 4 bytes: [R, G, B, A]
+  const src = new Uint8ClampedArray([
+    10, 20, 30, 40,   // pixel 0
+    50, 60, 70, 80,   // pixel 1
+    90, 100, 110, 120, // pixel 2
+    130, 140, 150, 160 // pixel 3
+  ]);
+
+  // Test case 1: When alpha parameter is 1,
+  // the image should be copied using the Uint32Array branch.
+  // Destination buffer (RGBA 32bpp) of same size.
+  const dest1 = new Uint8ClampedArray(16);
+  cs.fillRgb(dest1, 2, 2, 2, 2, 2, 8, src, 1);
+
+  // Compute expected result for case 1.
+  const expected1 = new Uint8ClampedArray(16);
+  const src32 = new Uint32Array(src.buffer);
+  const exp32 = new Uint32Array(expected1.buffer);
+  const littleEndian = new Uint32Array(new Uint8ClampedArray([1, 0, 0, 0]).buffer)[0] === 1;
+  const rgbMask = littleEndian ? 0x00ffffff : 0xffffff00;
+  for (let i = 0, len = src32.length; i < len; i++) {
+    exp32[i] = src32[i] & rgbMask;
+  }
+  assert.deepStrictEqual(Array.from(dest1), Array.from(expected1));
+
+  // Test case 2: When alpha parameter is not 1 (e.g., 0),
+  // the image should be copied manually dropping the alpha channel.
+  // Destination buffer (RGB 24bpp) length = 2 * 2 * 3 = 12.
+  const dest2 = new Uint8ClampedArray(12);
+  cs.fillRgb(dest2, 2, 2, 2, 2, 2, 8, src, 0);
+  const expected2 = new Uint8ClampedArray([
+    10, 20, 30,  // pixel 0
+    50, 60, 70,  // pixel 1
+    90, 100, 110, // pixel 2
+    130, 140, 150 // pixel 3
+  ]);
+  assert.deepStrictEqual(Array.from(dest2), Array.from(expected2));
+});

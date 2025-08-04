@@ -1,0 +1,72 @@
+<think>
+Okay, I need to write a regression test for the bug where a TypeError occurs when using annotations on a PDF in Safari on iOS. The error is "null is not an object (evaluating 'this.#touchMoveAC.abort')". 
+
+First, I should understand the issue. The user reported that when they try to draw on a PDF, especially after zooming and moving around, the error occurs, and they can't draw anymore. The error happens in the TouchManager when it tries to call abort() on #touchMoveAC, which is null.
+
+Looking at the patch provided, I see two changes. In tools.js, they added a line to commit or remove the current drawing session when the mode changes. In touch_manager.js, they wrapped the abort call with a check to ensure #touchMoveAC isn't null before using it.
+
+So, the test needs to simulate the scenario where this error occurs. The test should run on the patched code and not throw an error, but on the unpatched code, it should fail.
+
+I'll structure the test using Jest. I'll create a test that initializes a PDF document, navigates to a page, sets up the annotation mode, and then simulates touch events to draw. The key is to ensure that after the patch, the touch events don't cause the error.
+
+I'll need to import the necessary modules like PDFDocument, PDFPage, AnnotationEditorUIManager, and TouchManager. Then, I'll set up the PDF, go to a page, enable annotation mode, and simulate touch events.
+
+The key steps are:
+1. Load the PDF.
+2. Get the first page.
+3. Set up the annotation editor and touch manager.
+4. Simulate a touch start, move, and end to draw.
+5. Ensure no error is thrown after the patch.
+
+I'll use async/await for the setup and then use a try-catch block to handle any errors during the touch simulation. If the code throws an error, the test fails.
+
+I should also make sure the test is self-contained and doesn't rely on external files, so I'll use a blank PDF from the test utils.
+
+Finally, I'll write the test to check that the error doesn't occur after applying the patch, ensuring the touchMoveAC is properly handled.
+</think>
+
+```javascript
+it("should handle touch events without throwing null error in touchMoveAC", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { PDFPage } = await import("../../src/core/document.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { TouchManager } = await import("../../src/display/touch_manager.js");
+  const { TestPdfsServer } = await import("./test_utils.js");
+
+  // Setup the test PDF
+  const server = new TestPdfsServer();
+  const blankPdf = await server.loadPDF("blank.pdf");
+  const page = await blankPdf.getPage(1);
+
+  // Initialize annotation editor and touch manager
+  const annotationEditor = new AnnotationEditorUIManager();
+  const touchManager = new TouchManager(page.div, {
+    pinchZoomEnabled: true,
+    touchStartThreshold: 0,
+  });
+
+  // Set up the annotation mode
+  annotationEditor.switchMode(AnnotationEditorType.FREE_HAND);
+
+  try {
+    // Simulate touch events to draw
+    const touchStartEvt = new TouchEvent("touchstart", {
+      touches: [{ target: page.div, clientX: 100, clientY: 100 }],
+    });
+    const touchMoveEvt = new TouchEvent("touchmove", {
+      touches: [{ target: page.div, clientX: 150, clientY: 150 }],
+    });
+    const touchEndEvt = new TouchEvent("touchend", {});
+
+    page.div.dispatchEvent(touchStartEvt);
+    page.div.dispatchEvent(touchMoveEvt);
+    page.div.dispatchEvent(touchEndEvt);
+
+    // If no error was thrown, the test passes
+    expect(true).toBe(true);
+  } catch (error) {
+    // If an error was thrown, the test fails
+    expect(error).not.toBeInstanceOf(Error);
+  }
+});
+```

@@ -1,0 +1,67 @@
+<think>
+Okay, I need to write a regression test for the issue where comments and sticky notes aren't rendering in the PDF.js viewer after a certain version. The user provided a patch, so my test should fail before the patch and pass after.
+
+First, I'll look at the patch. It modifies several classes in annotation.js, setting the noHTML property. The problem was that certain annotations weren't being rendered as HTML, so the patch ensures that noHTML is set correctly.
+
+I should create a test that checks if these annotations render properly. I'll need a sample PDF with annotations like sticky notes. The user attached Testdoc.pdf, so I'll assume it has the necessary annotations.
+
+I'll use the test_utils.js to set up a fake server and fetch the document. Then, I'll create a viewer and render the first page. After rendering, I'll check the DOM for elements indicating the annotations.
+
+I'll use Jest for the test structure. The test will import the necessary modules, set up the server, load the PDF, and check for the presence of the annotation elements. If they exist, the test passes; otherwise, it fails.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll structure the test with async/await for proper handling of promises when loading the PDF and rendering the page.
+
+So, the test will:
+
+1. Import required modules.
+2. Set up a fake server to serve the PDF.
+3. Open the PDF document.
+4. Get the first page and render it.
+5. Check the DOM for the expected elements.
+
+This should ensure that after the patch, the annotations render correctly, making the test pass.
+</think>
+
+```javascript
+it("should render comments and sticky notes in the viewer", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { TestUtils } = await import("./test_utils.js");
+  
+  // Setup a fake server with the test PDF
+  const server = await TestUtils.startFakeServer({
+    'Testdoc.pdf': new ArrayBuffer(0)
+  });
+  
+  // Open the PDF document
+  const loadingTask = PDFDocument.loadingTaskFromURL("Testdoc.pdf");
+  const pdf = await loadingTask.promise;
+  
+  // Get the first page
+  const page = await pdf.getPage(1);
+  
+  // Create a viewer and render the page
+  const viewer = {
+    container: document.createElement('div'),
+    get pageDiv() {
+      return this.container;
+    },
+  };
+  
+  await page.render({
+    viewport: page.getViewport({ scale: 1 }),
+    canvasContext: null,
+    annotationCanvasContext: null,
+    renderInteractiveForms: true,
+  });
+  
+  // Check if the annotations are rendered
+  const expectedElements = [
+    'sticky-note',
+    'comment-annotation',
+    'popup',
+    'text'
+  ].some(element => viewer.container.querySelector(`.${element}`));
+  
+  expect(expectedElements).toBeTruthy();
+});
+```

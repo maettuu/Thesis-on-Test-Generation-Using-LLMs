@@ -1,0 +1,34 @@
+```javascript
+it("should render PolygonAnnotation with fill color", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Annotation } = await import("../../src/core/annotation.js");
+  const { PDFPage } = await import("../../src/core/document.js");
+  const { getRgbColor } = await import("../../src/core/colorspace_utils.js");
+  const { getPdfColorArray } = await import("../../src/core/default_appearance.js");
+
+  const pdfData = await fetch("https://github.com/user-attachments/files/21099399/document.pdf").then(response => response.arrayBuffer());
+  const pdf = await PDFDocument.load(pdfData);
+  const page = await pdf.getPage(1);
+  const annotations = await page.getAnnotations();
+
+  const polygonAnnotation = annotations.find(annotation => annotation instanceof Annotation && annotation.data.annotationType === "Polygon");
+  const fillColor = getRgbColor(polygonAnnotation.dict.getArray("IC"), null);
+  const expectedFillColor = getPdfColorArray(fillColor);
+
+  const actualFillColor = polygonAnnotation._setDefaultAppearance({
+    xref: pdf.xref,
+    extra: `${polygonAnnotation.borderStyle.width || 1} w`,
+    strokeColor: polygonAnnotation.color ? getPdfColorArray(polygonAnnotation.color) : [0, 0, 0],
+    strokeAlpha: polygonAnnotation.dict.get("CA"),
+    pointsCallback: (buffer, points) => {
+      for (let i = 0, ii = polygonAnnotation.data.vertices.length; i < ii; i += 2) {
+        buffer.push(`${polygonAnnotation.data.vertices[i]} ${polygonAnnotation.data.vertices[i + 1]} ${i === 0 ? "m" : "l"}`);
+      }
+      buffer.push("f");
+      return [points[0], points[7], points[2], points[3]];
+    },
+  });
+
+  expect(actualFillColor).toContain(`${expectedFillColor.join(" ")}`);
+});
+```

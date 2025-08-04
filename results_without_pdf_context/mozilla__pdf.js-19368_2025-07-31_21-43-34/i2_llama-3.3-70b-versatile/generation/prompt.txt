@@ -1,0 +1,1698 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Investigate if we could use some caches based on WeakRef
+For the context, in Fenix, several users reported some freeze when zooming/scrolling a pdf:
+ - https://bugzilla.mozilla.org/show_bug.cgi?id=1890537
+ - and a possible explanation (I'm not sure at all): https://bugzilla.mozilla.org/show_bug.cgi?id=1896513#c21
+
+So my idea is too try to release memory when needed because devices don't always have a lot of memory and because afaik Android OS is trying to smartly manage it (for example in killing some apps in background).
+During the rendering of a page, we could keep a normal reference on each object to avoid to accidentally remove them. When the rendering is done we could just move them (maybe after a delay we could configure through an option which could be zero with Fenix and 30s for Firefox) and keep a WeakRef (see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Memory_management#weakrefs_and_finalizationregistry) on the moved objects.
+
+@Snuffleupagus, @timvandermeij, any positive/negative thoughts ?
+
+
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/image_utils.js b/src/core/image_utils.js
+--- a/src/core/image_utils.js
++++ b/src/core/image_utils.js
+@@ -13,12 +13,7 @@
+  * limitations under the License.
+  */
+ 
+-import {
+-  assert,
+-  MAX_IMAGE_SIZE_TO_CACHE,
+-  unreachable,
+-  warn,
+-} from "../shared/util.js";
++import { assert, unreachable, warn } from "../shared/util.js";
+ import { RefSet, RefSetCache } from "./primitives.js";
+ 
+ class BaseLocalCache {
+@@ -179,7 +174,7 @@ class GlobalImageCache {
+ 
+   static MIN_IMAGES_TO_CACHE = 10;
+ 
+-  static MAX_BYTE_SIZE = 5 * MAX_IMAGE_SIZE_TO_CACHE;
++  static MAX_BYTE_SIZE = 5e7; // Fifty megabytes.
+ 
+   #decodeFailedSet = new RefSet();
+
+diff --git a/src/display/api.js b/src/display/api.js
+--- a/src/display/api.js
++++ b/src/display/api.js
+@@ -25,7 +25,6 @@ import {
+   getVerbosityLevel,
+   info,
+   isNodeJS,
+-  MAX_IMAGE_SIZE_TO_CACHE,
+   RenderingIntentFlag,
+   setVerbosityLevel,
+   shadow,
+@@ -72,7 +71,6 @@ import { XfaText } from "./xfa_text.js";
+ 
+ const DEFAULT_RANGE_CHUNK_SIZE = 65536; // 2^16 = 65536
+ const RENDERING_CANCELLED_TIMEOUT = 100; // ms
+-const DELAYED_CLEANUP_TIMEOUT = 5000; // ms
+ 
+ /**
+  * @typedef { Int8Array | Uint8Array | Uint8ClampedArray |
+@@ -1339,8 +1337,6 @@ class PDFDocumentProxy {
+  * Proxy to a `PDFPage` in the worker thread.
+  */
+ class PDFPageProxy {
+-  #delayedCleanupTimeout = null;
+-
+   #pendingCleanup = false;
+ 
+   constructor(pageIndex, pageInfo, transport, pdfBug = false) {
+@@ -1353,7 +1349,6 @@ class PDFPageProxy {
+     this.commonObjs = transport.commonObjs;
+     this.objs = new PDFObjects();
+ 
+-    this._maybeCleanupAfterRender = false;
+     this._intentStates = new Map();
+     this.destroyed = false;
+   }
+@@ -1490,10 +1485,8 @@ class PDFPageProxy {
+     );
+     const { renderingIntent, cacheKey } = intentArgs;
+     // If there was a pending destroy, cancel it so no cleanup happens during
+-    // this call to render...
++    // this call to render.
+     this.#pendingCleanup = false;
+-    // ... and ensure that a delayed cleanup is always aborted.
+-    this.#abortDelayedCleanup();
+ 
+     optionalContentConfigPromise ||=
+       this._transport.getOptionalContentConfig(renderingIntent);
+@@ -1532,10 +1525,10 @@ class PDFPageProxy {
+ 
+       // Attempt to reduce memory usage during *printing*, by always running
+       // cleanup immediately once rendering has finished.
+-      if (this._maybeCleanupAfterRender || intentPrint) {
++      if (intentPrint) {
+         this.#pendingCleanup = true;
+       }
+-      this.#tryCleanup(/* delayed = */ !intentPrint);
++      this.#tryCleanup();
+ 
+       if (error) {
+         internalRenderTask.capability.reject(error);
+@@ -1769,7 +1762,6 @@ class PDFPageProxy {
+     }
+     this.objs.clear();
+     this.#pendingCleanup = false;
+-    this.#abortDelayedCleanup();
+ 
+     return Promise.all(waitOn);
+   }
+@@ -1783,7 +1775,7 @@ class PDFPageProxy {
+    */
+   cleanup(resetStats = false) {
+     this.#pendingCleanup = true;
+-    const success = this.#tryCleanup(/* delayed = */ false);
++    const success = this.#tryCleanup();
+ 
+     if (resetStats && success) {
+       this._stats &&= new StatTimer();
+@@ -1793,25 +1785,12 @@ class PDFPageProxy {
+ 
+   /**
+    * Attempts to clean up if rendering is in a state where that's possible.
+-   * @param {boolean} [delayed] - Delay the cleanup, to e.g. improve zooming
+-   *   performance in documents with large images.
+-   *   The default value is `false`.
+    * @returns {boolean} Indicates if clean-up was successfully run.
+    */
+-  #tryCleanup(delayed = false) {
+-    this.#abortDelayedCleanup();
+-
++  #tryCleanup() {
+     if (!this.#pendingCleanup || this.destroyed) {
+       return false;
+     }
+-    if (delayed) {
+-      this.#delayedCleanupTimeout = setTimeout(() => {
+-        this.#delayedCleanupTimeout = null;
+-        this.#tryCleanup(/* delayed = */ false);
+-      }, DELAYED_CLEANUP_TIMEOUT);
+-
+-      return false;
+-    }
+     for (const { renderTasks, operatorList } of this._intentStates.values()) {
+       if (renderTasks.size > 0 || !operatorList.lastChunk) {
+         return false;
+@@ -1823,13 +1802,6 @@ class PDFPageProxy {
+     return true;
+   }
+ 
+-  #abortDelayedCleanup() {
+-    if (this.#delayedCleanupTimeout) {
+-      clearTimeout(this.#delayedCleanupTimeout);
+-      this.#delayedCleanupTimeout = null;
+-    }
+-  }
+-
+   /**
+    * @private
+    */
+@@ -1863,7 +1835,7 @@ class PDFPageProxy {
+     }
+ 
+     if (operatorListChunk.lastChunk) {
+-      this.#tryCleanup(/* delayed = */ true);
++      this.#tryCleanup();
+     }
+   }
+ 
+@@ -1926,7 +1898,7 @@ class PDFPageProxy {
+             for (const internalRenderTask of intentState.renderTasks) {
+               internalRenderTask.operatorListChanged();
+             }
+-            this.#tryCleanup(/* delayed = */ true);
++            this.#tryCleanup();
+           }
+ 
+           if (intentState.displayReadyCapability) {
+@@ -2884,13 +2856,6 @@ class WorkerTransport {
+ 
+       switch (type) {
+         case "Image":
+-          pageProxy.objs.resolve(id, imageData);
+-
+-          // Heuristic that will allow us not to store large data.
+-          if (imageData?.dataLen > MAX_IMAGE_SIZE_TO_CACHE) {
+-            pageProxy._maybeCleanupAfterRender = true;
+-          }
+-          break;
+         case "Pattern":
+           pageProxy.objs.resolve(id, imageData);
+           break;
+
+diff --git a/src/shared/util.js b/src/shared/util.js
+--- a/src/shared/util.js
++++ b/src/shared/util.js
+@@ -28,8 +28,6 @@ const isNodeJS =
+ const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0];
+ const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
+ 
+-const MAX_IMAGE_SIZE_TO_CACHE = 10e6; // Ten megabytes.
+-
+ // Represent the percentage of the height of a single-line field over
+ // the font size. Acrobat seems to use this value.
+ const LINE_FACTOR = 1.35;
+@@ -1155,7 +1153,6 @@ export {
+   isNodeJS,
+   LINE_DESCENT_FACTOR,
+   LINE_FACTOR,
+-  MAX_IMAGE_SIZE_TO_CACHE,
+   normalizeUnicode,
+   objectFromMap,
+   objectSize,
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.0
+- @babel/preset-env: ^7.26.0
+- @babel/runtime: ^7.26.0
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.65
+- @types/node: ^22.10.7
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001692
+- core-js: ^3.40.0
+- eslint: ^9.18.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.6.0
+- eslint-plugin-prettier: ^5.2.2
+- eslint-plugin-unicorn: ^56.0.1
+- globals: ^15.14.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.5.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.1
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.4.2
+- puppeteer: ^24.1.0
+- stylelint: ^16.13.2
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.11
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.7.3
+- vinyl: ^3.0.0
+- webpack: ^5.97.1
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, FeatureTest, FormatError, ImageKind, InvalidPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/image_utils.js
+1 /* Copyright 2019 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   MAX_IMAGE_SIZE_TO_CACHE,
+19   unreachable,
+20   warn,
+21 } from "../shared/util.js";
+22 import { RefSet, RefSetCache } from "./primitives.js";
+23 
+296 
+File:
+src/display/api.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+20 import {
+21   AbortException,
+22   AnnotationMode,
+23   assert,
+24   FeatureTest,
+25   getVerbosityLevel,
+26   info,
+27   isNodeJS,
+28   MAX_IMAGE_SIZE_TO_CACHE,
+29   RenderingIntentFlag,
+30   setVerbosityLevel,
+31   shadow,
+32   stringToBytes,
+33   unreachable,
+34   warn,
+35 } from "../shared/util.js";
+36 import {
+37   AnnotationStorage,
+38   PrintAnnotationStorage,
+39   SerializableEmpty,
+40 } from "./annotation_storage.js";
+41 import { FontFaceObject, FontLoader } from "./font_loader.js";
+42 import {
+43   isDataScheme,
+44   isValidFetchUrl,
+45   PageViewport,
+46   RenderingCancelledException,
+47   StatTimer,
+48 } from "./display_utils.js";
+49 import { MessageHandler, wrapReason } from "../shared/message_handler.js";
+50 import {
+51   NodeCanvasFactory,
+52   NodeCMapReaderFactory,
+53   NodeFilterFactory,
+54   NodeStandardFontDataFactory,
+55   NodeWasmFactory,
+56 } from "display-node_utils";
+57 import { CanvasGraphics } from "./canvas.js";
+58 import { DOMCanvasFactory } from "./canvas_factory.js";
+59 import { DOMCMapReaderFactory } from "display-cmap_reader_factory";
+60 import { DOMFilterFactory } from "./filter_factory.js";
+61 import { DOMStandardFontDataFactory } from "display-standard_fontdata_factory";
+62 import { DOMWasmFactory } from "display-wasm_factory";
+63 import { GlobalWorkerOptions } from "./worker_options.js";
+64 import { Metadata } from "./metadata.js";
+65 import { OptionalContentConfig } from "./optional_content_config.js";
+66 import { PDFDataTransportStream } from "./transport_stream.js";
+67 import { PDFFetchStream } from "display-fetch_stream";
+68 import { PDFNetworkStream } from "display-network";
+69 import { PDFNodeStream } from "display-node_stream";
+70 import { TextLayer } from "./text_layer.js";
+71 import { XfaText } from "./xfa_text.js";
+72 
+73 const DEFAULT_RANGE_CHUNK_SIZE = 65536; // 2^16 = 65536
+74 const RENDERING_CANCELLED_TIMEOUT = 100; // ms
+75 const DELAYED_CLEANUP_TIMEOUT = 5000; // ms
+76 
+1338 /**
+1339  * Proxy to a `PDFPage` in the worker thread.
+1340  */
+1341 class PDFPageProxy {
+1342   #delayedCleanupTimeout = null;
+1343 
+1344   #pendingCleanup = false;
+1345 
+1346   constructor(pageIndex, pageInfo, transport, pdfBug = false) {
+1347     this._pageIndex = pageIndex;
+1348     this._pageInfo = pageInfo;
+1349     this._transport = transport;
+1350     this._stats = pdfBug ? new StatTimer() : null;
+1351     this._pdfBug = pdfBug;
+1352     /** @type {PDFObjects} */
+1353     this.commonObjs = transport.commonObjs;
+1354     this.objs = new PDFObjects();
+1355 
+1356     this._maybeCleanupAfterRender = false;
+1357     this._intentStates = new Map();
+1358     this.destroyed = false;
+1359   }
+1360 
+1463   /**
+1464    * Begins the process of rendering a page to the desired context.
+1465    *
+1466    * @param {RenderParameters} params - Page render parameters.
+1467    * @returns {RenderTask} An object that contains a promise that is
+1468    *   resolved when the page finishes rendering.
+1469    */
+1470   render({
+1471     canvasContext,
+1472     viewport,
+1473     intent = "display",
+1474     annotationMode = AnnotationMode.ENABLE,
+1475     transform = null,
+1476     background = null,
+1477     optionalContentConfigPromise = null,
+1478     annotationCanvasMap = null,
+1479     pageColors = null,
+1480     printAnnotationStorage = null,
+1481     isEditing = false,
+1482   }) {
+1483     this._stats?.time("Overall");
+1484 
+1485     const intentArgs = this._transport.getRenderingIntent(
+1486       intent,
+1487       annotationMode,
+1488       printAnnotationStorage,
+1489       isEditing
+1490     );
+1491     const { renderingIntent, cacheKey } = intentArgs;
+1492     // If there was a pending destroy, cancel it so no cleanup happens during
+1493     // this call to render...
+1494     this.#pendingCleanup = false;
+1495     // ... and ensure that a delayed cleanup is always aborted.
+1496     this.#abortDelayedCleanup();
+1497 
+1498     optionalContentConfigPromise ||=
+1499       this._transport.getOptionalContentConfig(renderingIntent);
+1500 
+1501     let intentState = this._intentStates.get(cacheKey);
+1502     if (!intentState) {
+1503       intentState = Object.create(null);
+1504       this._intentStates.set(cacheKey, intentState);
+1505     }
+1506 
+1507     // Ensure that a pending `streamReader` cancel timeout is always aborted.
+1508     if (intentState.streamReaderCancelTimeout) {
+1509       clearTimeout(intentState.streamReaderCancelTimeout);
+1510       intentState.streamReaderCancelTimeout = null;
+1511     }
+1512 
+1513     const intentPrint = !!(renderingIntent & RenderingIntentFlag.PRINT);
+1514 
+1515     // If there's no displayReadyCapability yet, then the operatorList
+1516     // was never requested before. Make the request and create the promise.
+1517     if (!intentState.displayReadyCapability) {
+1518       intentState.displayReadyCapability = Promise.withResolvers();
+1519       intentState.operatorList = {
+1520         fnArray: [],
+1521         argsArray: [],
+1522         lastChunk: false,
+1523         separateAnnots: null,
+1524       };
+1525 
+1526       this._stats?.time("Page Request");
+1527       this._pumpOperatorList(intentArgs);
+1528     }
+1529 
+1530     const complete = error => {
+1531       intentState.renderTasks.delete(internalRenderTask);
+1532 
+1533       // Attempt to reduce memory usage during *printing*, by always running
+1534       // cleanup immediately once rendering has finished.
+1535       if (this._maybeCleanupAfterRender || intentPrint) {
+1536         this.#pendingCleanup = true;
+1537       }
+1538       this.#tryCleanup(/* delayed = */ !intentPrint);
+1539 
+1540       if (error) {
+1541         internalRenderTask.capability.reject(error);
+1542 
+1543         this._abortOperatorList({
+1544           intentState,
+1545           reason: error instanceof Error ? error : new Error(error),
+1546         });
+1547       } else {
+1548         internalRenderTask.capability.resolve();
+1549       }
+1550 
+1551       if (this._stats) {
+1552         this._stats.timeEnd("Rendering");
+1553         this._stats.timeEnd("Overall");
+1554 
+1555         if (globalThis.Stats?.enabled) {
+1556           globalThis.Stats.add(this.pageNumber, this._stats);
+1557         }
+1558       }
+1559     };
+1560 
+1561     const internalRenderTask = new InternalRenderTask({
+1562       callback: complete,
+1563       // Only include the required properties, and *not* the entire object.
+1564       params: {
+1565         canvasContext,
+1566         viewport,
+1567         transform,
+1568         background,
+1569       },
+1570       objs: this.objs,
+1571       commonObjs: this.commonObjs,
+1572       annotationCanvasMap,
+1573       operatorList: intentState.operatorList,
+1574       pageIndex: this._pageIndex,
+1575       canvasFactory: this._transport.canvasFactory,
+1576       filterFactory: this._transport.filterFactory,
+1577       useRequestAnimationFrame: !intentPrint,
+1578       pdfBug: this._pdfBug,
+1579       pageColors,
+1580     });
+1581 
+1582     (intentState.renderTasks ||= new Set()).add(internalRenderTask);
+1583     const renderTask = internalRenderTask.task;
+1584 
+1585     Promise.all([
+1586       intentState.displayReadyCapability.promise,
+1587       optionalContentConfigPromise,
+1588     ])
+1589       .then(([transparency, optionalContentConfig]) => {
+1590         if (this.destroyed) {
+1591           complete();
+1592           return;
+1593         }
+1594         this._stats?.time("Rendering");
+1595 
+1596         if (!(optionalContentConfig.renderingIntent & renderingIntent)) {
+1597           throw new Error(
+1598             "Must use the same `intent`-argument when calling the `PDFPageProxy.render` " +
+1599               "and `PDFDocumentProxy.getOptionalContentConfig` methods."
+1600           );
+1601         }
+1602         internalRenderTask.initializeGraphics({
+1603           transparency,
+1604           optionalContentConfig,
+1605         });
+1606         internalRenderTask.operatorListChanged();
+1607       })
+1608       .catch(complete);
+1609 
+1610     return renderTask;
+1611   }
+1612 
+1746   /**
+1747    * Destroys the page object.
+1748    * @private
+1749    */
+1750   _destroy() {
+1751     this.destroyed = true;
+1752 
+1753     const waitOn = [];
+1754     for (const intentState of this._intentStates.values()) {
+1755       this._abortOperatorList({
+1756         intentState,
+1757         reason: new Error("Page was destroyed."),
+1758         force: true,
+1759       });
+1760 
+1761       if (intentState.opListReadCapability) {
+1762         // Avoid errors below, since the renderTasks are just stubs.
+1763         continue;
+1764       }
+1765       for (const internalRenderTask of intentState.renderTasks) {
+1766         waitOn.push(internalRenderTask.completed);
+1767         internalRenderTask.cancel();
+1768       }
+1769     }
+1770     this.objs.clear();
+1771     this.#pendingCleanup = false;
+1772     this.#abortDelayedCleanup();
+1773 
+1774     return Promise.all(waitOn);
+1775   }
+1776 
+1777   /**
+1778    * Cleans up resources allocated by the page.
+1779    *
+1780    * @param {boolean} [resetStats] - Reset page stats, if enabled.
+1781    *   The default value is `false`.
+1782    * @returns {boolean} Indicates if clean-up was successfully run.
+1783    */
+1784   cleanup(resetStats = false) {
+1785     this.#pendingCleanup = true;
+1786     const success = this.#tryCleanup(/* delayed = */ false);
+1787 
+1788     if (resetStats && success) {
+1789       this._stats &&= new StatTimer();
+1790     }
+1791     return success;
+1792   }
+1793 
+1794   /**
+1795    * Attempts to clean up if rendering is in a state where that's possible.
+1796    * @param {boolean} [delayed] - Delay the cleanup, to e.g. improve zooming
+1797    *   performance in documents with large images.
+1798    *   The default value is `false`.
+1799    * @returns {boolean} Indicates if clean-up was successfully run.
+1800    */
+1801   #tryCleanup(delayed = false) {
+1802     this.#abortDelayedCleanup();
+1803 
+1804     if (!this.#pendingCleanup || this.destroyed) {
+1805       return false;
+1806     }
+1807     if (delayed) {
+1808       this.#delayedCleanupTimeout = setTimeout(() => {
+1809         this.#delayedCleanupTimeout = null;
+1810         this.#tryCleanup(/* delayed = */ false);
+1811       }, DELAYED_CLEANUP_TIMEOUT);
+1812 
+1813       return false;
+1814     }
+1815     for (const { renderTasks, operatorList } of this._intentStates.values()) {
+1816       if (renderTasks.size > 0 || !operatorList.lastChunk) {
+1817         return false;
+1818       }
+1819     }
+1820     this._intentStates.clear();
+1821     this.objs.clear();
+1822     this.#pendingCleanup = false;
+1823     return true;
+1824   }
+1825 
+1826   #abortDelayedCleanup() {
+1827     if (this.#delayedCleanupTimeout) {
+1828       clearTimeout(this.#delayedCleanupTimeout);
+1829       this.#delayedCleanupTimeout = null;
+1830     }
+1831   }
+1832 
+1848   /**
+1849    * @private
+1850    */
+1851   _renderPageChunk(operatorListChunk, intentState) {
+1852     // Add the new chunk to the current operator list.
+1853     for (let i = 0, ii = operatorListChunk.length; i < ii; i++) {
+1854       intentState.operatorList.fnArray.push(operatorListChunk.fnArray[i]);
+1855       intentState.operatorList.argsArray.push(operatorListChunk.argsArray[i]);
+1856     }
+1857     intentState.operatorList.lastChunk = operatorListChunk.lastChunk;
+1858     intentState.operatorList.separateAnnots = operatorListChunk.separateAnnots;
+1859 
+1860     // Notify all the rendering tasks there are more operators to be consumed.
+1861     for (const internalRenderTask of intentState.renderTasks) {
+1862       internalRenderTask.operatorListChanged();
+1863     }
+1864 
+1865     if (operatorListChunk.lastChunk) {
+1866       this.#tryCleanup(/* delayed = */ true);
+1867     }
+1868   }
+1869 
+1870   /**
+1871    * @private
+1872    */
+1873   _pumpOperatorList({
+1874     renderingIntent,
+1875     cacheKey,
+1876     annotationStorageSerializable,
+1877     modifiedIds,
+1878   }) {
+1879     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+1880       assert(
+1881         Number.isInteger(renderingIntent) && renderingIntent > 0,
+1882         '_pumpOperatorList: Expected valid "renderingIntent" argument.'
+1883       );
+1884     }
+1885     const { map, transfer } = annotationStorageSerializable;
+1886 
+1887     const readableStream = this._transport.messageHandler.sendWithStream(
+1888       "GetOperatorList",
+1889       {
+1890         pageIndex: this._pageIndex,
+1891         intent: renderingIntent,
+1892         cacheKey,
+1893         annotationStorage: map,
+1894         modifiedIds,
+1895       },
+1896       transfer
+1897     );
+1898     const reader = readableStream.getReader();
+1899 
+1900     const intentState = this._intentStates.get(cacheKey);
+1901     intentState.streamReader = reader;
+1902 
+1903     const pump = () => {
+1904       reader.read().then(
+1905         ({ value, done }) => {
+1906           if (done) {
+1907             intentState.streamReader = null;
+1908             return;
+1909           }
+1910           if (this._transport.destroyed) {
+1911             return; // Ignore any pending requests if the worker was terminated.
+1912           }
+1913           this._renderPageChunk(value, intentState);
+1914           pump();
+1915         },
+1916         reason => {
+1917           intentState.streamReader = null;
+1918 
+1919           if (this._transport.destroyed) {
+1920             return; // Ignore any pending requests if the worker was terminated.
+1921           }
+1922           if (intentState.operatorList) {
+1923             // Mark operator list as complete.
+1924             intentState.operatorList.lastChunk = true;
+1925 
+1926             for (const internalRenderTask of intentState.renderTasks) {
+1927               internalRenderTask.operatorListChanged();
+1928             }
+1929             this.#tryCleanup(/* delayed = */ true);
+1930           }
+1931 
+1932           if (intentState.displayReadyCapability) {
+1933             intentState.displayReadyCapability.reject(reason);
+1934           } else if (intentState.opListReadCapability) {
+1935             intentState.opListReadCapability.reject(reason);
+1936           } else {
+1937             throw reason;
+1938           }
+1939         }
+1940       );
+1941     };
+1942     pump();
+1943   }
+1944 
+2017 }
+2018 
+2415 /**
+2416  * For internal use only.
+2417  * @ignore
+2418  */
+2419 class WorkerTransport {
+2420   #methodPromises = new Map();
+2421 
+2422   #pageCache = new Map();
+2423 
+2424   #pagePromises = new Map();
+2425 
+2426   #pageRefCache = new Map();
+2427 
+2428   #passwordCapability = null;
+2429 
+2430   constructor(messageHandler, loadingTask, networkStream, params, factory) {
+2431     this.messageHandler = messageHandler;
+2432     this.loadingTask = loadingTask;
+2433     this.commonObjs = new PDFObjects();
+2434     this.fontLoader = new FontLoader({
+2435       ownerDocument: params.ownerDocument,
+2436       styleElement: params.styleElement,
+2437     });
+2438     this.loadingParams = params.loadingParams;
+2439     this._params = params;
+2440 
+2441     this.canvasFactory = factory.canvasFactory;
+2442     this.filterFactory = factory.filterFactory;
+2443     this.cMapReaderFactory = factory.cMapReaderFactory;
+2444     this.standardFontDataFactory = factory.standardFontDataFactory;
+2445     this.wasmFactory = factory.wasmFactory;
+2446 
+2447     this.destroyed = false;
+2448     this.destroyCapability = null;
+2449 
+2450     this._networkStream = networkStream;
+2451     this._fullReader = null;
+2452     this._lastProgress = null;
+2453     this.downloadInfoCapability = Promise.withResolvers();
+2454 
+2455     this.setupMessageHandler();
+2456 
+2457     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+2458       // For testing purposes.
+2459       Object.defineProperty(this, "getNetworkStreamName", {
+2460         value: () => networkStream?.constructor?.name || null,
+2461       });
+2462       Object.defineProperty(this, "getXFADatasets", {
+2463         value: () =>
+2464           this.messageHandler.sendWithPromise("GetXFADatasets", null),
+2465       });
+2466       Object.defineProperty(this, "getXRefPrevValue", {
+2467         value: () =>
+2468           this.messageHandler.sendWithPromise("GetXRefPrevValue", null),
+2469       });
+2470       Object.defineProperty(this, "getStartXRefPos", {
+2471         value: () =>
+2472           this.messageHandler.sendWithPromise("GetStartXRefPos", null),
+2473       });
+2474       Object.defineProperty(this, "getAnnotArray", {
+2475         value: pageIndex =>
+2476           this.messageHandler.sendWithPromise("GetAnnotArray", { pageIndex }),
+2477       });
+2478     }
+2479   }
+2480 
+2615   setupMessageHandler() {
+2616     const { messageHandler, loadingTask } = this;
+2617 
+2618     messageHandler.on("GetReader", (data, sink) => {
+2619       assert(
+2620         this._networkStream,
+2621         "GetReader - no `IPDFStream` instance available."
+2622       );
+2623       this._fullReader = this._networkStream.getFullReader();
+2624       this._fullReader.onProgress = evt => {
+2625         this._lastProgress = {
+2626           loaded: evt.loaded,
+2627           total: evt.total,
+2628         };
+2629       };
+2630       sink.onPull = () => {
+2631         this._fullReader
+2632           .read()
+2633           .then(function ({ value, done }) {
+2634             if (done) {
+2635               sink.close();
+2636               return;
+2637             }
+2638             assert(
+2639               value instanceof ArrayBuffer,
+2640               "GetReader - expected an ArrayBuffer."
+2641             );
+2642             // Enqueue data chunk into sink, and transfer it
+2643             // to other side as `Transferable` object.
+2644             sink.enqueue(new Uint8Array(value), 1, [value]);
+2645           })
+2646           .catch(reason => {
+2647             sink.error(reason);
+2648           });
+2649       };
+2650 
+2651       sink.onCancel = reason => {
+2652         this._fullReader.cancel(reason);
+2653 
+2654         sink.ready.catch(readyReason => {
+2655           if (this.destroyed) {
+2656             return; // Ignore any pending requests if the worker was terminated.
+2657           }
+2658           throw readyReason;
+2659         });
+2660       };
+2661     });
+2662 
+2663     messageHandler.on("ReaderHeadersReady", async data => {
+2664       await this._fullReader.headersReady;
+2665 
+2666       const { isStreamingSupported, isRangeSupported, contentLength } =
+2667         this._fullReader;
+2668 
+2669       // If stream or range are disabled, it's our only way to report
+2670       // loading progress.
+2671       if (!isStreamingSupported || !isRangeSupported) {
+2672         if (this._lastProgress) {
+2673           loadingTask.onProgress?.(this._lastProgress);
+2674         }
+2675         this._fullReader.onProgress = evt => {
+2676           loadingTask.onProgress?.({
+2677             loaded: evt.loaded,
+2678             total: evt.total,
+2679           });
+2680         };
+2681       }
+2682 
+2683       return { isStreamingSupported, isRangeSupported, contentLength };
+2684     });
+2685 
+2686     messageHandler.on("GetRangeReader", (data, sink) => {
+2687       assert(
+2688         this._networkStream,
+2689         "GetRangeReader - no `IPDFStream` instance available."
+2690       );
+2691       const rangeReader = this._networkStream.getRangeReader(
+2692         data.begin,
+2693         data.end
+2694       );
+2695 
+2696       // When streaming is enabled, it's possible that the data requested here
+2697       // has already been fetched via the `_fullRequestReader` implementation.
+2698       // However, given that the PDF data is loaded asynchronously on the
+2699       // main-thread and then sent via `postMessage` to the worker-thread,
+2700       // it may not have been available during parsing (hence the attempt to
+2701       // use range requests here).
+2702       //
+2703       // To avoid wasting time and resources here, we'll thus *not* dispatch
+2704       // range requests if the data was already loaded but has not been sent to
+2705       // the worker-thread yet (which will happen via the `_fullRequestReader`).
+2706       if (!rangeReader) {
+2707         sink.close();
+2708         return;
+2709       }
+2710 
+2711       sink.onPull = () => {
+2712         rangeReader
+2713           .read()
+2714           .then(function ({ value, done }) {
+2715             if (done) {
+2716               sink.close();
+2717               return;
+2718             }
+2719             assert(
+2720               value instanceof ArrayBuffer,
+2721               "GetRangeReader - expected an ArrayBuffer."
+2722             );
+2723             sink.enqueue(new Uint8Array(value), 1, [value]);
+2724           })
+2725           .catch(reason => {
+2726             sink.error(reason);
+2727           });
+2728       };
+2729 
+2730       sink.onCancel = reason => {
+2731         rangeReader.cancel(reason);
+2732 
+2733         sink.ready.catch(readyReason => {
+2734           if (this.destroyed) {
+2735             return; // Ignore any pending requests if the worker was terminated.
+2736           }
+2737           throw readyReason;
+2738         });
+2739       };
+2740     });
+2741 
+2742     messageHandler.on("GetDoc", ({ pdfInfo }) => {
+2743       this._numPages = pdfInfo.numPages;
+2744       this._htmlForXfa = pdfInfo.htmlForXfa;
+2745       delete pdfInfo.htmlForXfa;
+2746       loadingTask._capability.resolve(new PDFDocumentProxy(pdfInfo, this));
+2747     });
+2748 
+2749     messageHandler.on("DocException", ex => {
+2750       loadingTask._capability.reject(wrapReason(ex));
+2751     });
+2752 
+2753     messageHandler.on("PasswordRequest", ex => {
+2754       this.#passwordCapability = Promise.withResolvers();
+2755 
+2756       try {
+2757         if (!loadingTask.onPassword) {
+2758           throw wrapReason(ex);
+2759         }
+2760 
+2761         const updatePassword = password => {
+2762           if (password instanceof Error) {
+2763             this.#passwordCapability.reject(password);
+2764           } else {
+2765             this.#passwordCapability.resolve({ password });
+2766           }
+2767         };
+2768         loadingTask.onPassword(updatePassword, ex.code);
+2769       } catch (err) {
+2770         this.#passwordCapability.reject(err);
+2771       }
+2772       return this.#passwordCapability.promise;
+2773     });
+2774 
+2775     messageHandler.on("DataLoaded", data => {
+2776       // For consistency: Ensure that progress is always reported when the
+2777       // entire PDF file has been loaded, regardless of how it was fetched.
+2778       loadingTask.onProgress?.({
+2779         loaded: data.length,
+2780         total: data.length,
+2781       });
+2782 
+2783       this.downloadInfoCapability.resolve(data);
+2784     });
+2785 
+2786     messageHandler.on("StartRenderPage", data => {
+2787       if (this.destroyed) {
+2788         return; // Ignore any pending requests if the worker was terminated.
+2789       }
+2790 
+2791       const page = this.#pageCache.get(data.pageIndex);
+2792       page._startRenderPage(data.transparency, data.cacheKey);
+2793     });
+2794 
+2795     messageHandler.on("commonobj", ([id, type, exportedData]) => {
+2796       if (this.destroyed) {
+2797         return null; // Ignore any pending requests if the worker was terminated.
+2798       }
+2799 
+2800       if (this.commonObjs.has(id)) {
+2801         return null;
+2802       }
+2803 
+2804       switch (type) {
+2805         case "Font":
+2806           const { disableFontFace, fontExtraProperties, pdfBug } = this._params;
+2807 
+2808           if ("error" in exportedData) {
+2809             const exportedError = exportedData.error;
+2810             warn(`Error during font loading: ${exportedError}`);
+2811             this.commonObjs.resolve(id, exportedError);
+2812             break;
+2813           }
+2814 
+2815           const inspectFont =
+2816             pdfBug && globalThis.FontInspector?.enabled
+2817               ? (font, url) => globalThis.FontInspector.fontAdded(font, url)
+2818               : null;
+2819           const font = new FontFaceObject(exportedData, {
+2820             disableFontFace,
+2821             fontExtraProperties,
+2822             inspectFont,
+2823           });
+2824 
+2825           this.fontLoader
+2826             .bind(font)
+2827             .catch(() => messageHandler.sendWithPromise("FontFallback", { id }))
+2828             .finally(() => {
+2829               if (!fontExtraProperties && font.data) {
+2830                 // Immediately release the `font.data` property once the font
+2831                 // has been attached to the DOM, since it's no longer needed,
+2832                 // rather than waiting for a `PDFDocumentProxy.cleanup` call.
+2833                 // Since `font.data` could be very large, e.g. in some cases
+2834                 // multiple megabytes, this will help reduce memory usage.
+2835                 font.data = null;
+2836               }
+2837               this.commonObjs.resolve(id, font);
+2838             });
+2839           break;
+2840         case "CopyLocalImage":
+2841           const { imageRef } = exportedData;
+2842           assert(imageRef, "The imageRef must be defined.");
+2843 
+2844           for (const pageProxy of this.#pageCache.values()) {
+2845             for (const [, data] of pageProxy.objs) {
+2846               if (data?.ref !== imageRef) {
+2847                 continue;
+2848               }
+2849               if (!data.dataLen) {
+2850                 return null;
+2851               }
+2852               this.commonObjs.resolve(id, structuredClone(data));
+2853               return data.dataLen;
+2854             }
+2855           }
+2856           break;
+2857         case "FontPath":
+2858         case "Image":
+2859         case "Pattern":
+2860           this.commonObjs.resolve(id, exportedData);
+2861           break;
+2862         default:
+2863           throw new Error(`Got unknown common object type ${type}`);
+2864       }
+2865 
+2866       return null;
+2867     });
+2868 
+2869     messageHandler.on("obj", ([id, pageIndex, type, imageData]) => {
+2870       if (this.destroyed) {
+2871         // Ignore any pending requests if the worker was terminated.
+2872         return;
+2873       }
+2874 
+2875       const pageProxy = this.#pageCache.get(pageIndex);
+2876       if (pageProxy.objs.has(id)) {
+2877         return;
+2878       }
+2879       // Don't store data *after* cleanup has successfully run, see bug 1854145.
+2880       if (pageProxy._intentStates.size === 0) {
+2881         imageData?.bitmap?.close(); // Release any `ImageBitmap` data.
+2882         return;
+2883       }
+2884 
+2885       switch (type) {
+2886         case "Image":
+2887           pageProxy.objs.resolve(id, imageData);
+2888 
+2889           // Heuristic that will allow us not to store large data.
+2890           if (imageData?.dataLen > MAX_IMAGE_SIZE_TO_CACHE) {
+2891             pageProxy._maybeCleanupAfterRender = true;
+2892           }
+2893           break;
+2894         case "Pattern":
+2895           pageProxy.objs.resolve(id, imageData);
+2896           break;
+2897         default:
+2898           throw new Error(`Got unknown object type ${type}`);
+2899       }
+2900     });
+2901 
+2902     messageHandler.on("DocProgress", data => {
+2903       if (this.destroyed) {
+2904         return; // Ignore any pending requests if the worker was terminated.
+2905       }
+2906       loadingTask.onProgress?.({
+2907         loaded: data.loaded,
+2908         total: data.total,
+2909       });
+2910     });
+2911 
+2912     messageHandler.on("FetchBuiltInCMap", async data => {
+2913       if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+2914         throw new Error("Not implemented: FetchBuiltInCMap");
+2915       }
+2916       if (this.destroyed) {
+2917         throw new Error("Worker was destroyed.");
+2918       }
+2919       if (!this.cMapReaderFactory) {
+2920         throw new Error(
+2921           "CMapReaderFactory not initialized, see the `useWorkerFetch` parameter."
+2922         );
+2923       }
+2924       return this.cMapReaderFactory.fetch(data);
+2925     });
+2926 
+2927     messageHandler.on("FetchStandardFontData", async data => {
+2928       if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+2929         throw new Error("Not implemented: FetchStandardFontData");
+2930       }
+2931       if (this.destroyed) {
+2932         throw new Error("Worker was destroyed.");
+2933       }
+2934       if (!this.standardFontDataFactory) {
+2935         throw new Error(
+2936           "StandardFontDataFactory not initialized, see the `useWorkerFetch` parameter."
+2937         );
+2938       }
+2939       return this.standardFontDataFactory.fetch(data);
+2940     });
+2941 
+2942     messageHandler.on("FetchWasm", async data => {
+2943       if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+2944         throw new Error("Not implemented: FetchWasm");
+2945       }
+2946       if (this.destroyed) {
+2947         throw new Error("Worker was destroyed.");
+2948       }
+2949       if (!this.wasmFactory) {
+2950         throw new Error(
+2951           "WasmFactory not initialized, see the `useWorkerFetch` parameter."
+2952         );
+2953       }
+2954       return this.wasmFactory.fetch(data);
+2955     });
+2956   }
+2957 
+3175 }
+3176 
+3177 const INITIAL_DATA = Symbol("INITIAL_DATA");
+3178 
+3527 const version =
+3528   typeof PDFJSDev !== "undefined" ? PDFJSDev.eval("BUNDLE_VERSION") : null;
+3530 const build =
+3531   typeof PDFJSDev !== "undefined" ? PDFJSDev.eval("BUNDLE_BUILD") : null;
+3532 
+File:
+src/shared/util.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 /* globals process */
+16 
+17 // NW.js / Electron is a browser context, but copies some Node.js objects; see
+18 // http://docs.nwjs.io/en/latest/For%20Users/Advanced/JavaScript%20Contexts%20in%20NW.js/#access-nodejs-and-nwjs-api-in-browser-context
+19 // https://www.electronjs.org/docs/api/process#processversionselectron-readonly
+20 // https://www.electronjs.org/docs/api/process#processtype-readonly
+21 const isNodeJS =
+22   (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+23   typeof process === "object" &&
+24   process + "" === "[object process]" &&
+25   !process.versions.nw &&
+26   !(process.versions.electron && process.type && process.type !== "browser");
+27 
+28 const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0];
+29 const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
+30 
+31 const MAX_IMAGE_SIZE_TO_CACHE = 10e6; // Ten megabytes.
+32 
+33 // Represent the percentage of the height of a single-line field over
+34 // the font size. Acrobat seems to use this value.
+35 const LINE_FACTOR = 1.35;
+36 const LINE_DESCENT_FACTOR = 0.35;
+37 const BASELINE_FACTOR = LINE_DESCENT_FACTOR / LINE_FACTOR;
+38 
+53 const RenderingIntentFlag = {
+54   ANY: 0x01,
+55   DISPLAY: 0x02,
+56   PRINT: 0x04,
+57   SAVE: 0x08,
+58   ANNOTATIONS_FORMS: 0x10,
+59   ANNOTATIONS_STORAGE: 0x20,
+60   ANNOTATIONS_DISABLE: 0x40,
+61   IS_EDITING: 0x80,
+62   OPLIST: 0x100,
+63 };
+64 
+65 const AnnotationMode = {
+66   DISABLE: 0,
+67   ENABLE: 1,
+68   ENABLE_FORMS: 2,
+69   ENABLE_STORAGE: 3,
+70 };
+71 
+72 const AnnotationEditorPrefix = "pdfjs_internal_editor_";
+73 
+74 const AnnotationEditorType = {
+75   DISABLE: -1,
+76   NONE: 0,
+77   FREETEXT: 3,
+78   HIGHLIGHT: 9,
+79   STAMP: 13,
+80   INK: 15,
+81 };
+82 
+83 const AnnotationEditorParamsType = {
+84   RESIZE: 1,
+85   CREATE: 2,
+86   FREETEXT_SIZE: 11,
+87   FREETEXT_COLOR: 12,
+88   FREETEXT_OPACITY: 13,
+89   INK_COLOR: 21,
+90   INK_THICKNESS: 22,
+91   INK_OPACITY: 23,
+92   HIGHLIGHT_COLOR: 31,
+93   HIGHLIGHT_DEFAULT_COLOR: 32,
+94   HIGHLIGHT_THICKNESS: 33,
+95   HIGHLIGHT_FREE: 34,
+96   HIGHLIGHT_SHOW_ALL: 35,
+97   DRAW_STEP: 41,
+98 };
+99 
+100 // Permission flags from Table 22, Section 7.6.3.2 of the PDF specification.
+101 const PermissionFlag = {
+102   PRINT: 0x04,
+103   MODIFY_CONTENTS: 0x08,
+104   COPY: 0x10,
+105   MODIFY_ANNOTATIONS: 0x20,
+106   FILL_INTERACTIVE_FORMS: 0x100,
+107   COPY_FOR_ACCESSIBILITY: 0x200,
+108   ASSEMBLE: 0x400,
+109   PRINT_HIGH_QUALITY: 0x800,
+110 };
+111 
+112 const TextRenderingMode = {
+113   FILL: 0,
+114   STROKE: 1,
+115   FILL_STROKE: 2,
+116   INVISIBLE: 3,
+117   FILL_ADD_TO_PATH: 4,
+118   STROKE_ADD_TO_PATH: 5,
+119   FILL_STROKE_ADD_TO_PATH: 6,
+120   ADD_TO_PATH: 7,
+121   FILL_STROKE_MASK: 3,
+122   ADD_TO_PATH_FLAG: 4,
+123 };
+124 
+125 const ImageKind = {
+126   GRAYSCALE_1BPP: 1,
+127   RGB_24BPP: 2,
+128   RGBA_32BPP: 3,
+129 };
+130 
+131 const AnnotationType = {
+132   TEXT: 1,
+133   LINK: 2,
+134   FREETEXT: 3,
+135   LINE: 4,
+136   SQUARE: 5,
+137   CIRCLE: 6,
+138   POLYGON: 7,
+139   POLYLINE: 8,
+140   HIGHLIGHT: 9,
+141   UNDERLINE: 10,
+142   SQUIGGLY: 11,
+143   STRIKEOUT: 12,
+144   STAMP: 13,
+145   CARET: 14,
+146   INK: 15,
+147   POPUP: 16,
+148   FILEATTACHMENT: 17,
+149   SOUND: 18,
+150   MOVIE: 19,
+151   WIDGET: 20,
+152   SCREEN: 21,
+153   PRINTERMARK: 22,
+154   TRAPNET: 23,
+155   WATERMARK: 24,
+156   THREED: 25,
+157   REDACT: 26,
+158 };
+159 
+160 const AnnotationReplyType = {
+161   GROUP: "Group",
+162   REPLY: "R",
+163 };
+164 
+165 const AnnotationFlag = {
+166   INVISIBLE: 0x01,
+167   HIDDEN: 0x02,
+168   PRINT: 0x04,
+169   NOZOOM: 0x08,
+170   NOROTATE: 0x10,
+171   NOVIEW: 0x20,
+172   READONLY: 0x40,
+173   LOCKED: 0x80,
+174   TOGGLENOVIEW: 0x100,
+175   LOCKEDCONTENTS: 0x200,
+176 };
+177 
+178 const AnnotationFieldFlag = {
+179   READONLY: 0x0000001,
+180   REQUIRED: 0x0000002,
+181   NOEXPORT: 0x0000004,
+182   MULTILINE: 0x0001000,
+183   PASSWORD: 0x0002000,
+184   NOTOGGLETOOFF: 0x0004000,
+185   RADIO: 0x0008000,
+186   PUSHBUTTON: 0x0010000,
+187   COMBO: 0x0020000,
+188   EDIT: 0x0040000,
+189   SORT: 0x0080000,
+190   FILESELECT: 0x0100000,
+191   MULTISELECT: 0x0200000,
+192   DONOTSPELLCHECK: 0x0400000,
+193   DONOTSCROLL: 0x0800000,
+194   COMB: 0x1000000,
+195   RICHTEXT: 0x2000000,
+196   RADIOSINUNISON: 0x2000000,
+197   COMMITONSELCHANGE: 0x4000000,
+198 };
+199 
+200 const AnnotationBorderStyleType = {
+201   SOLID: 1,
+202   DASHED: 2,
+203   BEVELED: 3,
+204   INSET: 4,
+205   UNDERLINE: 5,
+206 };
+207 
+208 const AnnotationActionEventType = {
+209   E: "Mouse Enter",
+210   X: "Mouse Exit",
+211   D: "Mouse Down",
+212   U: "Mouse Up",
+213   Fo: "Focus",
+214   Bl: "Blur",
+215   PO: "PageOpen",
+216   PC: "PageClose",
+217   PV: "PageVisible",
+218   PI: "PageInvisible",
+219   K: "Keystroke",
+220   F: "Format",
+221   V: "Validate",
+222   C: "Calculate",
+223 };
+224 
+225 const DocumentActionEventType = {
+226   WC: "WillClose",
+227   WS: "WillSave",
+228   DS: "DidSave",
+229   WP: "WillPrint",
+230   DP: "DidPrint",
+231 };
+232 
+233 const PageActionEventType = {
+234   O: "PageOpen",
+235   C: "PageClose",
+236 };
+237 
+238 const VerbosityLevel = {
+239   ERRORS: 0,
+240   WARNINGS: 1,
+241   INFOS: 5,
+242 };
+243 
+244 // All the possible operations for an operator list.
+245 const OPS = {
+246   // Intentionally start from 1 so it is easy to spot bad operators that will be
+247   // 0's.
+248   // PLEASE NOTE: We purposely keep any removed operators commented out, since
+249   //              re-numbering the list would risk breaking third-party users.
+250   dependency: 1,
+251   setLineWidth: 2,
+252   setLineCap: 3,
+253   setLineJoin: 4,
+254   setMiterLimit: 5,
+255   setDash: 6,
+256   setRenderingIntent: 7,
+257   setFlatness: 8,
+258   setGState: 9,
+259   save: 10,
+260   restore: 11,
+261   transform: 12,
+262   moveTo: 13,
+263   lineTo: 14,
+264   curveTo: 15,
+265   curveTo2: 16,
+266   curveTo3: 17,
+267   closePath: 18,
+268   rectangle: 19,
+269   stroke: 20,
+270   closeStroke: 21,
+271   fill: 22,
+272   eoFill: 23,
+273   fillStroke: 24,
+274   eoFillStroke: 25,
+275   closeFillStroke: 26,
+276   closeEOFillStroke: 27,
+277   endPath: 28,
+278   clip: 29,
+279   eoClip: 30,
+280   beginText: 31,
+281   endText: 32,
+282   setCharSpacing: 33,
+283   setWordSpacing: 34,
+284   setHScale: 35,
+285   setLeading: 36,
+286   setFont: 37,
+287   setTextRenderingMode: 38,
+288   setTextRise: 39,
+289   moveText: 40,
+290   setLeadingMoveText: 41,
+291   setTextMatrix: 42,
+292   nextLine: 43,
+293   showText: 44,
+294   showSpacedText: 45,
+295   nextLineShowText: 46,
+296   nextLineSetSpacingShowText: 47,
+297   setCharWidth: 48,
+298   setCharWidthAndBounds: 49,
+299   setStrokeColorSpace: 50,
+300   setFillColorSpace: 51,
+301   setStrokeColor: 52,
+302   setStrokeColorN: 53,
+303   setFillColor: 54,
+304   setFillColorN: 55,
+305   setStrokeGray: 56,
+306   setFillGray: 57,
+307   setStrokeRGBColor: 58,
+308   setFillRGBColor: 59,
+309   setStrokeCMYKColor: 60,
+310   setFillCMYKColor: 61,
+311   shadingFill: 62,
+312   beginInlineImage: 63,
+313   beginImageData: 64,
+314   endInlineImage: 65,
+315   paintXObject: 66,
+316   markPoint: 67,
+317   markPointProps: 68,
+318   beginMarkedContent: 69,
+319   beginMarkedContentProps: 70,
+320   endMarkedContent: 71,
+321   beginCompat: 72,
+322   endCompat: 73,
+323   paintFormXObjectBegin: 74,
+324   paintFormXObjectEnd: 75,
+325   beginGroup: 76,
+326   endGroup: 77,
+327   // beginAnnotations: 78,
+328   // endAnnotations: 79,
+329   beginAnnotation: 80,
+330   endAnnotation: 81,
+331   // paintJpegXObject: 82,
+332   paintImageMaskXObject: 83,
+333   paintImageMaskXObjectGroup: 84,
+334   paintImageXObject: 85,
+335   paintInlineImageXObject: 86,
+336   paintInlineImageXObjectGroup: 87,
+337   paintImageXObjectRepeat: 88,
+338   paintImageMaskXObjectRepeat: 89,
+339   paintSolidColorImageMask: 90,
+340   constructPath: 91,
+341   setStrokeTransparent: 92,
+342   setFillTransparent: 93,
+343 };
+344 
+345 const PasswordResponses = {
+346   NEED_PASSWORD: 1,
+347   INCORRECT_PASSWORD: 2,
+348 };
+349 
+350 let verbosity = VerbosityLevel.WARNINGS;
+351 
+362 // A notice for devs. These are good for things that are helpful to devs, such
+363 // as warning that Workers were disabled, which is important to devs but not
+364 // end users.
+371 
+372 // Non-fatal warnings.
+379 
+390 // Checks if URLs use one of the allowed protocols, e.g. to avoid XSS.
+403 
+466 const BaseException = (function BaseExceptionClosure() {
+467   // eslint-disable-next-line no-shadow
+468   function BaseException(message, name) {
+469     if (
+470       (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) &&
+471       this.constructor === BaseException
+472     ) {
+473       unreachable("Cannot initialize BaseException.");
+474     }
+475     this.message = message;
+476     this.name = name;
+477   }
+478   BaseException.prototype = new Error();
+479   BaseException.constructor = BaseException;
+480 
+481   return BaseException;
+482 })();
+483 
+579 // Ensure that the returned Object has a `null` prototype; hence why
+580 // `Object.fromEntries(...)` is not used.
+588 
+589 // Checks the endianness of the platform.
+596 
+597 // Checks if it's possible to eval JS expressions.
+606 
+663 const hexNumbers = Array.from(Array(256).keys(), n =>
+664   n.toString(16).padStart(2, "0")
+665 );
+666 
+958 const PDFStringTranslateTable = [
+959   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x2d8,
+960   0x2c7, 0x2c6, 0x2d9, 0x2dd, 0x2db, 0x2da, 0x2dc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+961   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+962   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+963   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+964   0, 0, 0, 0, 0, 0, 0, 0, 0x2022, 0x2020, 0x2021, 0x2026, 0x2014, 0x2013, 0x192,
+965   0x2044, 0x2039, 0x203a, 0x2212, 0x2030, 0x201e, 0x201c, 0x201d, 0x2018,
+966   0x2019, 0x201a, 0x2122, 0xfb01, 0xfb02, 0x141, 0x152, 0x160, 0x178, 0x17d,
+967   0x131, 0x142, 0x153, 0x161, 0x17e, 0, 0x20ac,
+968 ];
+969 
+1052 let NormalizeRegex = null;
+1053 let NormalizationMap = null;
+1070 
+1083 const AnnotationPrefix = "pdfjs_internal_id_";
+1084 
+1085 // TODO: Remove this once `Uint8Array.prototype.toHex` is generally available.
+1092 
+1093 // TODO: Remove this once `Uint8Array.prototype.toBase64` is generally
+1094 //       available.
+1101 
+1102 // TODO: Remove this once `Uint8Array.fromBase64` is generally available.
+1109 
+1110 // TODO: Remove this once https://bugzilla.mozilla.org/show_bug.cgi?id=1928493
+1111 //       is fixed.
+1122 
+</code>
+
+PR summary:
+<pr_summary>
+[api-minor] Simplify clean-up of page resources after rendering
+After PR #2317, which landed in 2012, we'd immediately clean-up after rendering for pages with large image resources. This had the effect that re-rendering, e.g. after zooming, would force us to re-parse the entire page which could easily lead to bad performance.
+In PR #16108, which landed in 2023, we tried to lessen the impact of that by slightly delaying clean-up however that's obviously not a perfect solution (and it increased the complexity of the relevant code).
+
+Furthermore, the condition for this "immediate" clean-up seems a bit arbitrary to me since a page could easily contain a large number of smaller images whose total size vastly exceeds the threshold.
+
+Hence this patch, which suggests that we remove the conditional and delayed clean-up after rendering. Compared to the situation back in 2012, a number of things have improved since:
+ - We have *multiple* caches for repeated image-resources on the worker-thread[1], which helps reduce overall memory usage and improves performance.
+ - We downsize huge images on the worker-thread, which means that the images we're using on the main-thread cannot be arbitrarily large.
+ - The amount of available RAM on devices should be a lot higher, since more than a decade has passed.
+
+A future improvement here, for more resource constrained environments, could be to instead clean-up when actually needed using e.g. `WeakRef`s (see issue 18148).
+
+---
+[1] More specifically:
+ - `LocalImageCache`, which caches image-data by /Name and /Ref on the `PartialEvaluator.prototype.getOperatorList` level.
+ - `RegionalImageCache`, which caches image-data by /Ref on the `PartialEvaluator`-instance (i.e. at the page) level.
+ - `GlobalImageCache`, which caches image-data by /Ref globally at the document level.
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

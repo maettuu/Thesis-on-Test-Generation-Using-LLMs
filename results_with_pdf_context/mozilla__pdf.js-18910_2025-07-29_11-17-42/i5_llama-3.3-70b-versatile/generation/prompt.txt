@@ -1,0 +1,561 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Use ImageDecoder to speed up decoding images in PDFs
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/base_stream.js b/src/core/base_stream.js
+--- a/src/core/base_stream.js
++++ b/src/core/base_stream.js
+@@ -68,6 +68,10 @@ class BaseStream {
+     return false;
+   }
+ 
++  async getTransferableImage() {
++    return null;
++  }
++
+   peekByte() {
+     const peekedByte = this.getByte();
+     if (peekedByte !== -1) {
+
+diff --git a/src/core/image.js b/src/core/image.js
+--- a/src/core/image.js
++++ b/src/core/image.js
+@@ -752,6 +752,10 @@ class PDFImage {
+         drawWidth === originalWidth &&
+         drawHeight === originalHeight
+       ) {
++        const image = await this.#getImage(originalWidth, originalHeight);
++        if (image) {
++          return image;
++        }
+         const data = await this.getImageBytes(originalHeight * rowBytes, {});
+         if (isOffscreenCanvasSupported) {
+           if (mustBeResized) {
+@@ -810,6 +814,10 @@ class PDFImage {
+           }
+ 
+           if (isHandled) {
++            const image = await this.#getImage(drawWidth, drawHeight);
++            if (image) {
++              return image;
++            }
+             const rgba = await this.getImageBytes(imageLength, {
+               drawWidth,
+               drawHeight,
+@@ -1013,6 +1021,20 @@ class PDFImage {
+     };
+   }
+ 
++  async #getImage(width, height) {
++    const bitmap = await this.image.getTransferableImage();
++    if (!bitmap) {
++      return null;
++    }
++    return {
++      data: null,
++      width,
++      height,
++      bitmap,
++      interpolate: this.interpolate,
++    };
++  }
++
+   async getImageBytes(
+     length,
+     {
+
+diff --git a/src/core/jpeg_stream.js b/src/core/jpeg_stream.js
+--- a/src/core/jpeg_stream.js
++++ b/src/core/jpeg_stream.js
+@@ -13,10 +13,10 @@
+  * limitations under the License.
+  */
+ 
++import { shadow, warn } from "../shared/util.js";
+ import { DecodeStream } from "./decode_stream.js";
+ import { Dict } from "./primitives.js";
+ import { JpegImage } from "./jpg.js";
+-import { shadow } from "../shared/util.js";
+ 
+ /**
+  * For JPEG's we use a library to decode these images and the stream behaves
+@@ -32,6 +32,18 @@ class JpegStream extends DecodeStream {
+     this.params = params;
+   }
+ 
++  static get canUseImageDecoder() {
++    return shadow(
++      this,
++      "canUseImageDecoder",
++      // eslint-disable-next-line no-undef
++      typeof ImageDecoder === "undefined"
++        ? Promise.resolve(false)
++        : // eslint-disable-next-line no-undef
++          ImageDecoder.isTypeSupported("image/jpeg")
++    );
++  }
++
+   get bytes() {
+     // If `this.maybeLength` is null, we'll get the entire stream.
+     return shadow(this, "bytes", this.stream.getBytes(this.maybeLength));
+@@ -46,22 +58,7 @@ class JpegStream extends DecodeStream {
+     this.decodeImage();
+   }
+ 
+-  decodeImage(bytes) {
+-    if (this.eof) {
+-      return this.buffer;
+-    }
+-    bytes ||= this.bytes;
+-
+-    // Some images may contain 'junk' before the SOI (start-of-image) marker.
+-    // Note: this seems to mainly affect inline images.
+-    for (let i = 0, ii = bytes.length - 1; i < ii; i++) {
+-      if (bytes[i] === 0xff && bytes[i + 1] === 0xd8) {
+-        if (i > 0) {
+-          bytes = bytes.subarray(i);
+-        }
+-        break;
+-      }
+-    }
++  get jpegOptions() {
+     const jpegOptions = {
+       decodeTransform: undefined,
+       colorTransform: undefined,
+@@ -93,8 +90,34 @@ class JpegStream extends DecodeStream {
+         jpegOptions.colorTransform = colorTransform;
+       }
+     }
+-    const jpegImage = new JpegImage(jpegOptions);
++    return shadow(this, "jpegOptions", jpegOptions);
++  }
++
++  #skipUselessBytes(data) {
++    // Some images may contain 'junk' before the SOI (start-of-image) marker.
++    // Note: this seems to mainly affect inline images.
++    for (let i = 0, ii = data.length - 1; i < ii; i++) {
++      if (data[i] === 0xff && data[i + 1] === 0xd8) {
++        if (i > 0) {
++          data = data.subarray(i);
++        }
++        break;
++      }
++    }
++    return data;
++  }
++
++  decodeImage(bytes) {
++    if (this.eof) {
++      return this.buffer;
++    }
++    bytes = this.#skipUselessBytes(bytes || this.bytes);
+ 
++    // TODO: if an image has a mask we need to combine the data.
++    // So ideally get a VideoFrame from getTransferableImage and then use
++    // copyTo.
++
++    const jpegImage = new JpegImage(this.jpegOptions);
+     jpegImage.parse(bytes);
+     const data = jpegImage.getData({
+       width: this.drawWidth,
+@@ -113,6 +136,48 @@ class JpegStream extends DecodeStream {
+   get canAsyncDecodeImageFromBuffer() {
+     return this.stream.isAsync;
+   }
++
++  async getTransferableImage() {
++    if (!(await JpegStream.canUseImageDecoder)) {
++      return null;
++    }
++    const jpegOptions = this.jpegOptions;
++    if (jpegOptions.decodeTransform) {
++      // TODO: We could decode the image thanks to ImageDecoder and then
++      // get the pixels with copyTo and apply the decodeTransform.
++      return null;
++    }
++    let decoder;
++    try {
++      // TODO: If the stream is Flate & DCT we could try to just pipe the
++      // the DecompressionStream into the ImageDecoder: it'll avoid the
++      // intermediate ArrayBuffer.
++      const bytes =
++        (this.canAsyncDecodeImageFromBuffer &&
++          (await this.stream.asyncGetBytes())) ||
++        this.bytes;
++      if (!bytes) {
++        return null;
++      }
++      const data = this.#skipUselessBytes(bytes);
++      if (!JpegImage.canUseImageDecoder(data, jpegOptions.colorTransform)) {
++        return null;
++      }
++      // eslint-disable-next-line no-undef
++      decoder = new ImageDecoder({
++        data,
++        type: "image/jpeg",
++        preferAnimation: false,
++      });
++
++      return (await decoder.decode()).image;
++    } catch (reason) {
++      warn(`getTransferableImage - failed: "${reason}".`);
++      return null;
++    } finally {
++      decoder?.close();
++    }
++  }
+ }
+ 
+ export { JpegStream };
+
+diff --git a/src/core/jpg.js b/src/core/jpg.js
+--- a/src/core/jpg.js
++++ b/src/core/jpg.js
+@@ -744,55 +744,109 @@ function findNextFileMarker(data, currentPos, startPos = currentPos) {
+   };
+ }
+ 
++function prepareComponents(frame) {
++  const mcusPerLine = Math.ceil(frame.samplesPerLine / 8 / frame.maxH);
++  const mcusPerColumn = Math.ceil(frame.scanLines / 8 / frame.maxV);
++  for (const component of frame.components) {
++    const blocksPerLine = Math.ceil(
++      (Math.ceil(frame.samplesPerLine / 8) * component.h) / frame.maxH
++    );
++    const blocksPerColumn = Math.ceil(
++      (Math.ceil(frame.scanLines / 8) * component.v) / frame.maxV
++    );
++    const blocksPerLineForMcu = mcusPerLine * component.h;
++    const blocksPerColumnForMcu = mcusPerColumn * component.v;
++
++    const blocksBufferSize =
++      64 * blocksPerColumnForMcu * (blocksPerLineForMcu + 1);
++    component.blockData = new Int16Array(blocksBufferSize);
++    component.blocksPerLine = blocksPerLine;
++    component.blocksPerColumn = blocksPerColumn;
++  }
++  frame.mcusPerLine = mcusPerLine;
++  frame.mcusPerColumn = mcusPerColumn;
++}
++
++function readDataBlock(data, offset) {
++  const length = readUint16(data, offset);
++  offset += 2;
++  let endOffset = offset + length - 2;
++
++  const fileMarker = findNextFileMarker(data, endOffset, offset);
++  if (fileMarker?.invalid) {
++    warn(
++      "readDataBlock - incorrect length, current marker is: " +
++        fileMarker.invalid
++    );
++    endOffset = fileMarker.offset;
++  }
++
++  const array = data.subarray(offset, endOffset);
++  offset += array.length;
++  return { appData: array, newOffset: offset };
++}
++
++function skipData(data, offset) {
++  const length = readUint16(data, offset);
++  offset += 2;
++  const endOffset = offset + length - 2;
++
++  const fileMarker = findNextFileMarker(data, endOffset, offset);
++  if (fileMarker?.invalid) {
++    return fileMarker.offset;
++  }
++  return endOffset;
++}
++
+ class JpegImage {
+   constructor({ decodeTransform = null, colorTransform = -1 } = {}) {
+     this._decodeTransform = decodeTransform;
+     this._colorTransform = colorTransform;
+   }
+ 
+-  parse(data, { dnlScanLines = null } = {}) {
+-    function readDataBlock() {
+-      const length = readUint16(data, offset);
+-      offset += 2;
+-      let endOffset = offset + length - 2;
+-
+-      const fileMarker = findNextFileMarker(data, endOffset, offset);
+-      if (fileMarker?.invalid) {
+-        warn(
+-          "readDataBlock - incorrect length, current marker is: " +
+-            fileMarker.invalid
+-        );
+-        endOffset = fileMarker.offset;
+-      }
+-
+-      const array = data.subarray(offset, endOffset);
+-      offset += array.length;
+-      return array;
++  static canUseImageDecoder(data, colorTransform = -1) {
++    let offset = 0;
++    let numComponents = null;
++    let fileMarker = readUint16(data, offset);
++    offset += 2;
++    if (fileMarker !== /* SOI (Start of Image) = */ 0xffd8) {
++      throw new JpegError("SOI not found");
+     }
++    fileMarker = readUint16(data, offset);
++    offset += 2;
+ 
+-    function prepareComponents(frame) {
+-      const mcusPerLine = Math.ceil(frame.samplesPerLine / 8 / frame.maxH);
+-      const mcusPerColumn = Math.ceil(frame.scanLines / 8 / frame.maxV);
+-      for (const component of frame.components) {
+-        const blocksPerLine = Math.ceil(
+-          (Math.ceil(frame.samplesPerLine / 8) * component.h) / frame.maxH
+-        );
+-        const blocksPerColumn = Math.ceil(
+-          (Math.ceil(frame.scanLines / 8) * component.v) / frame.maxV
+-        );
+-        const blocksPerLineForMcu = mcusPerLine * component.h;
+-        const blocksPerColumnForMcu = mcusPerColumn * component.v;
+-
+-        const blocksBufferSize =
+-          64 * blocksPerColumnForMcu * (blocksPerLineForMcu + 1);
+-        component.blockData = new Int16Array(blocksBufferSize);
+-        component.blocksPerLine = blocksPerLine;
+-        component.blocksPerColumn = blocksPerColumn;
++    markerLoop: while (fileMarker !== /* EOI (End of Image) = */ 0xffd9) {
++      switch (fileMarker) {
++        case 0xffc0: // SOF0 (Start of Frame, Baseline DCT)
++        case 0xffc1: // SOF1 (Start of Frame, Extended DCT)
++        case 0xffc2: // SOF2 (Start of Frame, Progressive DCT)
++          // Skip marker length.
++          // Skip precision.
++          // Skip scanLines.
++          // Skip samplesPerLine.
++          numComponents = data[offset + (2 + 1 + 2 + 2)];
++          break markerLoop;
++        case 0xffff: // Fill bytes
++          if (data[offset] !== 0xff) {
++            // Avoid skipping a valid marker.
++            offset--;
++          }
++          break;
+       }
+-      frame.mcusPerLine = mcusPerLine;
+-      frame.mcusPerColumn = mcusPerColumn;
++      offset = skipData(data, offset);
++      fileMarker = readUint16(data, offset);
++      offset += 2;
++    }
++    if (numComponents === 4) {
++      return false;
++    }
++    if (numComponents === 3 && colorTransform === 0) {
++      return false;
+     }
++    return true;
++  }
+ 
++  parse(data, { dnlScanLines = null } = {}) {
+     let offset = 0;
+     let jfif = null;
+     let adobe = null;
+@@ -830,7 +884,8 @@ class JpegImage {
+         case 0xffee: // APP14
+         case 0xffef: // APP15
+         case 0xfffe: // COM (Comment)
+-          const appData = readDataBlock();
++          const { appData, newOffset } = readDataBlock(data, offset);
++          offset = newOffset;
+ 
+           if (fileMarker === 0xffe0) {
+             // 'JFIF\x00'
+
+diff --git a/src/display/canvas.js b/src/display/canvas.js
+--- a/src/display/canvas.js
++++ b/src/display/canvas.js
+@@ -1059,8 +1059,10 @@ class CanvasGraphics {
+     // Vertical or horizontal scaling shall not be more than 2 to not lose the
+     // pixels during drawImage operation, painting on the temporary canvas(es)
+     // that are twice smaller in size.
+-    const width = img.width;
+-    const height = img.height;
++
++    // displayWidth and displayHeight are used for VideoFrame.
++    const width = img.width ?? img.displayWidth;
++    const height = img.height ?? img.displayHeight;
+     let widthScale = Math.max(
+       Math.hypot(inverseTransform[0], inverseTransform[1]),
+       1
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.25.8
+- @babel/preset-env: ^7.25.8
+- @babel/runtime: ^7.25.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001669
+- canvas: ^3.0.0-rc2
+- core-js: ^3.38.1
+- eslint: ^8.57.1
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^3.9.1
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-unicorn: ^56.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.4.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.5
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.47
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.0
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.0
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.10.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.3
+- vinyl: ^3.0.0
+- webpack: ^5.95.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages, fetchData
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

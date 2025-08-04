@@ -1,0 +1,84 @@
+<think>
+Okay, I need to write a regression test for the issue where adding a `<base href>` tag breaks transparency filters in Firefox. The user provided a patch, and I need to ensure the test fails before the patch and passes after.
+
+First, I'll start by understanding the problem. The bug occurs when a `<base href>` is present, causing incorrect rendering of drop shadows in Firefox. The patch modifies the DOMFilterFactory to correctly handle URLs when a base href is set.
+
+I'll create a test that simulates this scenario. The test should:
+
+1. Set up a simple HTML structure with a `<base href>` tag.
+2. Create a PDF page with a transparency layer (like a drop shadow).
+3. Render the PDF using pdf.js and check if the transparency is rendered correctly.
+
+I'll use the provided test.pdf file from the issue. The test will load this PDF and check for the presence of the drop shadow effect.
+
+I need to import the necessary modules. Since the test is in Node.js, I'll use dynamic imports to load the required classes like PDFDocument and PDFPage.
+
+I'll set up a canvas to render the PDF page. After rendering, I'll check the canvas pixels to see if the drop shadow is correctly applied. If the patch is correct, the pixels should match the expected values.
+
+The test will fail before the patch because the URLs for filters won't be correctly resolved, leading to incorrect rendering. After applying the patch, the URLs should be correctly generated, and the test should pass.
+
+I'll structure the test using Jest, with async/await for loading the PDF and getting the page. The test will create a new PDFDocument, get the first page, render it, and then check the canvas pixels.
+
+I'll also make sure to clean up by closing the PDF document after the test to avoid memory leaks.
+
+Finally, I'll write the test code, ensuring all necessary modules are imported and the test correctly compares the expected and actual results.
+</think>
+
+```javascript
+it("should render transparency filters correctly with <base href>", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { DOMCanvasFactory } = await import("../../src/display/display_utils.js");
+
+  // Create a test HTML structure with <base href>
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <base href=".">
+    </head>
+    <body>
+    </body>
+    </html>
+  `;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const canvas = doc.createElement("canvas");
+  doc.body.appendChild(canvas);
+
+  // Create a new PDF document with the test PDF
+  const pdf = await PDFDocument.create(
+    await fetch("test.pdf").then(res => res.arrayBuffer())
+  );
+
+  // Get the first page
+  const page = await pdf.getPage(1);
+
+  // Set up rendering
+  const viewport = page.getViewPort({ scale: 1 });
+  const canvasFactory = new DOMCanvasFactory();
+  const canvasRender = canvasFactory.createCanvas(viewport.width, viewport.height);
+  const ctx = canvasRender.getContext("2d");
+
+  // Render the page
+  await page.render({
+    canvasContext: ctx,
+    viewport,
+    enableWebGL: false,
+  });
+
+  // Check for expected transparency effect
+  const expectedAlpha = 128;
+  const actualImageData = ctx.getImageData(0, 0, canvasRender.width, canvasRender.height);
+  const alphaFound = actualImageData.data.some((value, index) => {
+    if (index % 4 === 3) { // Alpha channel
+      return value === expectedAlpha;
+    }
+    return false;
+  });
+
+  expect(alphaFound).toBe(true);
+
+  // Cleanup
+  await pdf.close();
+});
+```

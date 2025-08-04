@@ -1,0 +1,55 @@
+it("should render text when browserdisplayusedocumentfonts is disabled", async () => {
+  const { PDFDataLoader } = await import("../../src/display/api.js");
+  const { PDFDocument } = await import("../../src/display/document.js");
+  const { PDFPage } = await import("../../src/display/document.js");
+  const { PDFViewer } = await import("../../src/web/pdf_viewer.js");
+  const { PDFRenderer } = await import("../../src/display/canvas.js");
+
+  // Create a minimal PDF with text
+  const pdfData = new Uint8Array([
+    0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x30, 0x0A, 0x25, 0x5E, 0x5E, 0x5E, 0x5E, 0x0A,
+    0x31, 0x20, 0x30, 0x20, 0x72, 0x65, 0x66, 0x0A, 0x34, 0x35, 0x30, 0x30, 0x39, 0x34, 0x0A,
+    0x32, 0x30, 0x20, 0x30, 0x20, 0x72, 0x65, 0x66, 0x0A, 0x34, 0x35, 0x30, 0x30, 0x39, 0x34, 0x0A,
+    0x38, 0x20, 0x30, 0x20, 0x72, 0x65, 0x66, 0x0A, 0x34, 0x35, 0x30, 0x30, 0x39, 0x34, 0x0A,
+    0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x30, 0x0A
+  ]);
+
+  // Mock browser.display.use_document_fonts
+  const originalUseDocumentFonts = globalThis.navigator.browser.display.use_document_fonts;
+  globalThis.navigator.browser.display.use_document_fonts = () => 0;
+
+  try {
+    const loader = new PDFDataLoader({
+      data: pdfData,
+    });
+    const pdf = await PDFDocument.load(loader);
+    const page = await pdf.getPage(1);
+    const viewer = new PDFViewer();
+    const renderer = new PDFRenderer({
+      canvasCtx: {
+        save: () => {},
+        restore: () => {},
+        scale: () => {},
+        translate: () => {},
+        fillText: () => {},
+        strokeText: () => {},
+        measureText: () => ({ width: 0 }),
+        getTransform: () => new DOMMatrix(),
+        setTransform: () => {},
+      },
+    });
+
+    await page.startRendering({
+      viewport: page.getViewport({ scale: 1 }),
+      renderInteractive: false,
+    });
+
+    const canvas = renderer.canvasCtx;
+    const expectedText = "Test String";
+    const actualText = canvas.fillText;
+
+    expect(actualText).toBeTruthy();
+  } finally {
+    globalThis.navigator.browser.display.use_document_fonts = originalUseDocumentFonts;
+  }
+});

@@ -1,0 +1,54 @@
+it("should render top and bottom images with masks", async () => {
+  const { pdfjsLib } = await import("../../src/core/pdfjsLib.js");
+  const { PDFDocument } = pdfjsLib;
+  const { OPS } = await import("../../src/core/evaluator.js");
+
+  // Create a test PDF with top and bottom images
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+
+  // Create top image with mask
+  const topImage = new pdf.Image();
+  topImage.scale(1, 1);
+  topImage.setMask("auto");
+
+  // Create bottom image with mask
+  const bottomImage = new pdf.Image();
+  bottomImage.scale(1, 1);
+  bottomImage.setMask("auto");
+
+  page.drawImage(topImage, 0, 0);
+  page.drawImage(bottomImage, 0, 500);
+
+  // Mock the PDF fetch
+  const pdfData = await pdf.writeAsync();
+  const pdfBlob = new Blob([pdfData.buffer], { type: "application/pdf" });
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+
+  global.fetch = jest.fn(() =>
+    Promise.resolve({ blob: () => Promise.resolve(pdfBlob) })
+  );
+
+  // Load the document and render the page
+  const loadingTask = pdfjsLib.getDocument(pdfUrl);
+  const document = await loadingTask.promise;
+  const pageProxy = await document.getPage(1);
+  const operatorList = await pageProxy.getOperatorList();
+
+  // Check if the operator list includes the expected operations for top and bottom images
+  const expectedOps = [
+    OPS.save,
+    OPS.setGState,
+    OPS.paintImageMaskXObject,
+    OPS.restore,
+    OPS.save,
+    OPS.setGState,
+    OPS.paintImageMaskXObject,
+    OPS.restore
+  ];
+
+  expect(operatorList.fnArray).toContain(OPS.save);
+  expect(operatorList.fnArray).toContain(OPS.setGState);
+  expect(operatorList.fnArray).toContain(OPS.paintImageMaskXObject);
+  expect(operatorList.fnArray).toContain(OPS.restore);
+});

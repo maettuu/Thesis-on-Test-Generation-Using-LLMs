@@ -1,0 +1,755 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+ncode.syosetu.com - Opening a PDF in Firefox shows Japanese vertical punctuation errors
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/fonts.js b/src/core/fonts.js
+--- a/src/core/fonts.js
++++ b/src/core/fonts.js
+@@ -26,6 +26,7 @@ import {
+ import { CFFCompiler, CFFParser } from "./cff_parser.js";
+ import {
+   FontFlags,
++  getVerticalPresentationForm,
+   MacStandardGlyphOrdering,
+   normalizeFontName,
+   recoverGlyphName,
+@@ -3366,6 +3367,13 @@ class Font {
+       }
+     }
+ 
++    if (this.missingFile && this.vertical && fontChar.length === 1) {
++      const vertical = getVerticalPresentationForm()[fontChar.charCodeAt(0)];
++      if (vertical) {
++        fontChar = unicode = String.fromCharCode(vertical);
++      }
++    }
++
+     glyph = new Glyph(
+       charcode,
+       fontChar,
+
+diff --git a/src/core/fonts_utils.js b/src/core/fonts_utils.js
+--- a/src/core/fonts_utils.js
++++ b/src/core/fonts_utils.js
+@@ -15,6 +15,7 @@
+ 
+ import { getEncoding, StandardEncoding } from "./encodings.js";
+ import { getGlyphsUnicode } from "./glyphlist.js";
++import { getLookupTableFactory } from "./core_utils.js";
+ import { getUnicodeForGlyph } from "./unicode.js";
+ import { info } from "../shared/util.js";
+ 
+@@ -168,8 +169,47 @@ function normalizeFontName(name) {
+   return name.replaceAll(/[,_]/g, "-").replaceAll(/\s/g, "");
+ }
+ 
++const getVerticalPresentationForm = getLookupTableFactory(t => {
++  // This table has been found at
++  // https://searchfox.org/mozilla-central/rev/cbdfa503a87597b20719aae5f6a1efccd6cb3b7b/gfx/thebes/gfxHarfBuzzShaper.cpp#251-294
++  t[0x2013] = 0xfe32; // EN DASH
++  t[0x2014] = 0xfe31; // EM DASH
++  t[0x2025] = 0xfe30; // TWO DOT LEADER
++  t[0x2026] = 0xfe19; // HORIZONTAL ELLIPSIS
++  t[0x3001] = 0xfe11; // IDEOGRAPHIC COMMA
++  t[0x3002] = 0xfe12; // IDEOGRAPHIC FULL STOP
++  t[0x3008] = 0xfe3f; // LEFT ANGLE BRACKET
++  t[0x3009] = 0xfe40; // RIGHT ANGLE BRACKET
++  t[0x300a] = 0xfe3d; // LEFT DOUBLE ANGLE BRACKET
++  t[0x300b] = 0xfe3e; // RIGHT DOUBLE ANGLE BRACKET
++  t[0x300c] = 0xfe41; // LEFT CORNER BRACKET
++  t[0x300d] = 0xfe42; // RIGHT CORNER BRACKET
++  t[0x300e] = 0xfe43; // LEFT WHITE CORNER BRACKET
++  t[0x300f] = 0xfe44; // RIGHT WHITE CORNER BRACKET
++  t[0x3010] = 0xfe3b; // LEFT BLACK LENTICULAR BRACKET
++  t[0x3011] = 0xfe3c; // RIGHT BLACK LENTICULAR BRACKET
++  t[0x3014] = 0xfe39; // LEFT TORTOISE SHELL BRACKET
++  t[0x3015] = 0xfe3a; // RIGHT TORTOISE SHELL BRACKET
++  t[0x3016] = 0xfe17; // LEFT WHITE LENTICULAR BRACKET
++  t[0x3017] = 0xfe18; // RIGHT WHITE LENTICULAR BRACKET
++  t[0xfe4f] = 0xfe34; // WAVY LOW LINE
++  t[0xff01] = 0xfe15; // FULLWIDTH EXCLAMATION MARK
++  t[0xff08] = 0xfe35; // FULLWIDTH LEFT PARENTHESIS
++  t[0xff09] = 0xfe36; // FULLWIDTH RIGHT PARENTHESIS
++  t[0xff0c] = 0xfe10; // FULLWIDTH COMMA
++  t[0xff1a] = 0xfe13; // FULLWIDTH COLON
++  t[0xff1b] = 0xfe14; // FULLWIDTH SEMICOLON
++  t[0xff1f] = 0xfe16; // FULLWIDTH QUESTION MARK
++  t[0xff3b] = 0xfe47; // FULLWIDTH LEFT SQUARE BRACKET
++  t[0xff3d] = 0xfe48; // FULLWIDTH RIGHT SQUARE BRACKET
++  t[0xff3f] = 0xfe33; // FULLWIDTH LOW LINE
++  t[0xff5b] = 0xfe37; // FULLWIDTH LEFT CURLY BRACKET
++  t[0xff5d] = 0xfe38; // FULLWIDTH RIGHT CURLY BRACKET
++});
++
+ export {
+   FontFlags,
++  getVerticalPresentationForm,
+   MacStandardGlyphOrdering,
+   normalizeFontName,
+   recoverGlyphName,
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.24.7
+- @babel/preset-env: ^7.24.7
+- @babel/runtime: ^7.24.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.19
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001636
+- canvas: ^2.11.2
+- core-js: ^3.37.1
+- cross-env: ^7.0.3
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.1
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.2.0
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.7.4
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^54.0.0
+- globals: ^15.6.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.9.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.3
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.1
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.0
+- pngjs: ^7.0.0
+- postcss: ^8.4.38
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^7.0.1
+- postcss-nesting: ^12.1.5
+- prettier: ^3.3.2
+- puppeteer: ^22.12.0
+- streamqueue: ^1.1.2
+- stylelint: ^16.6.1
+- stylelint-prettier: ^5.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.5.2
+- vinyl: ^3.0.0
+- webpack: ^5.92.1
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/fonts.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   bytesToString,
+19   FONT_IDENTITY_MATRIX,
+20   FormatError,
+21   info,
+22   shadow,
+23   string32,
+24   warn,
+25 } from "../shared/util.js";
+26 import { CFFCompiler, CFFParser } from "./cff_parser.js";
+27 import {
+28   FontFlags,
+29   MacStandardGlyphOrdering,
+30   normalizeFontName,
+31   recoverGlyphName,
+32   SEAC_ANALYSIS_ENABLED,
+33 } from "./fonts_utils.js";
+34 import {
+35   getCharUnicodeCategory,
+36   getUnicodeForGlyph,
+37   getUnicodeRangeFor,
+38   mapSpecialUnicodeValues,
+39 } from "./unicode.js";
+40 import { getDingbatsGlyphsUnicode, getGlyphsUnicode } from "./glyphlist.js";
+41 import {
+42   getEncoding,
+43   MacRomanEncoding,
+44   StandardEncoding,
+45   SymbolSetEncoding,
+46   WinAnsiEncoding,
+47   ZapfDingbatsEncoding,
+48 } from "./encodings.js";
+49 import {
+50   getGlyphMapForStandardFonts,
+51   getNonStdFontMap,
+52   getSerifFonts,
+53   getStdFontMap,
+54   getSupplementalGlyphMapForArialBlack,
+55   getSupplementalGlyphMapForCalibri,
+56 } from "./standard_fonts.js";
+57 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
+58 import { CFFFont } from "./cff_font.js";
+59 import { FontRendererFactory } from "./font_renderer.js";
+60 import { getFontBasicMetrics } from "./metrics.js";
+61 import { GlyfTable } from "./glyf.js";
+62 import { IdentityCMap } from "./cmap.js";
+63 import { OpenTypeFileBuilder } from "./opentype_file_builder.js";
+64 import { readUint32 } from "./core_utils.js";
+65 import { Stream } from "./stream.js";
+66 import { Type1Font } from "./type1_font.js";
+67 
+68 // Unicode Private Use Areas:
+69 const PRIVATE_USE_AREAS = [
+70   [0xe000, 0xf8ff], // BMP (0)
+71   [0x100000, 0x10fffd], // PUP (16)
+72 ];
+73 
+74 // PDF Glyph Space Units are one Thousandth of a TextSpace Unit
+75 // except for Type 3 fonts
+76 const PDF_GLYPH_SPACE_UNITS = 1000;
+77 
+78 const EXPORT_DATA_PROPERTIES = [
+79   "ascent",
+80   "bbox",
+81   "black",
+82   "bold",
+83   "charProcOperatorList",
+84   "composite",
+85   "cssFontInfo",
+86   "data",
+87   "defaultVMetrics",
+88   "defaultWidth",
+89   "descent",
+90   "fallbackName",
+91   "fontMatrix",
+92   "isInvalidPDFjsFont",
+93   "isType3Font",
+94   "italic",
+95   "loadedName",
+96   "mimetype",
+97   "missingFile",
+98   "name",
+99   "remeasure",
+100   "subtype",
+101   "systemFontInfo",
+102   "type",
+103   "vertical",
+104 ];
+105 
+106 const EXPORT_DATA_EXTRA_PROPERTIES = [
+107   "cMap",
+108   "defaultEncoding",
+109   "differences",
+110   "isMonospace",
+111   "isSerifFont",
+112   "isSymbolicFont",
+113   "seacMap",
+114   "toFontChar",
+115   "toUnicode",
+116   "vmetrics",
+117   "widths",
+118 ];
+119 
+436 // Please refer to:
+437 //  - https://developer.apple.com/fonts/TrueType-Reference-Manual/RM06/Chap6name.html
+441 
+442 // Please refer to:
+443 //  - https://developer.apple.com/fonts/TrueType-Reference-Manual/RM06/Chap6name.html
+444 //  - https://learn.microsoft.com/en-us/typography/opentype/spec/name#windows-language-ids
+448 
+949 /**
+950  * 'Font' is the class the outside world should use, it encapsulate all the font
+951  * decoding logics whatever type it is (assuming the font type is supported).
+952  */
+953 class Font {
+954   constructor(name, file, properties) {
+955     this.name = name;
+956     this.psName = null;
+957     this.mimetype = null;
+958     this.disableFontFace = false;
+959 
+960     this.loadedName = properties.loadedName;
+961     this.isType3Font = properties.isType3Font;
+962     this.missingFile = false;
+963     this.cssFontInfo = properties.cssFontInfo;
+964 
+965     this._charsCache = Object.create(null);
+966     this._glyphCache = Object.create(null);
+967 
+968     let isSerifFont = !!(properties.flags & FontFlags.Serif);
+969     // Fallback to checking the font name, in order to improve text-selection,
+970     // since the /Flags-entry is often wrong (fixes issue13845.pdf).
+971     if (!isSerifFont && !properties.isSimulatedFlags) {
+972       const baseName = name.replaceAll(/[,_]/g, "-").split("-", 1)[0],
+973         serifFonts = getSerifFonts();
+974       for (const namePart of baseName.split("+")) {
+975         if (serifFonts[namePart]) {
+976           isSerifFont = true;
+977           break;
+978         }
+979       }
+980     }
+981     this.isSerifFont = isSerifFont;
+982 
+983     this.isSymbolicFont = !!(properties.flags & FontFlags.Symbolic);
+984     this.isMonospace = !!(properties.flags & FontFlags.FixedPitch);
+985 
+986     let { type, subtype } = properties;
+987     this.type = type;
+988     this.subtype = subtype;
+989     this.systemFontInfo = properties.systemFontInfo;
+990 
+991     const matches = name.match(/^InvalidPDFjsFont_(.*)_\d+$/);
+992     this.isInvalidPDFjsFont = !!matches;
+993     if (this.isInvalidPDFjsFont) {
+994       this.fallbackName = matches[1];
+995     } else if (this.isMonospace) {
+996       this.fallbackName = "monospace";
+997     } else if (this.isSerifFont) {
+998       this.fallbackName = "serif";
+999     } else {
+1000       this.fallbackName = "sans-serif";
+1001     }
+1002 
+1003     if (this.systemFontInfo?.guessFallback) {
+1004       // Once the fallback name is guessed, we don't want to guess it again.
+1005       this.systemFontInfo.guessFallback = false;
+1006       this.systemFontInfo.css += `,${this.fallbackName}`;
+1007     }
+1008 
+1009     this.differences = properties.differences;
+1010     this.widths = properties.widths;
+1011     this.defaultWidth = properties.defaultWidth;
+1012     this.composite = properties.composite;
+1013     this.cMap = properties.cMap;
+1014     this.capHeight = properties.capHeight / PDF_GLYPH_SPACE_UNITS;
+1015     this.ascent = properties.ascent / PDF_GLYPH_SPACE_UNITS;
+1016     this.descent = properties.descent / PDF_GLYPH_SPACE_UNITS;
+1017     this.lineHeight = this.ascent - this.descent;
+1018     this.fontMatrix = properties.fontMatrix;
+1019     this.bbox = properties.bbox;
+1020     this.defaultEncoding = properties.defaultEncoding;
+1021 
+1022     this.toUnicode = properties.toUnicode;
+1023     this.toFontChar = [];
+1024 
+1025     if (properties.type === "Type3") {
+1026       for (let charCode = 0; charCode < 256; charCode++) {
+1027         this.toFontChar[charCode] =
+1028           this.differences[charCode] || properties.defaultEncoding[charCode];
+1029       }
+1030       return;
+1031     }
+1032 
+1033     this.cidEncoding = properties.cidEncoding || "";
+1034     this.vertical = !!properties.vertical;
+1035     if (this.vertical) {
+1036       this.vmetrics = properties.vmetrics;
+1037       this.defaultVMetrics = properties.defaultVMetrics;
+1038     }
+1039 
+1040     if (!file || file.isEmpty) {
+1041       if (file) {
+1042         // Some bad PDF generators will include empty font files,
+1043         // attempting to recover by assuming that no file exists.
+1044         warn('Font file is empty in "' + name + '" (' + this.loadedName + ")");
+1045       }
+1046       this.fallbackToSystemFont(properties);
+1047       return;
+1048     }
+1049 
+1050     // Parse the font file to determine the correct type/subtype, rather than
+1051     // relying on the (often incorrect) data in the font dictionary; (see e.g.
+1052     //  issue6782.pdf, issue7598.pdf, and issue9949.pdf).
+1053     [type, subtype] = getFontFileType(file, properties);
+1054 
+1055     if (type !== this.type || subtype !== this.subtype) {
+1056       info(
+1057         "Inconsistent font file Type/SubType, expected: " +
+1058           `${this.type}/${this.subtype} but found: ${type}/${subtype}.`
+1059       );
+1060     }
+1061 
+1062     let data;
+1063     try {
+1064       switch (type) {
+1065         case "MMType1":
+1066           info("MMType1 font (" + name + "), falling back to Type1.");
+1067         /* falls through */
+1068         case "Type1":
+1069         case "CIDFontType0":
+1070           this.mimetype = "font/opentype";
+1071 
+1072           const cff =
+1073             subtype === "Type1C" || subtype === "CIDFontType0C"
+1074               ? new CFFFont(file, properties)
+1075               : new Type1Font(name, file, properties);
+1076 
+1077           adjustWidths(properties);
+1078 
+1079           // Wrap the CFF data inside an OTF font file
+1080           data = this.convert(name, cff, properties);
+1081           break;
+1082 
+1083         case "OpenType":
+1084         case "TrueType":
+1085         case "CIDFontType2":
+1086           this.mimetype = "font/opentype";
+1087 
+1088           // Repair the TrueType file. It is can be damaged in the point of
+1089           // view of the sanitizer
+1090           data = this.checkAndRepair(name, file, properties);
+1091           if (this.isOpenType) {
+1092             adjustWidths(properties);
+1093 
+1094             type = "OpenType";
+1095           }
+1096           break;
+1097 
+1098         default:
+1099           throw new FormatError(`Font ${type} is not supported`);
+1100       }
+1101     } catch (e) {
+1102       warn(e);
+1103       this.fallbackToSystemFont(properties);
+1104       return;
+1105     }
+1106 
+1107     amendFallbackToUnicode(properties);
+1108     this.data = data;
+1109 
+1110     // Transfer some properties again that could change during font conversion
+1111     this.type = type;
+1112     this.subtype = subtype;
+1113     this.fontMatrix = properties.fontMatrix;
+1114     this.widths = properties.widths;
+1115     this.defaultWidth = properties.defaultWidth;
+1116     this.toUnicode = properties.toUnicode;
+1117     this.seacMap = properties.seacMap;
+1118   }
+1119 
+3295   /**
+3296    * @private
+3297    */
+3298   _charToGlyph(charcode, isSpace = false) {
+3299     let glyph = this._glyphCache[charcode];
+3300     // All `Glyph`-properties, except `isSpace` in multi-byte strings,
+3301     // depend indirectly on the `charcode`.
+3302     if (glyph?.isSpace === isSpace) {
+3303       return glyph;
+3304     }
+3305     let fontCharCode, width, operatorListId;
+3306 
+3307     let widthCode = charcode;
+3308     if (this.cMap?.contains(charcode)) {
+3309       widthCode = this.cMap.lookup(charcode);
+3310 
+3311       if (typeof widthCode === "string") {
+3312         widthCode = convertCidString(charcode, widthCode);
+3313       }
+3314     }
+3315     width = this.widths[widthCode];
+3316     if (typeof width !== "number") {
+3317       width = this.defaultWidth;
+3318     }
+3319     const vmetric = this.vmetrics?.[widthCode];
+3320 
+3321     let unicode = this.toUnicode.get(charcode) || charcode;
+3322     if (typeof unicode === "number") {
+3323       unicode = String.fromCharCode(unicode);
+3324     }
+3325 
+3326     let isInFont = this.toFontChar[charcode] !== undefined;
+3327     // First try the toFontChar map, if it's not there then try falling
+3328     // back to the char code.
+3329     fontCharCode = this.toFontChar[charcode] || charcode;
+3330     if (this.missingFile) {
+3331       const glyphName =
+3332         this.differences[charcode] || this.defaultEncoding[charcode];
+3333       if (
+3334         (glyphName === ".notdef" || glyphName === "") &&
+3335         this.type === "Type1"
+3336       ) {
+3337         // .notdef glyphs should be invisible in non-embedded Type1 fonts, so
+3338         // replace them with spaces.
+3339         fontCharCode = 0x20;
+3340       }
+3341       fontCharCode = mapSpecialUnicodeValues(fontCharCode);
+3342     }
+3343 
+3344     if (this.isType3Font) {
+3345       // Font char code in this case is actually a glyph name.
+3346       operatorListId = fontCharCode;
+3347     }
+3348 
+3349     let accent = null;
+3350     if (this.seacMap?.[charcode]) {
+3351       isInFont = true;
+3352       const seac = this.seacMap[charcode];
+3353       fontCharCode = seac.baseFontCharCode;
+3354       accent = {
+3355         fontChar: String.fromCodePoint(seac.accentFontCharCode),
+3356         offset: seac.accentOffset,
+3357       };
+3358     }
+3359 
+3360     let fontChar = "";
+3361     if (typeof fontCharCode === "number") {
+3362       if (fontCharCode <= 0x10ffff) {
+3363         fontChar = String.fromCodePoint(fontCharCode);
+3364       } else {
+3365         warn(`charToGlyph - invalid fontCharCode: ${fontCharCode}`);
+3366       }
+3367     }
+3368 
+3369     glyph = new Glyph(
+3370       charcode,
+3371       fontChar,
+3372       unicode,
+3373       accent,
+3374       width,
+3375       vmetric,
+3376       operatorListId,
+3377       isSpace,
+3378       isInFont
+3379     );
+3380     return (this._glyphCache[charcode] = glyph);
+3381   }
+3382 
+3509 }
+3510 
+3530 
+File:
+src/core/fonts_utils.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { getEncoding, StandardEncoding } from "./encodings.js";
+17 import { getGlyphsUnicode } from "./glyphlist.js";
+18 import { getUnicodeForGlyph } from "./unicode.js";
+19 import { info } from "../shared/util.js";
+20 
+21 // Accented characters have issues on Windows and Linux. When this flag is
+22 // enabled glyphs that use seac and seac style endchar operators are truncated
+23 // and we instead just store the glyph id's of the base glyph and its accent to
+24 // be drawn individually.
+25 // Linux (freetype) requires that when a seac style endchar is used
+26 // that the charset must be a predefined one, however we build a
+27 // custom one. Windows just refuses to draw glyphs with seac operators.
+28 const SEAC_ANALYSIS_ENABLED = true;
+29 
+30 const FontFlags = {
+31   FixedPitch: 1,
+32   Serif: 2,
+33   Symbolic: 4,
+34   Script: 8,
+35   Nonsymbolic: 32,
+36   Italic: 64,
+37   AllCap: 65536,
+38   SmallCap: 131072,
+39   ForceBold: 262144,
+40 };
+41 
+42 // prettier-ignore
+43 const MacStandardGlyphOrdering = [
+44   ".notdef", ".null", "nonmarkingreturn", "space", "exclam", "quotedbl",
+45   "numbersign", "dollar", "percent", "ampersand", "quotesingle", "parenleft",
+46   "parenright", "asterisk", "plus", "comma", "hyphen", "period", "slash",
+47   "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+48   "nine", "colon", "semicolon", "less", "equal", "greater", "question", "at",
+49   "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O",
+50   "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "bracketleft",
+51   "backslash", "bracketright", "asciicircum", "underscore", "grave", "a", "b",
+52   "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q",
+53   "r", "s", "t", "u", "v", "w", "x", "y", "z", "braceleft", "bar", "braceright",
+54   "asciitilde", "Adieresis", "Aring", "Ccedilla", "Eacute", "Ntilde",
+55   "Odieresis", "Udieresis", "aacute", "agrave", "acircumflex", "adieresis",
+56   "atilde", "aring", "ccedilla", "eacute", "egrave", "ecircumflex", "edieresis",
+57   "iacute", "igrave", "icircumflex", "idieresis", "ntilde", "oacute", "ograve",
+58   "ocircumflex", "odieresis", "otilde", "uacute", "ugrave", "ucircumflex",
+59   "udieresis", "dagger", "degree", "cent", "sterling", "section", "bullet",
+60   "paragraph", "germandbls", "registered", "copyright", "trademark", "acute",
+61   "dieresis", "notequal", "AE", "Oslash", "infinity", "plusminus", "lessequal",
+62   "greaterequal", "yen", "mu", "partialdiff", "summation", "product", "pi",
+63   "integral", "ordfeminine", "ordmasculine", "Omega", "ae", "oslash",
+64   "questiondown", "exclamdown", "logicalnot", "radical", "florin",
+65   "approxequal", "Delta", "guillemotleft", "guillemotright", "ellipsis",
+66   "nonbreakingspace", "Agrave", "Atilde", "Otilde", "OE", "oe", "endash",
+67   "emdash", "quotedblleft", "quotedblright", "quoteleft", "quoteright",
+68   "divide", "lozenge", "ydieresis", "Ydieresis", "fraction", "currency",
+69   "guilsinglleft", "guilsinglright", "fi", "fl", "daggerdbl", "periodcentered",
+70   "quotesinglbase", "quotedblbase", "perthousand", "Acircumflex",
+71   "Ecircumflex", "Aacute", "Edieresis", "Egrave", "Iacute", "Icircumflex",
+72   "Idieresis", "Igrave", "Oacute", "Ocircumflex", "apple", "Ograve", "Uacute",
+73   "Ucircumflex", "Ugrave", "dotlessi", "circumflex", "tilde", "macron",
+74   "breve", "dotaccent", "ring", "cedilla", "hungarumlaut", "ogonek", "caron",
+75   "Lslash", "lslash", "Scaron", "scaron", "Zcaron", "zcaron", "brokenbar",
+76   "Eth", "eth", "Yacute", "yacute", "Thorn", "thorn", "minus", "multiply",
+77   "onesuperior", "twosuperior", "threesuperior", "onehalf", "onequarter",
+78   "threequarters", "franc", "Gbreve", "gbreve", "Idotaccent", "Scedilla",
+79   "scedilla", "Cacute", "cacute", "Ccaron", "ccaron", "dcroat"];
+80 
+81 // Some bad PDF generators, e.g. Scribus PDF, include glyph names
+82 // in a 'uniXXXX' format -- attempting to recover proper ones.
+99 
+170 
+</code>
+
+PR summary:
+<pr_summary>
+Use vertical variant of a char when it's in a missing vertical font (bug 1905623)
+
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

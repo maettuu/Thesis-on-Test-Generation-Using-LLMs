@@ -1,0 +1,305 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: Missing text later in PDF with probably broken font
+### Attach (recommended) or Link to PDF file
+
+[Capital Bancorp Inc Corporate Responsibility 2025509 SD000000003063823863-1-2.pdf](https://github.com/user-attachments/files/20281525/Capital.Bancorp.Inc.Corporate.Responsibility.2025509.SD000000003063823863-1-2.pdf)
+
+### Web browser and its version
+
+Firefox 140 (also tested in Chrome, I don't know which version)
+
+### Operating system and its version
+
+Ubuntu 25.04 with x11
+
+### PDF.js version
+
+5.2.133
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+Open the PDF and try to select some text
+
+### What is the expected behavior?
+
+It should generate a text layer, because this PDF contains actual text and it's not just an image
+
+### What went wrong?
+
+It does not generate a text layer. This is probably because there are some problems with the font used by the PDF:
+```
+Warning: loadFont - translateFont failed: "FormatError: invalid font name". [pdf.worker.mjs:323:13](resource://pdf.js/build/pdf.worker.mjs)
+Warning: Error during font loading: invalid font name [pdf.mjs:323:13](resource://pdf.js/build/pdf.mjs)
+Warning: loadFont - translateFont failed: "FormatError: invalid font name". [pdf.worker.mjs:323:13](resource://pdf.js/build/pdf.worker.mjs)
+Warning: Error during font loading: invalid font name [pdf.mjs:323:13](resource://pdf.js/build/pdf.mjs)
+Warning: loadFont - translateFont failed: "FormatError: invalid font name". [pdf.worker.mjs:323:13](resource://pdf.js/build/pdf.worker.mjs)
+Warning: Error during font loading: invalid font name [pdf.mjs:323:13](resource://pdf.js/build/pdf.mjs)
+```
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+Even though it seems like it's a problem with the PDF, both Chrome and the built-in PDF viewer in Ubuntu allow  me to select the text.
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/evaluator.js b/src/core/evaluator.js
+--- a/src/core/evaluator.js
++++ b/src/core/evaluator.js
+@@ -4313,12 +4313,9 @@ class PartialEvaluator {
+ 
+     if (!descriptor) {
+       if (isType3Font) {
+-        const bbox = lookupNormalRect(dict.getArray("FontBBox"), [0, 0, 0, 0]);
+         // FontDescriptor is only required for Type3 fonts when the document
+-        // is a tagged pdf. Create a barbebones one to get by.
+-        descriptor = new Dict(null);
+-        descriptor.set("FontName", Name.get(type));
+-        descriptor.set("FontBBox", bbox);
++        // is a tagged pdf.
++        descriptor = Dict.empty;
+       } else {
+         // Before PDF 1.5 if the font was one of the base 14 fonts, having a
+         // FontDescriptor was not required.
+@@ -4420,7 +4417,13 @@ class PartialEvaluator {
+ 
+     const fontNameStr = fontName?.name;
+     const baseFontStr = baseFont?.name;
+-    if (!isType3Font && fontNameStr !== baseFontStr) {
++    if (isType3Font) {
++      if (!fontNameStr) {
++        // Since the /FontDescriptor is optional in Type3 fonts, ensure that we
++        // always have a "valid" /FontName (fixes issue19954.pdf).
++        fontName = Name.get(type);
++      }
++    } else if (fontNameStr !== baseFontStr) {
+       info(
+         `The FontDescriptor's FontName is "${fontNameStr}" but ` +
+           `should be the same as the Font's BaseFont "${baseFontStr}".`
+@@ -4438,8 +4441,8 @@ class PartialEvaluator {
+       ) {
+         fontName = null;
+       }
++      fontName ||= baseFont;
+     }
+-    fontName ||= baseFont;
+ 
+     if (!(fontName instanceof Name)) {
+       throw new FormatError("invalid font name");
+@@ -4517,7 +4520,7 @@ class PartialEvaluator {
+     );
+     const bbox = lookupNormalRect(
+       descriptor.getArray("FontBBox") || dict.getArray("FontBBox"),
+-      undefined
++      isType3Font ? [0, 0, 0, 0] : undefined
+     );
+     let ascent = descriptor.get("Ascent");
+     if (typeof ascent !== "number") {
+@@ -4705,9 +4708,9 @@ class TranslatedFont {
+     const fontResources = this.dict.get("Resources") || resources;
+     const charProcOperatorList = Object.create(null);
+ 
+-    const fontBBox = Util.normalizeRect(font.bbox || [0, 0, 0, 0]),
+-      width = fontBBox[2] - fontBBox[0],
+-      height = fontBBox[3] - fontBBox[1];
++    const [x0, y0, x1, y1] = font.bbox,
++      width = x1 - x0,
++      height = y1 - y0;
+     const fontBBoxSize = Math.hypot(width, height);
+ 
+     for (const key of charProcs.getKeys()) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.27.1
+- @babel/preset-env: ^7.27.2
+- @babel/runtime: ^7.27.1
+- @csstools/postcss-light-dark-function: ^2.0.8
+- @fluent/bundle: ^0.19.1
+- @fluent/dom: ^0.10.1
+- @metalsmith/layouts: ^3.0.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.70
+- @types/node: ^22.15.18
+- autoprefixer: ^10.4.21
+- babel-loader: ^10.0.0
+- caniuse-lite: ^1.0.30001718
+- core-js: ^3.42.0
+- eslint: ^9.27.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.13.0
+- eslint-plugin-prettier: ^5.4.0
+- eslint-plugin-unicorn: ^59.0.1
+- globals: ^16.1.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.7.1
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.3
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.4
+- postcss-nesting: ^13.0.1
+- prettier: ^3.5.3
+- puppeteer: ^24.8.2
+- stylelint: ^16.19.1
+- stylelint-prettier: ^5.0.3
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.14
+- tsc-alias: ^1.8.16
+- ttest: ^4.0.0
+- typescript: ^5.8.3
+- vinyl: ^3.0.0
+- webpack: ^5.99.8
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20.16.0 || >=22.3.0
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/calculate_md5.js`: calculateMD5
+- `../../src/core/calculate_sha256.js`: calculateSHA256
+- `../../src/core/calculate_sha_other.js`: calculateSHA384, calculateSHA512
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/colorspace_utils.js`: ColorSpaceUtils
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalColorSpaceCache, GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, isValidExplicitDest, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, DrawOPS, FeatureTest, FormatError, ImageKind, InvalidPDFException, MathClamp, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util, updateUrlHash
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

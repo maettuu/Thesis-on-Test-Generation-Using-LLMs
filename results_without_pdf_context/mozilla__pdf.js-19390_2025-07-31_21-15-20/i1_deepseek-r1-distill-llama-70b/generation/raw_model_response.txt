@@ -1,0 +1,71 @@
+<think>
+Okay, I need to write a regression test for the bug where password fields are rendered as regular text fields in PDF.js. The test should fail before the patch and pass after the patch is applied. 
+
+First, I'll look at the provided code and the patch. The patch modifies two files: annotation.js and annotation_layer.js. In annotation.js, it adds a password property to the data object and updates how the appearance is handled. In annotation_layer.js, it changes the input type to "password" if the field is a password type.
+
+The test should check if the password field is correctly rendered as a password input. So, I'll create a test PDF with a password field and check the input type in the rendered HTML.
+
+I'll use the test file provided. I'll import necessary modules like AnnotationFactory, DefaultStandardFontDataFactory, etc. Then, I'll create a sample PDF with a password field using a mock XRef and write the PDF structure.
+
+In the test, I'll get the annotation and check if the data.password is true. Then, I'll render the annotation and check the generated HTML. I'll look for an input element with type="password".
+
+I need to ensure that before the patch, this test would fail because the input type would be "text", and after the patch, it would be "password". So, the test will assert that the input type is "password".
+
+I'll structure the test using async/await, create the PDF data, parse it, get the annotation, and then check the rendered HTML. I'll use Jest's toContain to check if the HTML contains the correct input type.
+</think>
+
+it("should render password fields as password input elements", async () => {
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { DefaultStandardFontDataFactory } = await import("../../src/display/standard_fontdata_factory.js");
+  const { createIdFactory, XRefMock } = await import("./test_utils.js");
+
+  const idFactory = createIdFactory();
+  const xref = new XRefMock(idFactory);
+  const fontDataFactory = new DefaultStandardFontDataFactory();
+
+  // Create a sample PDF with a password field
+  const pdfData = `
+    1 0 obj
+    <</Type /Catalog /Pages 2 0 R>>
+    endobj
+    2 0 obj
+    <</Type /Pages /Kids [3 0 R] /Count 1>>
+    endobj
+    3 0 obj
+    <</Type /Page /Parent 2 0 R /Resources 4 0 R
+      /Contents [] >>
+    endobj
+    4 0 obj
+    <</ProcSet [/PDF /Text] >>
+    endobj
+    5 0 obj
+    <</FT /Btn /Ff 0 /Type /Widget /Subtype /Widget
+      /T (passwordField) /F (0) >>
+    endobj
+  `;
+
+  const parser = new Parser(new Lexer(new StringStream(pdfData)));
+  const pdf = await parser.parse();
+
+  const annotationFactory = new AnnotationFactory(
+    new DefaultStandardFontDataFactory(),
+    fontDataFactory,
+    xref,
+    idFactory
+  );
+
+  const annotation = await annotationFactory.createAnnotation(
+    pdf.get(5),
+    null,
+    null,
+    null,
+    null
+  );
+
+  expect(annotation.data.password).toBe(true);
+
+  const element = await annotation.render();
+  const html = element.outerHTML;
+
+  expect(html).toContain("input type=\"password\"");
+});

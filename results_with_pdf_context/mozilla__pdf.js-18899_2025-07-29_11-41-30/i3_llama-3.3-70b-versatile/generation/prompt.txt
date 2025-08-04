@@ -1,0 +1,2947 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: JPX image rendering regression after PR 18204
+### Attach (recommended) or Link to PDF file
+
+https://sbc.org.pl/Content/403918/PDF/539_2671.pdf
+
+### Web browser and its version
+
+N/A
+
+### Operating system and its version
+
+N/A
+
+### PDF.js version
+
+Any version after https://github.com/mozilla/pdf.js/pull/18204
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+Load the linked PDF document in the viewer.
+
+### What is the expected behavior?
+
+That the image is correctly rendered.
+
+![good](https://github.com/user-attachments/assets/539f1ac6-a5a1-4a31-b059-f21bf2693a10)
+
+
+### What went wrong?
+
+The image doesn't render, with the following console output:
+```
+Warning: Unable to decode image "img_p0_2": "IndexSizeError: Index or size is negative or greater than the allowed amount". [pdf.worker.mjs:348:13](resource://pdf.js/build/pdf.worker.mjs)
+Warning: Dependent image isn't ready yet [pdf.mjs:391:13](resource://pdf.js/build/pdf.mjs)
+```
+
+![bad](https://github.com/user-attachments/assets/6909afea-11d6-44a0-8c48-f596295f60f8)
+
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+```
+196affd8e06148041b885ce63df260e4dab5f8e1 is the first bad commit
+commit 196affd8e06148041b885ce63df260e4dab5f8e1
+Author: Calixte Denizet <calixte.denizet@gmail.com>
+Date:   Mon Jun 3 16:09:26 2024 +0200
+
+    Fix decoding of JPX images having an alpha channel
+
+    When an image has a non-zero SMaskInData it means that the image
+    has an alpha channel.
+    With JPX images, the colorspace isn't required (by spec) so when we
+    don't have it, the JPX decoder will handle the conversion in RGBA
+    format.
+
+ external/openjpeg/openjpeg.js  |  2 +-
+ src/core/base_stream.js        |  4 +--
+ src/core/colorspace.js         | 22 ++++++++++++
+ src/core/decode_stream.js      | 12 +++----
+ src/core/flate_stream.js       |  2 +-
+ src/core/image.js              | 82 ++++++++++++++++++++++++++++++------------
+ src/core/jpx.js                |  5 +--
+ src/core/jpx_stream.js         |  8 ++---
+ test/pdfs/isssue18194.pdf.link |  1 +
+ test/pdfs/issue11306.pdf.link  |  1 +
+ test/pdfs/issue16782.pdf.link  |  1 +
+ test/test_manifest.json        | 25 +++++++++++++
+ 12 files changed, 126 insertions(+), 39 deletions(-)
+ create mode 100644 test/pdfs/isssue18194.pdf.link
+ create mode 100644 test/pdfs/issue11306.pdf.link
+ create mode 100644 test/pdfs/issue16782.pdf.link
+```
+
+*Please note:* The PDF document renders a bit slow, given the large images, however that's already tracked in #17427.
+
+/cc @calixteman 
+</issue>
+
+PDF File:
+<pdf>
+issue18896.pdf
+</pdf>
+
+Patch:
+<patch>
+diff --git a/src/core/colorspace.js b/src/core/colorspace.js
+--- a/src/core/colorspace.js
++++ b/src/core/colorspace.js
+@@ -15,6 +15,7 @@
+ 
+ import {
+   assert,
++  FeatureTest,
+   FormatError,
+   info,
+   shadow,
+@@ -60,6 +61,61 @@ function resizeRgbImage(src, dest, w1, h1, w2, h2, alpha01) {
+   }
+ }
+ 
++function resizeRgbaImage(src, dest, w1, h1, w2, h2, alpha01) {
++  const xRatio = w1 / w2;
++  const yRatio = h1 / h2;
++  let newIndex = 0;
++  const xScaled = new Uint16Array(w2);
++
++  if (alpha01 === 1) {
++    for (let i = 0; i < w2; i++) {
++      xScaled[i] = Math.floor(i * xRatio);
++    }
++    const src32 = new Uint32Array(src.buffer);
++    const dest32 = new Uint32Array(dest.buffer);
++    const rgbMask = FeatureTest.isLittleEndian ? 0x00ffffff : 0xffffff00;
++    for (let i = 0; i < h2; i++) {
++      const buf = src32.subarray(Math.floor(i * yRatio) * w1);
++      for (let j = 0; j < w2; j++) {
++        dest32[newIndex++] |= buf[xScaled[j]] & rgbMask;
++      }
++    }
++  } else {
++    const COMPONENTS = 4;
++    const w1Scanline = w1 * COMPONENTS;
++    for (let i = 0; i < w2; i++) {
++      xScaled[i] = Math.floor(i * xRatio) * COMPONENTS;
++    }
++    for (let i = 0; i < h2; i++) {
++      const buf = src.subarray(Math.floor(i * yRatio) * w1Scanline);
++      for (let j = 0; j < w2; j++) {
++        const oldIndex = xScaled[j];
++        dest[newIndex++] = buf[oldIndex];
++        dest[newIndex++] = buf[oldIndex + 1];
++        dest[newIndex++] = buf[oldIndex + 2];
++      }
++    }
++  }
++}
++
++function copyRgbaImage(src, dest, alpha01) {
++  if (alpha01 === 1) {
++    const src32 = new Uint32Array(src.buffer);
++    const dest32 = new Uint32Array(dest.buffer);
++    const rgbMask = FeatureTest.isLittleEndian ? 0x00ffffff : 0xffffff00;
++    for (let i = 0, ii = src32.length; i < ii; i++) {
++      dest32[i] |= src32[i] & rgbMask;
++    }
++  } else {
++    let j = 0;
++    for (let i = 0, ii = src.length; i < ii; i += 4) {
++      dest[j++] = src[i];
++      dest[j++] = src[i + 1];
++      dest[j++] = src[i + 2];
++    }
++  }
++}
++
+ class ColorSpace {
+   constructor(name, numComps) {
+     if (
+@@ -806,6 +862,38 @@ class DeviceRgbaCS extends ColorSpace {
+   isPassthrough(bits) {
+     return bits === 8;
+   }
++
++  fillRgb(
++    dest,
++    originalWidth,
++    originalHeight,
++    width,
++    height,
++    actualHeight,
++    bpc,
++    comps,
++    alpha01
++  ) {
++    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
++      assert(
++        dest instanceof Uint8ClampedArray,
++        'DeviceRgbaCS.fillRgb: Unsupported "dest" type.'
++      );
++    }
++    if (originalHeight !== height || originalWidth !== width) {
++      resizeRgbaImage(
++        comps,
++        dest,
++        originalWidth,
++        originalHeight,
++        width,
++        height,
++        alpha01
++      );
++    } else {
++      copyRgbaImage(comps, dest, alpha01);
++    }
++  }
+ }
+ 
+ /**
+
+diff --git a/src/core/image.js b/src/core/image.js
+--- a/src/core/image.js
++++ b/src/core/image.js
+@@ -705,7 +705,7 @@ class PDFImage {
+       isOffscreenCanvasSupported &&
+       ImageResizer.needsToBeResized(drawWidth, drawHeight);
+ 
+-    if (this.colorSpace.name === "DeviceRGBA") {
++    if (!this.smask && !this.mask && this.colorSpace.name === "DeviceRGBA") {
+       imgData.kind = ImageKind.RGBA_32BPP;
+       const imgArray = (imgData.data = await this.getImageBytes(
+         originalHeight * originalWidth * 4,
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.25.7
+- @babel/preset-env: ^7.25.7
+- @babel/runtime: ^7.25.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001667
+- canvas: ^2.11.2
+- core-js: ^3.38.1
+- eslint: ^8.57.1
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.2
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^56.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.3.1
+- jsdoc: ^4.0.3
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.4
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.47
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.0
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.0
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.9.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.2
+- vinyl: ^3.0.0
+- webpack: ^5.95.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/colorspace.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   FormatError,
+19   info,
+20   shadow,
+21   unreachable,
+22   warn,
+23 } from "../shared/util.js";
+24 import { Dict, Name, Ref } from "./primitives.js";
+25 import { BaseStream } from "./base_stream.js";
+26 import { MissingDataException } from "./core_utils.js";
+27 
+28 /**
+29  * Resizes an RGB image with 3 components.
+30  * @param {TypedArray} src - The source buffer.
+31  * @param {TypedArray} dest - The destination buffer.
+32  * @param {number} w1 - Original width.
+33  * @param {number} h1 - Original height.
+34  * @param {number} w2 - New width.
+35  * @param {number} h2 - New height.
+36  * @param {number} alpha01 - Size reserved for the alpha channel.
+37  */
+38 function resizeRgbImage(src, dest, w1, h1, w2, h2, alpha01) {
+39   const COMPONENTS = 3;
+40   alpha01 = alpha01 !== 1 ? 0 : alpha01;
+41   const xRatio = w1 / w2;
+42   const yRatio = h1 / h2;
+43   let newIndex = 0,
+44     oldIndex;
+45   const xScaled = new Uint16Array(w2);
+46   const w1Scanline = w1 * COMPONENTS;
+47 
+48   for (let i = 0; i < w2; i++) {
+49     xScaled[i] = Math.floor(i * xRatio) * COMPONENTS;
+50   }
+51   for (let i = 0; i < h2; i++) {
+52     const py = Math.floor(i * yRatio) * w1Scanline;
+53     for (let j = 0; j < w2; j++) {
+54       oldIndex = py + xScaled[j];
+55       dest[newIndex++] = src[oldIndex++];
+56       dest[newIndex++] = src[oldIndex++];
+57       dest[newIndex++] = src[oldIndex++];
+58       newIndex += alpha01;
+59     }
+60   }
+61 }
+62 
+63 class ColorSpace {
+64   constructor(name, numComps) {
+65     if (
+66       (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) &&
+67       this.constructor === ColorSpace
+68     ) {
+69       unreachable("Cannot initialize ColorSpace.");
+70     }
+71     this.name = name;
+72     this.numComps = numComps;
+73   }
+74 
+75   /**
+76    * Converts the color value to the RGB color. The color components are
+77    * located in the src array starting from the srcOffset. Returns the array
+78    * of the rgb components, each value ranging from [0,255].
+79    */
+80   getRgb(src, srcOffset) {
+81     const rgb = new Uint8ClampedArray(3);
+82     this.getRgbItem(src, srcOffset, rgb, 0);
+83     return rgb;
+84   }
+85 
+86   /**
+87    * Converts the color value to the RGB color, similar to the getRgb method.
+88    * The result placed into the dest array starting from the destOffset.
+89    */
+90   getRgbItem(src, srcOffset, dest, destOffset) {
+91     unreachable("Should not call ColorSpace.getRgbItem");
+92   }
+93 
+94   /**
+95    * Converts the specified number of the color values to the RGB colors.
+96    * The colors are located in the src array starting from the srcOffset.
+97    * The result is placed into the dest array starting from the destOffset.
+98    * The src array items shall be in [0,2^bits) range, the dest array items
+99    * will be in [0,255] range. alpha01 indicates how many alpha components
+100    * there are in the dest array; it will be either 0 (RGB array) or 1 (RGBA
+101    * array).
+102    */
+103   getRgbBuffer(src, srcOffset, count, dest, destOffset, bits, alpha01) {
+104     unreachable("Should not call ColorSpace.getRgbBuffer");
+105   }
+106 
+107   /**
+108    * Determines the number of bytes required to store the result of the
+109    * conversion done by the getRgbBuffer method. As in getRgbBuffer,
+110    * |alpha01| is either 0 (RGB output) or 1 (RGBA output).
+111    */
+112   getOutputLength(inputLength, alpha01) {
+113     unreachable("Should not call ColorSpace.getOutputLength");
+114   }
+115 
+116   /**
+117    * Returns true if source data will be equal the result/output data.
+118    */
+119   isPassthrough(bits) {
+120     return false;
+121   }
+122 
+123   /**
+124    * Refer to the static `ColorSpace.isDefaultDecode` method below.
+125    */
+126   isDefaultDecode(decodeMap, bpc) {
+127     return ColorSpace.isDefaultDecode(decodeMap, this.numComps);
+128   }
+129 
+130   /**
+131    * Fills in the RGB colors in the destination buffer.  alpha01 indicates
+132    * how many alpha components there are in the dest array; it will be either
+133    * 0 (RGB array) or 1 (RGBA array).
+134    */
+135   fillRgb(
+136     dest,
+137     originalWidth,
+138     originalHeight,
+139     width,
+140     height,
+141     actualHeight,
+142     bpc,
+143     comps,
+144     alpha01
+145   ) {
+146     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+147       assert(
+148         dest instanceof Uint8ClampedArray,
+149         'ColorSpace.fillRgb: Unsupported "dest" type.'
+150       );
+151     }
+152     const count = originalWidth * originalHeight;
+153     let rgbBuf = null;
+154     const numComponentColors = 1 << bpc;
+155     const needsResizing = originalHeight !== height || originalWidth !== width;
+156 
+157     if (this.isPassthrough(bpc)) {
+158       rgbBuf = comps;
+159     } else if (
+160       this.numComps === 1 &&
+161       count > numComponentColors &&
+162       this.name !== "DeviceGray" &&
+163       this.name !== "DeviceRGB"
+164     ) {
+165       // Optimization: create a color map when there is just one component and
+166       // we are converting more colors than the size of the color map. We
+167       // don't build the map if the colorspace is gray or rgb since those
+168       // methods are faster than building a map. This mainly offers big speed
+169       // ups for indexed and alternate colorspaces.
+170       //
+171       // TODO it may be worth while to cache the color map. While running
+172       // testing I never hit a cache so I will leave that out for now (perhaps
+173       // we are reparsing colorspaces too much?).
+174       const allColors =
+175         bpc <= 8
+176           ? new Uint8Array(numComponentColors)
+177           : new Uint16Array(numComponentColors);
+178       for (let i = 0; i < numComponentColors; i++) {
+179         allColors[i] = i;
+180       }
+181       const colorMap = new Uint8ClampedArray(numComponentColors * 3);
+182       this.getRgbBuffer(
+183         allColors,
+184         0,
+185         numComponentColors,
+186         colorMap,
+187         0,
+188         bpc,
+189         /* alpha01 = */ 0
+190       );
+191 
+192       if (!needsResizing) {
+193         // Fill in the RGB values directly into |dest|.
+194         let destPos = 0;
+195         for (let i = 0; i < count; ++i) {
+196           const key = comps[i] * 3;
+197           dest[destPos++] = colorMap[key];
+198           dest[destPos++] = colorMap[key + 1];
+199           dest[destPos++] = colorMap[key + 2];
+200           destPos += alpha01;
+201         }
+202       } else {
+203         rgbBuf = new Uint8Array(count * 3);
+204         let rgbPos = 0;
+205         for (let i = 0; i < count; ++i) {
+206           const key = comps[i] * 3;
+207           rgbBuf[rgbPos++] = colorMap[key];
+208           rgbBuf[rgbPos++] = colorMap[key + 1];
+209           rgbBuf[rgbPos++] = colorMap[key + 2];
+210         }
+211       }
+212     } else if (!needsResizing) {
+213       // Fill in the RGB values directly into |dest|.
+214       this.getRgbBuffer(comps, 0, width * actualHeight, dest, 0, bpc, alpha01);
+215     } else {
+216       rgbBuf = new Uint8ClampedArray(count * 3);
+217       this.getRgbBuffer(comps, 0, count, rgbBuf, 0, bpc, /* alpha01 = */ 0);
+218     }
+219 
+220     if (rgbBuf) {
+221       if (needsResizing) {
+222         resizeRgbImage(
+223           rgbBuf,
+224           dest,
+225           originalWidth,
+226           originalHeight,
+227           width,
+228           height,
+229           alpha01
+230         );
+231       } else {
+232         let destPos = 0,
+233           rgbPos = 0;
+234         for (let i = 0, ii = width * actualHeight; i < ii; i++) {
+235           dest[destPos++] = rgbBuf[rgbPos++];
+236           dest[destPos++] = rgbBuf[rgbPos++];
+237           dest[destPos++] = rgbBuf[rgbPos++];
+238           destPos += alpha01;
+239         }
+240       }
+241     }
+242   }
+243 
+244   /**
+245    * True if the colorspace has components in the default range of [0, 1].
+246    * This should be true for all colorspaces except for lab color spaces
+247    * which are [0,100], [-128, 127], [-128, 127].
+248    */
+249   get usesZeroToOneRange() {
+250     return shadow(this, "usesZeroToOneRange", true);
+251   }
+252 
+253   /**
+254    * @private
+255    */
+256   static _cache(cacheKey, xref, localColorSpaceCache, parsedColorSpace) {
+257     if (!localColorSpaceCache) {
+258       throw new Error(
+259         'ColorSpace._cache - expected "localColorSpaceCache" argument.'
+260       );
+261     }
+262     if (!parsedColorSpace) {
+263       throw new Error(
+264         'ColorSpace._cache - expected "parsedColorSpace" argument.'
+265       );
+266     }
+267     let csName, csRef;
+268     if (cacheKey instanceof Ref) {
+269       csRef = cacheKey;
+270 
+271       // If parsing succeeded, we know that this call cannot throw.
+272       cacheKey = xref.fetch(cacheKey);
+273     }
+274     if (cacheKey instanceof Name) {
+275       csName = cacheKey.name;
+276     }
+277     if (csName || csRef) {
+278       localColorSpaceCache.set(csName, csRef, parsedColorSpace);
+279     }
+280   }
+281 
+282   static getCached(cacheKey, xref, localColorSpaceCache) {
+283     if (!localColorSpaceCache) {
+284       throw new Error(
+285         'ColorSpace.getCached - expected "localColorSpaceCache" argument.'
+286       );
+287     }
+288     if (cacheKey instanceof Ref) {
+289       const localColorSpace = localColorSpaceCache.getByRef(cacheKey);
+290       if (localColorSpace) {
+291         return localColorSpace;
+292       }
+293 
+294       try {
+295         cacheKey = xref.fetch(cacheKey);
+296       } catch (ex) {
+297         if (ex instanceof MissingDataException) {
+298           throw ex;
+299         }
+300         // Any errors should be handled during parsing, rather than here.
+301       }
+302     }
+303     if (cacheKey instanceof Name) {
+304       const localColorSpace = localColorSpaceCache.getByName(cacheKey.name);
+305       if (localColorSpace) {
+306         return localColorSpace;
+307       }
+308     }
+309     return null;
+310   }
+311 
+312   static async parseAsync({
+313     cs,
+314     xref,
+315     resources = null,
+316     pdfFunctionFactory,
+317     localColorSpaceCache,
+318   }) {
+319     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+320       assert(
+321         !this.getCached(cs, xref, localColorSpaceCache),
+322         "Expected `ColorSpace.getCached` to have been manually checked " +
+323           "before calling `ColorSpace.parseAsync`."
+324       );
+325     }
+326     const parsedColorSpace = this._parse(
+327       cs,
+328       xref,
+329       resources,
+330       pdfFunctionFactory
+331     );
+332 
+333     // Attempt to cache the parsed ColorSpace, by name and/or reference.
+334     this._cache(cs, xref, localColorSpaceCache, parsedColorSpace);
+335 
+336     return parsedColorSpace;
+337   }
+338 
+339   static parse({
+340     cs,
+341     xref,
+342     resources = null,
+343     pdfFunctionFactory,
+344     localColorSpaceCache,
+345   }) {
+346     const cachedColorSpace = this.getCached(cs, xref, localColorSpaceCache);
+347     if (cachedColorSpace) {
+348       return cachedColorSpace;
+349     }
+350     const parsedColorSpace = this._parse(
+351       cs,
+352       xref,
+353       resources,
+354       pdfFunctionFactory
+355     );
+356 
+357     // Attempt to cache the parsed ColorSpace, by name and/or reference.
+358     this._cache(cs, xref, localColorSpaceCache, parsedColorSpace);
+359 
+360     return parsedColorSpace;
+361   }
+362 
+363   /**
+364    * @private
+365    */
+366   static _parse(cs, xref, resources = null, pdfFunctionFactory) {
+367     cs = xref.fetchIfRef(cs);
+368     if (cs instanceof Name) {
+369       switch (cs.name) {
+370         case "G":
+371         case "DeviceGray":
+372           return this.singletons.gray;
+373         case "RGB":
+374         case "DeviceRGB":
+375           return this.singletons.rgb;
+376         case "DeviceRGBA":
+377           return this.singletons.rgba;
+378         case "CMYK":
+379         case "DeviceCMYK":
+380           return this.singletons.cmyk;
+381         case "Pattern":
+382           return new PatternCS(/* baseCS = */ null);
+383         default:
+384           if (resources instanceof Dict) {
+385             const colorSpaces = resources.get("ColorSpace");
+386             if (colorSpaces instanceof Dict) {
+387               const resourcesCS = colorSpaces.get(cs.name);
+388               if (resourcesCS) {
+389                 if (resourcesCS instanceof Name) {
+390                   return this._parse(
+391                     resourcesCS,
+392                     xref,
+393                     resources,
+394                     pdfFunctionFactory
+395                   );
+396                 }
+397                 cs = resourcesCS;
+398                 break;
+399               }
+400             }
+401           }
+402           // Fallback to the default gray color space.
+403           warn(`Unrecognized ColorSpace: ${cs.name}`);
+404           return this.singletons.gray;
+405       }
+406     }
+407     if (Array.isArray(cs)) {
+408       const mode = xref.fetchIfRef(cs[0]).name;
+409       let params, numComps, baseCS, whitePoint, blackPoint, gamma;
+410 
+411       switch (mode) {
+412         case "G":
+413         case "DeviceGray":
+414           return this.singletons.gray;
+415         case "RGB":
+416         case "DeviceRGB":
+417           return this.singletons.rgb;
+418         case "CMYK":
+419         case "DeviceCMYK":
+420           return this.singletons.cmyk;
+421         case "CalGray":
+422           params = xref.fetchIfRef(cs[1]);
+423           whitePoint = params.getArray("WhitePoint");
+424           blackPoint = params.getArray("BlackPoint");
+425           gamma = params.get("Gamma");
+426           return new CalGrayCS(whitePoint, blackPoint, gamma);
+427         case "CalRGB":
+428           params = xref.fetchIfRef(cs[1]);
+429           whitePoint = params.getArray("WhitePoint");
+430           blackPoint = params.getArray("BlackPoint");
+431           gamma = params.getArray("Gamma");
+432           const matrix = params.getArray("Matrix");
+433           return new CalRGBCS(whitePoint, blackPoint, gamma, matrix);
+434         case "ICCBased":
+435           const stream = xref.fetchIfRef(cs[1]);
+436           const dict = stream.dict;
+437           numComps = dict.get("N");
+438           const alt = dict.get("Alternate");
+439           if (alt) {
+440             const altCS = this._parse(alt, xref, resources, pdfFunctionFactory);
+441             // Ensure that the number of components are correct,
+442             // and also (indirectly) that it is not a PatternCS.
+443             if (altCS.numComps === numComps) {
+444               return altCS;
+445             }
+446             warn("ICCBased color space: Ignoring incorrect /Alternate entry.");
+447           }
+448           if (numComps === 1) {
+449             return this.singletons.gray;
+450           } else if (numComps === 3) {
+451             return this.singletons.rgb;
+452           } else if (numComps === 4) {
+453             return this.singletons.cmyk;
+454           }
+455           break;
+456         case "Pattern":
+457           baseCS = cs[1] || null;
+458           if (baseCS) {
+459             baseCS = this._parse(baseCS, xref, resources, pdfFunctionFactory);
+460           }
+461           return new PatternCS(baseCS);
+462         case "I":
+463         case "Indexed":
+464           baseCS = this._parse(cs[1], xref, resources, pdfFunctionFactory);
+465           const hiVal = Math.max(0, Math.min(xref.fetchIfRef(cs[2]), 255));
+466           const lookup = xref.fetchIfRef(cs[3]);
+467           return new IndexedCS(baseCS, hiVal, lookup);
+468         case "Separation":
+469         case "DeviceN":
+470           const name = xref.fetchIfRef(cs[1]);
+471           numComps = Array.isArray(name) ? name.length : 1;
+472           baseCS = this._parse(cs[2], xref, resources, pdfFunctionFactory);
+473           const tintFn = pdfFunctionFactory.create(cs[3]);
+474           return new AlternateCS(numComps, baseCS, tintFn);
+475         case "Lab":
+476           params = xref.fetchIfRef(cs[1]);
+477           whitePoint = params.getArray("WhitePoint");
+478           blackPoint = params.getArray("BlackPoint");
+479           const range = params.getArray("Range");
+480           return new LabCS(whitePoint, blackPoint, range);
+481         default:
+482           // Fallback to the default gray color space.
+483           warn(`Unimplemented ColorSpace object: ${mode}`);
+484           return this.singletons.gray;
+485       }
+486     }
+487     // Fallback to the default gray color space.
+488     warn(`Unrecognized ColorSpace object: ${cs}`);
+489     return this.singletons.gray;
+490   }
+491 
+492   /**
+493    * Checks if a decode map matches the default decode map for a color space.
+494    * This handles the general decode maps where there are two values per
+495    * component, e.g. [0, 1, 0, 1, 0, 1] for a RGB color.
+496    * This does not handle Lab, Indexed, or Pattern decode maps since they are
+497    * slightly different.
+498    * @param {Array} decode - Decode map (usually from an image).
+499    * @param {number} numComps - Number of components the color space has.
+500    */
+501   static isDefaultDecode(decode, numComps) {
+502     if (!Array.isArray(decode)) {
+503       return true;
+504     }
+505     if (numComps * 2 !== decode.length) {
+506       warn("The decode map is not the correct length");
+507       return true;
+508     }
+509     for (let i = 0, ii = decode.length; i < ii; i += 2) {
+510       if (decode[i] !== 0 || decode[i + 1] !== 1) {
+511         return false;
+512       }
+513     }
+514     return true;
+515   }
+516 
+517   static get singletons() {
+518     return shadow(this, "singletons", {
+519       get gray() {
+520         return shadow(this, "gray", new DeviceGrayCS());
+521       },
+522       get rgb() {
+523         return shadow(this, "rgb", new DeviceRgbCS());
+524       },
+525       get rgba() {
+526         return shadow(this, "rgba", new DeviceRgbaCS());
+527       },
+528       get cmyk() {
+529         return shadow(this, "cmyk", new DeviceCmykCS());
+530       },
+531     });
+532   }
+533 }
+534 
+535 /**
+536  * Alternate color space handles both Separation and DeviceN color spaces.  A
+537  * Separation color space is actually just a DeviceN with one color component.
+538  * Both color spaces use a tinting function to convert colors to a base color
+539  * space.
+540  *
+541  * The default color is `new Float32Array(new Array(numComps).fill(1))`.
+542  */
+543 class AlternateCS extends ColorSpace {
+544   constructor(numComps, base, tintFn) {
+545     super("Alternate", numComps);
+546     this.base = base;
+547     this.tintFn = tintFn;
+548     this.tmpBuf = new Float32Array(base.numComps);
+549   }
+550 
+551   getRgbItem(src, srcOffset, dest, destOffset) {
+552     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+553       assert(
+554         dest instanceof Uint8ClampedArray,
+555         'AlternateCS.getRgbItem: Unsupported "dest" type.'
+556       );
+557     }
+558     const tmpBuf = this.tmpBuf;
+559     this.tintFn(src, srcOffset, tmpBuf, 0);
+560     this.base.getRgbItem(tmpBuf, 0, dest, destOffset);
+561   }
+562 
+563   getRgbBuffer(src, srcOffset, count, dest, destOffset, bits, alpha01) {
+564     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+565       assert(
+566         dest instanceof Uint8ClampedArray,
+567         'AlternateCS.getRgbBuffer: Unsupported "dest" type.'
+568       );
+569     }
+570     const tintFn = this.tintFn;
+571     const base = this.base;
+572     const scale = 1 / ((1 << bits) - 1);
+573     const baseNumComps = base.numComps;
+574     const usesZeroToOneRange = base.usesZeroToOneRange;
+575     const isPassthrough =
+576       (base.isPassthrough(8) || !usesZeroToOneRange) && alpha01 === 0;
+577     let pos = isPassthrough ? destOffset : 0;
+578     const baseBuf = isPassthrough
+579       ? dest
+580       : new Uint8ClampedArray(baseNumComps * count);
+581     const numComps = this.numComps;
+582 
+583     const scaled = new Float32Array(numComps);
+584     const tinted = new Float32Array(baseNumComps);
+585     let i, j;
+586 
+587     for (i = 0; i < count; i++) {
+588       for (j = 0; j < numComps; j++) {
+589         scaled[j] = src[srcOffset++] * scale;
+590       }
+591       tintFn(scaled, 0, tinted, 0);
+592       if (usesZeroToOneRange) {
+593         for (j = 0; j < baseNumComps; j++) {
+594           baseBuf[pos++] = tinted[j] * 255;
+595         }
+596       } else {
+597         base.getRgbItem(tinted, 0, baseBuf, pos);
+598         pos += baseNumComps;
+599       }
+600     }
+601 
+602     if (!isPassthrough) {
+603       base.getRgbBuffer(baseBuf, 0, count, dest, destOffset, 8, alpha01);
+604     }
+605   }
+606 
+607   getOutputLength(inputLength, alpha01) {
+608     return this.base.getOutputLength(
+609       (inputLength * this.base.numComps) / this.numComps,
+610       alpha01
+611     );
+612   }
+613 }
+614 
+615 class PatternCS extends ColorSpace {
+616   constructor(baseCS) {
+617     super("Pattern", null);
+618     this.base = baseCS;
+619   }
+620 
+621   isDefaultDecode(decodeMap, bpc) {
+622     unreachable("Should not call PatternCS.isDefaultDecode");
+623   }
+624 }
+625 
+626 /**
+627  * The default color is `new Uint8Array([0])`.
+628  */
+629 class IndexedCS extends ColorSpace {
+630   constructor(base, highVal, lookup) {
+631     super("Indexed", 1);
+632     this.base = base;
+633 
+634     const length = base.numComps * (highVal + 1);
+635     this.lookup = new Uint8Array(length);
+636 
+637     if (lookup instanceof BaseStream) {
+638       const bytes = lookup.getBytes(length);
+639       this.lookup.set(bytes);
+640     } else if (typeof lookup === "string") {
+641       for (let i = 0; i < length; ++i) {
+642         this.lookup[i] = lookup.charCodeAt(i) & 0xff;
+643       }
+644     } else {
+645       throw new FormatError(`IndexedCS - unrecognized lookup table: ${lookup}`);
+646     }
+647   }
+648 
+649   getRgbItem(src, srcOffset, dest, destOffset) {
+650     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+651       assert(
+652         dest instanceof Uint8ClampedArray,
+653         'IndexedCS.getRgbItem: Unsupported "dest" type.'
+654       );
+655     }
+656     const numComps = this.base.numComps;
+657     const start = src[srcOffset] * numComps;
+658     this.base.getRgbBuffer(this.lookup, start, 1, dest, destOffset, 8, 0);
+659   }
+660 
+661   getRgbBuffer(src, srcOffset, count, dest, destOffset, bits, alpha01) {
+662     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+663       assert(
+664         dest instanceof Uint8ClampedArray,
+665         'IndexedCS.getRgbBuffer: Unsupported "dest" type.'
+666       );
+667     }
+668     const base = this.base;
+669     const numComps = base.numComps;
+670     const outputDelta = base.getOutputLength(numComps, alpha01);
+671     const lookup = this.lookup;
+672 
+673     for (let i = 0; i < count; ++i) {
+674       const lookupPos = src[srcOffset++] * numComps;
+675       base.getRgbBuffer(lookup, lookupPos, 1, dest, destOffset, 8, alpha01);
+676       destOffset += outputDelta;
+677     }
+678   }
+679 
+680   getOutputLength(inputLength, alpha01) {
+681     return this.base.getOutputLength(inputLength * this.base.numComps, alpha01);
+682   }
+683 
+684   isDefaultDecode(decodeMap, bpc) {
+685     if (!Array.isArray(decodeMap)) {
+686       return true;
+687     }
+688     if (decodeMap.length !== 2) {
+689       warn("Decode map length is not correct");
+690       return true;
+691     }
+692     if (!Number.isInteger(bpc) || bpc < 1) {
+693       warn("Bits per component is not correct");
+694       return true;
+695     }
+696     return decodeMap[0] === 0 && decodeMap[1] === (1 << bpc) - 1;
+697   }
+698 }
+699 
+700 /**
+701  * The default color is `new Float32Array([0])`.
+702  */
+703 class DeviceGrayCS extends ColorSpace {
+704   constructor() {
+705     super("DeviceGray", 1);
+706   }
+707 
+708   getRgbItem(src, srcOffset, dest, destOffset) {
+709     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+710       assert(
+711         dest instanceof Uint8ClampedArray,
+712         'DeviceGrayCS.getRgbItem: Unsupported "dest" type.'
+713       );
+714     }
+715     const c = src[srcOffset] * 255;
+716     dest[destOffset] = dest[destOffset + 1] = dest[destOffset + 2] = c;
+717   }
+718 
+719   getRgbBuffer(src, srcOffset, count, dest, destOffset, bits, alpha01) {
+720     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+721       assert(
+722         dest instanceof Uint8ClampedArray,
+723         'DeviceGrayCS.getRgbBuffer: Unsupported "dest" type.'
+724       );
+725     }
+726     const scale = 255 / ((1 << bits) - 1);
+727     let j = srcOffset,
+728       q = destOffset;
+729     for (let i = 0; i < count; ++i) {
+730       const c = scale * src[j++];
+731       dest[q++] = c;
+732       dest[q++] = c;
+733       dest[q++] = c;
+734       q += alpha01;
+735     }
+736   }
+737 
+738   getOutputLength(inputLength, alpha01) {
+739     return inputLength * (3 + alpha01);
+740   }
+741 }
+742 
+743 /**
+744  * The default color is `new Float32Array([0, 0, 0])`.
+745  */
+746 class DeviceRgbCS extends ColorSpace {
+747   constructor() {
+748     super("DeviceRGB", 3);
+749   }
+750 
+751   getRgbItem(src, srcOffset, dest, destOffset) {
+752     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+753       assert(
+754         dest instanceof Uint8ClampedArray,
+755         'DeviceRgbCS.getRgbItem: Unsupported "dest" type.'
+756       );
+757     }
+758     dest[destOffset] = src[srcOffset] * 255;
+759     dest[destOffset + 1] = src[srcOffset + 1] * 255;
+760     dest[destOffset + 2] = src[srcOffset + 2] * 255;
+761   }
+762 
+763   getRgbBuffer(src, srcOffset, count, dest, destOffset, bits, alpha01) {
+764     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+765       assert(
+766         dest instanceof Uint8ClampedArray,
+767         'DeviceRgbCS.getRgbBuffer: Unsupported "dest" type.'
+768       );
+769     }
+770     if (bits === 8 && alpha01 === 0) {
+771       dest.set(src.subarray(srcOffset, srcOffset + count * 3), destOffset);
+772       return;
+773     }
+774     const scale = 255 / ((1 << bits) - 1);
+775     let j = srcOffset,
+776       q = destOffset;
+777     for (let i = 0; i < count; ++i) {
+778       dest[q++] = scale * src[j++];
+779       dest[q++] = scale * src[j++];
+780       dest[q++] = scale * src[j++];
+781       q += alpha01;
+782     }
+783   }
+784 
+785   getOutputLength(inputLength, alpha01) {
+786     return ((inputLength * (3 + alpha01)) / 3) | 0;
+787   }
+788 
+789   isPassthrough(bits) {
+790     return bits === 8;
+791   }
+792 }
+793 
+794 /**
+795  * The default color is `new Float32Array([0, 0, 0, 1])`.
+796  */
+797 class DeviceRgbaCS extends ColorSpace {
+798   constructor() {
+799     super("DeviceRGBA", 4);
+800   }
+801 
+802   getOutputLength(inputLength, _alpha01) {
+803     return inputLength * 4;
+804   }
+805 
+806   isPassthrough(bits) {
+807     return bits === 8;
+808   }
+809 }
+810 
+811 /**
+812  * The default color is `new Float32Array([0, 0, 0, 1])`.
+813  */
+814 class DeviceCmykCS extends ColorSpace {
+815   constructor() {
+816     super("DeviceCMYK", 4);
+817   }
+818 
+819   // The coefficients below was found using numerical analysis: the method of
+820   // steepest descent for the sum((f_i - color_value_i)^2) for r/g/b colors,
+821   // where color_value is the tabular value from the table of sampled RGB colors
+822   // from CMYK US Web Coated (SWOP) colorspace, and f_i is the corresponding
+823   // CMYK color conversion using the estimation below:
+824   //   f(A, B,.. N) = Acc+Bcm+Ccy+Dck+c+Fmm+Gmy+Hmk+Im+Jyy+Kyk+Ly+Mkk+Nk+255
+825   #toRgb(src, srcOffset, srcScale, dest, destOffset) {
+826     const c = src[srcOffset] * srcScale;
+827     const m = src[srcOffset + 1] * srcScale;
+828     const y = src[srcOffset + 2] * srcScale;
+829     const k = src[srcOffset + 3] * srcScale;
+830 
+831     dest[destOffset] =
+832       255 +
+833       c *
+834         (-4.387332384609988 * c +
+835           54.48615194189176 * m +
+836           18.82290502165302 * y +
+837           212.25662451639585 * k +
+838           -285.2331026137004) +
+839       m *
+840         (1.7149763477362134 * m -
+841           5.6096736904047315 * y +
+842           -17.873870861415444 * k -
+843           5.497006427196366) +
+844       y *
+845         (-2.5217340131683033 * y - 21.248923337353073 * k + 17.5119270841813) +
+846       k * (-21.86122147463605 * k - 189.48180835922747);
+847 
+848     dest[destOffset + 1] =
+849       255 +
+850       c *
+851         (8.841041422036149 * c +
+852           60.118027045597366 * m +
+853           6.871425592049007 * y +
+854           31.159100130055922 * k +
+855           -79.2970844816548) +
+856       m *
+857         (-15.310361306967817 * m +
+858           17.575251261109482 * y +
+859           131.35250912493976 * k -
+860           190.9453302588951) +
+861       y * (4.444339102852739 * y + 9.8632861493405 * k - 24.86741582555878) +
+862       k * (-20.737325471181034 * k - 187.80453709719578);
+863 
+864     dest[destOffset + 2] =
+865       255 +
+866       c *
+867         (0.8842522430003296 * c +
+868           8.078677503112928 * m +
+869           30.89978309703729 * y -
+870           0.23883238689178934 * k +
+871           -14.183576799673286) +
+872       m *
+873         (10.49593273432072 * m +
+874           63.02378494754052 * y +
+875           50.606957656360734 * k -
+876           112.23884253719248) +
+877       y *
+878         (0.03296041114873217 * y +
+879           115.60384449646641 * k +
+880           -193.58209356861505) +
+881       k * (-22.33816807309886 * k - 180.12613974708367);
+882   }
+883 
+884   getRgbItem(src, srcOffset, dest, destOffset) {
+885     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+886       assert(
+887         dest instanceof Uint8ClampedArray,
+888         'DeviceCmykCS.getRgbItem: Unsupported "dest" type.'
+889       );
+890     }
+891     this.#toRgb(src, srcOffset, 1, dest, destOffset);
+892   }
+893 
+894   getRgbBuffer(src, srcOffset, count, dest, destOffset, bits, alpha01) {
+895     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+896       assert(
+897         dest instanceof Uint8ClampedArray,
+898         'DeviceCmykCS.getRgbBuffer: Unsupported "dest" type.'
+899       );
+900     }
+901     const scale = 1 / ((1 << bits) - 1);
+902     for (let i = 0; i < count; i++) {
+903       this.#toRgb(src, srcOffset, scale, dest, destOffset);
+904       srcOffset += 4;
+905       destOffset += 3 + alpha01;
+906     }
+907   }
+908 
+909   getOutputLength(inputLength, alpha01) {
+910     return ((inputLength / 4) * (3 + alpha01)) | 0;
+911   }
+912 }
+913 
+914 /**
+915  * CalGrayCS: Based on "PDF Reference, Sixth Ed", p.245
+916  *
+917  * The default color is `new Float32Array([0])`.
+918  */
+919 class CalGrayCS extends ColorSpace {
+920   constructor(whitePoint, blackPoint, gamma) {
+921     super("CalGray", 1);
+922 
+923     if (!whitePoint) {
+924       throw new FormatError(
+925         "WhitePoint missing - required for color space CalGray"
+926       );
+927     }
+928     // Translate arguments to spec variables.
+929     [this.XW, this.YW, this.ZW] = whitePoint;
+930     [this.XB, this.YB, this.ZB] = blackPoint || [0, 0, 0];
+931     this.G = gamma || 1;
+932 
+933     // Validate variables as per spec.
+934     if (this.XW < 0 || this.ZW < 0 || this.YW !== 1) {
+935       throw new FormatError(
+936         `Invalid WhitePoint components for ${this.name}, no fallback available`
+937       );
+938     }
+939 
+940     if (this.XB < 0 || this.YB < 0 || this.ZB < 0) {
+941       info(`Invalid BlackPoint for ${this.name}, falling back to default.`);
+942       this.XB = this.YB = this.ZB = 0;
+943     }
+944 
+945     if (this.XB !== 0 || this.YB !== 0 || this.ZB !== 0) {
+946       warn(
+947         `${this.name}, BlackPoint: XB: ${this.XB}, YB: ${this.YB}, ` +
+948           `ZB: ${this.ZB}, only default values are supported.`
+949       );
+950     }
+951 
+952     if (this.G < 1) {
+953       info(
+954         `Invalid Gamma: ${this.G} for ${this.name}, falling back to default.`
+955       );
+956       this.G = 1;
+957     }
+958   }
+959 
+960   #toRgb(src, srcOffset, dest, destOffset, scale) {
+961     // A represents a gray component of a calibrated gray space.
+962     // A <---> AG in the spec
+963     const A = src[srcOffset] * scale;
+964     const AG = A ** this.G;
+965 
+966     // Computes L as per spec. ( = this.YW * AG )
+967     // Except if other than default BlackPoint values are used.
+968     const L = this.YW * AG;
+969     // http://www.poynton.com/notes/colour_and_gamma/ColorFAQ.html, Ch 4.
+970     // Convert values to rgb range [0, 255].
+971     const val = Math.max(295.8 * L ** 0.3333333333333333 - 40.8, 0);
+972     dest[destOffset] = val;
+973     dest[destOffset + 1] = val;
+974     dest[destOffset + 2] = val;
+975   }
+976 
+977   getRgbItem(src, srcOffset, dest, destOffset) {
+978     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+979       assert(
+980         dest instanceof Uint8ClampedArray,
+981         'CalGrayCS.getRgbItem: Unsupported "dest" type.'
+982       );
+983     }
+984     this.#toRgb(src, srcOffset, dest, destOffset, 1);
+985   }
+986 
+987   getRgbBuffer(src, srcOffset, count, dest, destOffset, bits, alpha01) {
+988     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+989       assert(
+990         dest instanceof Uint8ClampedArray,
+991         'CalGrayCS.getRgbBuffer: Unsupported "dest" type.'
+992       );
+993     }
+994     const scale = 1 / ((1 << bits) - 1);
+995 
+996     for (let i = 0; i < count; ++i) {
+997       this.#toRgb(src, srcOffset, dest, destOffset, scale);
+998       srcOffset += 1;
+999       destOffset += 3 + alpha01;
+1000     }
+1001   }
+1002 
+1003   getOutputLength(inputLength, alpha01) {
+1004     return inputLength * (3 + alpha01);
+1005   }
+1006 }
+1007 
+1008 /**
+1009  * CalRGBCS: Based on "PDF Reference, Sixth Ed", p.247
+1010  *
+1011  * The default color is `new Float32Array([0, 0, 0])`.
+1012  */
+1013 class CalRGBCS extends ColorSpace {
+1014   // See http://www.brucelindbloom.com/index.html?Eqn_ChromAdapt.html for these
+1015   // matrices.
+1016   // prettier-ignore
+1017   static #BRADFORD_SCALE_MATRIX = new Float32Array([
+1018     0.8951, 0.2664, -0.1614,
+1019     -0.7502, 1.7135, 0.0367,
+1020     0.0389, -0.0685, 1.0296]);
+1021 
+1022   // prettier-ignore
+1023   static #BRADFORD_SCALE_INVERSE_MATRIX = new Float32Array([
+1024     0.9869929, -0.1470543, 0.1599627,
+1025     0.4323053, 0.5183603, 0.0492912,
+1026     -0.0085287, 0.0400428, 0.9684867]);
+1027 
+1028   // See http://www.brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html.
+1029   // prettier-ignore
+1030   static #SRGB_D65_XYZ_TO_RGB_MATRIX = new Float32Array([
+1031     3.2404542, -1.5371385, -0.4985314,
+1032     -0.9692660, 1.8760108, 0.0415560,
+1033     0.0556434, -0.2040259, 1.0572252]);
+1034 
+1035   static #FLAT_WHITEPOINT_MATRIX = new Float32Array([1, 1, 1]);
+1036 
+1037   static #tempNormalizeMatrix = new Float32Array(3);
+1038 
+1039   static #tempConvertMatrix1 = new Float32Array(3);
+1040 
+1041   static #tempConvertMatrix2 = new Float32Array(3);
+1042 
+1043   static #DECODE_L_CONSTANT = ((8 + 16) / 116) ** 3 / 8.0;
+1044 
+1045   constructor(whitePoint, blackPoint, gamma, matrix) {
+1046     super("CalRGB", 3);
+1047 
+1048     if (!whitePoint) {
+1049       throw new FormatError(
+1050         "WhitePoint missing - required for color space CalRGB"
+1051       );
+1052     }
+1053     // Translate arguments to spec variables.
+1054     const [XW, YW, ZW] = (this.whitePoint = whitePoint);
+1055     const [XB, YB, ZB] = (this.blackPoint = blackPoint || new Float32Array(3));
+1056 
+1057     [this.GR, this.GG, this.GB] = gamma || new Float32Array([1, 1, 1]);
+1058     [
+1059       this.MXA,
+1060       this.MYA,
+1061       this.MZA,
+1062       this.MXB,
+1063       this.MYB,
+1064       this.MZB,
+1065       this.MXC,
+1066       this.MYC,
+1067       this.MZC,
+1068     ] = matrix || new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+1069 
+1070     // Validate variables as per spec.
+1071     if (XW < 0 || ZW < 0 || YW !== 1) {
+1072       throw new FormatError(
+1073         `Invalid WhitePoint components for ${this.name}, no fallback available`
+1074       );
+1075     }
+1076 
+1077     if (XB < 0 || YB < 0 || ZB < 0) {
+1078       info(
+1079         `Invalid BlackPoint for ${this.name} [${XB}, ${YB}, ${ZB}], ` +
+1080           "falling back to default."
+1081       );
+1082       this.blackPoint = new Float32Array(3);
+1083     }
+1084 
+1085     if (this.GR < 0 || this.GG < 0 || this.GB < 0) {
+1086       info(
+1087         `Invalid Gamma [${this.GR}, ${this.GG}, ${this.GB}] for ` +
+1088           `${this.name}, falling back to default.`
+1089       );
+1090       this.GR = this.GG = this.GB = 1;
+1091     }
+1092   }
+1093 
+1094   #matrixProduct(a, b, result) {
+1095     result[0] = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+1096     result[1] = a[3] * b[0] + a[4] * b[1] + a[5] * b[2];
+1097     result[2] = a[6] * b[0] + a[7] * b[1] + a[8] * b[2];
+1098   }
+1099 
+1100   #toFlat(sourceWhitePoint, LMS, result) {
+1101     result[0] = (LMS[0] * 1) / sourceWhitePoint[0];
+1102     result[1] = (LMS[1] * 1) / sourceWhitePoint[1];
+1103     result[2] = (LMS[2] * 1) / sourceWhitePoint[2];
+1104   }
+1105 
+1106   #toD65(sourceWhitePoint, LMS, result) {
+1107     const D65X = 0.95047;
+1108     const D65Y = 1;
+1109     const D65Z = 1.08883;
+1110 
+1111     result[0] = (LMS[0] * D65X) / sourceWhitePoint[0];
+1112     result[1] = (LMS[1] * D65Y) / sourceWhitePoint[1];
+1113     result[2] = (LMS[2] * D65Z) / sourceWhitePoint[2];
+1114   }
+1115 
+1116   #sRGBTransferFunction(color) {
+1117     // See http://en.wikipedia.org/wiki/SRGB.
+1118     if (color <= 0.0031308) {
+1119       return this.#adjustToRange(0, 1, 12.92 * color);
+1120     }
+1121     // Optimization:
+1122     // If color is close enough to 1, skip calling the following transform
+1123     // since calling Math.pow is expensive. If color is larger than
+1124     // the threshold, the final result is larger than 254.5 since
+1125     // ((1 + 0.055) * 0.99554525 ** (1 / 2.4) - 0.055) * 255 ===
+1126     // 254.50000003134699
+1127     if (color >= 0.99554525) {
+1128       return 1;
+1129     }
+1130     return this.#adjustToRange(0, 1, (1 + 0.055) * color ** (1 / 2.4) - 0.055);
+1131   }
+1132 
+1133   #adjustToRange(min, max, value) {
+1134     return Math.max(min, Math.min(max, value));
+1135   }
+1136 
+1137   #decodeL(L) {
+1138     if (L < 0) {
+1139       return -this.#decodeL(-L);
+1140     }
+1141     if (L > 8.0) {
+1142       return ((L + 16) / 116) ** 3;
+1143     }
+1144     return L * CalRGBCS.#DECODE_L_CONSTANT;
+1145   }
+1146 
+1147   #compensateBlackPoint(sourceBlackPoint, XYZ_Flat, result) {
+1148     // In case the blackPoint is already the default blackPoint then there is
+1149     // no need to do compensation.
+1150     if (
+1151       sourceBlackPoint[0] === 0 &&
+1152       sourceBlackPoint[1] === 0 &&
+1153       sourceBlackPoint[2] === 0
+1154     ) {
+1155       result[0] = XYZ_Flat[0];
+1156       result[1] = XYZ_Flat[1];
+1157       result[2] = XYZ_Flat[2];
+1158       return;
+1159     }
+1160 
+1161     // For the blackPoint calculation details, please see
+1162     // http://www.adobe.com/content/dam/Adobe/en/devnet/photoshop/sdk/
+1163     // AdobeBPC.pdf.
+1164     // The destination blackPoint is the default blackPoint [0, 0, 0].
+1165     const zeroDecodeL = this.#decodeL(0);
+1166 
+1167     const X_DST = zeroDecodeL;
+1168     const X_SRC = this.#decodeL(sourceBlackPoint[0]);
+1169 
+1170     const Y_DST = zeroDecodeL;
+1171     const Y_SRC = this.#decodeL(sourceBlackPoint[1]);
+1172 
+1173     const Z_DST = zeroDecodeL;
+1174     const Z_SRC = this.#decodeL(sourceBlackPoint[2]);
+1175 
+1176     const X_Scale = (1 - X_DST) / (1 - X_SRC);
+1177     const X_Offset = 1 - X_Scale;
+1178 
+1179     const Y_Scale = (1 - Y_DST) / (1 - Y_SRC);
+1180     const Y_Offset = 1 - Y_Scale;
+1181 
+1182     const Z_Scale = (1 - Z_DST) / (1 - Z_SRC);
+1183     const Z_Offset = 1 - Z_Scale;
+1184 
+1185     result[0] = XYZ_Flat[0] * X_Scale + X_Offset;
+1186     result[1] = XYZ_Flat[1] * Y_Scale + Y_Offset;
+1187     result[2] = XYZ_Flat[2] * Z_Scale + Z_Offset;
+1188   }
+1189 
+1190   #normalizeWhitePointToFlat(sourceWhitePoint, XYZ_In, result) {
+1191     // In case the whitePoint is already flat then there is no need to do
+1192     // normalization.
+1193     if (sourceWhitePoint[0] === 1 && sourceWhitePoint[2] === 1) {
+1194       result[0] = XYZ_In[0];
+1195       result[1] = XYZ_In[1];
+1196       result[2] = XYZ_In[2];
+1197       return;
+1198     }
+1199 
+1200     const LMS = result;
+1201     this.#matrixProduct(CalRGBCS.#BRADFORD_SCALE_MATRIX, XYZ_In, LMS);
+1202 
+1203     const LMS_Flat = CalRGBCS.#tempNormalizeMatrix;
+1204     this.#toFlat(sourceWhitePoint, LMS, LMS_Flat);
+1205 
+1206     this.#matrixProduct(
+1207       CalRGBCS.#BRADFORD_SCALE_INVERSE_MATRIX,
+1208       LMS_Flat,
+1209       result
+1210     );
+1211   }
+1212 
+1213   #normalizeWhitePointToD65(sourceWhitePoint, XYZ_In, result) {
+1214     const LMS = result;
+1215     this.#matrixProduct(CalRGBCS.#BRADFORD_SCALE_MATRIX, XYZ_In, LMS);
+1216 
+1217     const LMS_D65 = CalRGBCS.#tempNormalizeMatrix;
+1218     this.#toD65(sourceWhitePoint, LMS, LMS_D65);
+1219 
+1220     this.#matrixProduct(
+1221       CalRGBCS.#BRADFORD_SCALE_INVERSE_MATRIX,
+1222       LMS_D65,
+1223       result
+1224     );
+1225   }
+1226 
+1227   #toRgb(src, srcOffset, dest, destOffset, scale) {
+1228     // A, B and C represent a red, green and blue components of a calibrated
+1229     // rgb space.
+1230     const A = this.#adjustToRange(0, 1, src[srcOffset] * scale);
+1231     const B = this.#adjustToRange(0, 1, src[srcOffset + 1] * scale);
+1232     const C = this.#adjustToRange(0, 1, src[srcOffset + 2] * scale);
+1233 
+1234     // A <---> AGR in the spec
+1235     // B <---> BGG in the spec
+1236     // C <---> CGB in the spec
+1237     const AGR = A === 1 ? 1 : A ** this.GR;
+1238     const BGG = B === 1 ? 1 : B ** this.GG;
+1239     const CGB = C === 1 ? 1 : C ** this.GB;
+1240 
+1241     // Computes intermediate variables L, M, N as per spec.
+1242     // To decode X, Y, Z values map L, M, N directly to them.
+1243     const X = this.MXA * AGR + this.MXB * BGG + this.MXC * CGB;
+1244     const Y = this.MYA * AGR + this.MYB * BGG + this.MYC * CGB;
+1245     const Z = this.MZA * AGR + this.MZB * BGG + this.MZC * CGB;
+1246 
+1247     // The following calculations are based on this document:
+1248     // http://www.adobe.com/content/dam/Adobe/en/devnet/photoshop/sdk/
+1249     // AdobeBPC.pdf.
+1250     const XYZ = CalRGBCS.#tempConvertMatrix1;
+1251     XYZ[0] = X;
+1252     XYZ[1] = Y;
+1253     XYZ[2] = Z;
+1254     const XYZ_Flat = CalRGBCS.#tempConvertMatrix2;
+1255 
+1256     this.#normalizeWhitePointToFlat(this.whitePoint, XYZ, XYZ_Flat);
+1257 
+1258     const XYZ_Black = CalRGBCS.#tempConvertMatrix1;
+1259     this.#compensateBlackPoint(this.blackPoint, XYZ_Flat, XYZ_Black);
+1260 
+1261     const XYZ_D65 = CalRGBCS.#tempConvertMatrix2;
+1262     this.#normalizeWhitePointToD65(
+1263       CalRGBCS.#FLAT_WHITEPOINT_MATRIX,
+1264       XYZ_Black,
+1265       XYZ_D65
+1266     );
+1267 
+1268     const SRGB = CalRGBCS.#tempConvertMatrix1;
+1269     this.#matrixProduct(CalRGBCS.#SRGB_D65_XYZ_TO_RGB_MATRIX, XYZ_D65, SRGB);
+1270 
+1271     // Convert the values to rgb range [0, 255].
+1272     dest[destOffset] = this.#sRGBTransferFunction(SRGB[0]) * 255;
+1273     dest[destOffset + 1] = this.#sRGBTransferFunction(SRGB[1]) * 255;
+1274     dest[destOffset + 2] = this.#sRGBTransferFunction(SRGB[2]) * 255;
+1275   }
+1276 
+1277   getRgbItem(src, srcOffset, dest, destOffset) {
+1278     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+1279       assert(
+1280         dest instanceof Uint8ClampedArray,
+1281         'CalRGBCS.getRgbItem: Unsupported "dest" type.'
+1282       );
+1283     }
+1284     this.#toRgb(src, srcOffset, dest, destOffset, 1);
+1285   }
+1286 
+1287   getRgbBuffer(src, srcOffset, count, dest, destOffset, bits, alpha01) {
+1288     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+1289       assert(
+1290         dest instanceof Uint8ClampedArray,
+1291         'CalRGBCS.getRgbBuffer: Unsupported "dest" type.'
+1292       );
+1293     }
+1294     const scale = 1 / ((1 << bits) - 1);
+1295 
+1296     for (let i = 0; i < count; ++i) {
+1297       this.#toRgb(src, srcOffset, dest, destOffset, scale);
+1298       srcOffset += 3;
+1299       destOffset += 3 + alpha01;
+1300     }
+1301   }
+1302 
+1303   getOutputLength(inputLength, alpha01) {
+1304     return ((inputLength * (3 + alpha01)) / 3) | 0;
+1305   }
+1306 }
+1307 
+1308 /**
+1309  * LabCS: Based on "PDF Reference, Sixth Ed", p.250
+1310  *
+1311  * The default color is `new Float32Array([0, 0, 0])`.
+1312  */
+1313 class LabCS extends ColorSpace {
+1314   constructor(whitePoint, blackPoint, range) {
+1315     super("Lab", 3);
+1316 
+1317     if (!whitePoint) {
+1318       throw new FormatError(
+1319         "WhitePoint missing - required for color space Lab"
+1320       );
+1321     }
+1322     // Translate args to spec variables
+1323     [this.XW, this.YW, this.ZW] = whitePoint;
+1324     [this.amin, this.amax, this.bmin, this.bmax] = range || [
+1325       -100, 100, -100, 100,
+1326     ];
+1327 
+1328     // These are here just for completeness - the spec doesn't offer any
+1329     // formulas that use BlackPoint in Lab
+1330     [this.XB, this.YB, this.ZB] = blackPoint || [0, 0, 0];
+1331 
+1332     // Validate vars as per spec
+1333     if (this.XW < 0 || this.ZW < 0 || this.YW !== 1) {
+1334       throw new FormatError(
+1335         "Invalid WhitePoint components, no fallback available"
+1336       );
+1337     }
+1338 
+1339     if (this.XB < 0 || this.YB < 0 || this.ZB < 0) {
+1340       info("Invalid BlackPoint, falling back to default");
+1341       this.XB = this.YB = this.ZB = 0;
+1342     }
+1343 
+1344     if (this.amin > this.amax || this.bmin > this.bmax) {
+1345       info("Invalid Range, falling back to defaults");
+1346       this.amin = -100;
+1347       this.amax = 100;
+1348       this.bmin = -100;
+1349       this.bmax = 100;
+1350     }
+1351   }
+1352 
+1353   // Function g(x) from spec
+1354   #fn_g(x) {
+1355     return x >= 6 / 29 ? x ** 3 : (108 / 841) * (x - 4 / 29);
+1356   }
+1357 
+1358   #decode(value, high1, low2, high2) {
+1359     return low2 + (value * (high2 - low2)) / high1;
+1360   }
+1361 
+1362   // If decoding is needed maxVal should be 2^bits per component - 1.
+1363   #toRgb(src, srcOffset, maxVal, dest, destOffset) {
+1364     // XXX: Lab input is in the range of [0, 100], [amin, amax], [bmin, bmax]
+1365     // not the usual [0, 1]. If a command like setFillColor is used the src
+1366     // values will already be within the correct range. However, if we are
+1367     // converting an image we have to map the values to the correct range given
+1368     // above.
+1369     // Ls,as,bs <---> L*,a*,b* in the spec
+1370     let Ls = src[srcOffset];
+1371     let as = src[srcOffset + 1];
+1372     let bs = src[srcOffset + 2];
+1373     if (maxVal !== false) {
+1374       Ls = this.#decode(Ls, maxVal, 0, 100);
+1375       as = this.#decode(as, maxVal, this.amin, this.amax);
+1376       bs = this.#decode(bs, maxVal, this.bmin, this.bmax);
+1377     }
+1378 
+1379     // Adjust limits of 'as' and 'bs'
+1380     if (as > this.amax) {
+1381       as = this.amax;
+1382     } else if (as < this.amin) {
+1383       as = this.amin;
+1384     }
+1385     if (bs > this.bmax) {
+1386       bs = this.bmax;
+1387     } else if (bs < this.bmin) {
+1388       bs = this.bmin;
+1389     }
+1390 
+1391     // Computes intermediate variables X,Y,Z as per spec
+1392     const M = (Ls + 16) / 116;
+1393     const L = M + as / 500;
+1394     const N = M - bs / 200;
+1395 
+1396     const X = this.XW * this.#fn_g(L);
+1397     const Y = this.YW * this.#fn_g(M);
+1398     const Z = this.ZW * this.#fn_g(N);
+1399 
+1400     let r, g, b;
+1401     // Using different conversions for D50 and D65 white points,
+1402     // per http://www.color.org/srgb.pdf
+1403     if (this.ZW < 1) {
+1404       // Assuming D50 (X=0.9642, Y=1.00, Z=0.8249)
+1405       r = X * 3.1339 + Y * -1.617 + Z * -0.4906;
+1406       g = X * -0.9785 + Y * 1.916 + Z * 0.0333;
+1407       b = X * 0.072 + Y * -0.229 + Z * 1.4057;
+1408     } else {
+1409       // Assuming D65 (X=0.9505, Y=1.00, Z=1.0888)
+1410       r = X * 3.2406 + Y * -1.5372 + Z * -0.4986;
+1411       g = X * -0.9689 + Y * 1.8758 + Z * 0.0415;
+1412       b = X * 0.0557 + Y * -0.204 + Z * 1.057;
+1413     }
+1414     // Convert the color values to the [0,255] range (clamping is automatic).
+1415     dest[destOffset] = Math.sqrt(r) * 255;
+1416     dest[destOffset + 1] = Math.sqrt(g) * 255;
+1417     dest[destOffset + 2] = Math.sqrt(b) * 255;
+1418   }
+1419 
+1420   getRgbItem(src, srcOffset, dest, destOffset) {
+1421     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+1422       assert(
+1423         dest instanceof Uint8ClampedArray,
+1424         'LabCS.getRgbItem: Unsupported "dest" type.'
+1425       );
+1426     }
+1427     this.#toRgb(src, srcOffset, false, dest, destOffset);
+1428   }
+1429 
+1430   getRgbBuffer(src, srcOffset, count, dest, destOffset, bits, alpha01) {
+1431     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+1432       assert(
+1433         dest instanceof Uint8ClampedArray,
+1434         'LabCS.getRgbBuffer: Unsupported "dest" type.'
+1435       );
+1436     }
+1437     const maxVal = (1 << bits) - 1;
+1438     for (let i = 0; i < count; i++) {
+1439       this.#toRgb(src, srcOffset, maxVal, dest, destOffset);
+1440       srcOffset += 3;
+1441       destOffset += 3 + alpha01;
+1442     }
+1443   }
+1444 
+1445   getOutputLength(inputLength, alpha01) {
+1446     return ((inputLength * (3 + alpha01)) / 3) | 0;
+1447   }
+1448 
+1449   isDefaultDecode(decodeMap, bpc) {
+1450     // XXX: Decoding is handled with the lab conversion because of the strange
+1451     // ranges that are used.
+1452     return true;
+1453   }
+1454 
+1455   get usesZeroToOneRange() {
+1456     return shadow(this, "usesZeroToOneRange", false);
+1457   }
+1458 }
+1459 
+1460 export { ColorSpace };
+File:
+src/core/image.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   FeatureTest,
+19   FormatError,
+20   ImageKind,
+21   warn,
+22 } from "../shared/util.js";
+23 import {
+24   convertBlackAndWhiteToRGBA,
+25   convertToRGBA,
+26 } from "../shared/image_utils.js";
+27 import { BaseStream } from "./base_stream.js";
+28 import { ColorSpace } from "./colorspace.js";
+29 import { DecodeStream } from "./decode_stream.js";
+30 import { ImageResizer } from "./image_resizer.js";
+31 import { JpegStream } from "./jpeg_stream.js";
+32 import { JpxImage } from "./jpx.js";
+33 import { Name } from "./primitives.js";
+34 
+35 /**
+36  * Decode and clamp a value. The formula is different from the spec because we
+37  * don't decode to float range [0,1], we decode it in the [0,max] range.
+38  */
+39 function decodeAndClamp(value, addend, coefficient, max) {
+40   value = addend + value * coefficient;
+41   // Clamp the value to the range
+42   if (value < 0) {
+43     value = 0;
+44   } else if (value > max) {
+45     value = max;
+46   }
+47   return value;
+48 }
+49 
+50 /**
+51  * Resizes an image mask with 1 component.
+52  * @param {TypedArray} src - The source buffer.
+53  * @param {number} bpc - Number of bits per component.
+54  * @param {number} w1 - Original width.
+55  * @param {number} h1 - Original height.
+56  * @param {number} w2 - New width.
+57  * @param {number} h2 - New height.
+58  * @returns {TypedArray} The resized image mask buffer.
+59  */
+60 function resizeImageMask(src, bpc, w1, h1, w2, h2) {
+61   const length = w2 * h2;
+62   let dest;
+63   if (bpc <= 8) {
+64     dest = new Uint8Array(length);
+65   } else if (bpc <= 16) {
+66     dest = new Uint16Array(length);
+67   } else {
+68     dest = new Uint32Array(length);
+69   }
+70   const xRatio = w1 / w2;
+71   const yRatio = h1 / h2;
+72   let i,
+73     j,
+74     py,
+75     newIndex = 0,
+76     oldIndex;
+77   const xScaled = new Uint16Array(w2);
+78   const w1Scanline = w1;
+79 
+80   for (i = 0; i < w2; i++) {
+81     xScaled[i] = Math.floor(i * xRatio);
+82   }
+83   for (i = 0; i < h2; i++) {
+84     py = Math.floor(i * yRatio) * w1Scanline;
+85     for (j = 0; j < w2; j++) {
+86       oldIndex = py + xScaled[j];
+87       dest[newIndex++] = src[oldIndex];
+88     }
+89   }
+90   return dest;
+91 }
+92 
+93 class PDFImage {
+94   constructor({
+95     xref,
+96     res,
+97     image,
+98     isInline = false,
+99     smask = null,
+100     mask = null,
+101     isMask = false,
+102     pdfFunctionFactory,
+103     localColorSpaceCache,
+104   }) {
+105     this.image = image;
+106     const dict = image.dict;
+107 
+108     const filter = dict.get("F", "Filter");
+109     let filterName;
+110     if (filter instanceof Name) {
+111       filterName = filter.name;
+112     } else if (Array.isArray(filter)) {
+113       const filterZero = xref.fetchIfRef(filter[0]);
+114       if (filterZero instanceof Name) {
+115         filterName = filterZero.name;
+116       }
+117     }
+118     switch (filterName) {
+119       case "JPXDecode":
+120         ({
+121           width: image.width,
+122           height: image.height,
+123           componentsCount: image.numComps,
+124           bitsPerComponent: image.bitsPerComponent,
+125         } = JpxImage.parseImageProperties(image.stream));
+126         image.stream.reset();
+127         this.jpxDecoderOptions = {
+128           numComponents: 0,
+129           isIndexedColormap: false,
+130           smaskInData: dict.has("SMaskInData"),
+131         };
+132         break;
+133       case "JBIG2Decode":
+134         image.bitsPerComponent = 1;
+135         image.numComps = 1;
+136         break;
+137     }
+138 
+139     let width = dict.get("W", "Width");
+140     let height = dict.get("H", "Height");
+141 
+142     if (
+143       Number.isInteger(image.width) &&
+144       image.width > 0 &&
+145       Number.isInteger(image.height) &&
+146       image.height > 0 &&
+147       (image.width !== width || image.height !== height)
+148     ) {
+149       warn(
+150         "PDFImage - using the Width/Height of the image data, " +
+151           "rather than the image dictionary."
+152       );
+153       width = image.width;
+154       height = image.height;
+155     }
+156     if (width < 1 || height < 1) {
+157       throw new FormatError(
+158         `Invalid image width: ${width} or height: ${height}`
+159       );
+160     }
+161     this.width = width;
+162     this.height = height;
+163 
+164     this.interpolate = dict.get("I", "Interpolate");
+165     this.imageMask = dict.get("IM", "ImageMask") || false;
+166     this.matte = dict.get("Matte") || false;
+167 
+168     let bitsPerComponent = image.bitsPerComponent;
+169     if (!bitsPerComponent) {
+170       bitsPerComponent = dict.get("BPC", "BitsPerComponent");
+171       if (!bitsPerComponent) {
+172         if (this.imageMask) {
+173           bitsPerComponent = 1;
+174         } else {
+175           throw new FormatError(
+176             `Bits per component missing in image: ${this.imageMask}`
+177           );
+178         }
+179       }
+180     }
+181     this.bpc = bitsPerComponent;
+182 
+183     if (!this.imageMask) {
+184       let colorSpace = dict.getRaw("CS") || dict.getRaw("ColorSpace");
+185       const hasColorSpace = !!colorSpace;
+186       if (!hasColorSpace) {
+187         if (this.jpxDecoderOptions) {
+188           colorSpace = Name.get("DeviceRGBA");
+189         } else {
+190           switch (image.numComps) {
+191             case 1:
+192               colorSpace = Name.get("DeviceGray");
+193               break;
+194             case 3:
+195               colorSpace = Name.get("DeviceRGB");
+196               break;
+197             case 4:
+198               colorSpace = Name.get("DeviceCMYK");
+199               break;
+200             default:
+201               throw new Error(
+202                 `Images with ${image.numComps} color components not supported.`
+203               );
+204           }
+205         }
+206       } else if (this.jpxDecoderOptions?.smaskInData) {
+207         // If the jpx image has a color space then it mustn't be used in order
+208         // to be able to use the color space that comes from the pdf.
+209         colorSpace = Name.get("DeviceRGBA");
+210       }
+211 
+212       this.colorSpace = ColorSpace.parse({
+213         cs: colorSpace,
+214         xref,
+215         resources: isInline ? res : null,
+216         pdfFunctionFactory,
+217         localColorSpaceCache,
+218       });
+219       this.numComps = this.colorSpace.numComps;
+220 
+221       if (this.jpxDecoderOptions) {
+222         this.jpxDecoderOptions.numComponents = hasColorSpace ? this.numComp : 0;
+223         // If the jpx image has a color space then it musn't be used in order to
+224         // be able to use the color space that comes from the pdf.
+225         this.jpxDecoderOptions.isIndexedColormap =
+226           this.colorSpace.name === "Indexed";
+227       }
+228     }
+229 
+230     this.decode = dict.getArray("D", "Decode");
+231     this.needsDecode = false;
+232     if (
+233       this.decode &&
+234       ((this.colorSpace &&
+235         !this.colorSpace.isDefaultDecode(this.decode, bitsPerComponent)) ||
+236         (isMask &&
+237           !ColorSpace.isDefaultDecode(this.decode, /* numComps = */ 1)))
+238     ) {
+239       this.needsDecode = true;
+240       // Do some preprocessing to avoid more math.
+241       const max = (1 << bitsPerComponent) - 1;
+242       this.decodeCoefficients = [];
+243       this.decodeAddends = [];
+244       const isIndexed = this.colorSpace?.name === "Indexed";
+245       for (let i = 0, j = 0; i < this.decode.length; i += 2, ++j) {
+246         const dmin = this.decode[i];
+247         const dmax = this.decode[i + 1];
+248         this.decodeCoefficients[j] = isIndexed
+249           ? (dmax - dmin) / max
+250           : dmax - dmin;
+251         this.decodeAddends[j] = isIndexed ? dmin : max * dmin;
+252       }
+253     }
+254 
+255     if (smask) {
+256       this.smask = new PDFImage({
+257         xref,
+258         res,
+259         image: smask,
+260         isInline,
+261         pdfFunctionFactory,
+262         localColorSpaceCache,
+263       });
+264     } else if (mask) {
+265       if (mask instanceof BaseStream) {
+266         const maskDict = mask.dict,
+267           imageMask = maskDict.get("IM", "ImageMask");
+268         if (!imageMask) {
+269           warn("Ignoring /Mask in image without /ImageMask.");
+270         } else {
+271           this.mask = new PDFImage({
+272             xref,
+273             res,
+274             image: mask,
+275             isInline,
+276             isMask: true,
+277             pdfFunctionFactory,
+278             localColorSpaceCache,
+279           });
+280         }
+281       } else {
+282         // Color key mask (just an array).
+283         this.mask = mask;
+284       }
+285     }
+286   }
+287 
+288   /**
+289    * Handles processing of image data and returns the Promise that is resolved
+290    * with a PDFImage when the image is ready to be used.
+291    */
+292   static async buildImage({
+293     xref,
+294     res,
+295     image,
+296     isInline = false,
+297     pdfFunctionFactory,
+298     localColorSpaceCache,
+299   }) {
+300     const imageData = image;
+301     let smaskData = null;
+302     let maskData = null;
+303 
+304     const smask = image.dict.get("SMask");
+305     const mask = image.dict.get("Mask");
+306 
+307     if (smask) {
+308       if (smask instanceof BaseStream) {
+309         smaskData = smask;
+310       } else {
+311         warn("Unsupported /SMask format.");
+312       }
+313     } else if (mask) {
+314       if (mask instanceof BaseStream || Array.isArray(mask)) {
+315         maskData = mask;
+316       } else {
+317         warn("Unsupported /Mask format.");
+318       }
+319     }
+320 
+321     return new PDFImage({
+322       xref,
+323       res,
+324       image: imageData,
+325       isInline,
+326       smask: smaskData,
+327       mask: maskData,
+328       pdfFunctionFactory,
+329       localColorSpaceCache,
+330     });
+331   }
+332 
+333   static createRawMask({
+334     imgArray,
+335     width,
+336     height,
+337     imageIsFromDecodeStream,
+338     inverseDecode,
+339     interpolate,
+340   }) {
+341     // |imgArray| might not contain full data for every pixel of the mask, so
+342     // we need to distinguish between |computedLength| and |actualLength|.
+343     // In particular, if inverseDecode is true, then the array we return must
+344     // have a length of |computedLength|.
+345 
+346     const computedLength = ((width + 7) >> 3) * height;
+347     const actualLength = imgArray.byteLength;
+348     const haveFullData = computedLength === actualLength;
+349     let data, i;
+350 
+351     if (imageIsFromDecodeStream && (!inverseDecode || haveFullData)) {
+352       // imgArray came from a DecodeStream and its data is in an appropriate
+353       // form, so we can just transfer it.
+354       data = imgArray;
+355     } else if (!inverseDecode) {
+356       data = new Uint8Array(imgArray);
+357     } else {
+358       data = new Uint8Array(computedLength);
+359       data.set(imgArray);
+360       data.fill(0xff, actualLength);
+361     }
+362 
+363     // If necessary, invert the original mask data (but not any extra we might
+364     // have added above). It's safe to modify the array -- whether it's the
+365     // original or a copy, we're about to transfer it anyway, so nothing else
+366     // in this thread can be relying on its contents.
+367     if (inverseDecode) {
+368       for (i = 0; i < actualLength; i++) {
+369         data[i] ^= 0xff;
+370       }
+371     }
+372 
+373     return { data, width, height, interpolate };
+374   }
+375 
+376   static async createMask({
+377     imgArray,
+378     width,
+379     height,
+380     imageIsFromDecodeStream,
+381     inverseDecode,
+382     interpolate,
+383     isOffscreenCanvasSupported = false,
+384   }) {
+385     const isSingleOpaquePixel =
+386       width === 1 &&
+387       height === 1 &&
+388       inverseDecode === (imgArray.length === 0 || !!(imgArray[0] & 128));
+389 
+390     if (isSingleOpaquePixel) {
+391       return { isSingleOpaquePixel };
+392     }
+393 
+394     if (isOffscreenCanvasSupported) {
+395       if (ImageResizer.needsToBeResized(width, height)) {
+396         const data = new Uint8ClampedArray(width * height * 4);
+397         convertBlackAndWhiteToRGBA({
+398           src: imgArray,
+399           dest: data,
+400           width,
+401           height,
+402           nonBlackColor: 0,
+403           inverseDecode,
+404         });
+405         return ImageResizer.createImage({
+406           kind: ImageKind.RGBA_32BPP,
+407           data,
+408           width,
+409           height,
+410           interpolate,
+411         });
+412       }
+413 
+414       const canvas = new OffscreenCanvas(width, height);
+415       const ctx = canvas.getContext("2d");
+416       const imgData = ctx.createImageData(width, height);
+417       convertBlackAndWhiteToRGBA({
+418         src: imgArray,
+419         dest: imgData.data,
+420         width,
+421         height,
+422         nonBlackColor: 0,
+423         inverseDecode,
+424       });
+425 
+426       ctx.putImageData(imgData, 0, 0);
+427       const bitmap = canvas.transferToImageBitmap();
+428 
+429       return {
+430         data: null,
+431         width,
+432         height,
+433         interpolate,
+434         bitmap,
+435       };
+436     }
+437 
+438     // Get the data almost as they're and they'll be decoded
+439     // just before being drawn.
+440     return this.createRawMask({
+441       imgArray,
+442       width,
+443       height,
+444       inverseDecode,
+445       imageIsFromDecodeStream,
+446       interpolate,
+447     });
+448   }
+449 
+450   get drawWidth() {
+451     return Math.max(this.width, this.smask?.width || 0, this.mask?.width || 0);
+452   }
+453 
+454   get drawHeight() {
+455     return Math.max(
+456       this.height,
+457       this.smask?.height || 0,
+458       this.mask?.height || 0
+459     );
+460   }
+461 
+462   decodeBuffer(buffer) {
+463     const bpc = this.bpc;
+464     const numComps = this.numComps;
+465 
+466     const decodeAddends = this.decodeAddends;
+467     const decodeCoefficients = this.decodeCoefficients;
+468     const max = (1 << bpc) - 1;
+469     let i, ii;
+470 
+471     if (bpc === 1) {
+472       // If the buffer needed decode that means it just needs to be inverted.
+473       for (i = 0, ii = buffer.length; i < ii; i++) {
+474         buffer[i] = +!buffer[i];
+475       }
+476       return;
+477     }
+478     let index = 0;
+479     for (i = 0, ii = this.width * this.height; i < ii; i++) {
+480       for (let j = 0; j < numComps; j++) {
+481         buffer[index] = decodeAndClamp(
+482           buffer[index],
+483           decodeAddends[j],
+484           decodeCoefficients[j],
+485           max
+486         );
+487         index++;
+488       }
+489     }
+490   }
+491 
+492   getComponents(buffer) {
+493     const bpc = this.bpc;
+494 
+495     // This image doesn't require any extra work.
+496     if (bpc === 8) {
+497       return buffer;
+498     }
+499 
+500     const width = this.width;
+501     const height = this.height;
+502     const numComps = this.numComps;
+503 
+504     const length = width * height * numComps;
+505     let bufferPos = 0;
+506     let output;
+507     if (bpc <= 8) {
+508       output = new Uint8Array(length);
+509     } else if (bpc <= 16) {
+510       output = new Uint16Array(length);
+511     } else {
+512       output = new Uint32Array(length);
+513     }
+514     const rowComps = width * numComps;
+515 
+516     const max = (1 << bpc) - 1;
+517     let i = 0,
+518       ii,
+519       buf;
+520 
+521     if (bpc === 1) {
+522       // Optimization for reading 1 bpc images.
+523       let mask, loop1End, loop2End;
+524       for (let j = 0; j < height; j++) {
+525         loop1End = i + (rowComps & ~7);
+526         loop2End = i + rowComps;
+527 
+528         // unroll loop for all full bytes
+529         while (i < loop1End) {
+530           buf = buffer[bufferPos++];
+531           output[i] = (buf >> 7) & 1;
+532           output[i + 1] = (buf >> 6) & 1;
+533           output[i + 2] = (buf >> 5) & 1;
+534           output[i + 3] = (buf >> 4) & 1;
+535           output[i + 4] = (buf >> 3) & 1;
+536           output[i + 5] = (buf >> 2) & 1;
+537           output[i + 6] = (buf >> 1) & 1;
+538           output[i + 7] = buf & 1;
+539           i += 8;
+540         }
+541 
+542         // handle remaining bits
+543         if (i < loop2End) {
+544           buf = buffer[bufferPos++];
+545           mask = 128;
+546           while (i < loop2End) {
+547             output[i++] = +!!(buf & mask);
+548             mask >>= 1;
+549           }
+550         }
+551       }
+552     } else {
+553       // The general case that handles all other bpc values.
+554       let bits = 0;
+555       buf = 0;
+556       for (i = 0, ii = length; i < ii; ++i) {
+557         if (i % rowComps === 0) {
+558           buf = 0;
+559           bits = 0;
+560         }
+561 
+562         while (bits < bpc) {
+563           buf = (buf << 8) | buffer[bufferPos++];
+564           bits += 8;
+565         }
+566 
+567         const remainingBits = bits - bpc;
+568         let value = buf >> remainingBits;
+569         if (value < 0) {
+570           value = 0;
+571         } else if (value > max) {
+572           value = max;
+573         }
+574         output[i] = value;
+575         buf &= (1 << remainingBits) - 1;
+576         bits = remainingBits;
+577       }
+578     }
+579     return output;
+580   }
+581 
+582   async fillOpacity(rgbaBuf, width, height, actualHeight, image) {
+583     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+584       assert(
+585         rgbaBuf instanceof Uint8ClampedArray,
+586         'PDFImage.fillOpacity: Unsupported "rgbaBuf" type.'
+587       );
+588     }
+589     const smask = this.smask;
+590     const mask = this.mask;
+591     let alphaBuf, sw, sh, i, ii, j;
+592 
+593     if (smask) {
+594       sw = smask.width;
+595       sh = smask.height;
+596       alphaBuf = new Uint8ClampedArray(sw * sh);
+597       await smask.fillGrayBuffer(alphaBuf);
+598       if (sw !== width || sh !== height) {
+599         alphaBuf = resizeImageMask(alphaBuf, smask.bpc, sw, sh, width, height);
+600       }
+601     } else if (mask) {
+602       if (mask instanceof PDFImage) {
+603         sw = mask.width;
+604         sh = mask.height;
+605         alphaBuf = new Uint8ClampedArray(sw * sh);
+606         mask.numComps = 1;
+607         await mask.fillGrayBuffer(alphaBuf);
+608 
+609         // Need to invert values in rgbaBuf
+610         for (i = 0, ii = sw * sh; i < ii; ++i) {
+611           alphaBuf[i] = 255 - alphaBuf[i];
+612         }
+613 
+614         if (sw !== width || sh !== height) {
+615           alphaBuf = resizeImageMask(alphaBuf, mask.bpc, sw, sh, width, height);
+616         }
+617       } else if (Array.isArray(mask)) {
+618         // Color key mask: if any of the components are outside the range
+619         // then they should be painted.
+620         alphaBuf = new Uint8ClampedArray(width * height);
+621         const numComps = this.numComps;
+622         for (i = 0, ii = width * height; i < ii; ++i) {
+623           let opacity = 0;
+624           const imageOffset = i * numComps;
+625           for (j = 0; j < numComps; ++j) {
+626             const color = image[imageOffset + j];
+627             const maskOffset = j * 2;
+628             if (color < mask[maskOffset] || color > mask[maskOffset + 1]) {
+629               opacity = 255;
+630               break;
+631             }
+632           }
+633           alphaBuf[i] = opacity;
+634         }
+635       } else {
+636         throw new FormatError("Unknown mask format.");
+637       }
+638     }
+639 
+640     if (alphaBuf) {
+641       for (i = 0, j = 3, ii = width * actualHeight; i < ii; ++i, j += 4) {
+642         rgbaBuf[j] = alphaBuf[i];
+643       }
+644     } else {
+645       // No mask.
+646       for (i = 0, j = 3, ii = width * actualHeight; i < ii; ++i, j += 4) {
+647         rgbaBuf[j] = 255;
+648       }
+649     }
+650   }
+651 
+652   undoPreblend(buffer, width, height) {
+653     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+654       assert(
+655         buffer instanceof Uint8ClampedArray,
+656         'PDFImage.undoPreblend: Unsupported "buffer" type.'
+657       );
+658     }
+659     const matte = this.smask?.matte;
+660     if (!matte) {
+661       return;
+662     }
+663     const matteRgb = this.colorSpace.getRgb(matte, 0);
+664     const matteR = matteRgb[0];
+665     const matteG = matteRgb[1];
+666     const matteB = matteRgb[2];
+667     const length = width * height * 4;
+668     for (let i = 0; i < length; i += 4) {
+669       const alpha = buffer[i + 3];
+670       if (alpha === 0) {
+671         // according formula we have to get Infinity in all components
+672         // making it white (typical paper color) should be okay
+673         buffer[i] = 255;
+674         buffer[i + 1] = 255;
+675         buffer[i + 2] = 255;
+676         continue;
+677       }
+678       const k = 255 / alpha;
+679       buffer[i] = (buffer[i] - matteR) * k + matteR;
+680       buffer[i + 1] = (buffer[i + 1] - matteG) * k + matteG;
+681       buffer[i + 2] = (buffer[i + 2] - matteB) * k + matteB;
+682     }
+683   }
+684 
+685   async createImageData(forceRGBA = false, isOffscreenCanvasSupported = false) {
+686     const drawWidth = this.drawWidth;
+687     const drawHeight = this.drawHeight;
+688     const imgData = {
+689       width: drawWidth,
+690       height: drawHeight,
+691       interpolate: this.interpolate,
+692       kind: 0,
+693       data: null,
+694       // Other fields are filled in below.
+695     };
+696 
+697     const numComps = this.numComps;
+698     const originalWidth = this.width;
+699     const originalHeight = this.height;
+700     const bpc = this.bpc;
+701 
+702     // Rows start at byte boundary.
+703     const rowBytes = (originalWidth * numComps * bpc + 7) >> 3;
+704     const mustBeResized =
+705       isOffscreenCanvasSupported &&
+706       ImageResizer.needsToBeResized(drawWidth, drawHeight);
+707 
+708     if (this.colorSpace.name === "DeviceRGBA") {
+709       imgData.kind = ImageKind.RGBA_32BPP;
+710       const imgArray = (imgData.data = await this.getImageBytes(
+711         originalHeight * originalWidth * 4,
+712         {}
+713       ));
+714 
+715       if (isOffscreenCanvasSupported) {
+716         if (!mustBeResized) {
+717           return this.createBitmap(
+718             ImageKind.RGBA_32BPP,
+719             drawWidth,
+720             drawHeight,
+721             imgArray
+722           );
+723         }
+724         return ImageResizer.createImage(imgData, false);
+725       }
+726 
+727       return imgData;
+728     }
+729 
+730     if (!forceRGBA) {
+731       // If it is a 1-bit-per-pixel grayscale (i.e. black-and-white) image
+732       // without any complications, we pass a same-sized copy to the main
+733       // thread rather than expanding by 32x to RGBA form. This saves *lots*
+734       // of memory for many scanned documents. It's also much faster.
+735       //
+736       // Similarly, if it is a 24-bit-per pixel RGB image without any
+737       // complications, we avoid expanding by 1.333x to RGBA form.
+738       let kind;
+739       if (this.colorSpace.name === "DeviceGray" && bpc === 1) {
+740         kind = ImageKind.GRAYSCALE_1BPP;
+741       } else if (
+742         this.colorSpace.name === "DeviceRGB" &&
+743         bpc === 8 &&
+744         !this.needsDecode
+745       ) {
+746         kind = ImageKind.RGB_24BPP;
+747       }
+748       if (
+749         kind &&
+750         !this.smask &&
+751         !this.mask &&
+752         drawWidth === originalWidth &&
+753         drawHeight === originalHeight
+754       ) {
+755         const data = await this.getImageBytes(originalHeight * rowBytes, {});
+756         if (isOffscreenCanvasSupported) {
+757           if (mustBeResized) {
+758             return ImageResizer.createImage(
+759               {
+760                 data,
+761                 kind,
+762                 width: drawWidth,
+763                 height: drawHeight,
+764                 interpolate: this.interpolate,
+765               },
+766               this.needsDecode
+767             );
+768           }
+769           return this.createBitmap(kind, originalWidth, originalHeight, data);
+770         }
+771         imgData.kind = kind;
+772         imgData.data = data;
+773 
+774         if (this.needsDecode) {
+775           // Invert the buffer (which must be grayscale if we reached here).
+776           assert(
+777             kind === ImageKind.GRAYSCALE_1BPP,
+778             "PDFImage.createImageData: The image must be grayscale."
+779           );
+780           const buffer = imgData.data;
+781           for (let i = 0, ii = buffer.length; i < ii; i++) {
+782             buffer[i] ^= 0xff;
+783           }
+784         }
+785         return imgData;
+786       }
+787       if (
+788         this.image instanceof JpegStream &&
+789         !this.smask &&
+790         !this.mask &&
+791         !this.needsDecode
+792       ) {
+793         let imageLength = originalHeight * rowBytes;
+794         if (isOffscreenCanvasSupported && !mustBeResized) {
+795           let isHandled = false;
+796           switch (this.colorSpace.name) {
+797             case "DeviceGray":
+798               // Avoid truncating the image, since `JpegImage.getData`
+799               // will expand the image data when `forceRGB === true`.
+800               imageLength *= 4;
+801               isHandled = true;
+802               break;
+803             case "DeviceRGB":
+804               imageLength = (imageLength / 3) * 4;
+805               isHandled = true;
+806               break;
+807             case "DeviceCMYK":
+808               isHandled = true;
+809               break;
+810           }
+811 
+812           if (isHandled) {
+813             const rgba = await this.getImageBytes(imageLength, {
+814               drawWidth,
+815               drawHeight,
+816               forceRGBA: true,
+817             });
+818             return this.createBitmap(
+819               ImageKind.RGBA_32BPP,
+820               drawWidth,
+821               drawHeight,
+822               rgba
+823             );
+824           }
+825         } else {
+826           switch (this.colorSpace.name) {
+827             case "DeviceGray":
+828               imageLength *= 3;
+829             /* falls through */
+830             case "DeviceRGB":
+831             case "DeviceCMYK":
+832               imgData.kind = ImageKind.RGB_24BPP;
+833               imgData.data = await this.getImageBytes(imageLength, {
+834                 drawWidth,
+835                 drawHeight,
+836                 forceRGB: true,
+837               });
+838               if (mustBeResized) {
+839                 // The image is too big so we resize it.
+840                 return ImageResizer.createImage(imgData);
+841               }
+842               return imgData;
+843           }
+844         }
+845       }
+846     }
+847 
+848     const imgArray = await this.getImageBytes(originalHeight * rowBytes, {
+849       internal: true,
+850     });
+851     // imgArray can be incomplete (e.g. after CCITT fax encoding).
+852     const actualHeight =
+853       0 | (((imgArray.length / rowBytes) * drawHeight) / originalHeight);
+854 
+855     const comps = this.getComponents(imgArray);
+856 
+857     // If opacity data is present, use RGBA_32BPP form. Otherwise, use the
+858     // more compact RGB_24BPP form if allowable.
+859     let alpha01, maybeUndoPreblend;
+860 
+861     let canvas, ctx, canvasImgData, data;
+862     if (isOffscreenCanvasSupported && !mustBeResized) {
+863       canvas = new OffscreenCanvas(drawWidth, drawHeight);
+864       ctx = canvas.getContext("2d");
+865       canvasImgData = ctx.createImageData(drawWidth, drawHeight);
+866       data = canvasImgData.data;
+867     }
+868 
+869     imgData.kind = ImageKind.RGBA_32BPP;
+870 
+871     if (!forceRGBA && !this.smask && !this.mask) {
+872       if (!isOffscreenCanvasSupported || mustBeResized) {
+873         imgData.kind = ImageKind.RGB_24BPP;
+874         data = new Uint8ClampedArray(drawWidth * drawHeight * 3);
+875         alpha01 = 0;
+876       } else {
+877         const arr = new Uint32Array(data.buffer);
+878         arr.fill(FeatureTest.isLittleEndian ? 0xff000000 : 0x000000ff);
+879         alpha01 = 1;
+880       }
+881       maybeUndoPreblend = false;
+882     } else {
+883       if (!isOffscreenCanvasSupported || mustBeResized) {
+884         data = new Uint8ClampedArray(drawWidth * drawHeight * 4);
+885       }
+886 
+887       alpha01 = 1;
+888       maybeUndoPreblend = true;
+889 
+890       // Color key masking (opacity) must be performed before decoding.
+891       await this.fillOpacity(data, drawWidth, drawHeight, actualHeight, comps);
+892     }
+893 
+894     if (this.needsDecode) {
+895       this.decodeBuffer(comps);
+896     }
+897     this.colorSpace.fillRgb(
+898       data,
+899       originalWidth,
+900       originalHeight,
+901       drawWidth,
+902       drawHeight,
+903       actualHeight,
+904       bpc,
+905       comps,
+906       alpha01
+907     );
+908     if (maybeUndoPreblend) {
+909       this.undoPreblend(data, drawWidth, actualHeight);
+910     }
+911 
+912     if (isOffscreenCanvasSupported && !mustBeResized) {
+913       ctx.putImageData(canvasImgData, 0, 0);
+914       const bitmap = canvas.transferToImageBitmap();
+915 
+916       return {
+917         data: null,
+918         width: drawWidth,
+919         height: drawHeight,
+920         bitmap,
+921         interpolate: this.interpolate,
+922       };
+923     }
+924 
+925     imgData.data = data;
+926     if (mustBeResized) {
+927       return ImageResizer.createImage(imgData);
+928     }
+929     return imgData;
+930   }
+931 
+932   async fillGrayBuffer(buffer) {
+933     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+934       assert(
+935         buffer instanceof Uint8ClampedArray,
+936         'PDFImage.fillGrayBuffer: Unsupported "buffer" type.'
+937       );
+938     }
+939     const numComps = this.numComps;
+940     if (numComps !== 1) {
+941       throw new FormatError(
+942         `Reading gray scale from a color image: ${numComps}`
+943       );
+944     }
+945 
+946     const width = this.width;
+947     const height = this.height;
+948     const bpc = this.bpc;
+949 
+950     // rows start at byte boundary
+951     const rowBytes = (width * numComps * bpc + 7) >> 3;
+952     const imgArray = await this.getImageBytes(height * rowBytes, {
+953       internal: true,
+954     });
+955 
+956     const comps = this.getComponents(imgArray);
+957     let i, length;
+958 
+959     if (bpc === 1) {
+960       // inline decoding (= inversion) for 1 bpc images
+961       length = width * height;
+962       if (this.needsDecode) {
+963         // invert and scale to {0, 255}
+964         for (i = 0; i < length; ++i) {
+965           buffer[i] = (comps[i] - 1) & 255;
+966         }
+967       } else {
+968         // scale to {0, 255}
+969         for (i = 0; i < length; ++i) {
+970           buffer[i] = -comps[i] & 255;
+971         }
+972       }
+973       return;
+974     }
+975 
+976     if (this.needsDecode) {
+977       this.decodeBuffer(comps);
+978     }
+979     length = width * height;
+980     // we aren't using a colorspace so we need to scale the value
+981     const scale = 255 / ((1 << bpc) - 1);
+982     for (i = 0; i < length; ++i) {
+983       buffer[i] = scale * comps[i];
+984     }
+985   }
+986 
+987   createBitmap(kind, width, height, src) {
+988     const canvas = new OffscreenCanvas(width, height);
+989     const ctx = canvas.getContext("2d");
+990     let imgData;
+991     if (kind === ImageKind.RGBA_32BPP) {
+992       imgData = new ImageData(src, width, height);
+993     } else {
+994       imgData = ctx.createImageData(width, height);
+995       convertToRGBA({
+996         kind,
+997         src,
+998         dest: new Uint32Array(imgData.data.buffer),
+999         width,
+1000         height,
+1001         inverseDecode: this.needsDecode,
+1002       });
+1003     }
+1004     ctx.putImageData(imgData, 0, 0);
+1005     const bitmap = canvas.transferToImageBitmap();
+1006 
+1007     return {
+1008       data: null,
+1009       width,
+1010       height,
+1011       bitmap,
+1012       interpolate: this.interpolate,
+1013     };
+1014   }
+1015 
+1016   async getImageBytes(
+1017     length,
+1018     {
+1019       drawWidth,
+1020       drawHeight,
+1021       forceRGBA = false,
+1022       forceRGB = false,
+1023       internal = false,
+1024     }
+1025   ) {
+1026     this.image.reset();
+1027     this.image.drawWidth = drawWidth || this.width;
+1028     this.image.drawHeight = drawHeight || this.height;
+1029     this.image.forceRGBA = !!forceRGBA;
+1030     this.image.forceRGB = !!forceRGB;
+1031     const imageBytes = await this.image.getImageData(
+1032       length,
+1033       this.jpxDecoderOptions
+1034     );
+1035 
+1036     // If imageBytes came from a DecodeStream, we're safe to transfer it
+1037     // (and thus detach its underlying buffer) because it will constitute
+1038     // the entire DecodeStream's data.  But if it came from a Stream, we
+1039     // need to copy it because it'll only be a portion of the Stream's
+1040     // data, and the rest will be read later on.
+1041     if (internal || this.image instanceof DecodeStream) {
+1042       return imageBytes;
+1043     }
+1044     assert(
+1045       imageBytes instanceof Uint8Array,
+1046       'PDFImage.getImageBytes: Unsupported "imageBytes" type.'
+1047     );
+1048     return new Uint8Array(imageBytes);
+1049   }
+1050 }
+1051 
+1052 export { PDFImage };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/colorspace_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { Dict, Name, Ref } from "../../src/core/primitives.js";
+import { Stream, StringStream } from "../../src/core/stream.js";
+import { ColorSpace } from "../../src/core/colorspace.js";
+import { LocalColorSpaceCache } from "../../src/core/image_utils.js";
+import { PDFFunctionFactory } from "../../src/core/function.js";
+import { XRefMock } from "./test_utils.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. You can use the PDF file for testing as follows:
+const { getDocument } = await import('../../src/display/api.js');
+const { buildGetDocumentParams } = await import('./test_utils.js');
+const loadingTask = getDocument(buildGetDocumentParams('issue18896.pdf'))
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

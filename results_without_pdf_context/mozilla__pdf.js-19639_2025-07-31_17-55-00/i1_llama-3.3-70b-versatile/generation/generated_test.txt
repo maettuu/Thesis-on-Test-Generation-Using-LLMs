@@ -1,0 +1,66 @@
+it("should convert negative line width to absolute value in the graphic state", async () => {
+  const { PartialEvaluator } = await import("../../src/core/evaluator.js");
+  const { Dict, Name } = await import("../../src/core/primitives.js");
+  const { OPS } = await import("../../src/shared/util.js");
+  const { createIdFactory } = await import("./test_utils.js");
+  // Create a dummy operator list that records operations.
+  class DummyOperatorList {
+    constructor() {
+      this.fnArray = [];
+      this.argsArray = [];
+    }
+    addOp(fn, args) {
+      this.fnArray.push(fn);
+      this.argsArray.push(args);
+    }
+    addDependency(dep) {}
+    ready = Promise.resolve();
+  }
+  const opList = new DummyOperatorList();
+  // Create a gState with a negative line width.
+  const gState = new Map([["LW", -5]]);
+  // Create a minimal dummy task.
+  const dummyTask = { name: "testTask", ensureNotTerminated() {} };
+  // Dummy state manager.
+  const dummyStateManager = { state: {} };
+  // Minimal caches.
+  const localGStateCache = new Map();
+  const localColorSpaceCache = new Map();
+  // Instantiate PartialEvaluator with dummy parameters.
+  const evaluator = new PartialEvaluator({
+    xref: { fetch() {} },
+    handler: {},
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalColorSpaceCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options: {}
+  });
+  await evaluator.setGState({
+    resources: Dict.empty,
+    gState,
+    operatorList: opList,
+    cacheKey: "test",
+    task: dummyTask,
+    stateManager: dummyStateManager,
+    localGStateCache,
+    localColorSpaceCache
+  });
+  // Find the setGState operation and verify that LW has been converted to its absolute value.
+  let found = false;
+  for (let i = 0; i < opList.fnArray.length; i++) {
+    if (opList.fnArray[i] === OPS.setGState) {
+      const stateArray = opList.argsArray[i][0];
+      for (const entry of stateArray) {
+        if (entry[0] === "LW" && entry[1] === 5) {
+          found = true;
+        }
+      }
+    }
+  }
+  expect(found).toBe(true);
+});

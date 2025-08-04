@@ -1,0 +1,57 @@
+<think>
+Okay, I need to write a regression test for the issue where pressing the Delete key should delete the selected element when editing a PDF. The patch adds "mac+Delete" to the list of keyboard shortcuts in the tools.js file. 
+
+First, I should understand what the patch does. It looks like the patch is adding support for the Delete key on macOS. Before the patch, the Delete key might not have worked on macOS, but now it should. So the test needs to verify that after the patch, pressing Delete on macOS deletes the selected annotation.
+
+I'll start by looking at the existing test file, test/unit/annotation_spec.js. It imports several modules, including Annotation, AnnotationFactory, and MarkupAnnotation from core/annotation.js. It also has some setup functions like createIdFactory, which might be useful.
+
+The test should simulate selecting an annotation and then pressing the Delete key. Then, it should check if the annotation was actually deleted. 
+
+I'll need to mock the PDF document and the annotation storage. I can create a mock annotation using AnnotationFactory.create(). I'll add this annotation to the annotationStorage so that it exists before the test runs.
+
+Next, I'll set up the event bus to handle the 'keydown' event. The event should have the key 'Delete' and, for macOS, the metaKey should be true. So the event would be something like { key: 'Delete', metaKey: true }.
+
+I'll then create an instance of AnnotationEditorUIManager with the necessary mocks. This includes the container, eventBus, pdfDocument, and pageColors. 
+
+After triggering the keydown event, I'll check if the annotation is removed from the annotationStorage. If the storage no longer has the annotation, the test passes.
+
+I should make sure that the test is self-contained and doesn't rely on any external dependencies beyond what's already imported. Also, I need to ensure that the test fails before the patch and passes after, which means the test correctly captures the regression.
+
+So, putting it all together, the test will:
+
+1. Import necessary modules.
+2. Create a mock annotation and add it to the storage.
+3. Set up the event bus and UI manager.
+4. Dispatch the keydown event with Delete on macOS.
+5. Assert that the annotation was deleted.
+
+I think that's a solid plan. Now, I'll write the code accordingly.
+</think>
+
+```javascript
+it("should delete selected annotation when Delete key is pressed on macOS", async () => {
+  const { AnnotationFactory, AnnotationStorage, AnnotationEditorUIManager, EventBus } = await import("../../src/display/editor/tools.js");
+  const annotation = AnnotationFactory.create(AnnotationType.MARKUP, {
+    subtype: "Highlight",
+    content: "Test annotation",
+  });
+  const storage = new AnnotationStorage();
+  storage.add(annotation);
+  const eventBus = new EventBus();
+  const pdfDocument = {
+    annotationStorage: storage,
+    filterFactory: {},
+  };
+  const container = {};
+  const pageColors = {};
+
+  const uiManager = new AnnotationEditorUIManager(container, eventBus, pdfDocument, pageColors);
+
+  const event = { key: "Delete", metaKey: true };
+  eventBus._on("keydown", (e) => uiManager.keydown(e));
+
+  eventBus.dispatch("keydown", event);
+
+  expect(storage.getAnnotations().length).toBe(0);
+});
+```

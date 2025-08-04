@@ -1,0 +1,1663 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Shift or Ctrl Key cause the drawn line is selected with additional line and can't be removed
+Attach (recommended) or Link to PDF file here: The live demo: https://mozilla.github.io/pdf.js/web/viewer.html
+
+Configuration:
+- Web browser and its version: FireFox and Chrome tested
+- Operating system and its version: 
+- PDF.js version: The latest one (4.0.379)
+- Is a browser extension: No
+
+Steps to reproduce the problem:
+1. Open the live demo https://mozilla.github.io/pdf.js/web/viewer.html 
+2. click the Draw toolbar 
+3. Draw a line on the viewer (any line on any place)
+4. Okay. here is the problem. I want to create another line but I press and hold Shift or Ctrl key on my keyboard then tried to draw the new line with my mouse. Suddenly the drawn line is selected with additional straight line in it. Also I can't remove them.
+
+What is the expected behavior? 
+I expect the pressed Shift/Ctrl key can make a straight line instead of the free/bezier line (if it's possible to create a straight line with the key combination). 
+
+What went wrong? 
+The drawn line is selected with additional straight line in it. Also I can't remove them. pls check this screen
+![-compressed-tracemonkey-pldi-09-pdf](https://github.com/mozilla/pdf.js/assets/3117049/2b049620-4aee-46c0-bac5-2b2c3117cb31)
+
+
+
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/ink.js b/src/display/editor/ink.js
+--- a/src/display/editor/ink.js
++++ b/src/display/editor/ink.js
+@@ -67,6 +67,8 @@ class InkEditor extends AnnotationEditor {
+ 
+   static _editorType = AnnotationEditorType.INK;
+ 
++  #isDrawingStraightLine = false;
++
+   constructor(params) {
+     super({ ...params, name: "inkEditor" });
+     this.color = params.color || null;
+@@ -393,6 +395,8 @@ class InkEditor extends AnnotationEditor {
+       this.opacity ??= InkEditor._defaultOpacity;
+     }
+     this.currentPath.push([x, y]);
++    this.#currentPath2D = new Path2D();
++    this.#currentPath2D.moveTo(x, y);
+     this.#hasSomethingToDraw = false;
+     this.#setStroke();
+ 
+@@ -411,34 +415,33 @@ class InkEditor extends AnnotationEditor {
+    * @param {number} y
+    */
+   #draw(x, y) {
+-    const [lastX, lastY] = this.currentPath.at(-1);
+-    if (this.currentPath.length > 1 && x === lastX && y === lastY) {
+-      return;
+-    }
+-    const currentPath = this.currentPath;
+-    let path2D = this.#currentPath2D;
+-    currentPath.push([x, y]);
+-    this.#hasSomethingToDraw = true;
+ 
+-    if (currentPath.length <= 2) {
+-      path2D.moveTo(...currentPath[0]);
+-      path2D.lineTo(x, y);
+-      return;
+-    }
+-
+-    if (currentPath.length === 3) {
+-      this.#currentPath2D = path2D = new Path2D();
+-      path2D.moveTo(...currentPath[0]);
++    if (this.#isDrawingStraightLine) {
++      const [startX, startY] = this.currentPath[0];
++      this.currentPath = [[startX, startY], [x, y]];
++      this.#currentPath2D = new Path2D();
++      this.#currentPath2D.moveTo(startX, startY);
++      this.#currentPath2D.lineTo(x, y);
++    }  else {
++      const [lastX, lastY] = this.currentPath.at(-1);
++      if (this.currentPath.length > 1 && x === lastX && y === lastY) {
++        return;
++      }
++      this.currentPath.push([x, y]);
++      if (this.currentPath.length > 2) {
++        this.#makeBezierCurve(
++          this.#currentPath2D,
++          ...this.currentPath.at(-3),
++          ...this.currentPath.at(-2),
++          x,
++          y
++        );
++      } else {
++        this.#currentPath2D.lineTo(x, y);
++      }
+     }
+-
+-    this.#makeBezierCurve(
+-      path2D,
+-      ...currentPath.at(-3),
+-      ...currentPath.at(-2),
+-      x,
+-      y
+-    );
+-  }
++    this.#hasSomethingToDraw = true;
++}
+ 
+   #endPath() {
+     if (this.currentPath.length === 0) {
+@@ -460,8 +463,8 @@ class InkEditor extends AnnotationEditor {
+     y = Math.min(Math.max(y, 0), this.canvas.height);
+ 
+     this.#draw(x, y);
+-    this.#endPath();
+-
++    // this.#endPath();
++    // this.#isDrawingStraightLine = false;
+     // Interpolate the path entered by the user with some
+     // Bezier's curves in order to have a smoother path and
+     // to reduce the data size used to draw it in the PDF.
+@@ -470,8 +473,8 @@ class InkEditor extends AnnotationEditor {
+       bezier = this.#generateBezierPoints();
+     } else {
+       // We have only one point finally.
+-      const xy = [x, y];
+-      bezier = [[xy, xy.slice(), xy.slice(), xy]];
++      const [x, y] = this.currentPath[0];
++      bezier = [[[x, y], [x, y], [x, y], [x, y]]];
+     }
+     const path2D = this.#currentPath2D;
+     const currentPath = this.currentPath;
+@@ -501,6 +504,10 @@ class InkEditor extends AnnotationEditor {
+     };
+ 
+     this.addCommands({ cmd, undo, mustExec: true });
++    this.#isDrawingStraightLine = false;
++    
++     // Re-enable selection
++    setTimeout(() => this.parent.setEditingState(true), 0);
+   }
+ 
+   #drawPoints() {
+@@ -557,8 +564,18 @@ class InkEditor extends AnnotationEditor {
+ 
+   #generateBezierPoints() {
+     const path = this.currentPath;
+-    if (path.length <= 2) {
+-      return [[path[0], path[0], path.at(-1), path.at(-1)]];
++
++    if (!path || path.length === 0) {
++      return [];
++    }
++    
++    if (path.length === 1) {
++      // If we only have one point, duplicate it to create a tiny line
++      return [[path[0], path[0], path[0], path[0]]];
++    }
++
++    if (path.length === 2 && this.#isDrawingStraightLine)  {
++      return [[path[0], path[0], path[1], path[1]]];
+     }
+ 
+     const bezierPoints = [];
+@@ -581,6 +598,7 @@ class InkEditor extends AnnotationEditor {
+       [x0, y0] = [x3, y3];
+     }
+ 
++    if (path.length > 2) {
+     const [x1, y1] = path[i];
+     const [x2, y2] = path[i + 1];
+ 
+@@ -589,6 +607,7 @@ class InkEditor extends AnnotationEditor {
+     const control2 = [x2 + (2 * (x1 - x2)) / 3, y2 + (2 * (y1 - y2)) / 3];
+ 
+     bezierPoints.push([[x0, y0], control1, control2, [x2, y2]]);
++    }
+     return bezierPoints;
+   }
+ 
+@@ -664,16 +683,18 @@ class InkEditor extends AnnotationEditor {
+ 
+     // We want to draw on top of any other editors.
+     // Since it's the last child, there's no need to give it a higher z-index.
+-    this.setInForeground();
++    // this.setInForeground();
+ 
+     event.preventDefault();
++    event.stopPropagation();
+ 
+     if (!this.div.contains(document.activeElement)) {
+       this.div.focus({
+         preventScroll: true /* See issue #17327 */,
+       });
+     }
+-
++    this.#isDrawingStraightLine = event.shiftKey || event.ctrlKey;
++    this.parent.setEditingState(false);
+     this.#startDrawing(event.offsetX, event.offsetY);
+   }
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.24.8
+- @babel/preset-env: ^7.24.8
+- @babel/runtime: ^7.24.8
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.19
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001641
+- canvas: ^2.11.2
+- core-js: ^3.37.1
+- cross-env: ^7.0.3
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.1
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.2.0
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.7.4
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^54.0.0
+- globals: ^15.8.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.3
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.1
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.39
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^7.0.1
+- postcss-nesting: ^12.1.5
+- prettier: ^3.3.3
+- puppeteer: ^22.13.0
+- stylelint: ^16.7.0
+- stylelint-prettier: ^5.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.5.3
+- vinyl: ^3.0.0
+- webpack: ^5.93.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/ink.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorParamsType,
+18   AnnotationEditorType,
+19   Util,
+20 } from "../../shared/util.js";
+21 import { AnnotationEditor } from "./editor.js";
+22 import { InkAnnotationElement } from "../annotation_layer.js";
+23 import { noContextMenu } from "../display_utils.js";
+24 import { opacityToHex } from "./tools.js";
+25 
+26 /**
+27  * Basic draw editor in order to generate an Ink annotation.
+28  */
+29 class InkEditor extends AnnotationEditor {
+30   #baseHeight = 0;
+31 
+32   #baseWidth = 0;
+33 
+34   #boundCanvasPointermove = this.canvasPointermove.bind(this);
+35 
+36   #boundCanvasPointerleave = this.canvasPointerleave.bind(this);
+37 
+38   #boundCanvasPointerup = this.canvasPointerup.bind(this);
+39 
+40   #boundCanvasPointerdown = this.canvasPointerdown.bind(this);
+41 
+42   #canvasContextMenuTimeoutId = null;
+43 
+44   #currentPath2D = new Path2D();
+45 
+46   #disableEditing = false;
+47 
+48   #hasSomethingToDraw = false;
+49 
+50   #isCanvasInitialized = false;
+51 
+52   #observer = null;
+53 
+54   #realWidth = 0;
+55 
+56   #realHeight = 0;
+57 
+58   #requestFrameCallback = null;
+59 
+60   static _defaultColor = null;
+61 
+62   static _defaultOpacity = 1;
+63 
+64   static _defaultThickness = 1;
+65 
+66   static _type = "ink";
+67 
+68   static _editorType = AnnotationEditorType.INK;
+69 
+70   constructor(params) {
+71     super({ ...params, name: "inkEditor" });
+72     this.color = params.color || null;
+73     this.thickness = params.thickness || null;
+74     this.opacity = params.opacity || null;
+75     this.paths = [];
+76     this.bezierPath2D = [];
+77     this.allRawPaths = [];
+78     this.currentPath = [];
+79     this.scaleFactor = 1;
+80     this.translationX = this.translationY = 0;
+81     this.x = 0;
+82     this.y = 0;
+83     this._willKeepAspectRatio = true;
+84   }
+85 
+86   /** @inheritdoc */
+87   static initialize(l10n, uiManager) {
+88     AnnotationEditor.initialize(l10n, uiManager);
+89   }
+90 
+91   /** @inheritdoc */
+92   static updateDefaultParams(type, value) {
+93     switch (type) {
+94       case AnnotationEditorParamsType.INK_THICKNESS:
+95         InkEditor._defaultThickness = value;
+96         break;
+97       case AnnotationEditorParamsType.INK_COLOR:
+98         InkEditor._defaultColor = value;
+99         break;
+100       case AnnotationEditorParamsType.INK_OPACITY:
+101         InkEditor._defaultOpacity = value / 100;
+102         break;
+103     }
+104   }
+105 
+106   /** @inheritdoc */
+107   updateParams(type, value) {
+108     switch (type) {
+109       case AnnotationEditorParamsType.INK_THICKNESS:
+110         this.#updateThickness(value);
+111         break;
+112       case AnnotationEditorParamsType.INK_COLOR:
+113         this.#updateColor(value);
+114         break;
+115       case AnnotationEditorParamsType.INK_OPACITY:
+116         this.#updateOpacity(value);
+117         break;
+118     }
+119   }
+120 
+121   /** @inheritdoc */
+122   static get defaultPropertiesToUpdate() {
+123     return [
+124       [AnnotationEditorParamsType.INK_THICKNESS, InkEditor._defaultThickness],
+125       [
+126         AnnotationEditorParamsType.INK_COLOR,
+127         InkEditor._defaultColor || AnnotationEditor._defaultLineColor,
+128       ],
+129       [
+130         AnnotationEditorParamsType.INK_OPACITY,
+131         Math.round(InkEditor._defaultOpacity * 100),
+132       ],
+133     ];
+134   }
+135 
+136   /** @inheritdoc */
+137   get propertiesToUpdate() {
+138     return [
+139       [
+140         AnnotationEditorParamsType.INK_THICKNESS,
+141         this.thickness || InkEditor._defaultThickness,
+142       ],
+143       [
+144         AnnotationEditorParamsType.INK_COLOR,
+145         this.color ||
+146           InkEditor._defaultColor ||
+147           AnnotationEditor._defaultLineColor,
+148       ],
+149       [
+150         AnnotationEditorParamsType.INK_OPACITY,
+151         Math.round(100 * (this.opacity ?? InkEditor._defaultOpacity)),
+152       ],
+153     ];
+154   }
+155 
+156   /**
+157    * Update the thickness and make this action undoable.
+158    * @param {number} thickness
+159    */
+160   #updateThickness(thickness) {
+161     const setThickness = th => {
+162       this.thickness = th;
+163       this.#fitToContent();
+164     };
+165     const savedThickness = this.thickness;
+166     this.addCommands({
+167       cmd: setThickness.bind(this, thickness),
+168       undo: setThickness.bind(this, savedThickness),
+169       post: this._uiManager.updateUI.bind(this._uiManager, this),
+170       mustExec: true,
+171       type: AnnotationEditorParamsType.INK_THICKNESS,
+172       overwriteIfSameType: true,
+173       keepUndo: true,
+174     });
+175   }
+176 
+177   /**
+178    * Update the color and make this action undoable.
+179    * @param {string} color
+180    */
+181   #updateColor(color) {
+182     const setColor = col => {
+183       this.color = col;
+184       this.#redraw();
+185     };
+186     const savedColor = this.color;
+187     this.addCommands({
+188       cmd: setColor.bind(this, color),
+189       undo: setColor.bind(this, savedColor),
+190       post: this._uiManager.updateUI.bind(this._uiManager, this),
+191       mustExec: true,
+192       type: AnnotationEditorParamsType.INK_COLOR,
+193       overwriteIfSameType: true,
+194       keepUndo: true,
+195     });
+196   }
+197 
+198   /**
+199    * Update the opacity and make this action undoable.
+200    * @param {number} opacity
+201    */
+202   #updateOpacity(opacity) {
+203     const setOpacity = op => {
+204       this.opacity = op;
+205       this.#redraw();
+206     };
+207     opacity /= 100;
+208     const savedOpacity = this.opacity;
+209     this.addCommands({
+210       cmd: setOpacity.bind(this, opacity),
+211       undo: setOpacity.bind(this, savedOpacity),
+212       post: this._uiManager.updateUI.bind(this._uiManager, this),
+213       mustExec: true,
+214       type: AnnotationEditorParamsType.INK_OPACITY,
+215       overwriteIfSameType: true,
+216       keepUndo: true,
+217     });
+218   }
+219 
+220   /** @inheritdoc */
+221   rebuild() {
+222     if (!this.parent) {
+223       return;
+224     }
+225     super.rebuild();
+226     if (this.div === null) {
+227       return;
+228     }
+229 
+230     if (!this.canvas) {
+231       this.#createCanvas();
+232       this.#createObserver();
+233     }
+234 
+235     if (!this.isAttachedToDOM) {
+236       // At some point this editor was removed and we're rebuilding it,
+237       // hence we must add it to its parent.
+238       this.parent.add(this);
+239       this.#setCanvasDims();
+240     }
+241     this.#fitToContent();
+242   }
+243 
+244   /** @inheritdoc */
+245   remove() {
+246     if (this.canvas === null) {
+247       return;
+248     }
+249 
+250     if (!this.isEmpty()) {
+251       this.commit();
+252     }
+253 
+254     // Destroy the canvas.
+255     this.canvas.width = this.canvas.height = 0;
+256     this.canvas.remove();
+257     this.canvas = null;
+258 
+259     if (this.#canvasContextMenuTimeoutId) {
+260       clearTimeout(this.#canvasContextMenuTimeoutId);
+261       this.#canvasContextMenuTimeoutId = null;
+262     }
+263 
+264     this.#observer?.disconnect();
+265     this.#observer = null;
+266 
+267     super.remove();
+268   }
+269 
+270   setParent(parent) {
+271     if (!this.parent && parent) {
+272       // We've a parent hence the rescale will be handled thanks to the
+273       // ResizeObserver.
+274       this._uiManager.removeShouldRescale(this);
+275     } else if (this.parent && parent === null) {
+276       // The editor is removed from the DOM, hence we handle the rescale thanks
+277       // to the onScaleChanging callback.
+278       // This way, it'll be saved/printed correctly.
+279       this._uiManager.addShouldRescale(this);
+280     }
+281     super.setParent(parent);
+282   }
+283 
+284   onScaleChanging() {
+285     const [parentWidth, parentHeight] = this.parentDimensions;
+286     const width = this.width * parentWidth;
+287     const height = this.height * parentHeight;
+288     this.setDimensions(width, height);
+289   }
+290 
+291   /** @inheritdoc */
+292   enableEditMode() {
+293     if (this.#disableEditing || this.canvas === null) {
+294       return;
+295     }
+296 
+297     super.enableEditMode();
+298     this._isDraggable = false;
+299     this.canvas.addEventListener("pointerdown", this.#boundCanvasPointerdown, {
+300       signal: this._uiManager._signal,
+301     });
+302   }
+303 
+304   /** @inheritdoc */
+305   disableEditMode() {
+306     if (!this.isInEditMode() || this.canvas === null) {
+307       return;
+308     }
+309 
+310     super.disableEditMode();
+311     this._isDraggable = !this.isEmpty();
+312     this.div.classList.remove("editing");
+313 
+314     this.canvas.removeEventListener(
+315       "pointerdown",
+316       this.#boundCanvasPointerdown
+317     );
+318   }
+319 
+320   /** @inheritdoc */
+321   onceAdded() {
+322     this._isDraggable = !this.isEmpty();
+323   }
+324 
+325   /** @inheritdoc */
+326   isEmpty() {
+327     return (
+328       this.paths.length === 0 ||
+329       (this.paths.length === 1 && this.paths[0].length === 0)
+330     );
+331   }
+332 
+333   #getInitialBBox() {
+334     const {
+335       parentRotation,
+336       parentDimensions: [width, height],
+337     } = this;
+338     switch (parentRotation) {
+339       case 90:
+340         return [0, height, height, width];
+341       case 180:
+342         return [width, height, width, height];
+343       case 270:
+344         return [width, 0, height, width];
+345       default:
+346         return [0, 0, width, height];
+347     }
+348   }
+349 
+350   /**
+351    * Set line styles.
+352    */
+353   #setStroke() {
+354     const { ctx, color, opacity, thickness, parentScale, scaleFactor } = this;
+355     ctx.lineWidth = (thickness * parentScale) / scaleFactor;
+356     ctx.lineCap = "round";
+357     ctx.lineJoin = "round";
+358     ctx.miterLimit = 10;
+359     ctx.strokeStyle = `${color}${opacityToHex(opacity)}`;
+360   }
+361 
+362   /**
+363    * Start to draw on the canvas.
+364    * @param {number} x
+365    * @param {number} y
+366    */
+367   #startDrawing(x, y) {
+368     const signal = this._uiManager._signal;
+369     this.canvas.addEventListener("contextmenu", noContextMenu, { signal });
+370     this.canvas.addEventListener(
+371       "pointerleave",
+372       this.#boundCanvasPointerleave,
+373       { signal }
+374     );
+375     this.canvas.addEventListener("pointermove", this.#boundCanvasPointermove, {
+376       signal,
+377     });
+378     this.canvas.addEventListener("pointerup", this.#boundCanvasPointerup, {
+379       signal,
+380     });
+381     this.canvas.removeEventListener(
+382       "pointerdown",
+383       this.#boundCanvasPointerdown
+384     );
+385 
+386     this.isEditing = true;
+387     if (!this.#isCanvasInitialized) {
+388       this.#isCanvasInitialized = true;
+389       this.#setCanvasDims();
+390       this.thickness ||= InkEditor._defaultThickness;
+391       this.color ||=
+392         InkEditor._defaultColor || AnnotationEditor._defaultLineColor;
+393       this.opacity ??= InkEditor._defaultOpacity;
+394     }
+395     this.currentPath.push([x, y]);
+396     this.#hasSomethingToDraw = false;
+397     this.#setStroke();
+398 
+399     this.#requestFrameCallback = () => {
+400       this.#drawPoints();
+401       if (this.#requestFrameCallback) {
+402         window.requestAnimationFrame(this.#requestFrameCallback);
+403       }
+404     };
+405     window.requestAnimationFrame(this.#requestFrameCallback);
+406   }
+407 
+408   /**
+409    * Draw on the canvas.
+410    * @param {number} x
+411    * @param {number} y
+412    */
+413   #draw(x, y) {
+414     const [lastX, lastY] = this.currentPath.at(-1);
+415     if (this.currentPath.length > 1 && x === lastX && y === lastY) {
+416       return;
+417     }
+418     const currentPath = this.currentPath;
+419     let path2D = this.#currentPath2D;
+420     currentPath.push([x, y]);
+421     this.#hasSomethingToDraw = true;
+422 
+423     if (currentPath.length <= 2) {
+424       path2D.moveTo(...currentPath[0]);
+425       path2D.lineTo(x, y);
+426       return;
+427     }
+428 
+429     if (currentPath.length === 3) {
+430       this.#currentPath2D = path2D = new Path2D();
+431       path2D.moveTo(...currentPath[0]);
+432     }
+433 
+434     this.#makeBezierCurve(
+435       path2D,
+436       ...currentPath.at(-3),
+437       ...currentPath.at(-2),
+438       x,
+439       y
+440     );
+441   }
+442 
+443   #endPath() {
+444     if (this.currentPath.length === 0) {
+445       return;
+446     }
+447     const lastPoint = this.currentPath.at(-1);
+448     this.#currentPath2D.lineTo(...lastPoint);
+449   }
+450 
+451   /**
+452    * Stop to draw on the canvas.
+453    * @param {number} x
+454    * @param {number} y
+455    */
+456   #stopDrawing(x, y) {
+457     this.#requestFrameCallback = null;
+458 
+459     x = Math.min(Math.max(x, 0), this.canvas.width);
+460     y = Math.min(Math.max(y, 0), this.canvas.height);
+461 
+462     this.#draw(x, y);
+463     this.#endPath();
+464 
+465     // Interpolate the path entered by the user with some
+466     // Bezier's curves in order to have a smoother path and
+467     // to reduce the data size used to draw it in the PDF.
+468     let bezier;
+469     if (this.currentPath.length !== 1) {
+470       bezier = this.#generateBezierPoints();
+471     } else {
+472       // We have only one point finally.
+473       const xy = [x, y];
+474       bezier = [[xy, xy.slice(), xy.slice(), xy]];
+475     }
+476     const path2D = this.#currentPath2D;
+477     const currentPath = this.currentPath;
+478     this.currentPath = [];
+479     this.#currentPath2D = new Path2D();
+480 
+481     const cmd = () => {
+482       this.allRawPaths.push(currentPath);
+483       this.paths.push(bezier);
+484       this.bezierPath2D.push(path2D);
+485       this._uiManager.rebuild(this);
+486     };
+487 
+488     const undo = () => {
+489       this.allRawPaths.pop();
+490       this.paths.pop();
+491       this.bezierPath2D.pop();
+492       if (this.paths.length === 0) {
+493         this.remove();
+494       } else {
+495         if (!this.canvas) {
+496           this.#createCanvas();
+497           this.#createObserver();
+498         }
+499         this.#fitToContent();
+500       }
+501     };
+502 
+503     this.addCommands({ cmd, undo, mustExec: true });
+504   }
+505 
+506   #drawPoints() {
+507     if (!this.#hasSomethingToDraw) {
+508       return;
+509     }
+510     this.#hasSomethingToDraw = false;
+511 
+512     const thickness = Math.ceil(this.thickness * this.parentScale);
+513     const lastPoints = this.currentPath.slice(-3);
+514     const x = lastPoints.map(xy => xy[0]);
+515     const y = lastPoints.map(xy => xy[1]);
+516     const xMin = Math.min(...x) - thickness;
+517     const xMax = Math.max(...x) + thickness;
+518     const yMin = Math.min(...y) - thickness;
+519     const yMax = Math.max(...y) + thickness;
+520 
+521     const { ctx } = this;
+522     ctx.save();
+523 
+524     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+525       // In Chrome, the clip() method doesn't work as expected.
+526       ctx.clearRect(xMin, yMin, xMax - xMin, yMax - yMin);
+527       ctx.beginPath();
+528       ctx.rect(xMin, yMin, xMax - xMin, yMax - yMin);
+529       ctx.clip();
+530     } else {
+531       ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+532     }
+533 
+534     for (const path of this.bezierPath2D) {
+535       ctx.stroke(path);
+536     }
+537     ctx.stroke(this.#currentPath2D);
+538 
+539     ctx.restore();
+540   }
+541 
+542   #makeBezierCurve(path2D, x0, y0, x1, y1, x2, y2) {
+543     const prevX = (x0 + x1) / 2;
+544     const prevY = (y0 + y1) / 2;
+545     const x3 = (x1 + x2) / 2;
+546     const y3 = (y1 + y2) / 2;
+547 
+548     path2D.bezierCurveTo(
+549       prevX + (2 * (x1 - prevX)) / 3,
+550       prevY + (2 * (y1 - prevY)) / 3,
+551       x3 + (2 * (x1 - x3)) / 3,
+552       y3 + (2 * (y1 - y3)) / 3,
+553       x3,
+554       y3
+555     );
+556   }
+557 
+558   #generateBezierPoints() {
+559     const path = this.currentPath;
+560     if (path.length <= 2) {
+561       return [[path[0], path[0], path.at(-1), path.at(-1)]];
+562     }
+563 
+564     const bezierPoints = [];
+565     let i;
+566     let [x0, y0] = path[0];
+567     for (i = 1; i < path.length - 2; i++) {
+568       const [x1, y1] = path[i];
+569       const [x2, y2] = path[i + 1];
+570       const x3 = (x1 + x2) / 2;
+571       const y3 = (y1 + y2) / 2;
+572 
+573       // The quadratic is: [[x0, y0], [x1, y1], [x3, y3]].
+574       // Convert the quadratic to a cubic
+575       // (see https://fontforge.org/docs/techref/bezier.html#converting-truetype-to-postscript)
+576       const control1 = [x0 + (2 * (x1 - x0)) / 3, y0 + (2 * (y1 - y0)) / 3];
+577       const control2 = [x3 + (2 * (x1 - x3)) / 3, y3 + (2 * (y1 - y3)) / 3];
+578 
+579       bezierPoints.push([[x0, y0], control1, control2, [x3, y3]]);
+580 
+581       [x0, y0] = [x3, y3];
+582     }
+583 
+584     const [x1, y1] = path[i];
+585     const [x2, y2] = path[i + 1];
+586 
+587     // The quadratic is: [[x0, y0], [x1, y1], [x2, y2]].
+588     const control1 = [x0 + (2 * (x1 - x0)) / 3, y0 + (2 * (y1 - y0)) / 3];
+589     const control2 = [x2 + (2 * (x1 - x2)) / 3, y2 + (2 * (y1 - y2)) / 3];
+590 
+591     bezierPoints.push([[x0, y0], control1, control2, [x2, y2]]);
+592     return bezierPoints;
+593   }
+594 
+595   /**
+596    * Redraw all the paths.
+597    */
+598   #redraw() {
+599     if (this.isEmpty()) {
+600       this.#updateTransform();
+601       return;
+602     }
+603     this.#setStroke();
+604 
+605     const { canvas, ctx } = this;
+606     ctx.setTransform(1, 0, 0, 1, 0, 0);
+607     ctx.clearRect(0, 0, canvas.width, canvas.height);
+608     this.#updateTransform();
+609 
+610     for (const path of this.bezierPath2D) {
+611       ctx.stroke(path);
+612     }
+613   }
+614 
+615   /**
+616    * Commit the curves we have in this editor.
+617    */
+618   commit() {
+619     if (this.#disableEditing) {
+620       return;
+621     }
+622 
+623     super.commit();
+624 
+625     this.isEditing = false;
+626     this.disableEditMode();
+627 
+628     // This editor must be on top of the main ink editor.
+629     this.setInForeground();
+630 
+631     this.#disableEditing = true;
+632     this.div.classList.add("disabled");
+633 
+634     this.#fitToContent(/* firstTime = */ true);
+635     this.select();
+636 
+637     this.parent.addInkEditorIfNeeded(/* isCommitting = */ true);
+638 
+639     // When committing, the position of this editor is changed, hence we must
+640     // move it to the right position in the DOM.
+641     this.moveInDOM();
+642     this.div.focus({
+643       preventScroll: true /* See issue #15744 */,
+644     });
+645   }
+646 
+647   /** @inheritdoc */
+648   focusin(event) {
+649     if (!this._focusEventsAllowed) {
+650       return;
+651     }
+652     super.focusin(event);
+653     this.enableEditMode();
+654   }
+655 
+656   /**
+657    * onpointerdown callback for the canvas we're drawing on.
+658    * @param {PointerEvent} event
+659    */
+660   canvasPointerdown(event) {
+661     if (event.button !== 0 || !this.isInEditMode() || this.#disableEditing) {
+662       return;
+663     }
+664 
+665     // We want to draw on top of any other editors.
+666     // Since it's the last child, there's no need to give it a higher z-index.
+667     this.setInForeground();
+668 
+669     event.preventDefault();
+670 
+671     if (!this.div.contains(document.activeElement)) {
+672       this.div.focus({
+673         preventScroll: true /* See issue #17327 */,
+674       });
+675     }
+676 
+677     this.#startDrawing(event.offsetX, event.offsetY);
+678   }
+679 
+680   /**
+681    * onpointermove callback for the canvas we're drawing on.
+682    * @param {PointerEvent} event
+683    */
+684   canvasPointermove(event) {
+685     event.preventDefault();
+686     this.#draw(event.offsetX, event.offsetY);
+687   }
+688 
+689   /**
+690    * onpointerup callback for the canvas we're drawing on.
+691    * @param {PointerEvent} event
+692    */
+693   canvasPointerup(event) {
+694     event.preventDefault();
+695     this.#endDrawing(event);
+696   }
+697 
+698   /**
+699    * onpointerleave callback for the canvas we're drawing on.
+700    * @param {PointerEvent} event
+701    */
+702   canvasPointerleave(event) {
+703     this.#endDrawing(event);
+704   }
+705 
+706   /**
+707    * End the drawing.
+708    * @param {PointerEvent} event
+709    */
+710   #endDrawing(event) {
+711     this.canvas.removeEventListener(
+712       "pointerleave",
+713       this.#boundCanvasPointerleave
+714     );
+715     this.canvas.removeEventListener(
+716       "pointermove",
+717       this.#boundCanvasPointermove
+718     );
+719     this.canvas.removeEventListener("pointerup", this.#boundCanvasPointerup);
+720     this.canvas.addEventListener("pointerdown", this.#boundCanvasPointerdown, {
+721       signal: this._uiManager._signal,
+722     });
+723 
+724     // Slight delay to avoid the context menu to appear (it can happen on a long
+725     // tap with a pen).
+726     if (this.#canvasContextMenuTimeoutId) {
+727       clearTimeout(this.#canvasContextMenuTimeoutId);
+728     }
+729     this.#canvasContextMenuTimeoutId = setTimeout(() => {
+730       this.#canvasContextMenuTimeoutId = null;
+731       this.canvas.removeEventListener("contextmenu", noContextMenu);
+732     }, 10);
+733 
+734     this.#stopDrawing(event.offsetX, event.offsetY);
+735 
+736     this.addToAnnotationStorage();
+737 
+738     // Since the ink editor covers all of the page and we want to be able
+739     // to select another editor, we just put this one in the background.
+740     this.setInBackground();
+741   }
+742 
+743   /**
+744    * Create the canvas element.
+745    */
+746   #createCanvas() {
+747     this.canvas = document.createElement("canvas");
+748     this.canvas.width = this.canvas.height = 0;
+749     this.canvas.className = "inkEditorCanvas";
+750     this.canvas.setAttribute("data-l10n-id", "pdfjs-ink-canvas");
+751 
+752     this.div.append(this.canvas);
+753     this.ctx = this.canvas.getContext("2d");
+754   }
+755 
+756   /**
+757    * Create the resize observer.
+758    */
+759   #createObserver() {
+760     this.#observer = new ResizeObserver(entries => {
+761       const rect = entries[0].contentRect;
+762       if (rect.width && rect.height) {
+763         this.setDimensions(rect.width, rect.height);
+764       }
+765     });
+766     this.#observer.observe(this.div);
+767     this._uiManager._signal.addEventListener(
+768       "abort",
+769       () => {
+770         this.#observer?.disconnect();
+771         this.#observer = null;
+772       },
+773       { once: true }
+774     );
+775   }
+776 
+777   /** @inheritdoc */
+778   get isResizable() {
+779     return !this.isEmpty() && this.#disableEditing;
+780   }
+781 
+782   /** @inheritdoc */
+783   render() {
+784     if (this.div) {
+785       return this.div;
+786     }
+787 
+788     let baseX, baseY;
+789     if (this.width) {
+790       baseX = this.x;
+791       baseY = this.y;
+792     }
+793 
+794     super.render();
+795 
+796     this.div.setAttribute("data-l10n-id", "pdfjs-ink");
+797 
+798     const [x, y, w, h] = this.#getInitialBBox();
+799     this.setAt(x, y, 0, 0);
+800     this.setDims(w, h);
+801 
+802     this.#createCanvas();
+803 
+804     if (this.width) {
+805       // This editor was created in using copy (ctrl+c).
+806       const [parentWidth, parentHeight] = this.parentDimensions;
+807       this.setAspectRatio(this.width * parentWidth, this.height * parentHeight);
+808       this.setAt(
+809         baseX * parentWidth,
+810         baseY * parentHeight,
+811         this.width * parentWidth,
+812         this.height * parentHeight
+813       );
+814       this.#isCanvasInitialized = true;
+815       this.#setCanvasDims();
+816       this.setDims(this.width * parentWidth, this.height * parentHeight);
+817       this.#redraw();
+818       this.div.classList.add("disabled");
+819     } else {
+820       this.div.classList.add("editing");
+821       this.enableEditMode();
+822     }
+823 
+824     this.#createObserver();
+825 
+826     return this.div;
+827   }
+828 
+829   #setCanvasDims() {
+830     if (!this.#isCanvasInitialized) {
+831       return;
+832     }
+833     const [parentWidth, parentHeight] = this.parentDimensions;
+834     this.canvas.width = Math.ceil(this.width * parentWidth);
+835     this.canvas.height = Math.ceil(this.height * parentHeight);
+836     this.#updateTransform();
+837   }
+838 
+839   /**
+840    * When the dimensions of the div change the inner canvas must
+841    * renew its dimensions, hence it must redraw its own contents.
+842    * @param {number} width - the new width of the div
+843    * @param {number} height - the new height of the div
+844    * @returns
+845    */
+846   setDimensions(width, height) {
+847     const roundedWidth = Math.round(width);
+848     const roundedHeight = Math.round(height);
+849     if (
+850       this.#realWidth === roundedWidth &&
+851       this.#realHeight === roundedHeight
+852     ) {
+853       return;
+854     }
+855 
+856     this.#realWidth = roundedWidth;
+857     this.#realHeight = roundedHeight;
+858 
+859     this.canvas.style.visibility = "hidden";
+860 
+861     const [parentWidth, parentHeight] = this.parentDimensions;
+862     this.width = width / parentWidth;
+863     this.height = height / parentHeight;
+864     this.fixAndSetPosition();
+865 
+866     if (this.#disableEditing) {
+867       this.#setScaleFactor(width, height);
+868     }
+869 
+870     this.#setCanvasDims();
+871     this.#redraw();
+872 
+873     this.canvas.style.visibility = "visible";
+874 
+875     // For any reason the dimensions couldn't be in percent but in pixels, hence
+876     // we must fix them.
+877     this.fixDims();
+878   }
+879 
+880   #setScaleFactor(width, height) {
+881     const padding = this.#getPadding();
+882     const scaleFactorW = (width - padding) / this.#baseWidth;
+883     const scaleFactorH = (height - padding) / this.#baseHeight;
+884     this.scaleFactor = Math.min(scaleFactorW, scaleFactorH);
+885   }
+886 
+887   /**
+888    * Update the canvas transform.
+889    */
+890   #updateTransform() {
+891     const padding = this.#getPadding() / 2;
+892     this.ctx.setTransform(
+893       this.scaleFactor,
+894       0,
+895       0,
+896       this.scaleFactor,
+897       this.translationX * this.scaleFactor + padding,
+898       this.translationY * this.scaleFactor + padding
+899     );
+900   }
+901 
+902   /**
+903    * Convert into a Path2D.
+904    * @param {Array<Array<number>>} bezier
+905    * @returns {Path2D}
+906    */
+907   static #buildPath2D(bezier) {
+908     const path2D = new Path2D();
+909     for (let i = 0, ii = bezier.length; i < ii; i++) {
+910       const [first, control1, control2, second] = bezier[i];
+911       if (i === 0) {
+912         path2D.moveTo(...first);
+913       }
+914       path2D.bezierCurveTo(
+915         control1[0],
+916         control1[1],
+917         control2[0],
+918         control2[1],
+919         second[0],
+920         second[1]
+921       );
+922     }
+923     return path2D;
+924   }
+925 
+926   static #toPDFCoordinates(points, rect, rotation) {
+927     const [blX, blY, trX, trY] = rect;
+928 
+929     switch (rotation) {
+930       case 0:
+931         for (let i = 0, ii = points.length; i < ii; i += 2) {
+932           points[i] += blX;
+933           points[i + 1] = trY - points[i + 1];
+934         }
+935         break;
+936       case 90:
+937         for (let i = 0, ii = points.length; i < ii; i += 2) {
+938           const x = points[i];
+939           points[i] = points[i + 1] + blX;
+940           points[i + 1] = x + blY;
+941         }
+942         break;
+943       case 180:
+944         for (let i = 0, ii = points.length; i < ii; i += 2) {
+945           points[i] = trX - points[i];
+946           points[i + 1] += blY;
+947         }
+948         break;
+949       case 270:
+950         for (let i = 0, ii = points.length; i < ii; i += 2) {
+951           const x = points[i];
+952           points[i] = trX - points[i + 1];
+953           points[i + 1] = trY - x;
+954         }
+955         break;
+956       default:
+957         throw new Error("Invalid rotation");
+958     }
+959     return points;
+960   }
+961 
+962   static #fromPDFCoordinates(points, rect, rotation) {
+963     const [blX, blY, trX, trY] = rect;
+964 
+965     switch (rotation) {
+966       case 0:
+967         for (let i = 0, ii = points.length; i < ii; i += 2) {
+968           points[i] -= blX;
+969           points[i + 1] = trY - points[i + 1];
+970         }
+971         break;
+972       case 90:
+973         for (let i = 0, ii = points.length; i < ii; i += 2) {
+974           const x = points[i];
+975           points[i] = points[i + 1] - blY;
+976           points[i + 1] = x - blX;
+977         }
+978         break;
+979       case 180:
+980         for (let i = 0, ii = points.length; i < ii; i += 2) {
+981           points[i] = trX - points[i];
+982           points[i + 1] -= blY;
+983         }
+984         break;
+985       case 270:
+986         for (let i = 0, ii = points.length; i < ii; i += 2) {
+987           const x = points[i];
+988           points[i] = trY - points[i + 1];
+989           points[i + 1] = trX - x;
+990         }
+991         break;
+992       default:
+993         throw new Error("Invalid rotation");
+994     }
+995     return points;
+996   }
+997 
+998   /**
+999    * Transform and serialize the paths.
+1000    * @param {number} s - scale factor
+1001    * @param {number} tx - abscissa of the translation
+1002    * @param {number} ty - ordinate of the translation
+1003    * @param {Array<number>} rect - the bounding box of the annotation
+1004    */
+1005   #serializePaths(s, tx, ty, rect) {
+1006     const paths = [];
+1007     const padding = this.thickness / 2;
+1008     const shiftX = s * tx + padding;
+1009     const shiftY = s * ty + padding;
+1010     for (const bezier of this.paths) {
+1011       const buffer = [];
+1012       const points = [];
+1013       for (let j = 0, jj = bezier.length; j < jj; j++) {
+1014         const [first, control1, control2, second] = bezier[j];
+1015         if (first[0] === second[0] && first[1] === second[1] && jj === 1) {
+1016           // We have only one point.
+1017           const p0 = s * first[0] + shiftX;
+1018           const p1 = s * first[1] + shiftY;
+1019           buffer.push(p0, p1);
+1020           points.push(p0, p1);
+1021           break;
+1022         }
+1023         const p10 = s * first[0] + shiftX;
+1024         const p11 = s * first[1] + shiftY;
+1025         const p20 = s * control1[0] + shiftX;
+1026         const p21 = s * control1[1] + shiftY;
+1027         const p30 = s * control2[0] + shiftX;
+1028         const p31 = s * control2[1] + shiftY;
+1029         const p40 = s * second[0] + shiftX;
+1030         const p41 = s * second[1] + shiftY;
+1031 
+1032         if (j === 0) {
+1033           buffer.push(p10, p11);
+1034           points.push(p10, p11);
+1035         }
+1036         buffer.push(p20, p21, p30, p31, p40, p41);
+1037         points.push(p20, p21);
+1038         if (j === jj - 1) {
+1039           points.push(p40, p41);
+1040         }
+1041       }
+1042       paths.push({
+1043         bezier: InkEditor.#toPDFCoordinates(buffer, rect, this.rotation),
+1044         points: InkEditor.#toPDFCoordinates(points, rect, this.rotation),
+1045       });
+1046     }
+1047 
+1048     return paths;
+1049   }
+1050 
+1051   /**
+1052    * Get the bounding box containing all the paths.
+1053    * @returns {Array<number>}
+1054    */
+1055   #getBbox() {
+1056     let xMin = Infinity;
+1057     let xMax = -Infinity;
+1058     let yMin = Infinity;
+1059     let yMax = -Infinity;
+1060 
+1061     for (const path of this.paths) {
+1062       for (const [first, control1, control2, second] of path) {
+1063         const bbox = Util.bezierBoundingBox(
+1064           ...first,
+1065           ...control1,
+1066           ...control2,
+1067           ...second
+1068         );
+1069         xMin = Math.min(xMin, bbox[0]);
+1070         yMin = Math.min(yMin, bbox[1]);
+1071         xMax = Math.max(xMax, bbox[2]);
+1072         yMax = Math.max(yMax, bbox[3]);
+1073       }
+1074     }
+1075 
+1076     return [xMin, yMin, xMax, yMax];
+1077   }
+1078 
+1079   /**
+1080    * The bounding box is computed with null thickness, so we must take
+1081    * it into account for the display.
+1082    * It corresponds to the total padding, hence it should be divided by 2
+1083    * in order to have left/right paddings.
+1084    * @returns {number}
+1085    */
+1086   #getPadding() {
+1087     return this.#disableEditing
+1088       ? Math.ceil(this.thickness * this.parentScale)
+1089       : 0;
+1090   }
+1091 
+1092   /**
+1093    * Set the div position and dimensions in order to fit to
+1094    * the bounding box of the contents.
+1095    * @returns {undefined}
+1096    */
+1097   #fitToContent(firstTime = false) {
+1098     if (this.isEmpty()) {
+1099       return;
+1100     }
+1101 
+1102     if (!this.#disableEditing) {
+1103       this.#redraw();
+1104       return;
+1105     }
+1106 
+1107     const bbox = this.#getBbox();
+1108     const padding = this.#getPadding();
+1109     this.#baseWidth = Math.max(AnnotationEditor.MIN_SIZE, bbox[2] - bbox[0]);
+1110     this.#baseHeight = Math.max(AnnotationEditor.MIN_SIZE, bbox[3] - bbox[1]);
+1111 
+1112     const width = Math.ceil(padding + this.#baseWidth * this.scaleFactor);
+1113     const height = Math.ceil(padding + this.#baseHeight * this.scaleFactor);
+1114 
+1115     const [parentWidth, parentHeight] = this.parentDimensions;
+1116     this.width = width / parentWidth;
+1117     this.height = height / parentHeight;
+1118 
+1119     this.setAspectRatio(width, height);
+1120 
+1121     const prevTranslationX = this.translationX;
+1122     const prevTranslationY = this.translationY;
+1123 
+1124     this.translationX = -bbox[0];
+1125     this.translationY = -bbox[1];
+1126     this.#setCanvasDims();
+1127     this.#redraw();
+1128 
+1129     this.#realWidth = width;
+1130     this.#realHeight = height;
+1131 
+1132     this.setDims(width, height);
+1133     const unscaledPadding = firstTime ? padding / this.scaleFactor / 2 : 0;
+1134     this.translate(
+1135       prevTranslationX - this.translationX - unscaledPadding,
+1136       prevTranslationY - this.translationY - unscaledPadding
+1137     );
+1138   }
+1139 
+1140   /** @inheritdoc */
+1141   static deserialize(data, parent, uiManager) {
+1142     if (data instanceof InkAnnotationElement) {
+1143       return null;
+1144     }
+1145     const editor = super.deserialize(data, parent, uiManager);
+1146 
+1147     editor.thickness = data.thickness;
+1148     editor.color = Util.makeHexColor(...data.color);
+1149     editor.opacity = data.opacity;
+1150 
+1151     const [pageWidth, pageHeight] = editor.pageDimensions;
+1152     const width = editor.width * pageWidth;
+1153     const height = editor.height * pageHeight;
+1154     const scaleFactor = editor.parentScale;
+1155     const padding = data.thickness / 2;
+1156 
+1157     editor.#disableEditing = true;
+1158     editor.#realWidth = Math.round(width);
+1159     editor.#realHeight = Math.round(height);
+1160 
+1161     const { paths, rect, rotation } = data;
+1162 
+1163     for (let { bezier } of paths) {
+1164       bezier = InkEditor.#fromPDFCoordinates(bezier, rect, rotation);
+1165       const path = [];
+1166       editor.paths.push(path);
+1167       let p0 = scaleFactor * (bezier[0] - padding);
+1168       let p1 = scaleFactor * (bezier[1] - padding);
+1169       for (let i = 2, ii = bezier.length; i < ii; i += 6) {
+1170         const p10 = scaleFactor * (bezier[i] - padding);
+1171         const p11 = scaleFactor * (bezier[i + 1] - padding);
+1172         const p20 = scaleFactor * (bezier[i + 2] - padding);
+1173         const p21 = scaleFactor * (bezier[i + 3] - padding);
+1174         const p30 = scaleFactor * (bezier[i + 4] - padding);
+1175         const p31 = scaleFactor * (bezier[i + 5] - padding);
+1176         path.push([
+1177           [p0, p1],
+1178           [p10, p11],
+1179           [p20, p21],
+1180           [p30, p31],
+1181         ]);
+1182         p0 = p30;
+1183         p1 = p31;
+1184       }
+1185       const path2D = this.#buildPath2D(path);
+1186       editor.bezierPath2D.push(path2D);
+1187     }
+1188 
+1189     const bbox = editor.#getBbox();
+1190     editor.#baseWidth = Math.max(AnnotationEditor.MIN_SIZE, bbox[2] - bbox[0]);
+1191     editor.#baseHeight = Math.max(AnnotationEditor.MIN_SIZE, bbox[3] - bbox[1]);
+1192     editor.#setScaleFactor(width, height);
+1193 
+1194     return editor;
+1195   }
+1196 
+1197   /** @inheritdoc */
+1198   serialize() {
+1199     if (this.isEmpty()) {
+1200       return null;
+1201     }
+1202 
+1203     const rect = this.getRect(0, 0);
+1204     const color = AnnotationEditor._colorManager.convert(this.ctx.strokeStyle);
+1205 
+1206     return {
+1207       annotationType: AnnotationEditorType.INK,
+1208       color,
+1209       thickness: this.thickness,
+1210       opacity: this.opacity,
+1211       paths: this.#serializePaths(
+1212         this.scaleFactor / this.parentScale,
+1213         this.translationX,
+1214         this.translationY,
+1215         rect
+1216       ),
+1217       pageIndex: this.pageIndex,
+1218       rect,
+1219       rotation: this.rotation,
+1220       structTreeParentId: this._structTreeParentId,
+1221     };
+1222   }
+1223 }
+1224 
+1225 export { InkEditor };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/annotation_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  Annotation,
+  AnnotationBorderStyle,
+  AnnotationFactory,
+  getQuadPoints,
+  MarkupAnnotation,
+} from "../../src/core/annotation.js";
+import {
+  AnnotationBorderStyleType,
+  AnnotationEditorType,
+  AnnotationFieldFlag,
+  AnnotationFlag,
+  AnnotationType,
+  OPS,
+  RenderingIntentFlag,
+  stringToBytes,
+  stringToUTF8String,
+} from "../../src/shared/util.js";
+import {
+  CMAP_URL,
+  createIdFactory,
+  STANDARD_FONT_DATA_URL,
+  XRefMock,
+} from "./test_utils.js";
+import {
+  DefaultCMapReaderFactory,
+  DefaultStandardFontDataFactory,
+} from "../../src/display/api.js";
+import { Dict, Name, Ref, RefSetCache } from "../../src/core/primitives.js";
+import { Lexer, Parser } from "../../src/core/parser.js";
+import { FlateStream } from "../../src/core/flate_stream.js";
+import { PartialEvaluator } from "../../src/core/evaluator.js";
+import { StringStream } from "../../src/core/stream.js";
+import { WorkerTask } from "../../src/core/worker.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

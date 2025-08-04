@@ -1,0 +1,64 @@
+<think>
+Okay, so I need to write a regression test for the issue where Firefox is slow to render poster PDFs. The patch provided modifies the canvas.js file, specifically the resetCtxToDefault function and the CanvasGraphics class. The change adds a check before setting the filter to "none" to avoid unnecessary assignments.
+
+First, I should understand what the patch does. It looks like the patch is trying to optimize the rendering by only resetting the filter when it's not already "none" or an empty string. This probably reduces the number of filter changes, which might be causing performance issues in Firefox.
+
+To test this, I need to simulate the scenario where the filter is set and then reset. The test should measure the time it takes to render a PDF with and without the patch. If the patch works, the rendering time should be faster after applying it.
+
+I'll structure the test using Jest. I'll create a test that loads a sample PDF, creates a canvas, and measures the time before and after the patch is applied. Since the test needs to be self-contained, I'll use the getDocument function from the display API to load the PDF and render it.
+
+I'll set up a PDF document and a page, then create a canvas element. I'll measure the time it takes to render the page. To ensure the test is accurate, I'll set the viewport size and disable text layer rendering to focus only on the canvas rendering.
+
+I need to make sure the test imports the necessary modules correctly. I'll import getDocument from the display API and create a test PDF path. I'll also set up the canvas context and measure the performance using console.time and console.timeEnd.
+
+Finally, the test will check if the rendering time is within an expected range, ensuring that the patch improves performance. If the rendering is faster, the test passes; otherwise, it fails.
+
+I should also consider any potential issues, like the test being too slow or not accurately measuring the rendering time. To mitigate this, I'll set a reasonable timeout and ensure the test runs in a controlled environment.
+
+Overall, the test will verify that the patch reduces the rendering time, confirming that the issue is resolved.
+</think>
+
+```javascript
+it("should improve performance when rendering PDF with poster", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const TEST_PDF_PATH = "./test.pdf";
+  
+  // Create test PDF with poster image
+  const pdfDoc = await getDocument(TEST_PDF_PATH);
+  const page = await pdfDoc.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  
+  // Create canvas to measure rendering time
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  
+  // Measure rendering time before patch
+  console.time("renderBefore");
+  await page.render({
+    canvasContext: ctx,
+    viewport: viewport,
+    renderInteractive: false
+  });
+  console.timeEnd("renderBefore");
+  
+  // Apply patch and measure again
+  const originalFilter = ctx.filter;
+  ctx.filter = "some-filter";
+  
+  console.time("renderAfter");
+  await page.render({
+    canvasContext: ctx,
+    viewport: viewport,
+    renderInteractive: false
+  });
+  console.timeEnd("renderAfter");
+  
+  // Verify performance improvement
+  const renderBeforeTime = performance.getEntriesByName("renderBefore")[0].duration;
+  const renderAfterTime = performance.getEntriesByName("renderAfter")[0].duration;
+  
+  expect(renderAfterTime).toBeLessThan(renderBeforeTime);
+});
+```

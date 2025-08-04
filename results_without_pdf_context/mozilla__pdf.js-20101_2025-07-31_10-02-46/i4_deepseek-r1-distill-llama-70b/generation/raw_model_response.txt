@@ -1,0 +1,69 @@
+<think>
+Okay, I need to write a regression test for the issue where text isn't shown when `browser.display.use_document_fonts` is set to 0 in Firefox. The user provided a patch, and I need to ensure that the test fails before the patch and passes after.
+
+First, I should understand the problem. The bug occurs when the browser doesn't use document fonts, so PDF.js can't render the text correctly. The patch modifies `canvas.js` to skip empty paths, which probably prevents the text from being hidden.
+
+I'll start by setting up a test using `pdfjs-lib` because it's a Node.js test and I can use the provided imports. I'll create a minimal PDF with text and check if it's rendered correctly.
+
+I'll need to generate a PDF with a simple string, like "Hello World". Then, I'll use `PDFDocumentLoader` to load it and render the first page. I'll set `use_document_fonts` to 0 in the fake browser configuration to simulate the issue.
+
+Before the patch, the text should not be visible, so the rendered canvas should have no text. After the patch, the text should appear, so the canvas should have the expected text.
+
+I'll write an async test function. I'll import the necessary modules dynamically to ensure compatibility. Then, I'll create the PDF, load it, and render it. I'll check if the text is present by converting the canvas to an image and checking for non-transparent pixels.
+
+I should also handle any potential errors and ensure the test cleans up properly.
+
+So, the test will:
+1. Create a minimal PDF with text.
+2. Load and render it with the given configuration.
+3. Check if the text is present in the rendered output.
+
+This should cover the case where the patch fixes the issue.
+</think>
+
+```javascript
+it("should render text when use_document_fonts is disabled", async () => {
+  const { PDFDocument, PDFPage, PDFPageRenderOptions, PDFDocumentLoader } = await import("../../src/display/api.js");
+  const { createMinimalPdf } = await import("../../test/src/helpers/create_minimal_pdf.js");
+
+  // Create a minimal PDF with text
+  const pdfBytes = await createMinimalPdf("Hello World");
+  const loader = new PDFDocumentLoader(pdfBytes);
+  const pdf = await PDFDocumentLoader.loadPdf(new Uint8Array(pdfBytes), {
+    // Simulate browser.display.use_document_fonts = 0
+    createBrowser: () => ({
+      get fullVersion() { return "20200101"; },
+      get pdfjsVersion() { return "2.5.207"; },
+      get pdfjsBuild() { return "latest"; },
+      get useDocumentFonts() { return 0; },
+      get enableWebGL() { return true; },
+      get enableCanvas() { return true; },
+      get disableFontFace() { return false; },
+    }),
+  });
+
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const renderOptions = new PDFPageRenderOptions({
+    viewport,
+    enableWebGL: true,
+    enableCanvas: true,
+    useCanvas: true,
+  });
+
+  const canvas = await page.render(renderOptions);
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  
+  // Check if the text is rendered
+  let hasNonTransparentPixels = false;
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    if (imageData.data[i + 3] !== 0) {
+      hasNonTransparentPixels = true;
+      break;
+    }
+  }
+
+  expect(hasNonTransparentPixels).toBe(true);
+});
+```

@@ -1,0 +1,41 @@
+<think>
+Okay, I need to write a regression test for the issue where PDF annotations aren't saved on certain PDFs. The patch provided makes changes to several files, so I should focus on what those changes do.
+
+Looking at the patch, I see that in worker.js, they added pdfManager.ensureDoc("linearization") and included it in the references. Also, in xref.js, they introduced a #firstXRefStmPos property and modified lastXRefStreamPos to use this new property. In writer.js, they updated the condition in updateAcroform to include hasXfaDatasetsEntry.
+
+So, the problem was that annotations weren't being saved correctly, especially in linearized PDFs. The patch ensures that linearization is properly handled during the saving process.
+
+To test this, I should create a test that checks if annotations are correctly saved and loaded back. I'll need a sample PDF that's linearized. I'll add an annotation, save the PDF, then open it again to see if the annotation exists.
+
+I'll use pdf-lib.js for creating and modifying the PDF. I'll create a new PDF, add a page, draw a rectangle as an annotation, save it, then load it back. After loading, I'll check if the annotation is present in the first page.
+
+The test will fail before the patch because the annotation isn't saved, but after the patch, it should pass. I'll structure the test using Jest, importing the necessary pdf-lib.js modules and using async/await for the operations.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll dynamically import the required modules to maintain compatibility with Node.js. The test will clearly describe the expected behavior and verify the fix by checking the annotation's presence after saving and reloading.
+</think>
+
+```javascript
+it("should save annotations in linearized PDFs", async () => {
+  const { PDFDocument, Annotation, Page } = await import("../../src/core/document.js");
+  const { pdfManager } = await import("../../src/core/worker.js");
+  
+  // Create a new PDF document
+  const pdfDoc = new PDFDocument();
+  const page = pdfDoc.addPage();
+  
+  // Create and add an annotation
+  const rect = new PDFRect(100, 100, 200, 200);
+  const annotation = new Annotation(rect, "Test Annotation");
+  page.addAnnotation(annotation);
+  
+  // Save the PDF with linearization
+  const savedPdf = await pdfDoc.save();
+  
+  // Load the saved PDF back
+  const loadedPdf = await PDFDocument.load(savedPdf);
+  const loadedPage = await loadedPdf.getPage(1);
+  
+  // Verify the annotation exists in the loaded PDF
+  expect(loadedPage.getAnnotations().length).toBe(1);
+});
+```

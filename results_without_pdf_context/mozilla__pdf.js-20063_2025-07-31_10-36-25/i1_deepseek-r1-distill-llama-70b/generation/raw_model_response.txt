@@ -1,0 +1,48 @@
+<think>
+Okay, I need to create a regression test for the bug where the PolygonAnnotation's fill isn't rendered in PDF.js but works in other viewers. The patch provided modifies the PolylineAnnotation class to handle fill colors correctly. 
+
+First, I'll look at the existing test file, test/unit/annotation_spec.js, to see what imports and setup are already available. I notice that it imports necessary modules like Annotation, AnnotationFactory, and others. I can reuse these imports.
+
+The test needs to fail before the patch and pass after. So, I'll create a test that checks if both the outline and fill are rendered. 
+
+I'll start by setting up a mock PDF document. Using the XRefMock from test_utils.js, I'll create a mock dictionary for the annotation. I'll set the annotation type to POLYGON and include the Vertices array to define the polygon's shape. 
+
+Next, I'll set the stroke and fill colors using the /CA and /IC entries. The stroke color is black, and the fill is red. 
+
+I'll create an AnnotationFactory instance and use it to create the PolygonAnnotation from the mock dictionary. 
+
+Then, I'll render the annotation using the render method. After rendering, I'll check the SVG output. The SVG should have a path element with both stroke and fill attributes. 
+
+I'll write assertions to ensure that the fill color is present and correct. If the fill isn't present, the test will fail, indicating the bug is still present. After the patch, the test should pass.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll structure the test with async/await for proper initialization and cleanup.
+
+So, the test will create the annotation, render it, and check the SVG output for the fill color. This should validate that the patch fixes the issue.
+</think>
+
+```javascript
+it("should render polygon annotation with both stroke and fill colors", async () => {
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { AnnotationType } = await import("../../src/shared/util.js");
+  const { XRefMock } = await import("./test_utils.js");
+  const { Dict } = await import("../../src/core/primitives.js");
+
+  const xref = new XRefMock();
+  const dict = new Dict(xref, {
+    Type: new Name("Annot"),
+    Subtype: new Name("Polygon"),
+    Vertices: [0, 0, 100, 0, 100, 100, 0, 100, 0, 0],
+    CA: 1,
+    IC: [1, 0, 0, 1], // Red fill color
+  });
+
+  const factory = new AnnotationFactory();
+  const annotation = await factory.createAnnotation(dict);
+
+  const svg = await annotation.render();
+
+  // Check that the fill color is present in the SVG
+  const hasFillColor = svg.includes("fill=\"#ff0000\"");
+  assert(hasFillColor, "Polygon annotation fill color is missing");
+});
+```

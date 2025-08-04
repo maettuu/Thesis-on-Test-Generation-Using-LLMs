@@ -1,0 +1,76 @@
+<think>
+Okay, I need to write a regression test for the issue where pressing the Delete key should delete the selected element when editing a PDF. The patch adds "mac+Delete" to the list of keyboard shortcuts, so the test should verify that on Mac, using the Delete key correctly triggers the delete action.
+
+First, I'll look at the existing test file to see what's available. The test file already imports several modules, including AnnotationEditorUIManager and CommandManager from the code file. I can use these to set up the test scenario.
+
+I'll create a test block using `it("should delete selected annotation when pressing Delete on Mac", async () => { ... })`. The test needs to simulate a Mac environment, so I'll mock the platform using `Object.defineProperty` on the FeatureTest module.
+
+Next, I'll set up the necessary components. I'll create an instance of AnnotationEditorUIManager, which requires a container, eventBus, pdfDocument, and pageColors. For simplicity, I'll use a div element for the container, a basic eventBus, a mock PDF document, and default page colors.
+
+I'll then create a test annotation, perhaps a markup annotation, to simulate the selected element. I'll add this annotation to the annotation storage so that the editor manager is aware of it.
+
+With everything set up, I'll simulate the keydown event. Since we're testing for Mac, the event's metaKey should be true, and the key should be 'Delete'. I'll dispatch this event to the container.
+
+After triggering the event, I'll check if the annotation was correctly deleted by ensuring it's no longer in the annotation storage. If the storage size is zero, the test passes.
+
+I need to make sure that all dependencies are correctly imported and that the test doesn't rely on any external factors beyond what's provided. I'll also ensure that the test is self-contained and doesn't modify any existing state that could affect other tests.
+
+Finally, I'll write the code, making sure to handle any potential async operations and properly clean up after the test to prevent memory leaks.
+</think>
+
+```javascript
+it("should delete selected annotation when pressing Delete on Mac", async () => {
+  const { AnnotationEditorUIManager, CommandManager } = await import("../../src/display/editor/tools.js");
+  const { Annotation, MarkupAnnotation } = await import("../../src/core/annotation.js");
+  const { AnnotationStorage } = await import("../../src/display/annotation_storage.js");
+  
+  // Setup platform as Mac
+  Object.defineProperty(FeatureTest, "platform", {
+    get: () => ({ isMac: true }),
+  });
+
+  const container = document.createElement("div");
+  const eventBus = {
+    _on: () => {},
+    _off: () => {},
+    dispatch: () => {},
+  };
+  const pdfDocument = {
+    annotationStorage: new AnnotationStorage(),
+    filterFactory: {},
+  };
+  const pageColors = {
+    foreground: null,
+    background: null,
+  };
+
+  const uiManager = new AnnotationEditorUIManager(container, eventBus, pdfDocument, pageColors);
+  const commandManager = new CommandManager();
+
+  // Create test annotation
+  const annotation = new MarkupAnnotation({
+    id: "test-annotation",
+    flags: AnnotationFlag.NONE,
+    color: [0, 0, 0],
+    boundary: [0, 0, 100, 100],
+    content: "Test",
+  });
+
+  // Add annotation to storage
+  pdfDocument.annotationStorage.setValue(annotation.id, annotation);
+
+  // Simulate keydown event with Delete key on Mac
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    keyCode: 8, // Delete key code
+    key: "Delete",
+    metaKey: true,
+  });
+
+  container.dispatchEvent(event);
+
+  // Verify annotation was deleted
+  expect(pdfDocument.annotationStorage.size).toBe(0);
+});
+```

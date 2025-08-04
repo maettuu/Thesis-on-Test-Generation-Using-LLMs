@@ -1,0 +1,77 @@
+it("should save PDF annotations correctly", async () => {
+  const { PDFWorkerStream, WorkerMessageHandler, LocalPdfManager, AnnotationFactory } = await import("../../src/core/worker.js");
+  const { incrementalUpdate } = await import("../../src/core/writer.js");
+  const { XRef } = await import("../../src/core/xref.js");
+  const { arrayBuffersToBytes, getNewAnnotationsMap } = await import("../../src/core/core_utils.js");
+  const { Dict, Ref } = await import("../../src/core/primitives.js");
+
+  // Initialize required variables
+  let pdfManager;
+  let handler;
+  let annotationStorage = new Map();
+  let newAnnotationsByPage = new Map();
+  let xref;
+
+  // Define expected variable
+  let expectedAnnotations = [];
+
+  // Generate actual variables
+  handler = new WorkerMessageHandler();
+  pdfManager = new LocalPdfManager({
+    source: arrayBuffersToBytes([104, 101, 108, 108, 111]),
+    disableAutoFetch: true,
+    docBaseUrl: "",
+    docId: "test",
+    enableXfa: true,
+    evaluatorOptions: {},
+    handler: handler,
+    length: 5,
+    password: "",
+    rangeChunkSize: 1000000,
+  });
+
+  xref = new XRef(new PDFWorkerStream(handler), pdfManager);
+  xref.startXRefQueue.push(0);
+  xref.readXRef();
+
+  // Create a new annotation
+  const annotation = AnnotationFactory.createTextAnnotation({
+    page: 0,
+    rect: [10, 10, 20, 20],
+    text: "Hello World",
+  });
+  annotationStorage.set(0, [annotation]);
+
+  newAnnotationsByPage = getNewAnnotationsMap(annotationStorage);
+
+  // Save the PDF with the new annotation
+  const savedPdf = await incrementalUpdate({
+    originalData: arrayBuffersToBytes([104, 101, 108, 108, 111]),
+    xrefInfo: {
+      rootRef: new Ref(1, 0),
+      encryptRef: null,
+      newRef: new Ref(2, 0),
+      infoRef: null,
+      info: {},
+      fileIds: null,
+      startXRef: 0,
+      filename: "test.pdf",
+    },
+    newRefs: [],
+    xref: xref,
+    hasXfa: false,
+    xfaDatasetsRef: null,
+    hasXfaDatasetsEntry: false,
+    needAppearances: true,
+    acroFormRef: new Ref(1, 0),
+    acroForm: new Dict(xref),
+    xfaData: null,
+  });
+
+  // Check if the annotation was saved correctly
+  const savedAnnotations = await pdfManager.getPage(0).then(page => page.getAnnotationsData(handler));
+  expectedAnnotations = [{ page: 0, annotations: [annotation] }];
+
+  // Compare expected with actual
+  expect(savedAnnotations).toEqual(expectedAnnotations);
+});

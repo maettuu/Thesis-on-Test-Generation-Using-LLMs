@@ -1,0 +1,18 @@
+#test/unit/to_unicode_map_spec.js
+import { ToUnicodeMap } from "../../core/to_unicode_map.js";
+import { stringToUTF16String } from "../../shared/util.js";
+
+describe("ToUnicodeMap", () => {
+  it("should correctly map characters using codePointAt", async () => {
+    const cmap = ["\u0000", "\u0001", "\u0002"];
+    const toUnicodeMap = new ToUnicodeMap(cmap);
+    const expectedCharCodes = [0x0000, 0x0001, 0x0002];
+    const actualCharCodes = [];
+
+    toUnicodeMap.forEach((charCode, value) => {
+      actualCharCodes.push(value.codePointAt(0));
+    });
+
+    expect(actualCharCodes).toEqual(expectedCharCodes);
+  });
+});

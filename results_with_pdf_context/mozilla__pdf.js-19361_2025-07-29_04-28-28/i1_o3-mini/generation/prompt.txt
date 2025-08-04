@@ -1,0 +1,1227 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: First gradient text rendering error
+### Attach (recommended) or Link to PDF file
+
+ 
+[gradient-font-test.pdf](https://github.com/user-attachments/files/18486290/gradient-font-test.pdf)
+
+### Web browser and its version
+
+Chrome 132
+
+### Operating system and its version
+
+Windows 10
+
+### PDF.js version
+
+v4.10.38
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+In the example PDF, there is a red exception area below the first character of the text. Could this be a problem with the text rendering?
+
+### What is the expected behavior?
+
+- normal
+
+![Image](https://github.com/user-attachments/assets/140ab33c-0a1d-47c9-8810-54fa97f27140)
+
+### What went wrong?
+
+- pdf.js v4.10.38
+
+![Image](https://github.com/user-attachments/assets/30f19473-cc14-4d4a-93b3-110edfb0b5b1)
+
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+May be related to these PR:
+
+- https://github.com/mozilla/pdf.js/pull/19189
+- https://github.com/mozilla/pdf.js/pull/19023
+
+Look forward to your answer and repair thank you!
+</issue>
+
+PDF File:
+<pdf>
+issue19360.pdf
+</pdf>
+
+Patch:
+<patch>
+diff --git a/src/core/font_renderer.js b/src/core/font_renderer.js
+--- a/src/core/font_renderer.js
++++ b/src/core/font_renderer.js
+@@ -170,6 +170,11 @@ function lookupCmap(ranges, unicode) {
+ 
+ function compileGlyf(code, cmds, font) {
+   function moveTo(x, y) {
++    if (firstPoint) {
++      // Close the current subpath in adding a straight line to the first point.
++      cmds.add("L", firstPoint);
++    }
++    firstPoint = [x, y];
+     cmds.add("M", [x, y]);
+   }
+   function lineTo(x, y) {
+@@ -182,6 +187,7 @@ function compileGlyf(code, cmds, font) {
+   let i = 0;
+   const numberOfContours = getInt16(code, i);
+   let flags;
++  let firstPoint = null;
+   let x = 0,
+     y = 0;
+   i += 10;
+@@ -350,6 +356,11 @@ function compileGlyf(code, cmds, font) {
+ 
+ function compileCharString(charStringCode, cmds, font, glyphId) {
+   function moveTo(x, y) {
++    if (firstPoint) {
++      // Close the current subpath in adding a straight line to the first point.
++      cmds.add("L", firstPoint);
++    }
++    firstPoint = [x, y];
+     cmds.add("M", [x, y]);
+   }
+   function lineTo(x, y) {
+@@ -363,6 +374,7 @@ function compileCharString(charStringCode, cmds, font, glyphId) {
+   let x = 0,
+     y = 0;
+   let stems = 0;
++  let firstPoint = null;
+ 
+   function parse(code) {
+     let i = 0;
+
+diff --git a/src/display/canvas.js b/src/display/canvas.js
+--- a/src/display/canvas.js
++++ b/src/display/canvas.js
+@@ -2043,12 +2043,13 @@ class CanvasGraphics {
+       ctx.save();
+       ctx.translate(x, y);
+       ctx.scale(fontSize, -fontSize);
++      let currentTransform;
+       if (
+         fillStrokeMode === TextRenderingMode.FILL ||
+         fillStrokeMode === TextRenderingMode.FILL_STROKE
+       ) {
+         if (patternFillTransform) {
+-          const currentTransform = ctx.getTransform();
++          currentTransform = ctx.getTransform();
+           ctx.setTransform(...patternFillTransform);
+           ctx.fill(
+             this.#getScaledPath(path, currentTransform, patternFillTransform)
+@@ -2062,8 +2063,22 @@ class CanvasGraphics {
+         fillStrokeMode === TextRenderingMode.FILL_STROKE
+       ) {
+         if (patternStrokeTransform) {
+-          const currentTransform = ctx.getTransform();
++          currentTransform ||= ctx.getTransform();
+           ctx.setTransform(...patternStrokeTransform);
++          const { a, b, c, d } = currentTransform;
++          const invPatternTransform = Util.inverseTransform(
++            patternStrokeTransform
++          );
++          const transf = Util.transform(
++            [a, b, c, d, 0, 0],
++            invPatternTransform
++          );
++          const [sx, sy] = Util.singularValueDecompose2dScale(transf);
++
++          // Cancel the pattern scaling of the line width.
++          // If sx and sy are different, unfortunately we can't do anything and
++          // we'll have a rendering bug.
++          ctx.lineWidth *= Math.max(sx, sy) / fontSize;
+           ctx.stroke(
+             this.#getScaledPath(path, currentTransform, patternStrokeTransform)
+           );
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.0
+- @babel/preset-env: ^7.26.0
+- @babel/runtime: ^7.26.0
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.65
+- @types/node: ^22.10.7
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001692
+- core-js: ^3.40.0
+- eslint: ^9.18.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.6.0
+- eslint-plugin-prettier: ^5.2.2
+- eslint-plugin-unicorn: ^56.0.1
+- globals: ^15.14.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.5.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.1
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.4.2
+- puppeteer: ^24.1.0
+- stylelint: ^16.13.2
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.11
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.7.3
+- vinyl: ^3.0.0
+- webpack: ^5.97.1
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, FeatureTest, FormatError, ImageKind, InvalidPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/font_renderer.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   bytesToString,
+19   FONT_IDENTITY_MATRIX,
+20   FormatError,
+21   unreachable,
+22   Util,
+23   warn,
+24 } from "../shared/util.js";
+25 import {
+26   isNumberArray,
+27   readInt8,
+28   readUint16,
+29   readUint32,
+30 } from "./core_utils.js";
+31 import { CFFParser } from "./cff_parser.js";
+32 import { getGlyphsUnicode } from "./glyphlist.js";
+33 import { StandardEncoding } from "./encodings.js";
+34 import { Stream } from "./stream.js";
+35 
+36 // TODO: use DataView and its methods.
+37 
+171 function compileGlyf(code, cmds, font) {
+172   function moveTo(x, y) {
+173     cmds.add("M", [x, y]);
+174   }
+175   function lineTo(x, y) {
+176     cmds.add("L", [x, y]);
+177   }
+178   function quadraticCurveTo(xa, ya, x, y) {
+179     cmds.add("Q", [xa, ya, x, y]);
+180   }
+181 
+182   let i = 0;
+183   const numberOfContours = getInt16(code, i);
+184   let flags;
+185   let x = 0,
+186     y = 0;
+187   i += 10;
+188   if (numberOfContours < 0) {
+189     // composite glyph
+190     do {
+191       flags = readUint16(code, i);
+192       const glyphIndex = readUint16(code, i + 2);
+193       i += 4;
+194       let arg1, arg2;
+195       if (flags & 0x01) {
+196         if (flags & 0x02) {
+197           arg1 = getInt16(code, i);
+198           arg2 = getInt16(code, i + 2);
+199         } else {
+200           arg1 = readUint16(code, i);
+201           arg2 = readUint16(code, i + 2);
+202         }
+203         i += 4;
+204       } else if (flags & 0x02) {
+205         arg1 = readInt8(code, i++);
+206         arg2 = readInt8(code, i++);
+207       } else {
+208         arg1 = code[i++];
+209         arg2 = code[i++];
+210       }
+211       if (flags & 0x02) {
+212         x = arg1;
+213         y = arg2;
+214       } else {
+215         x = 0;
+216         y = 0;
+217       }
+218       let scaleX = 1,
+219         scaleY = 1,
+220         scale01 = 0,
+221         scale10 = 0;
+222       if (flags & 0x08) {
+223         scaleX = scaleY = getFloat214(code, i);
+224         i += 2;
+225       } else if (flags & 0x40) {
+226         scaleX = getFloat214(code, i);
+227         scaleY = getFloat214(code, i + 2);
+228         i += 4;
+229       } else if (flags & 0x80) {
+230         scaleX = getFloat214(code, i);
+231         scale01 = getFloat214(code, i + 2);
+232         scale10 = getFloat214(code, i + 4);
+233         scaleY = getFloat214(code, i + 6);
+234         i += 8;
+235       }
+236       const subglyph = font.glyphs[glyphIndex];
+237       if (subglyph) {
+238         // TODO: the transform should be applied only if there is a scale:
+239         // https://github.com/freetype/freetype/blob/edd4fedc5427cf1cf1f4b045e53ff91eb282e9d4/src/truetype/ttgload.c#L1205
+240         cmds.save();
+241         cmds.transform([scaleX, scale01, scale10, scaleY, x, y]);
+242 
+243         if (!(flags & 0x02)) {
+244           // TODO: we must use arg1 and arg2 to make something similar to:
+245           // https://github.com/freetype/freetype/blob/edd4fedc5427cf1cf1f4b045e53ff91eb282e9d4/src/truetype/ttgload.c#L1209
+246         }
+247         compileGlyf(subglyph, cmds, font);
+248         cmds.restore();
+249       }
+250     } while (flags & 0x20);
+251   } else {
+252     // simple glyph
+253     const endPtsOfContours = [];
+254     let j, jj;
+255     for (j = 0; j < numberOfContours; j++) {
+256       endPtsOfContours.push(readUint16(code, i));
+257       i += 2;
+258     }
+259     const instructionLength = readUint16(code, i);
+260     i += 2 + instructionLength; // skipping the instructions
+261     const numberOfPoints = endPtsOfContours.at(-1) + 1;
+262     const points = [];
+263     while (points.length < numberOfPoints) {
+264       flags = code[i++];
+265       let repeat = 1;
+266       if (flags & 0x08) {
+267         repeat += code[i++];
+268       }
+269       while (repeat-- > 0) {
+270         points.push({ flags });
+271       }
+272     }
+273     for (j = 0; j < numberOfPoints; j++) {
+274       switch (points[j].flags & 0x12) {
+275         case 0x00:
+276           x += getInt16(code, i);
+277           i += 2;
+278           break;
+279         case 0x02:
+280           x -= code[i++];
+281           break;
+282         case 0x12:
+283           x += code[i++];
+284           break;
+285       }
+286       points[j].x = x;
+287     }
+288     for (j = 0; j < numberOfPoints; j++) {
+289       switch (points[j].flags & 0x24) {
+290         case 0x00:
+291           y += getInt16(code, i);
+292           i += 2;
+293           break;
+294         case 0x04:
+295           y -= code[i++];
+296           break;
+297         case 0x24:
+298           y += code[i++];
+299           break;
+300       }
+301       points[j].y = y;
+302     }
+303 
+304     let startPoint = 0;
+305     for (i = 0; i < numberOfContours; i++) {
+306       const endPoint = endPtsOfContours[i];
+307       // contours might have implicit points, which is located in the middle
+308       // between two neighboring off-curve points
+309       const contour = points.slice(startPoint, endPoint + 1);
+310       if (contour[0].flags & 1) {
+311         contour.push(contour[0]); // using start point at the contour end
+312       } else if (contour.at(-1).flags & 1) {
+313         // first is off-curve point, trying to use one from the end
+314         contour.unshift(contour.at(-1));
+315       } else {
+316         // start and end are off-curve points, creating implicit one
+317         const p = {
+318           flags: 1,
+319           x: (contour[0].x + contour.at(-1).x) / 2,
+320           y: (contour[0].y + contour.at(-1).y) / 2,
+321         };
+322         contour.unshift(p);
+323         contour.push(p);
+324       }
+325       moveTo(contour[0].x, contour[0].y);
+326       for (j = 1, jj = contour.length; j < jj; j++) {
+327         if (contour[j].flags & 1) {
+328           lineTo(contour[j].x, contour[j].y);
+329         } else if (contour[j + 1].flags & 1) {
+330           quadraticCurveTo(
+331             contour[j].x,
+332             contour[j].y,
+333             contour[j + 1].x,
+334             contour[j + 1].y
+335           );
+336           j++;
+337         } else {
+338           quadraticCurveTo(
+339             contour[j].x,
+340             contour[j].y,
+341             (contour[j].x + contour[j + 1].x) / 2,
+342             (contour[j].y + contour[j + 1].y) / 2
+343           );
+344         }
+345       }
+346       startPoint = endPoint + 1;
+347     }
+348   }
+349 }
+350 
+351 function compileCharString(charStringCode, cmds, font, glyphId) {
+352   function moveTo(x, y) {
+353     cmds.add("M", [x, y]);
+354   }
+355   function lineTo(x, y) {
+356     cmds.add("L", [x, y]);
+357   }
+358   function bezierCurveTo(x1, y1, x2, y2, x, y) {
+359     cmds.add("C", [x1, y1, x2, y2, x, y]);
+360   }
+361 
+362   const stack = [];
+363   let x = 0,
+364     y = 0;
+365   let stems = 0;
+366 
+367   function parse(code) {
+368     let i = 0;
+369     while (i < code.length) {
+370       let stackClean = false;
+371       let v = code[i++];
+372       let xa, xb, ya, yb, y1, y2, y3, n, subrCode;
+373       switch (v) {
+374         case 1: // hstem
+375           stems += stack.length >> 1;
+376           stackClean = true;
+377           break;
+378         case 3: // vstem
+379           stems += stack.length >> 1;
+380           stackClean = true;
+381           break;
+382         case 4: // vmoveto
+383           y += stack.pop();
+384           moveTo(x, y);
+385           stackClean = true;
+386           break;
+387         case 5: // rlineto
+388           while (stack.length > 0) {
+389             x += stack.shift();
+390             y += stack.shift();
+391             lineTo(x, y);
+392           }
+393           break;
+394         case 6: // hlineto
+395           while (stack.length > 0) {
+396             x += stack.shift();
+397             lineTo(x, y);
+398             if (stack.length === 0) {
+399               break;
+400             }
+401             y += stack.shift();
+402             lineTo(x, y);
+403           }
+404           break;
+405         case 7: // vlineto
+406           while (stack.length > 0) {
+407             y += stack.shift();
+408             lineTo(x, y);
+409             if (stack.length === 0) {
+410               break;
+411             }
+412             x += stack.shift();
+413             lineTo(x, y);
+414           }
+415           break;
+416         case 8: // rrcurveto
+417           while (stack.length > 0) {
+418             xa = x + stack.shift();
+419             ya = y + stack.shift();
+420             xb = xa + stack.shift();
+421             yb = ya + stack.shift();
+422             x = xb + stack.shift();
+423             y = yb + stack.shift();
+424             bezierCurveTo(xa, ya, xb, yb, x, y);
+425           }
+426           break;
+427         case 10: // callsubr
+428           n = stack.pop();
+429           subrCode = null;
+430           if (font.isCFFCIDFont) {
+431             const fdIndex = font.fdSelect.getFDIndex(glyphId);
+432             if (fdIndex >= 0 && fdIndex < font.fdArray.length) {
+433               const fontDict = font.fdArray[fdIndex];
+434               let subrs;
+435               if (fontDict.privateDict?.subrsIndex) {
+436                 subrs = fontDict.privateDict.subrsIndex.objects;
+437               }
+438               if (subrs) {
+439                 // Add subroutine bias.
+440                 n += getSubroutineBias(subrs);
+441                 subrCode = subrs[n];
+442               }
+443             } else {
+444               warn("Invalid fd index for glyph index.");
+445             }
+446           } else {
+447             subrCode = font.subrs[n + font.subrsBias];
+448           }
+449           if (subrCode) {
+450             parse(subrCode);
+451           }
+452           break;
+453         case 11: // return
+454           return;
+455         case 12:
+456           v = code[i++];
+457           switch (v) {
+458             case 34: // flex
+459               xa = x + stack.shift();
+460               xb = xa + stack.shift();
+461               y1 = y + stack.shift();
+462               x = xb + stack.shift();
+463               bezierCurveTo(xa, y, xb, y1, x, y1);
+464               xa = x + stack.shift();
+465               xb = xa + stack.shift();
+466               x = xb + stack.shift();
+467               bezierCurveTo(xa, y1, xb, y, x, y);
+468               break;
+469             case 35: // flex
+470               xa = x + stack.shift();
+471               ya = y + stack.shift();
+472               xb = xa + stack.shift();
+473               yb = ya + stack.shift();
+474               x = xb + stack.shift();
+475               y = yb + stack.shift();
+476               bezierCurveTo(xa, ya, xb, yb, x, y);
+477               xa = x + stack.shift();
+478               ya = y + stack.shift();
+479               xb = xa + stack.shift();
+480               yb = ya + stack.shift();
+481               x = xb + stack.shift();
+482               y = yb + stack.shift();
+483               bezierCurveTo(xa, ya, xb, yb, x, y);
+484               stack.pop(); // fd
+485               break;
+486             case 36: // hflex1
+487               xa = x + stack.shift();
+488               y1 = y + stack.shift();
+489               xb = xa + stack.shift();
+490               y2 = y1 + stack.shift();
+491               x = xb + stack.shift();
+492               bezierCurveTo(xa, y1, xb, y2, x, y2);
+493               xa = x + stack.shift();
+494               xb = xa + stack.shift();
+495               y3 = y2 + stack.shift();
+496               x = xb + stack.shift();
+497               bezierCurveTo(xa, y2, xb, y3, x, y);
+498               break;
+499             case 37: // flex1
+500               const x0 = x,
+501                 y0 = y;
+502               xa = x + stack.shift();
+503               ya = y + stack.shift();
+504               xb = xa + stack.shift();
+505               yb = ya + stack.shift();
+506               x = xb + stack.shift();
+507               y = yb + stack.shift();
+508               bezierCurveTo(xa, ya, xb, yb, x, y);
+509               xa = x + stack.shift();
+510               ya = y + stack.shift();
+511               xb = xa + stack.shift();
+512               yb = ya + stack.shift();
+513               x = xb;
+514               y = yb;
+515               if (Math.abs(x - x0) > Math.abs(y - y0)) {
+516                 x += stack.shift();
+517               } else {
+518                 y += stack.shift();
+519               }
+520               bezierCurveTo(xa, ya, xb, yb, x, y);
+521               break;
+522             default:
+523               throw new FormatError(`unknown operator: 12 ${v}`);
+524           }
+525           break;
+526         case 14: // endchar
+527           if (stack.length >= 4) {
+528             const achar = stack.pop();
+529             const bchar = stack.pop();
+530             y = stack.pop();
+531             x = stack.pop();
+532             cmds.save();
+533             cmds.translate(x, y);
+534             let cmap = lookupCmap(
+535               font.cmap,
+536               String.fromCharCode(font.glyphNameMap[StandardEncoding[achar]])
+537             );
+538             compileCharString(
+539               font.glyphs[cmap.glyphId],
+540               cmds,
+541               font,
+542               cmap.glyphId
+543             );
+544             cmds.restore();
+545 
+546             cmap = lookupCmap(
+547               font.cmap,
+548               String.fromCharCode(font.glyphNameMap[StandardEncoding[bchar]])
+549             );
+550             compileCharString(
+551               font.glyphs[cmap.glyphId],
+552               cmds,
+553               font,
+554               cmap.glyphId
+555             );
+556           }
+557           return;
+558         case 18: // hstemhm
+559           stems += stack.length >> 1;
+560           stackClean = true;
+561           break;
+562         case 19: // hintmask
+563           stems += stack.length >> 1;
+564           i += (stems + 7) >> 3;
+565           stackClean = true;
+566           break;
+567         case 20: // cntrmask
+568           stems += stack.length >> 1;
+569           i += (stems + 7) >> 3;
+570           stackClean = true;
+571           break;
+572         case 21: // rmoveto
+573           y += stack.pop();
+574           x += stack.pop();
+575           moveTo(x, y);
+576           stackClean = true;
+577           break;
+578         case 22: // hmoveto
+579           x += stack.pop();
+580           moveTo(x, y);
+581           stackClean = true;
+582           break;
+583         case 23: // vstemhm
+584           stems += stack.length >> 1;
+585           stackClean = true;
+586           break;
+587         case 24: // rcurveline
+588           while (stack.length > 2) {
+589             xa = x + stack.shift();
+590             ya = y + stack.shift();
+591             xb = xa + stack.shift();
+592             yb = ya + stack.shift();
+593             x = xb + stack.shift();
+594             y = yb + stack.shift();
+595             bezierCurveTo(xa, ya, xb, yb, x, y);
+596           }
+597           x += stack.shift();
+598           y += stack.shift();
+599           lineTo(x, y);
+600           break;
+601         case 25: // rlinecurve
+602           while (stack.length > 6) {
+603             x += stack.shift();
+604             y += stack.shift();
+605             lineTo(x, y);
+606           }
+607           xa = x + stack.shift();
+608           ya = y + stack.shift();
+609           xb = xa + stack.shift();
+610           yb = ya + stack.shift();
+611           x = xb + stack.shift();
+612           y = yb + stack.shift();
+613           bezierCurveTo(xa, ya, xb, yb, x, y);
+614           break;
+615         case 26: // vvcurveto
+616           if (stack.length % 2) {
+617             x += stack.shift();
+618           }
+619           while (stack.length > 0) {
+620             xa = x;
+621             ya = y + stack.shift();
+622             xb = xa + stack.shift();
+623             yb = ya + stack.shift();
+624             x = xb;
+625             y = yb + stack.shift();
+626             bezierCurveTo(xa, ya, xb, yb, x, y);
+627           }
+628           break;
+629         case 27: // hhcurveto
+630           if (stack.length % 2) {
+631             y += stack.shift();
+632           }
+633           while (stack.length > 0) {
+634             xa = x + stack.shift();
+635             ya = y;
+636             xb = xa + stack.shift();
+637             yb = ya + stack.shift();
+638             x = xb + stack.shift();
+639             y = yb;
+640             bezierCurveTo(xa, ya, xb, yb, x, y);
+641           }
+642           break;
+643         case 28:
+644           stack.push(((code[i] << 24) | (code[i + 1] << 16)) >> 16);
+645           i += 2;
+646           break;
+647         case 29: // callgsubr
+648           n = stack.pop() + font.gsubrsBias;
+649           subrCode = font.gsubrs[n];
+650           if (subrCode) {
+651             parse(subrCode);
+652           }
+653           break;
+654         case 30: // vhcurveto
+655           while (stack.length > 0) {
+656             xa = x;
+657             ya = y + stack.shift();
+658             xb = xa + stack.shift();
+659             yb = ya + stack.shift();
+660             x = xb + stack.shift();
+661             y = yb + (stack.length === 1 ? stack.shift() : 0);
+662             bezierCurveTo(xa, ya, xb, yb, x, y);
+663             if (stack.length === 0) {
+664               break;
+665             }
+666 
+667             xa = x + stack.shift();
+668             ya = y;
+669             xb = xa + stack.shift();
+670             yb = ya + stack.shift();
+671             y = yb + stack.shift();
+672             x = xb + (stack.length === 1 ? stack.shift() : 0);
+673             bezierCurveTo(xa, ya, xb, yb, x, y);
+674           }
+675           break;
+676         case 31: // hvcurveto
+677           while (stack.length > 0) {
+678             xa = x + stack.shift();
+679             ya = y;
+680             xb = xa + stack.shift();
+681             yb = ya + stack.shift();
+682             y = yb + stack.shift();
+683             x = xb + (stack.length === 1 ? stack.shift() : 0);
+684             bezierCurveTo(xa, ya, xb, yb, x, y);
+685             if (stack.length === 0) {
+686               break;
+687             }
+688 
+689             xa = x;
+690             ya = y + stack.shift();
+691             xb = xa + stack.shift();
+692             yb = ya + stack.shift();
+693             x = xb + stack.shift();
+694             y = yb + (stack.length === 1 ? stack.shift() : 0);
+695             bezierCurveTo(xa, ya, xb, yb, x, y);
+696           }
+697           break;
+698         default:
+699           if (v < 32) {
+700             throw new FormatError(`unknown operator: ${v}`);
+701           }
+702           if (v < 247) {
+703             stack.push(v - 139);
+704           } else if (v < 251) {
+705             stack.push((v - 247) * 256 + code[i++] + 108);
+706           } else if (v < 255) {
+707             stack.push(-(v - 251) * 256 - code[i++] - 108);
+708           } else {
+709             stack.push(
+710               ((code[i] << 24) |
+711                 (code[i + 1] << 16) |
+712                 (code[i + 2] << 8) |
+713                 code[i + 3]) /
+714                 65536
+715             );
+716             i += 4;
+717           }
+718           break;
+719       }
+720       if (stackClean) {
+721         stack.length = 0;
+722       }
+723     }
+724   }
+725   parse(charStringCode);
+726 }
+727 
+728 const NOOP = "";
+729 
+927 
+File:
+src/display/canvas.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   FeatureTest,
+18   FONT_IDENTITY_MATRIX,
+19   IDENTITY_MATRIX,
+20   ImageKind,
+21   info,
+22   isNodeJS,
+23   OPS,
+24   shadow,
+25   TextRenderingMode,
+26   unreachable,
+27   Util,
+28   warn,
+29 } from "../shared/util.js";
+30 import {
+31   getCurrentTransform,
+32   getCurrentTransformInverse,
+33   PixelsPerInch,
+34 } from "./display_utils.js";
+35 import {
+36   getShadingPattern,
+37   PathType,
+38   TilingPattern,
+39 } from "./pattern_helper.js";
+40 import { convertBlackAndWhiteToRGBA } from "../shared/image_utils.js";
+41 
+42 // <canvas> contexts store most of the state we need natively.
+43 // However, PDF needs a bit more state, which we store here.
+44 // Minimal font size that would be used during canvas fillText operations.
+45 const MIN_FONT_SIZE = 16;
+46 // Maximum font size that would be used during canvas fillText operations.
+47 const MAX_FONT_SIZE = 100;
+48 
+49 // Defines the time the `executeOperatorList`-method is going to be executing
+50 // before it stops and schedules a continue of execution.
+51 const EXECUTION_TIME = 15; // ms
+52 // Defines the number of steps before checking the execution time.
+53 const EXECUTION_STEPS = 10;
+54 
+55 // To disable Type3 compilation, set the value to `-1`.
+56 const MAX_SIZE_TO_COMPILE = 1000;
+57 
+58 const FULL_CHUNK_HEIGHT = 16;
+59 
+819 const LINE_CAP_STYLES = ["butt", "round", "square"];
+820 const LINE_JOIN_STYLES = ["miter", "round", "bevel"];
+821 const NORMAL_CLIP = {};
+822 const EO_CLIP = {};
+823 
+824 class CanvasGraphics {
+825   constructor(
+826     canvasCtx,
+827     commonObjs,
+828     objs,
+829     canvasFactory,
+830     filterFactory,
+831     { optionalContentConfig, markedContentStack = null },
+832     annotationCanvasMap,
+833     pageColors
+834   ) {
+835     this.ctx = canvasCtx;
+836     this.current = new CanvasExtraState(
+837       this.ctx.canvas.width,
+838       this.ctx.canvas.height
+839     );
+840     this.stateStack = [];
+841     this.pendingClip = null;
+842     this.pendingEOFill = false;
+843     this.res = null;
+844     this.xobjs = null;
+845     this.commonObjs = commonObjs;
+846     this.objs = objs;
+847     this.canvasFactory = canvasFactory;
+848     this.filterFactory = filterFactory;
+849     this.groupStack = [];
+850     this.processingType3 = null;
+851     // Patterns are painted relative to the initial page/form transform, see
+852     // PDF spec 8.7.2 NOTE 1.
+853     this.baseTransform = null;
+854     this.baseTransformStack = [];
+855     this.groupLevel = 0;
+856     this.smaskStack = [];
+857     this.smaskCounter = 0;
+858     this.tempSMask = null;
+859     this.suspendedCtx = null;
+860     this.contentVisible = true;
+861     this.markedContentStack = markedContentStack || [];
+862     this.optionalContentConfig = optionalContentConfig;
+863     this.cachedCanvases = new CachedCanvases(this.canvasFactory);
+864     this.cachedPatterns = new Map();
+865     this.annotationCanvasMap = annotationCanvasMap;
+866     this.viewportScale = 1;
+867     this.outputScaleX = 1;
+868     this.outputScaleY = 1;
+869     this.pageColors = pageColors;
+870 
+871     this._cachedScaleForStroking = [-1, 0];
+872     this._cachedGetSinglePixelWidth = null;
+873     this._cachedBitmapsMap = new Map();
+874   }
+875 
+1281   // Graphics state
+1289 
+1613   // Path
+1758 
+1863   // Clipping
+1867 
+1872   // Text
+1879 
+2018   paintChar(character, x, y, patternFillTransform, patternStrokeTransform) {
+2019     const ctx = this.ctx;
+2020     const current = this.current;
+2021     const font = current.font;
+2022     const textRenderingMode = current.textRenderingMode;
+2023     const fontSize = current.fontSize / current.fontSizeScale;
+2024     const fillStrokeMode =
+2025       textRenderingMode & TextRenderingMode.FILL_STROKE_MASK;
+2026     const isAddToPathSet = !!(
+2027       textRenderingMode & TextRenderingMode.ADD_TO_PATH_FLAG
+2028     );
+2029     const patternFill = current.patternFill && !font.missingFile;
+2030     const patternStroke = current.patternStroke && !font.missingFile;
+2031 
+2032     let path;
+2033     if (
+2034       font.disableFontFace ||
+2035       isAddToPathSet ||
+2036       patternFill ||
+2037       patternStroke
+2038     ) {
+2039       path = font.getPathGenerator(this.commonObjs, character);
+2040     }
+2041 
+2042     if (font.disableFontFace || patternFill || patternStroke) {
+2043       ctx.save();
+2044       ctx.translate(x, y);
+2045       ctx.scale(fontSize, -fontSize);
+2046       if (
+2047         fillStrokeMode === TextRenderingMode.FILL ||
+2048         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2049       ) {
+2050         if (patternFillTransform) {
+2051           const currentTransform = ctx.getTransform();
+2052           ctx.setTransform(...patternFillTransform);
+2053           ctx.fill(
+2054             this.#getScaledPath(path, currentTransform, patternFillTransform)
+2055           );
+2056         } else {
+2057           ctx.fill(path);
+2058         }
+2059       }
+2060       if (
+2061         fillStrokeMode === TextRenderingMode.STROKE ||
+2062         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2063       ) {
+2064         if (patternStrokeTransform) {
+2065           const currentTransform = ctx.getTransform();
+2066           ctx.setTransform(...patternStrokeTransform);
+2067           ctx.stroke(
+2068             this.#getScaledPath(path, currentTransform, patternStrokeTransform)
+2069           );
+2070         } else {
+2071           ctx.lineWidth /= fontSize;
+2072           ctx.stroke(path);
+2073         }
+2074       }
+2075       ctx.restore();
+2076     } else {
+2077       if (
+2078         fillStrokeMode === TextRenderingMode.FILL ||
+2079         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2080       ) {
+2081         ctx.fillText(character, x, y);
+2082       }
+2083       if (
+2084         fillStrokeMode === TextRenderingMode.STROKE ||
+2085         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2086       ) {
+2087         ctx.strokeText(character, x, y);
+2088       }
+2089     }
+2090 
+2091     if (isAddToPathSet) {
+2092       const paths = (this.pendingTextPaths ||= []);
+2093       paths.push({
+2094         transform: getCurrentTransform(ctx),
+2095         x,
+2096         y,
+2097         fontSize,
+2098         path,
+2099       });
+2100     }
+2101   }
+2102 
+2388   // Type3 fonts
+2393 
+2400   // Color
+2432 
+2519   // Images
+2523 
+3109   // Marked content
+3110 
+3143   // Compatibility
+3144 
+3153   // Helper functions
+3154 
+3252   // Rescale before stroking in order to have a final lineWidth
+3253   // with both thicknesses greater or equal to 1.
+3292 
+3301 }
+3302 
+3308 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/api_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  AnnotationEditorType,
+  AnnotationMode,
+  AnnotationType,
+  ImageKind,
+  InvalidPDFException,
+  isNodeJS,
+  objectSize,
+  OPS,
+  PasswordException,
+  PasswordResponses,
+  PermissionFlag,
+  ResponseException,
+  UnknownErrorException,
+} from "../../src/shared/util.js";
+import {
+  buildGetDocumentParams,
+  CMAP_URL,
+  DefaultFileReaderFactory,
+  getCrossOriginHostname,
+  TEST_PDFS_PATH,
+  TestPdfsServer,
+} from "./test_utils.js";
+import {
+  fetchData as fetchDataDOM,
+  PageViewport,
+  RenderingCancelledException,
+  StatTimer,
+} from "../../src/display/display_utils.js";
+import {
+  getDocument,
+  PDFDataRangeTransport,
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  PDFWorker,
+  RenderTask,
+} from "../../src/display/api.js";
+import { AutoPrintRegExp } from "../../web/ui_utils.js";
+import { GlobalImageCache } from "../../src/core/image_utils.js";
+import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
+import { Metadata } from "../../src/display/metadata.js";
+const WORKER_SRC = "../../build/generic/build/pdf.worker.mjs";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. You can use the PDF file for testing as follows:
+const { getDocument } = await import('../../src/display/api.js');
+const { buildGetDocumentParams } = await import('./test_utils.js');
+const loadingTask = getDocument(buildGetDocumentParams('issue19360.pdf'))
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

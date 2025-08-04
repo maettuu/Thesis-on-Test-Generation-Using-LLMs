@@ -1,0 +1,63 @@
+<think>
+Okay, I need to write a regression test for the issue where the £ symbol isn't displaying correctly in PDF.js. The user provided a patch that modifies the standard_fonts.js file, specifically adding a mapping for £. 
+
+First, I should understand the problem. The £ symbol, which is U+00A3, was showing up as ά (U+03AC). The patch adds t[940] = 163; in the getSupplementalGlyphMapForCalibri function. I think this maps the CID 940 to GID 163, which is the correct £ symbol.
+
+So, the test needs to verify that after the patch, the £ symbol is correctly rendered. 
+
+I'll use the test utilities provided. I need to import the necessary modules. The test will create a PDF document with a string containing £, render it, and check if the text is extracted correctly.
+
+I'll structure the test using Jest. The test will be self-contained, so I'll generate a PDF on the fly. I'll create a PDF with the £ symbol, then extract the text and check if it contains '£'.
+
+Before the patch, this test should fail because the £ wouldn't be rendered correctly. After applying the patch, the test should pass.
+
+I'll use the PDFDocument from 'pdf-lib' to create the PDF. Then, using pdf.js, I'll open the document, get the first page, render it, and extract the text. Finally, I'll assert that the text includes '£'.
+
+I need to make sure all imports are correct and that the test runs asynchronously. Also, I should handle any potential errors, maybe with try-catch blocks, but the example provided doesn't include that, so I'll keep it simple.
+
+So, putting it all together, the test creates a PDF with £, extracts the text, and checks for the correct symbol.
+</think>
+
+```javascript
+it("should correctly render £ symbol in PDF", async () => {
+  const { PDFDocument } = await import('pdf-lib');
+  const { PDFDocument as PD } = await import('../../src/display/api.js');
+  const { TextLayerBuilder } = await import('../../src/web/text_layer_builder.js');
+
+  // Create a PDF with the £ symbol
+  const pdfDoc = new PDFDocument();
+  const page = pdfDoc.addPage();
+  const font = page.setFont('Helvetica');
+  page.text('£', 100, 100, { font });
+
+  // Convert the PDF buffer to a Blob
+  const pdfBuffer = await pdfDoc.toBuffer();
+  const pdfBlob = new Blob([pdfBuffer], { type: 'application/pdf' });
+
+  // Open the PDF in pdf.js
+  const loadingTask = PD.getDocument(pdfBlob);
+  const pdf = await loadingTask.promise;
+  const pagePromise = pdf.getPage(1);
+  const pdfPage = await pagePromise;
+
+  // Setup text layer
+  const container = document.createElement('div');
+  const textLayerBuilder = new TextLayerBuilder({
+    container: container,
+    viewport: pdfPage.getViewport(1),
+  });
+
+  // Render the page and get the text
+  const renderTask = pdfPage.render({
+    viewport: pdfPage.getViewport(1),
+    textLayer: textLayerBuilder,
+  });
+  await renderTask.promise;
+
+  // Get the extracted text
+  const text = await pdfPage.getTextContent();
+
+  // Verify the £ symbol is correctly rendered
+  expect(text.items[0].str).toContain('£');
+});
+```

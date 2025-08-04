@@ -1,0 +1,535 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Slow rendering of a PDF with a lot of pages
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/shared/message_handler.js b/src/shared/message_handler.js
+--- a/src/shared/message_handler.js
++++ b/src/shared/message_handler.js
+@@ -70,6 +70,14 @@ function wrapReason(reason) {
+ }
+ 
+ class MessageHandler {
++  #cancelledStreamIds = new Set();
++
++  #executorRunning = false;
++
++  #isPostponed = false;
++
++  #queue = [];
++
+   constructor(sourceName, targetName, comObj) {
+     this.sourceName = sourceName;
+     this.targetName = targetName;
+@@ -81,71 +89,116 @@ class MessageHandler {
+     this.callbackCapabilities = Object.create(null);
+     this.actionHandler = Object.create(null);
+ 
+-    this._onComObjOnMessage = event => {
+-      const data = event.data;
+-      if (data.targetName !== this.sourceName) {
+-        return;
+-      }
+-      if (data.stream) {
+-        this.#processStreamMessage(data);
+-        return;
+-      }
+-      if (data.callback) {
+-        const callbackId = data.callbackId;
+-        const capability = this.callbackCapabilities[callbackId];
+-        if (!capability) {
+-          throw new Error(`Cannot resolve callback ${callbackId}`);
++    this._onComObjOnMessage = ({ data }) => {
++      if (data.targetName === this.sourceName) {
++        // The meesages in the worker queue are processed with a
++        // higher priority than the tasks in the event queue.
++        // So, postponing the task execution, will ensure that the message
++        // queue is drained.
++        // If at some point we've a cancelled task (e.g. GetOperatorList),
++        // we're able to skip the task execution with the same streamId.
++        this.#queue.push(data);
++        this.#isPostponed ||= data.action === "GetOperatorList";
++        if (data.stream === StreamKind.CANCEL) {
++          this.#cancelledStreamIds.add(data.streamId);
+         }
+-        delete this.callbackCapabilities[callbackId];
+-
+-        if (data.callback === CallbackKind.DATA) {
+-          capability.resolve(data.data);
+-        } else if (data.callback === CallbackKind.ERROR) {
+-          capability.reject(wrapReason(data.reason));
+-        } else {
+-          throw new Error("Unexpected callback case");
++        if (!this.#executorRunning) {
++          this.#executorRunning = true;
++          this.#postponeExecution();
+         }
+-        return;
+       }
+-      const action = this.actionHandler[data.action];
+-      if (!action) {
+-        throw new Error(`Unknown action from worker: ${data.action}`);
++    };
++    comObj.addEventListener("message", this._onComObjOnMessage);
++  }
++
++  #postponeExecution() {
++    if (this.#isPostponed) {
++      setTimeout(this.#executor.bind(this), 0);
++    } else {
++      this.#executor();
++    }
++  }
++
++  #executor() {
++    if (this.#queue.length === 0) {
++      this.#cancelledStreamIds.clear();
++      this.#executorRunning = false;
++      return;
++    }
++
++    const data = this.#queue.shift();
++    const { stream, streamId } = data;
++
++    if (stream) {
++      if (
++        stream === StreamKind.CANCEL ||
++        !this.#cancelledStreamIds.has(streamId)
++      ) {
++        this.#processStreamMessage(data);
+       }
+-      if (data.callbackId) {
+-        const cbSourceName = this.sourceName;
+-        const cbTargetName = data.sourceName;
++      this.#postponeExecution();
++      return;
++    }
+ 
+-        new Promise(function (resolve) {
+-          resolve(action(data.data));
+-        }).then(
+-          function (result) {
+-            comObj.postMessage({
+-              sourceName: cbSourceName,
+-              targetName: cbTargetName,
+-              callback: CallbackKind.DATA,
+-              callbackId: data.callbackId,
+-              data: result,
+-            });
+-          },
+-          function (reason) {
+-            comObj.postMessage({
+-              sourceName: cbSourceName,
+-              targetName: cbTargetName,
+-              callback: CallbackKind.ERROR,
+-              callbackId: data.callbackId,
+-              reason: wrapReason(reason),
+-            });
+-          }
+-        );
+-        return;
++    if (streamId && this.#cancelledStreamIds.has(streamId)) {
++      this.#postponeExecution();
++      return;
++    }
++
++    if (data.callback) {
++      const callbackId = data.callbackId;
++      const capability = this.callbackCapabilities[callbackId];
++      if (!capability) {
++        throw new Error(`Cannot resolve callback ${callbackId}`);
+       }
+-      if (data.streamId) {
+-        this.#createStreamSink(data);
+-        return;
++      delete this.callbackCapabilities[callbackId];
++
++      if (data.callback === CallbackKind.DATA) {
++        capability.resolve(data.data);
++      } else if (data.callback === CallbackKind.ERROR) {
++        capability.reject(wrapReason(data.reason));
++      } else {
++        throw new Error("Unexpected callback case");
+       }
++      this.#postponeExecution();
++      return;
++    }
++    const action = this.actionHandler[data.action];
++    if (!action) {
++      throw new Error(`Unknown action from worker: ${data.action}`);
++    }
++    if (data.callbackId) {
++      const cbSourceName = this.sourceName;
++      const cbTargetName = data.sourceName;
++
++      new Promise(function (resolve) {
++        resolve(action(data.data));
++      }).then(
++        result => {
++          this.comObj.postMessage({
++            sourceName: cbSourceName,
++            targetName: cbTargetName,
++            callback: CallbackKind.DATA,
++            callbackId: data.callbackId,
++            data: result,
++          });
++        },
++        reason => {
++          this.comObj.postMessage({
++            sourceName: cbSourceName,
++            targetName: cbTargetName,
++            callback: CallbackKind.ERROR,
++            callbackId: data.callbackId,
++            reason: wrapReason(reason),
++          });
++        }
++      );
++    } else if (data.streamId) {
++      this.#createStreamSink(data);
++    } else {
+       action(data.data);
+-    };
+-    comObj.addEventListener("message", this._onComObjOnMessage);
++    }
++    this.#postponeExecution();
+   }
+ 
+   on(actionName, handler) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.3
+- @babel/preset-env: ^7.23.3
+- @babel/runtime: ^7.23.4
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @javascript-obfuscator/escodegen: 2.3.0
+- @jazzer.js/core: ^2.1.0
+- acorn: ^8.11.2
+- autoprefixer: ^10.4.16
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001564
+- canvas: ^2.11.2
+- core-js: ^3.33.3
+- cross-env: ^7.0.3
+- eslint: ^8.54.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.0
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.1
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^49.0.0
+- globals: ^13.23.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.31
+- postcss-dark-theme-class: ^1.0.0
+- postcss-dir-pseudo-class: ^8.0.0
+- postcss-discard-comments: ^6.0.0
+- postcss-nesting: ^12.0.1
+- prettier: ^3.1.0
+- puppeteer: ^21.6.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.11.0
+- stylelint-prettier: ^4.1.0
+- terser: ^5.24.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.2
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.89.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n.js`: L10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/shared/message_handler.js
+1 /* Copyright 2018 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AbortException,
+18   assert,
+19   MissingPDFException,
+20   PasswordException,
+21   PromiseCapability,
+22   UnexpectedResponseException,
+23   UnknownErrorException,
+24   unreachable,
+25 } from "./util.js";
+26 
+27 const CallbackKind = {
+28   UNKNOWN: 0,
+29   DATA: 1,
+30   ERROR: 2,
+31 };
+32 
+33 const StreamKind = {
+34   UNKNOWN: 0,
+35   CANCEL: 1,
+36   CANCEL_COMPLETE: 2,
+37   CLOSE: 3,
+38   ENQUEUE: 4,
+39   ERROR: 5,
+40   PULL: 6,
+41   PULL_COMPLETE: 7,
+42   START_COMPLETE: 8,
+43 };
+44 
+72 class MessageHandler {
+73   constructor(sourceName, targetName, comObj) {
+74     this.sourceName = sourceName;
+75     this.targetName = targetName;
+76     this.comObj = comObj;
+77     this.callbackId = 1;
+78     this.streamId = 1;
+79     this.streamSinks = Object.create(null);
+80     this.streamControllers = Object.create(null);
+81     this.callbackCapabilities = Object.create(null);
+82     this.actionHandler = Object.create(null);
+83 
+84     this._onComObjOnMessage = event => {
+85       const data = event.data;
+86       if (data.targetName !== this.sourceName) {
+87         return;
+88       }
+89       if (data.stream) {
+90         this.#processStreamMessage(data);
+91         return;
+92       }
+93       if (data.callback) {
+94         const callbackId = data.callbackId;
+95         const capability = this.callbackCapabilities[callbackId];
+96         if (!capability) {
+97           throw new Error(`Cannot resolve callback ${callbackId}`);
+98         }
+99         delete this.callbackCapabilities[callbackId];
+100 
+101         if (data.callback === CallbackKind.DATA) {
+102           capability.resolve(data.data);
+103         } else if (data.callback === CallbackKind.ERROR) {
+104           capability.reject(wrapReason(data.reason));
+105         } else {
+106           throw new Error("Unexpected callback case");
+107         }
+108         return;
+109       }
+110       const action = this.actionHandler[data.action];
+111       if (!action) {
+112         throw new Error(`Unknown action from worker: ${data.action}`);
+113       }
+114       if (data.callbackId) {
+115         const cbSourceName = this.sourceName;
+116         const cbTargetName = data.sourceName;
+117 
+118         new Promise(function (resolve) {
+119           resolve(action(data.data));
+120         }).then(
+121           function (result) {
+122             comObj.postMessage({
+123               sourceName: cbSourceName,
+124               targetName: cbTargetName,
+125               callback: CallbackKind.DATA,
+126               callbackId: data.callbackId,
+127               data: result,
+128             });
+129           },
+130           function (reason) {
+131             comObj.postMessage({
+132               sourceName: cbSourceName,
+133               targetName: cbTargetName,
+134               callback: CallbackKind.ERROR,
+135               callbackId: data.callbackId,
+136               reason: wrapReason(reason),
+137             });
+138           }
+139         );
+140         return;
+141       }
+142       if (data.streamId) {
+143         this.#createStreamSink(data);
+144         return;
+145       }
+146       action(data.data);
+147     };
+148     comObj.addEventListener("message", this._onComObjOnMessage);
+149   }
+150 
+533 }
+534 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/message_handler_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  AbortException,
+  PromiseCapability,
+  UnknownErrorException,
+} from "../../src/shared/util.js";
+import { LoopbackPort } from "../../src/display/api.js";
+import { MessageHandler } from "../../src/shared/message_handler.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

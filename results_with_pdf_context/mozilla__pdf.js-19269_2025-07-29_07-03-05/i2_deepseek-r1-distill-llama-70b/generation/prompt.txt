@@ -1,0 +1,1499 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Top and bottom images are not displayed in pdf file
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/evaluator.js b/src/core/evaluator.js
+--- a/src/core/evaluator.js
++++ b/src/core/evaluator.js
+@@ -175,7 +175,7 @@ function addLocallyCachedImageOps(opList, data) {
+   if (data.objId) {
+     opList.addDependency(data.objId);
+   }
+-  opList.addImageOps(data.fn, data.args, data.optionalContent);
++  opList.addImageOps(data.fn, data.args, data.optionalContent, data.hasMask);
+ 
+   if (data.fn === OPS.paintImageMaskXObject && data.args[0]?.count > 0) {
+     data.args[0].count++;
+@@ -730,13 +730,9 @@ class PartialEvaluator {
+     }
+ 
+     const SMALL_IMAGE_DIMENSIONS = 200;
++    const hasMask = dict.has("SMask") || dict.has("Mask");
+     // Inlining small images into the queue as RGB data
+-    if (
+-      isInline &&
+-      w + h < SMALL_IMAGE_DIMENSIONS &&
+-      !dict.has("SMask") &&
+-      !dict.has("Mask")
+-    ) {
++    if (isInline && w + h < SMALL_IMAGE_DIMENSIONS && !hasMask) {
+       try {
+         const imageObj = new PDFImage({
+           xref: this.xref,
+@@ -793,7 +789,12 @@ class PartialEvaluator {
+     // Ensure that the dependency is added before the image is decoded.
+     operatorList.addDependency(objId);
+     args = [objId, w, h];
+-    operatorList.addImageOps(OPS.paintImageXObject, args, optionalContent);
++    operatorList.addImageOps(
++      OPS.paintImageXObject,
++      args,
++      optionalContent,
++      hasMask
++    );
+ 
+     if (cacheGlobally) {
+       if (this.globalImageCache.hasDecodeFailed(imageRef)) {
+@@ -802,6 +803,7 @@ class PartialEvaluator {
+           fn: OPS.paintImageXObject,
+           args,
+           optionalContent,
++          hasMask,
+           byteSize: 0, // Data is `null`, since decoding failed previously.
+         });
+ 
+@@ -812,7 +814,7 @@ class PartialEvaluator {
+       // For large (at least 500x500) or more complex images that we'll cache
+       // globally, check if the image is still cached locally on the main-thread
+       // to avoid having to re-parse the image (since that can be slow).
+-      if (w * h > 250000 || dict.has("SMask") || dict.has("Mask")) {
++      if (w * h > 250000 || hasMask) {
+         const localLength = await this.handler.sendWithPromise("commonobj", [
+           objId,
+           "CopyLocalImage",
+@@ -825,6 +827,7 @@ class PartialEvaluator {
+             fn: OPS.paintImageXObject,
+             args,
+             optionalContent,
++            hasMask,
+             byteSize: 0, // Temporary entry, to avoid `setData` returning early.
+           });
+           this.globalImageCache.addByteSize(imageRef, localLength);
+@@ -872,6 +875,7 @@ class PartialEvaluator {
+         fn: OPS.paintImageXObject,
+         args,
+         optionalContent,
++        hasMask,
+       };
+       localImageCache.set(cacheKey, imageRef, cacheData);
+ 
+@@ -884,6 +888,7 @@ class PartialEvaluator {
+             fn: OPS.paintImageXObject,
+             args,
+             optionalContent,
++            hasMask,
+             byteSize: 0, // Temporary entry, note `addByteSize` above.
+           });
+         }
+@@ -1814,7 +1819,8 @@ class PartialEvaluator {
+                     operatorList.addImageOps(
+                       globalImage.fn,
+                       globalImage.args,
+-                      globalImage.optionalContent
++                      globalImage.optionalContent,
++                      globalImage.hasMask
+                     );
+ 
+                     resolveXObject();
+
+diff --git a/src/core/operator_list.js b/src/core/operator_list.js
+--- a/src/core/operator_list.js
++++ b/src/core/operator_list.js
+@@ -636,7 +636,11 @@ class OperatorList {
+     }
+   }
+ 
+-  addImageOps(fn, args, optionalContent) {
++  addImageOps(fn, args, optionalContent, hasMask = false) {
++    if (hasMask) {
++      this.addOp(OPS.save);
++      this.addOp(OPS.setGState, [[["SMask", false]]]);
++    }
+     if (optionalContent !== undefined) {
+       this.addOp(OPS.beginMarkedContentProps, ["OC", optionalContent]);
+     }
+@@ -646,6 +650,9 @@ class OperatorList {
+     if (optionalContent !== undefined) {
+       this.addOp(OPS.endMarkedContent, []);
+     }
++    if (hasMask) {
++      this.addOp(OPS.restore);
++    }
+   }
+ 
+   addDependency(dependency) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.0
+- @babel/preset-env: ^7.26.0
+- @babel/runtime: ^7.26.0
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.65
+- @types/node: ^22.10.2
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001690
+- core-js: ^3.39.0
+- eslint: ^9.17.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.3.0
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-unicorn: ^56.0.1
+- globals: ^15.14.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.11.0
+- jasmine: ^5.5.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.4.49
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.4.2
+- puppeteer: ^23.11.1
+- stylelint: ^16.12.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.11
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.7.2
+- vinyl: ^3.0.0
+- webpack: ^5.97.1
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: fetchData
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/evaluator.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AbortException,
+18   assert,
+19   FONT_IDENTITY_MATRIX,
+20   FormatError,
+21   IDENTITY_MATRIX,
+22   info,
+23   isArrayEqual,
+24   normalizeUnicode,
+25   OPS,
+26   shadow,
+27   stringToPDFString,
+28   TextRenderingMode,
+29   Util,
+30   warn,
+31 } from "../shared/util.js";
+32 import { CMapFactory, IdentityCMap } from "./cmap.js";
+33 import { Cmd, Dict, EOF, isName, Name, Ref, RefSet } from "./primitives.js";
+34 import { ErrorFont, Font } from "./fonts.js";
+35 import {
+36   getEncoding,
+37   MacRomanEncoding,
+38   StandardEncoding,
+39   SymbolSetEncoding,
+40   WinAnsiEncoding,
+41   ZapfDingbatsEncoding,
+42 } from "./encodings.js";
+43 import {
+44   getFontNameToFileMap,
+45   getSerifFonts,
+46   getStandardFontName,
+47   getStdFontMap,
+48   getSymbolsFonts,
+49   isKnownFontName,
+50 } from "./standard_fonts.js";
+51 import { getTilingPatternIR, Pattern } from "./pattern.js";
+52 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
+53 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
+54 import { isNumberArray, lookupMatrix, lookupNormalRect } from "./core_utils.js";
+55 import { isPDFFunction, PDFFunctionFactory } from "./function.js";
+56 import { Lexer, Parser } from "./parser.js";
+57 import {
+58   LocalColorSpaceCache,
+59   LocalGStateCache,
+60   LocalImageCache,
+61   LocalTilingPatternCache,
+62   RegionalImageCache,
+63 } from "./image_utils.js";
+64 import { BaseStream } from "./base_stream.js";
+65 import { bidi } from "./bidi.js";
+66 import { ColorSpace } from "./colorspace.js";
+67 import { DecodeStream } from "./decode_stream.js";
+68 import { FontFlags } from "./fonts_utils.js";
+69 import { getFontSubstitution } from "./font_substitutions.js";
+70 import { getGlyphsUnicode } from "./glyphlist.js";
+71 import { getMetrics } from "./metrics.js";
+72 import { getUnicodeForGlyph } from "./unicode.js";
+73 import { ImageResizer } from "./image_resizer.js";
+74 import { JpegStream } from "./jpeg_stream.js";
+75 import { MurmurHash3_64 } from "../shared/murmurhash3.js";
+76 import { OperatorList } from "./operator_list.js";
+77 import { PDFImage } from "./image.js";
+78 import { Stream } from "./stream.js";
+79 
+80 const DefaultPartialEvaluatorOptions = Object.freeze({
+81   maxImageSize: -1,
+82   disableFontFace: false,
+83   ignoreErrors: false,
+84   isEvalSupported: true,
+85   isOffscreenCanvasSupported: false,
+86   isImageDecoderSupported: false,
+87   canvasMaxAreaInBytes: -1,
+88   fontExtraProperties: false,
+89   useSystemFonts: true,
+90   cMapUrl: null,
+91   standardFontDataUrl: null,
+92 });
+93 
+94 const PatternType = {
+95   TILING: 1,
+96   SHADING: 2,
+97 };
+98 
+99 // Optionally avoid sending individual, or very few, text chunks to reduce
+100 // `postMessage` overhead with ReadableStream (see issue 13962).
+101 //
+102 // PLEASE NOTE: This value should *not* be too large (it's used as a lower limit
+103 // in `enqueueChunk`), since that would cause streaming of textContent to become
+104 // essentially useless in practice by sending all (or most) chunks at once.
+105 // Also, a too large value would (indirectly) affect the main-thread `textLayer`
+106 // building negatively by forcing all textContent to be handled at once, which
+107 // could easily end up hurting *overall* performance (e.g. rendering as well).
+108 const TEXT_CHUNK_BATCH_SIZE = 10;
+109 
+110 const deferred = Promise.resolve();
+111 
+112 // Convert PDF blend mode names to HTML5 blend mode names.
+173 
+174 function addLocallyCachedImageOps(opList, data) {
+175   if (data.objId) {
+176     opList.addDependency(data.objId);
+177   }
+178   opList.addImageOps(data.fn, data.args, data.optionalContent);
+179 
+180   if (data.fn === OPS.paintImageMaskXObject && data.args[0]?.count > 0) {
+181     data.args[0].count++;
+182   }
+183 }
+184 
+185 // Trying to minimize Date.now() usage and check every 100 time.
+208 
+209 class PartialEvaluator {
+210   constructor({
+211     xref,
+212     handler,
+213     pageIndex,
+214     idFactory,
+215     fontCache,
+216     builtInCMapCache,
+217     standardFontDataCache,
+218     globalImageCache,
+219     systemFontCache,
+220     options = null,
+221   }) {
+222     this.xref = xref;
+223     this.handler = handler;
+224     this.pageIndex = pageIndex;
+225     this.idFactory = idFactory;
+226     this.fontCache = fontCache;
+227     this.builtInCMapCache = builtInCMapCache;
+228     this.standardFontDataCache = standardFontDataCache;
+229     this.globalImageCache = globalImageCache;
+230     this.systemFontCache = systemFontCache;
+231     this.options = options || DefaultPartialEvaluatorOptions;
+232     this.type3FontRefs = null;
+233 
+234     this._regionalImageCache = new RegionalImageCache();
+235     this._fetchBuiltInCMapBound = this.fetchBuiltInCMap.bind(this);
+236 
+237     ImageResizer.setOptions(this.options);
+238     JpegStream.setOptions(this.options);
+239   }
+240 
+567   async buildPaintImageXObject({
+568     resources,
+569     image,
+570     isInline = false,
+571     operatorList,
+572     cacheKey,
+573     localImageCache,
+574     localColorSpaceCache,
+575   }) {
+576     const dict = image.dict;
+577     const imageRef = dict.objId;
+578     const w = dict.get("W", "Width");
+579     const h = dict.get("H", "Height");
+580 
+581     if (!(w && typeof w === "number") || !(h && typeof h === "number")) {
+582       warn("Image dimensions are missing, or not numbers.");
+583       return;
+584     }
+585     const maxImageSize = this.options.maxImageSize;
+586     if (maxImageSize !== -1 && w * h > maxImageSize) {
+587       const msg = "Image exceeded maximum allowed size and was removed.";
+588 
+589       if (this.options.ignoreErrors) {
+590         warn(msg);
+591         return;
+592       }
+593       throw new Error(msg);
+594     }
+595 
+596     let optionalContent;
+597     if (dict.has("OC")) {
+598       optionalContent = await this.parseMarkedContentProps(
+599         dict.get("OC"),
+600         resources
+601       );
+602     }
+603 
+604     const imageMask = dict.get("IM", "ImageMask") || false;
+605     let imgData, args;
+606     if (imageMask) {
+607       // This depends on a tmpCanvas being filled with the
+608       // current fillStyle, such that processing the pixel
+609       // data can't be done here. Instead of creating a
+610       // complete PDFImage, only read the information needed
+611       // for later.
+612       const interpolate = dict.get("I", "Interpolate");
+613       const bitStrideLength = (w + 7) >> 3;
+614       const imgArray = image.getBytes(bitStrideLength * h);
+615       const decode = dict.getArray("D", "Decode");
+616 
+617       if (this.parsingType3Font) {
+618         imgData = PDFImage.createRawMask({
+619           imgArray,
+620           width: w,
+621           height: h,
+622           imageIsFromDecodeStream: image instanceof DecodeStream,
+623           inverseDecode: decode?.[0] > 0,
+624           interpolate,
+625         });
+626 
+627         imgData.cached = !!cacheKey;
+628         args = [imgData];
+629 
+630         operatorList.addImageOps(
+631           OPS.paintImageMaskXObject,
+632           args,
+633           optionalContent
+634         );
+635 
+636         if (cacheKey) {
+637           const cacheData = {
+638             fn: OPS.paintImageMaskXObject,
+639             args,
+640             optionalContent,
+641           };
+642           localImageCache.set(cacheKey, imageRef, cacheData);
+643 
+644           if (imageRef) {
+645             this._regionalImageCache.set(
+646               /* name = */ null,
+647               imageRef,
+648               cacheData
+649             );
+650           }
+651         }
+652         return;
+653       }
+654 
+655       imgData = await PDFImage.createMask({
+656         imgArray,
+657         width: w,
+658         height: h,
+659         imageIsFromDecodeStream: image instanceof DecodeStream,
+660         inverseDecode: decode?.[0] > 0,
+661         interpolate,
+662         isOffscreenCanvasSupported: this.options.isOffscreenCanvasSupported,
+663       });
+664 
+665       if (imgData.isSingleOpaquePixel) {
+666         // Handles special case of mainly LaTeX documents which use image
+667         // masks to draw lines with the current fill style.
+668         operatorList.addImageOps(
+669           OPS.paintSolidColorImageMask,
+670           [],
+671           optionalContent
+672         );
+673 
+674         if (cacheKey) {
+675           const cacheData = {
+676             fn: OPS.paintSolidColorImageMask,
+677             args: [],
+678             optionalContent,
+679           };
+680           localImageCache.set(cacheKey, imageRef, cacheData);
+681 
+682           if (imageRef) {
+683             this._regionalImageCache.set(
+684               /* name = */ null,
+685               imageRef,
+686               cacheData
+687             );
+688           }
+689         }
+690         return;
+691       }
+692 
+693       const objId = `mask_${this.idFactory.createObjId()}`;
+694       operatorList.addDependency(objId);
+695 
+696       imgData.dataLen = imgData.bitmap
+697         ? imgData.width * imgData.height * 4
+698         : imgData.data.length;
+699       this._sendImgData(objId, imgData);
+700 
+701       args = [
+702         {
+703           data: objId,
+704           width: imgData.width,
+705           height: imgData.height,
+706           interpolate: imgData.interpolate,
+707           count: 1,
+708         },
+709       ];
+710       operatorList.addImageOps(
+711         OPS.paintImageMaskXObject,
+712         args,
+713         optionalContent
+714       );
+715 
+716       if (cacheKey) {
+717         const cacheData = {
+718           objId,
+719           fn: OPS.paintImageMaskXObject,
+720           args,
+721           optionalContent,
+722         };
+723         localImageCache.set(cacheKey, imageRef, cacheData);
+724 
+725         if (imageRef) {
+726           this._regionalImageCache.set(/* name = */ null, imageRef, cacheData);
+727         }
+728       }
+729       return;
+730     }
+731 
+732     const SMALL_IMAGE_DIMENSIONS = 200;
+733     // Inlining small images into the queue as RGB data
+734     if (
+735       isInline &&
+736       w + h < SMALL_IMAGE_DIMENSIONS &&
+737       !dict.has("SMask") &&
+738       !dict.has("Mask")
+739     ) {
+740       try {
+741         const imageObj = new PDFImage({
+742           xref: this.xref,
+743           res: resources,
+744           image,
+745           isInline,
+746           pdfFunctionFactory: this._pdfFunctionFactory,
+747           localColorSpaceCache,
+748         });
+749         // We force the use of RGBA_32BPP images here, because we can't handle
+750         // any other kind.
+751         imgData = await imageObj.createImageData(
+752           /* forceRGBA = */ true,
+753           /* isOffscreenCanvasSupported = */ false
+754         );
+755         operatorList.isOffscreenCanvasSupported =
+756           this.options.isOffscreenCanvasSupported;
+757         operatorList.addImageOps(
+758           OPS.paintInlineImageXObject,
+759           [imgData],
+760           optionalContent
+761         );
+762       } catch (reason) {
+763         const msg = `Unable to decode inline image: "${reason}".`;
+764 
+765         if (!this.options.ignoreErrors) {
+766           throw new Error(msg);
+767         }
+768         warn(msg);
+769       }
+770       return;
+771     }
+772 
+773     // If there is no imageMask, create the PDFImage and a lot
+774     // of image processing can be done here.
+775     let objId = `img_${this.idFactory.createObjId()}`,
+776       cacheGlobally = false;
+777 
+778     if (this.parsingType3Font) {
+779       objId = `${this.idFactory.getDocId()}_type3_${objId}`;
+780     } else if (cacheKey && imageRef) {
+781       cacheGlobally = this.globalImageCache.shouldCache(
+782         imageRef,
+783         this.pageIndex
+784       );
+785 
+786       if (cacheGlobally) {
+787         assert(!isInline, "Cannot cache an inline image globally.");
+788 
+789         objId = `${this.idFactory.getDocId()}_${objId}`;
+790       }
+791     }
+792 
+793     // Ensure that the dependency is added before the image is decoded.
+794     operatorList.addDependency(objId);
+795     args = [objId, w, h];
+796     operatorList.addImageOps(OPS.paintImageXObject, args, optionalContent);
+797 
+798     if (cacheGlobally) {
+799       if (this.globalImageCache.hasDecodeFailed(imageRef)) {
+800         this.globalImageCache.setData(imageRef, {
+801           objId,
+802           fn: OPS.paintImageXObject,
+803           args,
+804           optionalContent,
+805           byteSize: 0, // Data is `null`, since decoding failed previously.
+806         });
+807 
+808         this._sendImgData(objId, /* imgData = */ null, cacheGlobally);
+809         return;
+810       }
+811 
+812       // For large (at least 500x500) or more complex images that we'll cache
+813       // globally, check if the image is still cached locally on the main-thread
+814       // to avoid having to re-parse the image (since that can be slow).
+815       if (w * h > 250000 || dict.has("SMask") || dict.has("Mask")) {
+816         const localLength = await this.handler.sendWithPromise("commonobj", [
+817           objId,
+818           "CopyLocalImage",
+819           { imageRef },
+820         ]);
+821 
+822         if (localLength) {
+823           this.globalImageCache.setData(imageRef, {
+824             objId,
+825             fn: OPS.paintImageXObject,
+826             args,
+827             optionalContent,
+828             byteSize: 0, // Temporary entry, to avoid `setData` returning early.
+829           });
+830           this.globalImageCache.addByteSize(imageRef, localLength);
+831           return;
+832         }
+833       }
+834     }
+835 
+836     PDFImage.buildImage({
+837       xref: this.xref,
+838       res: resources,
+839       image,
+840       isInline,
+841       pdfFunctionFactory: this._pdfFunctionFactory,
+842       localColorSpaceCache,
+843     })
+844       .then(async imageObj => {
+845         imgData = await imageObj.createImageData(
+846           /* forceRGBA = */ false,
+847           /* isOffscreenCanvasSupported = */ this.options
+848             .isOffscreenCanvasSupported
+849         );
+850         imgData.dataLen = imgData.bitmap
+851           ? imgData.width * imgData.height * 4
+852           : imgData.data.length;
+853         imgData.ref = imageRef;
+854 
+855         if (cacheGlobally) {
+856           this.globalImageCache.addByteSize(imageRef, imgData.dataLen);
+857         }
+858         return this._sendImgData(objId, imgData, cacheGlobally);
+859       })
+860       .catch(reason => {
+861         warn(`Unable to decode image "${objId}": "${reason}".`);
+862 
+863         if (imageRef) {
+864           this.globalImageCache.addDecodeFailed(imageRef);
+865         }
+866         return this._sendImgData(objId, /* imgData = */ null, cacheGlobally);
+867       });
+868 
+869     if (cacheKey) {
+870       const cacheData = {
+871         objId,
+872         fn: OPS.paintImageXObject,
+873         args,
+874         optionalContent,
+875       };
+876       localImageCache.set(cacheKey, imageRef, cacheData);
+877 
+878       if (imageRef) {
+879         this._regionalImageCache.set(/* name = */ null, imageRef, cacheData);
+880 
+881         if (cacheGlobally) {
+882           this.globalImageCache.setData(imageRef, {
+883             objId,
+884             fn: OPS.paintImageXObject,
+885             args,
+886             optionalContent,
+887             byteSize: 0, // Temporary entry, note `addByteSize` above.
+888           });
+889         }
+890       }
+891     }
+892   }
+893 
+1711   getOperatorList({
+1712     stream,
+1713     task,
+1714     resources,
+1715     operatorList,
+1716     initialState = null,
+1717     fallbackFontDict = null,
+1718   }) {
+1719     // Ensure that `resources`/`initialState` is correctly initialized,
+1720     // even if the provided parameter is e.g. `null`.
+1721     resources ||= Dict.empty;
+1722     initialState ||= new EvalState();
+1723 
+1724     if (!operatorList) {
+1725       throw new Error('getOperatorList: missing "operatorList" parameter');
+1726     }
+1727 
+1728     const self = this;
+1729     const xref = this.xref;
+1730     let parsingText = false;
+1731     const localImageCache = new LocalImageCache();
+1732     const localColorSpaceCache = new LocalColorSpaceCache();
+1733     const localGStateCache = new LocalGStateCache();
+1734     const localTilingPatternCache = new LocalTilingPatternCache();
+1735     const localShadingPatternCache = new Map();
+1736 
+1737     const xobjs = resources.get("XObject") || Dict.empty;
+1738     const patterns = resources.get("Pattern") || Dict.empty;
+1739     const stateManager = new StateManager(initialState);
+1740     const preprocessor = new EvaluatorPreprocessor(stream, xref, stateManager);
+1741     const timeSlotManager = new TimeSlotManager();
+1742 
+1743     function closePendingRestoreOPS(argument) {
+1744       for (let i = 0, ii = preprocessor.savedStatesDepth; i < ii; i++) {
+1745         operatorList.addOp(OPS.restore, []);
+1746       }
+1747     }
+1748 
+1749     return new Promise(function promiseBody(resolve, reject) {
+1750       const next = function (promise) {
+1751         Promise.all([promise, operatorList.ready]).then(function () {
+1752           try {
+1753             promiseBody(resolve, reject);
+1754           } catch (ex) {
+1755             reject(ex);
+1756           }
+1757         }, reject);
+1758       };
+1759       task.ensureNotTerminated();
+1760       timeSlotManager.reset();
+1761 
+1762       const operation = {};
+1763       let stop, i, ii, cs, name, isValidName;
+1764       while (!(stop = timeSlotManager.check())) {
+1765         // The arguments parsed by read() are used beyond this loop, so we
+1766         // cannot reuse the same array on each iteration. Therefore we pass
+1767         // in |null| as the initial value (see the comment on
+1768         // EvaluatorPreprocessor_read() for why).
+1769         operation.args = null;
+1770         if (!preprocessor.read(operation)) {
+1771           break;
+1772         }
+1773         let args = operation.args;
+1774         let fn = operation.fn;
+1775 
+1776         switch (fn | 0) {
+1777           case OPS.paintXObject:
+1778             // eagerly compile XForm objects
+1779             isValidName = args[0] instanceof Name;
+1780             name = args[0].name;
+1781 
+1782             if (isValidName) {
+1783               const localImage = localImageCache.getByName(name);
+1784               if (localImage) {
+1785                 addLocallyCachedImageOps(operatorList, localImage);
+1786                 args = null;
+1787                 continue;
+1788               }
+1789             }
+1790 
+1791             next(
+1792               new Promise(function (resolveXObject, rejectXObject) {
+1793                 if (!isValidName) {
+1794                   throw new FormatError("XObject must be referred to by name.");
+1795                 }
+1796 
+1797                 let xobj = xobjs.getRaw(name);
+1798                 if (xobj instanceof Ref) {
+1799                   const localImage =
+1800                     localImageCache.getByRef(xobj) ||
+1801                     self._regionalImageCache.getByRef(xobj);
+1802                   if (localImage) {
+1803                     addLocallyCachedImageOps(operatorList, localImage);
+1804                     resolveXObject();
+1805                     return;
+1806                   }
+1807 
+1808                   const globalImage = self.globalImageCache.getData(
+1809                     xobj,
+1810                     self.pageIndex
+1811                   );
+1812                   if (globalImage) {
+1813                     operatorList.addDependency(globalImage.objId);
+1814                     operatorList.addImageOps(
+1815                       globalImage.fn,
+1816                       globalImage.args,
+1817                       globalImage.optionalContent
+1818                     );
+1819 
+1820                     resolveXObject();
+1821                     return;
+1822                   }
+1823 
+1824                   xobj = xref.fetch(xobj);
+1825                 }
+1826 
+1827                 if (!(xobj instanceof BaseStream)) {
+1828                   throw new FormatError("XObject should be a stream");
+1829                 }
+1830 
+1831                 const type = xobj.dict.get("Subtype");
+1832                 if (!(type instanceof Name)) {
+1833                   throw new FormatError("XObject should have a Name subtype");
+1834                 }
+1835 
+1836                 if (type.name === "Form") {
+1837                   stateManager.save();
+1838                   self
+1839                     .buildFormXObject(
+1840                       resources,
+1841                       xobj,
+1842                       null,
+1843                       operatorList,
+1844                       task,
+1845                       stateManager.state.clone(),
+1846                       localColorSpaceCache
+1847                     )
+1848                     .then(function () {
+1849                       stateManager.restore();
+1850                       resolveXObject();
+1851                     }, rejectXObject);
+1852                   return;
+1853                 } else if (type.name === "Image") {
+1854                   self
+1855                     .buildPaintImageXObject({
+1856                       resources,
+1857                       image: xobj,
+1858                       operatorList,
+1859                       cacheKey: name,
+1860                       localImageCache,
+1861                       localColorSpaceCache,
+1862                     })
+1863                     .then(resolveXObject, rejectXObject);
+1864                   return;
+1865                 } else if (type.name === "PS") {
+1866                   // PostScript XObjects are unused when viewing documents.
+1867                   // See section 4.7.1 of Adobe's PDF reference.
+1868                   info("Ignored XObject subtype PS");
+1869                 } else {
+1870                   throw new FormatError(
+1871                     `Unhandled XObject subtype ${type.name}`
+1872                   );
+1873                 }
+1874                 resolveXObject();
+1875               }).catch(function (reason) {
+1876                 if (reason instanceof AbortException) {
+1877                   return;
+1878                 }
+1879                 if (self.options.ignoreErrors) {
+1880                   warn(`getOperatorList - ignoring XObject: "${reason}".`);
+1881                   return;
+1882                 }
+1883                 throw reason;
+1884               })
+1885             );
+1886             return;
+1887           case OPS.setFont:
+1888             const fontSize = args[1];
+1889             // eagerly collect all fonts
+1890             next(
+1891               self
+1892                 .handleSetFont(
+1893                   resources,
+1894                   args,
+1895                   null,
+1896                   operatorList,
+1897                   task,
+1898                   stateManager.state,
+1899                   fallbackFontDict
+1900                 )
+1901                 .then(function (loadedName) {
+1902                   operatorList.addDependency(loadedName);
+1903                   operatorList.addOp(OPS.setFont, [loadedName, fontSize]);
+1904                 })
+1905             );
+1906             return;
+1907           case OPS.beginText:
+1908             parsingText = true;
+1909             break;
+1910           case OPS.endText:
+1911             parsingText = false;
+1912             break;
+1913           case OPS.endInlineImage:
+1914             const cacheKey = args[0].cacheKey;
+1915             if (cacheKey) {
+1916               const localImage = localImageCache.getByName(cacheKey);
+1917               if (localImage) {
+1918                 addLocallyCachedImageOps(operatorList, localImage);
+1919                 args = null;
+1920                 continue;
+1921               }
+1922             }
+1923             next(
+1924               self.buildPaintImageXObject({
+1925                 resources,
+1926                 image: args[0],
+1927                 isInline: true,
+1928                 operatorList,
+1929                 cacheKey,
+1930                 localImageCache,
+1931                 localColorSpaceCache,
+1932               })
+1933             );
+1934             return;
+1935           case OPS.showText:
+1936             if (!stateManager.state.font) {
+1937               self.ensureStateFont(stateManager.state);
+1938               continue;
+1939             }
+1940             args[0] = self.handleText(args[0], stateManager.state);
+1941             break;
+1942           case OPS.showSpacedText:
+1943             if (!stateManager.state.font) {
+1944               self.ensureStateFont(stateManager.state);
+1945               continue;
+1946             }
+1947             const combinedGlyphs = [],
+1948               state = stateManager.state;
+1949             for (const arrItem of args[0]) {
+1950               if (typeof arrItem === "string") {
+1951                 combinedGlyphs.push(...self.handleText(arrItem, state));
+1952               } else if (typeof arrItem === "number") {
+1953                 combinedGlyphs.push(arrItem);
+1954               }
+1955             }
+1956             args[0] = combinedGlyphs;
+1957             fn = OPS.showText;
+1958             break;
+1959           case OPS.nextLineShowText:
+1960             if (!stateManager.state.font) {
+1961               self.ensureStateFont(stateManager.state);
+1962               continue;
+1963             }
+1964             operatorList.addOp(OPS.nextLine);
+1965             args[0] = self.handleText(args[0], stateManager.state);
+1966             fn = OPS.showText;
+1967             break;
+1968           case OPS.nextLineSetSpacingShowText:
+1969             if (!stateManager.state.font) {
+1970               self.ensureStateFont(stateManager.state);
+1971               continue;
+1972             }
+1973             operatorList.addOp(OPS.nextLine);
+1974             operatorList.addOp(OPS.setWordSpacing, [args.shift()]);
+1975             operatorList.addOp(OPS.setCharSpacing, [args.shift()]);
+1976             args[0] = self.handleText(args[0], stateManager.state);
+1977             fn = OPS.showText;
+1978             break;
+1979           case OPS.setTextRenderingMode:
+1980             stateManager.state.textRenderingMode = args[0];
+1981             break;
+1982 
+1983           case OPS.setFillColorSpace: {
+1984             const cachedColorSpace = ColorSpace.getCached(
+1985               args[0],
+1986               xref,
+1987               localColorSpaceCache
+1988             );
+1989             if (cachedColorSpace) {
+1990               stateManager.state.fillColorSpace = cachedColorSpace;
+1991               continue;
+1992             }
+1993 
+1994             next(
+1995               self
+1996                 .parseColorSpace({
+1997                   cs: args[0],
+1998                   resources,
+1999                   localColorSpaceCache,
+2000                 })
+2001                 .then(function (colorSpace) {
+2002                   stateManager.state.fillColorSpace =
+2003                     colorSpace || ColorSpace.singletons.gray;
+2004                 })
+2005             );
+2006             return;
+2007           }
+2008           case OPS.setStrokeColorSpace: {
+2009             const cachedColorSpace = ColorSpace.getCached(
+2010               args[0],
+2011               xref,
+2012               localColorSpaceCache
+2013             );
+2014             if (cachedColorSpace) {
+2015               stateManager.state.strokeColorSpace = cachedColorSpace;
+2016               continue;
+2017             }
+2018 
+2019             next(
+2020               self
+2021                 .parseColorSpace({
+2022                   cs: args[0],
+2023                   resources,
+2024                   localColorSpaceCache,
+2025                 })
+2026                 .then(function (colorSpace) {
+2027                   stateManager.state.strokeColorSpace =
+2028                     colorSpace || ColorSpace.singletons.gray;
+2029                 })
+2030             );
+2031             return;
+2032           }
+2033           case OPS.setFillColor:
+2034             cs = stateManager.state.fillColorSpace;
+2035             args = cs.getRgb(args, 0);
+2036             fn = OPS.setFillRGBColor;
+2037             break;
+2038           case OPS.setStrokeColor:
+2039             cs = stateManager.state.strokeColorSpace;
+2040             args = cs.getRgb(args, 0);
+2041             fn = OPS.setStrokeRGBColor;
+2042             break;
+2043           case OPS.setFillGray:
+2044             stateManager.state.fillColorSpace = ColorSpace.singletons.gray;
+2045             args = ColorSpace.singletons.gray.getRgb(args, 0);
+2046             fn = OPS.setFillRGBColor;
+2047             break;
+2048           case OPS.setStrokeGray:
+2049             stateManager.state.strokeColorSpace = ColorSpace.singletons.gray;
+2050             args = ColorSpace.singletons.gray.getRgb(args, 0);
+2051             fn = OPS.setStrokeRGBColor;
+2052             break;
+2053           case OPS.setFillCMYKColor:
+2054             stateManager.state.fillColorSpace = ColorSpace.singletons.cmyk;
+2055             args = ColorSpace.singletons.cmyk.getRgb(args, 0);
+2056             fn = OPS.setFillRGBColor;
+2057             break;
+2058           case OPS.setStrokeCMYKColor:
+2059             stateManager.state.strokeColorSpace = ColorSpace.singletons.cmyk;
+2060             args = ColorSpace.singletons.cmyk.getRgb(args, 0);
+2061             fn = OPS.setStrokeRGBColor;
+2062             break;
+2063           case OPS.setFillRGBColor:
+2064             stateManager.state.fillColorSpace = ColorSpace.singletons.rgb;
+2065             args = ColorSpace.singletons.rgb.getRgb(args, 0);
+2066             break;
+2067           case OPS.setStrokeRGBColor:
+2068             stateManager.state.strokeColorSpace = ColorSpace.singletons.rgb;
+2069             args = ColorSpace.singletons.rgb.getRgb(args, 0);
+2070             break;
+2071           case OPS.setFillColorN:
+2072             cs = stateManager.state.patternFillColorSpace;
+2073             if (!cs) {
+2074               if (isNumberArray(args, null)) {
+2075                 args = ColorSpace.singletons.gray.getRgb(args, 0);
+2076                 fn = OPS.setFillRGBColor;
+2077                 break;
+2078               }
+2079               args = [];
+2080               fn = OPS.setFillTransparent;
+2081               break;
+2082             }
+2083             if (cs.name === "Pattern") {
+2084               next(
+2085                 self.handleColorN(
+2086                   operatorList,
+2087                   OPS.setFillColorN,
+2088                   args,
+2089                   cs,
+2090                   patterns,
+2091                   resources,
+2092                   task,
+2093                   localColorSpaceCache,
+2094                   localTilingPatternCache,
+2095                   localShadingPatternCache
+2096                 )
+2097               );
+2098               return;
+2099             }
+2100             args = cs.getRgb(args, 0);
+2101             fn = OPS.setFillRGBColor;
+2102             break;
+2103           case OPS.setStrokeColorN:
+2104             cs = stateManager.state.patternStrokeColorSpace;
+2105             if (!cs) {
+2106               if (isNumberArray(args, null)) {
+2107                 args = ColorSpace.singletons.gray.getRgb(args, 0);
+2108                 fn = OPS.setStrokeRGBColor;
+2109                 break;
+2110               }
+2111               args = [];
+2112               fn = OPS.setStrokeTransparent;
+2113               break;
+2114             }
+2115             if (cs.name === "Pattern") {
+2116               next(
+2117                 self.handleColorN(
+2118                   operatorList,
+2119                   OPS.setStrokeColorN,
+2120                   args,
+2121                   cs,
+2122                   patterns,
+2123                   resources,
+2124                   task,
+2125                   localColorSpaceCache,
+2126                   localTilingPatternCache,
+2127                   localShadingPatternCache
+2128                 )
+2129               );
+2130               return;
+2131             }
+2132             args = cs.getRgb(args, 0);
+2133             fn = OPS.setStrokeRGBColor;
+2134             break;
+2135 
+2136           case OPS.shadingFill:
+2137             let shading;
+2138             try {
+2139               const shadingRes = resources.get("Shading");
+2140               if (!shadingRes) {
+2141                 throw new FormatError("No shading resource found");
+2142               }
+2143 
+2144               shading = shadingRes.get(args[0].name);
+2145               if (!shading) {
+2146                 throw new FormatError("No shading object found");
+2147               }
+2148             } catch (reason) {
+2149               if (reason instanceof AbortException) {
+2150                 continue;
+2151               }
+2152               if (self.options.ignoreErrors) {
+2153                 warn(`getOperatorList - ignoring Shading: "${reason}".`);
+2154                 continue;
+2155               }
+2156               throw reason;
+2157             }
+2158             const patternId = self.parseShading({
+2159               shading,
+2160               resources,
+2161               localColorSpaceCache,
+2162               localShadingPatternCache,
+2163             });
+2164             if (!patternId) {
+2165               continue;
+2166             }
+2167             args = [patternId];
+2168             fn = OPS.shadingFill;
+2169             break;
+2170           case OPS.setGState:
+2171             isValidName = args[0] instanceof Name;
+2172             name = args[0].name;
+2173 
+2174             if (isValidName) {
+2175               const localGStateObj = localGStateCache.getByName(name);
+2176               if (localGStateObj) {
+2177                 if (localGStateObj.length > 0) {
+2178                   operatorList.addOp(OPS.setGState, [localGStateObj]);
+2179                 }
+2180                 args = null;
+2181                 continue;
+2182               }
+2183             }
+2184 
+2185             next(
+2186               new Promise(function (resolveGState, rejectGState) {
+2187                 if (!isValidName) {
+2188                   throw new FormatError("GState must be referred to by name.");
+2189                 }
+2190 
+2191                 const extGState = resources.get("ExtGState");
+2192                 if (!(extGState instanceof Dict)) {
+2193                   throw new FormatError("ExtGState should be a dictionary.");
+2194                 }
+2195 
+2196                 const gState = extGState.get(name);
+2197                 // TODO: Attempt to lookup cached GStates by reference as well,
+2198                 //       if and only if there are PDF documents where doing so
+2199                 //       would significantly improve performance.
+2200                 if (!(gState instanceof Dict)) {
+2201                   throw new FormatError("GState should be a dictionary.");
+2202                 }
+2203 
+2204                 self
+2205                   .setGState({
+2206                     resources,
+2207                     gState,
+2208                     operatorList,
+2209                     cacheKey: name,
+2210                     task,
+2211                     stateManager,
+2212                     localGStateCache,
+2213                     localColorSpaceCache,
+2214                   })
+2215                   .then(resolveGState, rejectGState);
+2216               }).catch(function (reason) {
+2217                 if (reason instanceof AbortException) {
+2218                   return;
+2219                 }
+2220                 if (self.options.ignoreErrors) {
+2221                   warn(`getOperatorList - ignoring ExtGState: "${reason}".`);
+2222                   return;
+2223                 }
+2224                 throw reason;
+2225               })
+2226             );
+2227             return;
+2228           case OPS.moveTo:
+2229           case OPS.lineTo:
+2230           case OPS.curveTo:
+2231           case OPS.curveTo2:
+2232           case OPS.curveTo3:
+2233           case OPS.closePath:
+2234           case OPS.rectangle:
+2235             self.buildPath(operatorList, fn, args, parsingText);
+2236             continue;
+2237           case OPS.markPoint:
+2238           case OPS.markPointProps:
+2239           case OPS.beginCompat:
+2240           case OPS.endCompat:
+2241             // Ignore operators where the corresponding handlers are known to
+2242             // be no-op in CanvasGraphics (display/canvas.js). This prevents
+2243             // serialization errors and is also a bit more efficient.
+2244             // We could also try to serialize all objects in a general way,
+2245             // e.g. as done in https://github.com/mozilla/pdf.js/pull/6266,
+2246             // but doing so is meaningless without knowing the semantics.
+2247             continue;
+2248           case OPS.beginMarkedContentProps:
+2249             if (!(args[0] instanceof Name)) {
+2250               warn(`Expected name for beginMarkedContentProps arg0=${args[0]}`);
+2251               operatorList.addOp(OPS.beginMarkedContentProps, ["OC", null]);
+2252               continue;
+2253             }
+2254             if (args[0].name === "OC") {
+2255               next(
+2256                 self
+2257                   .parseMarkedContentProps(args[1], resources)
+2258                   .then(data => {
+2259                     operatorList.addOp(OPS.beginMarkedContentProps, [
+2260                       "OC",
+2261                       data,
+2262                     ]);
+2263                   })
+2264                   .catch(reason => {
+2265                     if (reason instanceof AbortException) {
+2266                       return;
+2267                     }
+2268                     if (self.options.ignoreErrors) {
+2269                       warn(
+2270                         `getOperatorList - ignoring beginMarkedContentProps: "${reason}".`
+2271                       );
+2272                       operatorList.addOp(OPS.beginMarkedContentProps, [
+2273                         "OC",
+2274                         null,
+2275                       ]);
+2276                       return;
+2277                     }
+2278                     throw reason;
+2279                   })
+2280               );
+2281               return;
+2282             }
+2283             // Other marked content types aren't supported yet.
+2284             args = [
+2285               args[0].name,
+2286               args[1] instanceof Dict ? args[1].get("MCID") : null,
+2287             ];
+2288 
+2289             break;
+2290           case OPS.beginMarkedContent:
+2291           case OPS.endMarkedContent:
+2292           default:
+2293             // Note: Ignore the operator if it has `Dict` arguments, since
+2294             // those are non-serializable, otherwise postMessage will throw
+2295             // "An object could not be cloned.".
+2296             if (args !== null) {
+2297               for (i = 0, ii = args.length; i < ii; i++) {
+2298                 if (args[i] instanceof Dict) {
+2299                   break;
+2300                 }
+2301               }
+2302               if (i < ii) {
+2303                 warn("getOperatorList - ignoring operator: " + fn);
+2304                 continue;
+2305               }
+2306             }
+2307         }
+2308         operatorList.addOp(fn, args);
+2309       }
+2310       if (stop) {
+2311         next(deferred);
+2312         return;
+2313       }
+2314       // Some PDFs don't close all restores inside object/form.
+2315       // Closing those for them.
+2316       closePendingRestoreOPS();
+2317       resolve();
+2318     }).catch(reason => {
+2319       if (reason instanceof AbortException) {
+2320         return;
+2321       }
+2322       if (this.options.ignoreErrors) {
+2323         warn(
+2324           `getOperatorList - ignoring errors during "${task.name}" ` +
+2325             `task: "${reason}".`
+2326         );
+2327 
+2328         closePendingRestoreOPS();
+2329         return;
+2330       }
+2331       throw reason;
+2332     });
+2333   }
+2334 
+4607 }
+4608 
+5212 
+File:
+src/core/operator_list.js
+1 /* Copyright 2017 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { ImageKind, OPS, RenderingIntentFlag, warn } from "../shared/util.js";
+17 
+31 const InitialState = [];
+32 
+33 // This replaces (save, transform, paintInlineImageXObject, restore)+
+34 // sequences with one |paintInlineImageXObjectGroup| operation.
+163 
+164 // This replaces (save, transform, paintImageMaskXObject, restore)+
+165 // sequences with one |paintImageMaskXObjectGroup| or one
+166 // |paintImageMaskXObjectRepeat| operation.
+281 
+282 // This replaces (save, transform, paintImageXObject, restore)+ sequences
+283 // with one paintImageXObjectRepeat operation, if the |transform| and
+284 // |paintImageXObjectRepeat| ops are appropriate.
+380 
+381 // This replaces (beginText, setFont, setTextMatrix, showText, endText)+
+382 // sequences with (beginText, setFont, (setTextMatrix, showText)+, endText)+
+383 // sequences, if the font for each one is the same.
+472 
+582 class OperatorList {
+583   static CHUNK_SIZE = 1000;
+584 
+585   // Close to chunk size.
+586   static CHUNK_SIZE_ABOUT = this.CHUNK_SIZE - 5;
+587 
+588   constructor(intent = 0, streamSink) {
+589     this._streamSink = streamSink;
+590     this.fnArray = [];
+591     this.argsArray = [];
+592     this.optimizer =
+593       streamSink && !(intent & RenderingIntentFlag.OPLIST)
+594         ? new QueueOptimizer(this)
+595         : new NullOptimizer(this);
+596     this.dependencies = new Set();
+597     this._totalLength = 0;
+598     this.weight = 0;
+599     this._resolved = streamSink ? null : Promise.resolve();
+600   }
+601 
+602   // eslint-disable-next-line accessor-pairs
+606 
+639   addImageOps(fn, args, optionalContent) {
+640     if (optionalContent !== undefined) {
+641       this.addOp(OPS.beginMarkedContentProps, ["OC", optionalContent]);
+642     }
+643 
+644     this.addOp(fn, args);
+645 
+646     if (optionalContent !== undefined) {
+647       this.addOp(OPS.endMarkedContent, []);
+648     }
+649   }
+650 
+727 }
+728 
+</code>
+
+PR summary:
+<pr_summary>
+For images that include SMask/Mask entries, ignore an SMask defined in the current graphics state (bug 986450)
+From section [11.6.4.3 Mask Shape and Opacity](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf#G10.4848628) in the PDF specification:
+ - An image XObject may contain its own *soft-mask image* in the form of a subsidiary image XObject in the `SMask` entry of the image dictionary (see "Image Dictionaries"). This mask, if present, shall override any explicit or colour key mask specified by the image dictionary's `Mask` entry. Either form of mask in the image dictionary shall override the current soft mask in the graphics state.
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

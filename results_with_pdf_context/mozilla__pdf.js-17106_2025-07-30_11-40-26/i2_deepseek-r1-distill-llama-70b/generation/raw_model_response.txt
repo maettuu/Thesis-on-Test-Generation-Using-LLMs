@@ -1,0 +1,48 @@
+<think>
+Okay, I need to write a regression test for the issue where memory usage balloons when scrolling through a PDF. The patch provided is supposed to fix this by not storing data after cleanup and releasing ImageBitmap immediately. 
+
+First, I should understand the problem. When scrolling through a PDF, especially with large images, the memory increases because the data isn't being cleaned up properly. The patch adds a check to see if the page's intent states are empty, indicating cleanup has happened, and then releases the bitmap data.
+
+So, the test should simulate this scenario. I'll need to create a PDF with large images, load it, scroll through it, and check if the memory doesn't balloon.
+
+I'll use Puppeteer to control a headless browser. I'll load a test PDF, ensure it's rendered, and then navigate or scroll in a way that triggers the cleanup of pages. After that, I'll check the memory usage to see if it's within an expected range.
+
+I need to import the necessary modules. Puppeteer is already in the imports, so I can use that. I'll also need a sample PDF with large images. Since I can't create a new file, I'll assume there's a test PDF available at a specific path.
+
+The test will be an async function. I'll set up a browser instance, go to the test PDF, wait for it to load, and then navigate to a different page to trigger cleanup. After that, I'll take a memory snapshot and check if it's below a certain threshold.
+
+I should make sure the test doesn't have any flaky parts. Using Puppeteer's built-in memory tracking might help. I'll set a reasonable timeout and adjust the expected memory threshold based on typical values.
+
+Putting it all together, the test will load the PDF, cause the pages to be cleaned up, and then verify that the memory doesn't remain high. This should fail before the patch and pass after, confirming the fix.
+</think>
+
+```javascript
+it("should not balloon memory when scrolling through PDF with large images", async () => {
+  const { PDFDocument, PDFPageProxy } = await import("../../src/display/api.js");
+  const { puppeteer } = await import("puppeteer");
+
+  const browser = await puppeteer.launch();
+  const page = await browser.newPage();
+  const largePdfPath = require.resolve("../../test/pdfs/large-image.pdf");
+  
+  // Load PDF with multiple large images
+  await page.goto(`file://${largePdfPath}`, { waitUntil: "networkidle0" });
+  
+  // Simulate scrolling through pages
+  await page.evaluate(async () => {
+    const pdfDoc = await PDFDocument.load(await fetch("file://../test/pdfs/large-image.pdf").then(res => res.arrayBuffer()));
+    await pdfDoc.getPage(1).render();
+    history.back();
+  });
+
+  // Verify memory usage is within expected range after cleanup
+  const memoryUsage = await page.evaluate(() => {
+    return performance.memory.usedJSHeapSize;
+  });
+
+  await browser.close();
+  
+  // Adjust the expected threshold based on your environment
+  expect(memoryUsage).toBeLessThan(20 * 1024 * 1024); // 20MB
+});
+```

@@ -1,0 +1,50 @@
+<think>
+Okay, I need to create a regression test for the issue where `navigator` does not have the `platform` attribute, causing an error when using `pdfjs-dist`. The user provided a patch that modifies `util.js` to handle cases where `navigator` might not exist or `navigator.platform` might not be a string.
+
+First, I should understand what the patch does. Looking at the patch, in `util.js`, the `platform` getter in the `FeatureTest` class is changed. The original code checks if `PDFJSDev` is undefined or not in "GENERIC" mode and if `navigator` is undefined. If so, it returns `isMac: false`. Otherwise, it uses `navigator.platform.includes("Mac")`.
+
+The patch modifies this to first check if `PDFJSDev` is not undefined and is in "MOZCENTRAL" mode, or if `navigator` exists and `navigator.platform` is a string. If either is true, it sets `isMac` based on `navigator.platform`. Otherwise, it defaults `isMac` to false.
+
+So, the test needs to verify that when `navigator` is not available or `navigator.platform` is not a string, the `platform` getter doesn't throw an error and returns `isMac: false`.
+
+I should create a test that simulates environments where `navigator` is missing or `navigator.platform` is not a string. Since the test is in Node.js, `navigator` isn't typically available, but sometimes it might be defined by certain libraries.
+
+I'll structure the test with `describe` and `it` blocks. The `it` block will:
+1. Mock `navigator` to be undefined.
+2. Access `FeatureTest.platform` and check that `isMac` is false.
+3. Then, mock `navigator` to exist but without `platform` being a string.
+4. Check again that `isMac` is false.
+
+I'll use `sinon` to stub `navigator` for each case. This ensures that the test accurately reflects the scenarios before and after the patch.
+
+I need to import `FeatureTest` from the correct path. The test file already imports from `../../src/shared/util.js`, so I'll use that.
+
+Finally, I'll write assertions to ensure that accessing `platform` doesn't throw an error and that `isMac` is correctly set to false in both cases.
+</think>
+
+```javascript
+it("should handle missing navigator.platform without error", async () => {
+  const { FeatureTest } = await import("../../src/shared/util.js");
+  
+  // Mock navigator to be undefined
+  const navigatorStub = sinon.stub(global, "navigator", undefined);
+  
+  try {
+    const platform = await FeatureTest.platform;
+    expect(platform.isMac).toBe(false);
+  } finally {
+    navigatorStub.restore();
+  }
+  
+  // Mock navigator with platform not being a string
+  const navigatorPlatformStub = sinon.stub(global, "navigator");
+  navigatorPlatformStub.platform = null;
+  
+  try {
+    const platform = await FeatureTest.platform;
+    expect(platform.isMac).toBe(false);
+  } finally {
+    navigatorPlatformStub.restore();
+  }
+});
+```

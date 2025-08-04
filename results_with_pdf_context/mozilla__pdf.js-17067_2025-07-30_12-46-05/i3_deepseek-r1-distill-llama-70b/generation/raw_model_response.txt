@@ -1,0 +1,66 @@
+<think>
+Okay, I need to write a regression test for the issue where applying a transform breaks the pattern in PDF.js. The user provided a patch that modifies the updateRectMinMax method in canvas.js. My test should fail before the patch is applied and pass after.
+
+First, I'll look at the existing code and the patch. The patch changes how the minimum and maximum X and Y values are calculated when updating the rectangle's min and max. Before, it only considered two points, but now it considers four points, which probably fixes the issue with skewed or rotated rectangles.
+
+I need to create a test that checks if the pattern is rendered correctly after a transform is applied. The test should open the provided PDF, apply a transform, and check if the pattern appears as expected.
+
+I'll start by importing the necessary modules. Since the test is in Node.js, I'll use dynamic imports for getDocument and buildGetDocumentParams. I'll also need to create a canvas to render the PDF page.
+
+Next, I'll set up the PDF document and page. I'll use the issue17065.pdf file. I'll create a canvas element and set its size to match the page's viewport.
+
+I'll then draw the page onto the canvas. Applying a transform that skews or rotates the content should reproduce the issue. After the patch, the pattern should appear correctly.
+
+To verify the result, I'll check specific pixels. The pattern has a gradient from red to blue to green to purple. I'll check the RGBA values of certain pixels to ensure they match the expected colors.
+
+In the test, I'll compare the actual pixel values with the expected ones. If they match, the test passes; otherwise, it fails.
+
+I should structure the test as an async function using Jest's it syntax. I'll include error handling and ensure the test cleans up properly, like closing the PDF document after the test.
+
+I also need to make sure that the test is self-contained and doesn't rely on any external state. It should only use the provided imports and the test PDF file.
+
+Finally, I'll write the test code, making sure it's concise and only tests the specific behavior affected by the patch.
+</think>
+
+```javascript
+it("should render patterns correctly after transform", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  
+  const loadingTask = getDocument(buildGetDocumentParams('issue17065.pdf'));
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport: viewport,
+    transform: [1, 0, 0, 1, 0, 0],
+  });
+  
+  await renderTask.promise;
+  
+  // Verify the pattern is rendered correctly by checking pixel colors
+  const expectedRed = [255, 0, 0, 255];
+  const expectedBlue = [0, 0, 255, 255];
+  const expectedGreen = [0, 255, 0, 255];
+  const expectedPurple = [128, 0, 128, 255];
+  
+  const actualPixel1 = context.getImageData(100, 100, 1, 1).data;
+  const actualPixel2 = context.getImageData(200, 200, 1, 1).data;
+  const actualPixel3 = context.getImageData(300, 300, 1, 1).data;
+  const actualPixel4 = context.getImageData(400, 400, 1, 1).data;
+  
+  expect(actualPixel1).toEqual(expectedRed);
+  expect(actualPixel2).toEqual(expectedBlue);
+  expect(actualPixel3).toEqual(expectedGreen);
+  expect(actualPixel4).toEqual(expectedPurple);
+  
+  await pdf.close();
+});
+```

@@ -1,0 +1,3184 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Support highlighting images of text in addition of text
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/draw_layer.js b/src/display/draw_layer.js
+--- a/src/display/draw_layer.js
++++ b/src/display/draw_layer.js
+@@ -28,6 +28,8 @@ class DrawLayer {
+ 
+   #mapping = new Map();
+ 
++  #toUpdate = new Map();
++
+   constructor({ pageIndex }) {
+     this.pageIndex = pageIndex;
+   }
+@@ -53,7 +55,7 @@ class DrawLayer {
+     return shadow(this, "_svgFactory", new DOMSVGFactory());
+   }
+ 
+-  static #setBox(element, { x, y, width, height }) {
++  static #setBox(element, { x = 0, y = 0, width = 1, height = 1 } = {}) {
+     const { style } = element;
+     style.top = `${100 * y}%`;
+     style.left = `${100 * x}%`;
+@@ -83,10 +85,13 @@ class DrawLayer {
+     return clipPathId;
+   }
+ 
+-  highlight(outlines, color, opacity) {
++  highlight(outlines, color, opacity, isPathUpdatable = false) {
+     const id = this.#id++;
+     const root = this.#createSVG(outlines.box);
+     root.classList.add("highlight");
++    if (outlines.free) {
++      root.classList.add("free");
++    }
+     const defs = DrawLayer._svgFactory.createElement("defs");
+     root.append(defs);
+     const path = DrawLayer._svgFactory.createElement("path");
+@@ -95,6 +100,10 @@ class DrawLayer {
+     path.setAttribute("id", pathId);
+     path.setAttribute("d", outlines.toSVGPath());
+ 
++    if (isPathUpdatable) {
++      this.#toUpdate.set(id, path);
++    }
++
+     // Create the clipping path for the editor div.
+     const clipPathId = this.#createClipPath(defs, pathId);
+ 
+@@ -139,6 +148,22 @@ class DrawLayer {
+     return id;
+   }
+ 
++  finalizeLine(id, line) {
++    const path = this.#toUpdate.get(id);
++    this.#toUpdate.delete(id);
++    this.updateBox(id, line.box);
++    path.setAttribute("d", line.toSVGPath());
++  }
++
++  removeFreeHighlight(id) {
++    this.remove(id);
++    this.#toUpdate.delete(id);
++  }
++
++  updatePath(id, line) {
++    this.#toUpdate.get(id).setAttribute("d", line.toSVGPath());
++  }
++
+   updateBox(id, box) {
+     DrawLayer.#setBox(this.#mapping.get(id), box);
+   }
+
+diff --git a/src/display/editor/annotation_editor_layer.js b/src/display/editor/annotation_editor_layer.js
+--- a/src/display/editor/annotation_editor_layer.js
++++ b/src/display/editor/annotation_editor_layer.js
+@@ -67,6 +67,8 @@ class AnnotationEditorLayer {
+ 
+   #boundPointerdown = this.pointerdown.bind(this);
+ 
++  #boundTextLayerPointerDown = this.#textLayerPointerDown.bind(this);
++
+   #editorFocusTimeoutId = null;
+ 
+   #boundSelectionStart = this.selectionStart.bind(this);
+@@ -199,7 +201,7 @@ class AnnotationEditorLayer {
+       }
+     }
+ 
+-    const editor = this.#createAndAddNewEditor(
++    const editor = this.createAndAddNewEditor(
+       { offsetX: 0, offsetY: 0 },
+       /* isCentered = */ false
+     );
+@@ -328,12 +330,34 @@ class AnnotationEditorLayer {
+   enableTextSelection() {
+     if (this.#textLayer?.div) {
+       document.addEventListener("selectstart", this.#boundSelectionStart);
++      this.#textLayer.div.addEventListener(
++        "pointerdown",
++        this.#boundTextLayerPointerDown
++      );
++      this.#textLayer.div.classList.add("drawing");
+     }
+   }
+ 
+   disableTextSelection() {
+     if (this.#textLayer?.div) {
+       document.removeEventListener("selectstart", this.#boundSelectionStart);
++      this.#textLayer.div.removeEventListener(
++        "pointerdown",
++        this.#boundTextLayerPointerDown
++      );
++      this.#textLayer.div.classList.remove("drawing");
++    }
++  }
++
++  #textLayerPointerDown(event) {
++    if (event.target === this.#textLayer.div) {
++      const { isMac } = FeatureTest.platform;
++      if (event.button !== 0 || (event.ctrlKey && isMac)) {
++        // Do nothing on right click.
++        return;
++      }
++      HighlightEditor.startHighlighting(this, event);
++      event.preventDefault();
+     }
+   }
+ 
+@@ -565,7 +589,7 @@ class AnnotationEditorLayer {
+    * @param [Object] data
+    * @returns {AnnotationEditor}
+    */
+-  #createAndAddNewEditor(event, isCentered, data = {}) {
++  createAndAddNewEditor(event, isCentered, data = {}) {
+     const id = this.getNextId();
+     const editor = this.#createNewEditor({
+       parent: this,
+@@ -603,10 +627,7 @@ class AnnotationEditorLayer {
+    * Create and add a new editor.
+    */
+   addNewEditor() {
+-    this.#createAndAddNewEditor(
+-      this.#getCenterPoint(),
+-      /* isCentered = */ true
+-    );
++    this.createAndAddNewEditor(this.#getCenterPoint(), /* isCentered = */ true);
+   }
+ 
+   /**
+@@ -726,7 +747,7 @@ class AnnotationEditorLayer {
+       boxes.push(rotator(x, y, width, height));
+     }
+     if (boxes.length !== 0) {
+-      this.#createAndAddNewEditor(event, false, {
++      this.createAndAddNewEditor(event, false, {
+         boxes,
+       });
+     }
+@@ -767,7 +788,7 @@ class AnnotationEditorLayer {
+       return;
+     }
+ 
+-    this.#createAndAddNewEditor(event, /* isCentered = */ false);
++    this.createAndAddNewEditor(event, /* isCentered = */ false);
+   }
+ 
+   /**
+@@ -901,6 +922,10 @@ class AnnotationEditorLayer {
+     const { pageWidth, pageHeight } = this.viewport.rawDims;
+     return [pageWidth, pageHeight];
+   }
++
++  get scale() {
++    return this.#uiManager.viewParameters.realScale;
++  }
+ }
+ 
+ export { AnnotationEditorLayer };
+
+diff --git a/src/display/editor/highlight.js b/src/display/editor/highlight.js
+--- a/src/display/editor/highlight.js
++++ b/src/display/editor/highlight.js
+@@ -18,10 +18,11 @@ import {
+   AnnotationEditorType,
+   Util,
+ } from "../../shared/util.js";
++import { FreeOutliner, Outliner } from "./outliner.js";
+ import { AnnotationEditor } from "./editor.js";
+ import { bindEvents } from "./tools.js";
+ import { ColorPicker } from "./color_picker.js";
+-import { Outliner } from "./outliner.js";
++import { noContextMenu } from "../display_utils.js";
+ 
+ /**
+  * Basic draw editor in order to generate an Highlight annotation.
+@@ -41,6 +42,8 @@ class HighlightEditor extends AnnotationEditor {
+ 
+   #id = null;
+ 
++  #isFreeHighlight = false;
++
+   #lastPoint = null;
+ 
+   #opacity;
+@@ -51,12 +54,20 @@ class HighlightEditor extends AnnotationEditor {
+ 
+   static _defaultOpacity = 1;
+ 
++  static _defaultThickness = 10;
++
+   static _l10nPromise;
+ 
+   static _type = "highlight";
+ 
+   static _editorType = AnnotationEditorType.HIGHLIGHT;
+ 
++  static _freeHighlightId = -1;
++
++  static _freeHighlight = null;
++
++  static _freeHighlightClipId = "";
++
+   constructor(params) {
+     super({ ...params, name: "highlightEditor" });
+     this.color = params.color || HighlightEditor._defaultColor;
+@@ -64,9 +75,15 @@ class HighlightEditor extends AnnotationEditor {
+     this.#boxes = params.boxes || null;
+     this._isDraggable = false;
+ 
+-    this.#createOutlines();
+-    this.#addToDrawLayer();
+-    this.rotate(this.rotation);
++    if (params.highlightId > -1) {
++      this.#isFreeHighlight = true;
++      this.#createFreeOutlines(params);
++      this.#addToDrawLayer();
++    } else {
++      this.#createOutlines();
++      this.#addToDrawLayer();
++      this.rotate(this.rotation);
++    }
+   }
+ 
+   #createOutlines() {
+@@ -95,6 +112,60 @@ class HighlightEditor extends AnnotationEditor {
+     ];
+   }
+ 
++  #createFreeOutlines({ highlight, highlightId, clipPathId }) {
++    this.#highlightOutlines = highlight.getOutlines(
++      this._uiManager.direction === "ltr"
++    );
++    this.#id = highlightId;
++    this.#clipPathId = clipPathId;
++    const { x, y, width, height, lastPoint } = this.#highlightOutlines.box;
++
++    // We need to redraw the highlight because we change the coordinates to be
++    // in the box coordinate system.
++    this.parent.drawLayer.finalizeLine(this.#id, this.#highlightOutlines);
++    switch (this.rotation) {
++      case 0:
++        this.x = x;
++        this.y = y;
++        this.width = width;
++        this.height = height;
++        break;
++      case 90: {
++        const [pageWidth, pageHeight] = this.parentDimensions;
++        this.x = y;
++        this.y = 1 - x;
++        this.width = (width * pageHeight) / pageWidth;
++        this.height = (height * pageWidth) / pageHeight;
++        break;
++      }
++      case 180:
++        this.x = 1 - x;
++        this.y = 1 - y;
++        this.width = width;
++        this.height = height;
++        break;
++      case 270: {
++        const [pageWidth, pageHeight] = this.parentDimensions;
++        this.x = 1 - y;
++        this.y = x;
++        this.width = (width * pageHeight) / pageWidth;
++        this.height = (height * pageWidth) / pageHeight;
++        break;
++      }
++    }
++
++    const innerMargin = 1.5;
++    this.#focusOutlines = highlight.getFocusOutline(
++      /* Slightly bigger than the highlight in order to have a little
++         space between the highlight and the outline. */
++      HighlightEditor._defaultThickness + innerMargin
++    );
++    this.#outlineId = this.parent.drawLayer.highlightOutline(
++      this.#focusOutlines
++    );
++    this.#lastPoint = lastPoint;
++  }
++
+   static initialize(l10n, uiManager) {
+     AnnotationEditor.initialize(l10n, uiManager);
+     HighlightEditor._defaultColor ||=
+@@ -196,12 +267,12 @@ class HighlightEditor extends AnnotationEditor {
+ 
+   /** @inheritdoc */
+   fixAndSetPosition() {
+-    return super.fixAndSetPosition(0);
++    return super.fixAndSetPosition(this.#getRotation());
+   }
+ 
+   /** @inheritdoc */
+   getRect(tx, ty) {
+-    return super.getRect(tx, ty, 0);
++    return super.getRect(tx, ty, this.#getRotation());
+   }
+ 
+   /** @inheritdoc */
+@@ -229,7 +300,7 @@ class HighlightEditor extends AnnotationEditor {
+     this.#addToDrawLayer();
+ 
+     if (!this.isAttachedToDOM) {
+-      // At some point this editor was removed and we're rebuilting it,
++      // At some point this editor was removed and we're rebuilding it,
+       // hence we must add it to its parent.
+       this.parent.add(this);
+     }
+@@ -273,10 +344,10 @@ class HighlightEditor extends AnnotationEditor {
+         this.color,
+         this.#opacity
+       ));
++    this.#outlineId = parent.drawLayer.highlightOutline(this.#focusOutlines);
+     if (this.#highlightDiv) {
+       this.#highlightDiv.style.clipPath = this.#clipPathId;
+     }
+-    this.#outlineId = parent.drawLayer.highlightOutline(this.#focusOutlines);
+   }
+ 
+   static #rotateBbox({ x, y, width, height }, angle) {
+@@ -313,10 +384,19 @@ class HighlightEditor extends AnnotationEditor {
+ 
+   /** @inheritdoc */
+   rotate(angle) {
++    // We need to rotate the svgs because of the coordinates system.
+     const { drawLayer } = this.parent;
++    let box;
++    if (this.#isFreeHighlight) {
++      angle = (angle - this.rotation + 360) % 360;
++      box = HighlightEditor.#rotateBbox(this.#highlightOutlines.box, angle);
++    } else {
++      // An highlight annotation is always drawn horizontally.
++      box = HighlightEditor.#rotateBbox(this, angle);
++    }
+     drawLayer.rotate(this.#id, angle);
+     drawLayer.rotate(this.#outlineId, angle);
+-    drawLayer.updateBox(this.#id, HighlightEditor.#rotateBbox(this, angle));
++    drawLayer.updateBox(this.#id, box);
+     drawLayer.updateBox(
+       this.#outlineId,
+       HighlightEditor.#rotateBbox(this.#focusOutlines.box, angle)
+@@ -330,6 +410,9 @@ class HighlightEditor extends AnnotationEditor {
+     }
+ 
+     const div = super.render();
++    if (this.#isFreeHighlight) {
++      div.classList.add("free");
++    }
+     const highlightDiv = (this.#highlightDiv = document.createElement("div"));
+     div.append(highlightDiv);
+     highlightDiv.className = "internal";
+@@ -364,7 +447,16 @@ class HighlightEditor extends AnnotationEditor {
+     this.parent?.drawLayer.removeClass(this.#outlineId, "selected");
+   }
+ 
++  #getRotation() {
++    // Highlight annotations are always drawn horizontally but if
++    // a free highlight annotation can be rotated.
++    return this.#isFreeHighlight ? this.rotation : 0;
++  }
++
+   #serializeBoxes(rect) {
++    if (this.#isFreeHighlight) {
++      return null;
++    }
+     const [pageWidth, pageHeight] = this.pageDimensions;
+     const boxes = this.#boxes;
+     const quadPoints = new Array(boxes.length * 8);
+@@ -387,7 +479,79 @@ class HighlightEditor extends AnnotationEditor {
+   }
+ 
+   #serializeOutlines(rect) {
+-    return this.#highlightOutlines.serialize(rect, 0);
++    return this.#highlightOutlines.serialize(rect, this.#getRotation());
++  }
++
++  static startHighlighting(parent, { target: textLayer, x, y }) {
++    const {
++      x: layerX,
++      y: layerY,
++      width: parentWidth,
++      height: parentHeight,
++    } = textLayer.getBoundingClientRect();
++    const pointerMove = e => {
++      this.#highlightMove(parent, e);
++    };
++    const pointerDownOptions = { capture: true, passive: false };
++    const pointerDown = e => {
++      // Avoid to have undesired clicks during the drawing.
++      e.preventDefault();
++      e.stopPropagation();
++    };
++    const pointerUpCallback = e => {
++      textLayer.removeEventListener("pointermove", pointerMove);
++      window.removeEventListener("blur", pointerUpCallback);
++      window.removeEventListener("pointerup", pointerUpCallback);
++      window.removeEventListener(
++        "pointerdown",
++        pointerDown,
++        pointerDownOptions
++      );
++      window.removeEventListener("contextmenu", noContextMenu);
++      this.#endHighlight(parent, e);
++    };
++    window.addEventListener("blur", pointerUpCallback);
++    window.addEventListener("pointerup", pointerUpCallback);
++    window.addEventListener("pointerdown", pointerDown, pointerDownOptions);
++    window.addEventListener("contextmenu", noContextMenu);
++
++    textLayer.addEventListener("pointermove", pointerMove);
++    this._freeHighlight = new FreeOutliner(
++      { x, y },
++      [layerX, layerY, parentWidth, parentHeight],
++      parent.scale,
++      this._defaultThickness,
++      /* innerMargin = */ 0.001
++    );
++    ({ id: this._freeHighlightId, clipPathId: this._freeHighlightClipId } =
++      parent.drawLayer.highlight(
++        this._freeHighlight,
++        this._defaultColor,
++        this._defaultOpacity,
++        /* isPathUpdatable = */ true
++      ));
++  }
++
++  static #highlightMove(parent, event) {
++    if (this._freeHighlight.add(event)) {
++      // Redraw only if the point has been added.
++      parent.drawLayer.updatePath(this._freeHighlightId, this._freeHighlight);
++    }
++  }
++
++  static #endHighlight(parent, event) {
++    if (!this._freeHighlight.isEmpty()) {
++      parent.createAndAddNewEditor(event, false, {
++        highlightId: this._freeHighlightId,
++        highlight: this._freeHighlight,
++        clipPathId: this._freeHighlightClipId,
++      });
++    } else {
++      parent.drawLayer.removeFreeHighlight(this._freeHighlightId);
++    }
++    this._freeHighlightId = -1;
++    this._freeHighlight = null;
++    this._freeHighlightClipId = "";
+   }
+ 
+   /** @inheritdoc */
+@@ -437,7 +601,7 @@ class HighlightEditor extends AnnotationEditor {
+       outlines: this.#serializeOutlines(rect),
+       pageIndex: this.pageIndex,
+       rect,
+-      rotation: 0,
++      rotation: this.#getRotation(),
+       structTreeParentId: this._structTreeParentId,
+     };
+   }
+
+diff --git a/src/display/editor/outliner.js b/src/display/editor/outliner.js
+--- a/src/display/editor/outliner.js
++++ b/src/display/editor/outliner.js
+@@ -13,6 +13,8 @@
+  * limitations under the License.
+  */
+ 
++import { Util } from "../../shared/util.js";
++
+ class Outliner {
+   #box;
+ 
+@@ -260,10 +262,16 @@ class Outliner {
+ }
+ 
+ class Outline {
++  /**
++   * @returns {string} The SVG path of the outline.
++   */
+   toSVGPath() {
+     throw new Error("Abstract method `toSVGPath` must be implemented.");
+   }
+ 
++  /**
++   * @type {Object|null} The bounding box of the outline.
++   */
+   get box() {
+     throw new Error("Abstract getter `box` must be implemented.");
+   }
+@@ -271,6 +279,10 @@ class Outline {
+   serialize(_bbox, _rotation) {
+     throw new Error("Abstract method `serialize` must be implemented.");
+   }
++
++  get free() {
++    return this instanceof FreeHighlightOutline;
++  }
+ }
+ 
+ class HighlightOutline extends Outline {
+@@ -331,4 +343,469 @@ class HighlightOutline extends Outline {
+   }
+ }
+ 
+-export { Outliner };
++class FreeOutliner {
++  #box;
++
++  #bottom = [];
++
++  #innerMargin;
++
++  #top = [];
++
++  // The first 6 elements are the last 3 points of the top part of the outline.
++  // The next 6 elements are the last 3 points of the line.
++  // The next 6 elements are the last 3 points of the bottom part of the
++  // outline.
++  // We track the last 3 points in order to be able to:
++  //  - compute the normal of the line,
++  //  - compute the control points of the quadratic Bézier curve.
++  #last = new Float64Array(18);
++
++  #min;
++
++  #min_dist;
++
++  #scaleFactor;
++
++  #thickness;
++
++  #points = [];
++
++  static #MIN_DIST = 8;
++
++  static #MIN_DIFF = 2;
++
++  static #MIN = FreeOutliner.#MIN_DIST + FreeOutliner.#MIN_DIFF;
++
++  constructor({ x, y }, box, scaleFactor, thickness, innerMargin = 0) {
++    this.#box = box;
++    this.#thickness = thickness * scaleFactor;
++    this.#last.set([NaN, NaN, NaN, NaN, x, y], 6);
++    this.#innerMargin = innerMargin;
++    this.#min_dist = FreeOutliner.#MIN_DIST * scaleFactor;
++    this.#min = FreeOutliner.#MIN * scaleFactor;
++    this.#scaleFactor = scaleFactor;
++    this.#points.push(x, y);
++  }
++
++  get free() {
++    return true;
++  }
++
++  isEmpty() {
++    // When we add a second point then this.#last.slice(6) will be something
++    // like [NaN, NaN, firstX, firstY, secondX, secondY,...] so having a NaN
++    // at index 8 means that we've only one point.
++    return isNaN(this.#last[8]);
++  }
++
++  add({ x, y }) {
++    const [layerX, layerY, layerWidth, layerHeight] = this.#box;
++    let [x1, y1, x2, y2] = this.#last.subarray(8, 12);
++    const diffX = x - x2;
++    const diffY = y - y2;
++    const d = Math.hypot(diffX, diffY);
++    if (d < this.#min) {
++      // The idea is to avoid garbage points around the last point.
++      // When the points are too close, it just leads to bad normal vectors and
++      // control points.
++      return false;
++    }
++    const diffD = d - this.#min_dist;
++    const K = diffD / d;
++    const shiftX = K * diffX;
++    const shiftY = K * diffY;
++
++    // We update the last 3 points of the line.
++    let x0 = x1;
++    let y0 = y1;
++    x1 = x2;
++    y1 = y2;
++    x2 += shiftX;
++    y2 += shiftY;
++
++    // We keep track of the points in order to be able to compute the focus
++    // outline.
++    this.#points?.push(x, y);
++
++    // Create the normal unit vector.
++    // |(shiftX, shiftY)| = |K| * |(diffX, diffY)| = |K| * d = diffD.
++    const nX = -shiftY / diffD;
++    const nY = shiftX / diffD;
++    const thX = nX * this.#thickness;
++    const thY = nY * this.#thickness;
++    this.#last.set(this.#last.subarray(2, 8), 0);
++    this.#last.set([x2 + thX, y2 + thY], 4);
++    this.#last.set(this.#last.subarray(14, 18), 12);
++    this.#last.set([x2 - thX, y2 - thY], 16);
++
++    if (isNaN(this.#last[6])) {
++      if (this.#top.length === 0) {
++        this.#last.set([x1 + thX, y1 + thY], 2);
++        this.#top.push(
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (x1 + thX - layerX) / layerWidth,
++          (y1 + thY - layerY) / layerHeight
++        );
++        this.#last.set([x1 - thX, y1 - thY], 14);
++        this.#bottom.push(
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (x1 - thX - layerX) / layerWidth,
++          (y1 - thY - layerY) / layerHeight
++        );
++      }
++      this.#last.set([x0, y0, x1, y1, x2, y2], 6);
++      return !this.isEmpty();
++    }
++
++    this.#last.set([x0, y0, x1, y1, x2, y2], 6);
++
++    const angle = Math.abs(
++      Math.atan2(y0 - y1, x0 - x1) - Math.atan2(shiftY, shiftX)
++    );
++    if (angle < Math.PI / 2) {
++      // In order to avoid some possible artifacts, we're going to use the a
++      // straight line instead of a quadratic Bézier curve.
++      [x1, y1, x2, y2] = this.#last.subarray(2, 6);
++      this.#top.push(
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        ((x1 + x2) / 2 - layerX) / layerWidth,
++        ((y1 + y2) / 2 - layerY) / layerHeight
++      );
++      [x1, y1, x0, y0] = this.#last.subarray(14, 18);
++      this.#bottom.push(
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        ((x0 + x1) / 2 - layerX) / layerWidth,
++        ((y0 + y1) / 2 - layerY) / layerHeight
++      );
++      return true;
++    }
++
++    // Control points and the final point for the quadratic Bézier curve.
++    [x0, y0, x1, y1, x2, y2] = this.#last.subarray(0, 6);
++    this.#top.push(
++      ((x0 + 5 * x1) / 6 - layerX) / layerWidth,
++      ((y0 + 5 * y1) / 6 - layerY) / layerHeight,
++      ((5 * x1 + x2) / 6 - layerX) / layerWidth,
++      ((5 * y1 + y2) / 6 - layerY) / layerHeight,
++      ((x1 + x2) / 2 - layerX) / layerWidth,
++      ((y1 + y2) / 2 - layerY) / layerHeight
++    );
++    [x2, y2, x1, y1, x0, y0] = this.#last.subarray(12, 18);
++    this.#bottom.push(
++      ((x0 + 5 * x1) / 6 - layerX) / layerWidth,
++      ((y0 + 5 * y1) / 6 - layerY) / layerHeight,
++      ((5 * x1 + x2) / 6 - layerX) / layerWidth,
++      ((5 * y1 + y2) / 6 - layerY) / layerHeight,
++      ((x1 + x2) / 2 - layerX) / layerWidth,
++      ((y1 + y2) / 2 - layerY) / layerHeight
++    );
++    return true;
++  }
++
++  toSVGPath() {
++    if (this.isEmpty()) {
++      // We've only one point.
++      return "";
++    }
++    const top = this.#top;
++    const bottom = this.#bottom;
++    const lastTop = this.#last.subarray(4, 6);
++    const lastBottom = this.#last.subarray(16, 18);
++    const [x, y, width, height] = this.#box;
++
++    if (isNaN(this.#last[6]) && !this.isEmpty()) {
++      // We've only two points.
++      return `M${(this.#last[2] - x) / width} ${
++        (this.#last[3] - y) / height
++      } L${(this.#last[4] - x) / width} ${(this.#last[5] - y) / height} L${
++        (this.#last[16] - x) / width
++      } ${(this.#last[17] - y) / height} L${(this.#last[14] - x) / width} ${
++        (this.#last[15] - y) / height
++      } Z`;
++    }
++
++    const buffer = [];
++    buffer.push(`M${top[4]} ${top[5]}`);
++    for (let i = 6; i < top.length; i += 6) {
++      if (isNaN(top[i])) {
++        buffer.push(`L${top[i + 4]} ${top[i + 5]}`);
++      } else {
++        buffer.push(
++          `C${top[i]} ${top[i + 1]} ${top[i + 2]} ${top[i + 3]} ${top[i + 4]} ${
++            top[i + 5]
++          }`
++        );
++      }
++    }
++    buffer.push(
++      `L${(lastTop[0] - x) / width} ${(lastTop[1] - y) / height} L${
++        (lastBottom[0] - x) / width
++      } ${(lastBottom[1] - y) / height}`
++    );
++    for (let i = bottom.length - 6; i >= 6; i -= 6) {
++      if (isNaN(bottom[i])) {
++        buffer.push(`L${bottom[i + 4]} ${bottom[i + 5]}`);
++      } else {
++        buffer.push(
++          `C${bottom[i]} ${bottom[i + 1]} ${bottom[i + 2]} ${bottom[i + 3]} ${
++            bottom[i + 4]
++          } ${bottom[i + 5]}`
++        );
++      }
++    }
++    buffer.push(`L${bottom[4]} ${bottom[5]} Z`);
++
++    return buffer.join(" ");
++  }
++
++  getFocusOutline(thickness) {
++    // Build the outline of the highlight to use as the focus outline.
++    const [x, y] = this.#points;
++    const outliner = new FreeOutliner(
++      { x, y },
++      this.#box,
++      this.#scaleFactor,
++      thickness,
++      /* innerMargin = */ 0.0025
++    );
++    outliner.#points = null;
++    for (let i = 2; i < this.#points.length; i += 2) {
++      outliner.add({ x: this.#points[i], y: this.#points[i + 1] });
++    }
++    return outliner.getOutlines();
++  }
++
++  getOutlines(isLTR) {
++    const top = this.#top;
++    const bottom = this.#bottom;
++    const last = this.#last;
++    const lastTop = last.subarray(4, 6);
++    const lastBottom = last.subarray(16, 18);
++    const [layerX, layerY, layerWidth, layerHeight] = this.#box;
++
++    if (isNaN(last[6]) && !this.isEmpty()) {
++      // We've only two points.
++      const outline = new Float64Array(24);
++      outline.set(
++        [
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (last[2] - layerX) / layerWidth,
++          (last[3] - layerY) / layerHeight,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (last[4] - layerX) / layerWidth,
++          (last[5] - layerY) / layerHeight,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (last[16] - layerX) / layerWidth,
++          (last[17] - layerY) / layerHeight,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          (last[14] - layerX) / layerWidth,
++          (last[15] - layerY) / layerHeight,
++        ],
++        0
++      );
++      return new FreeHighlightOutline(outline, this.#innerMargin, isLTR);
++    }
++
++    const outline = new Float64Array(
++      this.#top.length + 12 + this.#bottom.length
++    );
++    let N = top.length;
++    for (let i = 0; i < N; i += 2) {
++      if (isNaN(top[i])) {
++        outline[i] = outline[i + 1] = NaN;
++        continue;
++      }
++      outline[i] = top[i];
++      outline[i + 1] = top[i + 1];
++    }
++    outline.set(
++      [
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        (lastTop[0] - layerX) / layerWidth,
++        (lastTop[1] - layerY) / layerHeight,
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        (lastBottom[0] - layerX) / layerWidth,
++        (lastBottom[1] - layerY) / layerHeight,
++      ],
++      N
++    );
++    N += 12;
++
++    for (let i = bottom.length - 6; i >= 6; i -= 6) {
++      for (let j = 0; j < 6; j += 2) {
++        if (isNaN(bottom[i + j])) {
++          outline[N] = outline[N + 1] = NaN;
++          N += 2;
++          continue;
++        }
++        outline[N] = bottom[i + j];
++        outline[N + 1] = bottom[i + j + 1];
++        N += 2;
++      }
++    }
++    outline.set([NaN, NaN, NaN, NaN, bottom[4], bottom[5]], N);
++    return new FreeHighlightOutline(outline, this.#innerMargin, isLTR);
++  }
++}
++
++class FreeHighlightOutline extends Outline {
++  #bbox = null;
++
++  #innerMargin;
++
++  #outline;
++
++  constructor(outline, innerMargin, isLTR) {
++    super();
++    this.#outline = outline;
++    this.#innerMargin = innerMargin;
++    this.#computeMinMax(isLTR);
++
++    const { x, y, width, height } = this.#bbox;
++    for (let i = 0, ii = outline.length; i < ii; i += 2) {
++      outline[i] = (outline[i] - x) / width;
++      outline[i + 1] = (outline[i + 1] - y) / height;
++    }
++  }
++
++  toSVGPath() {
++    const buffer = [`M${this.#outline[4]} ${this.#outline[5]}`];
++    for (let i = 6, ii = this.#outline.length; i < ii; i += 6) {
++      if (isNaN(this.#outline[i])) {
++        buffer.push(`L${this.#outline[i + 4]} ${this.#outline[i + 5]}`);
++        continue;
++      }
++      buffer.push(
++        `C${this.#outline[i]} ${this.#outline[i + 1]} ${this.#outline[i + 2]} ${
++          this.#outline[i + 3]
++        } ${this.#outline[i + 4]} ${this.#outline[i + 5]}`
++      );
++    }
++    buffer.push("Z");
++    return buffer.join(" ");
++  }
++
++  serialize([blX, blY, trX, trY], rotation) {
++    const src = this.#outline;
++    const outline = new Float64Array(src.length);
++    const width = trX - blX;
++    const height = trY - blY;
++    switch (rotation) {
++      case 0:
++        for (let i = 0, ii = src.length; i < ii; i += 2) {
++          outline[i] = blX + src[i] * width;
++          outline[i + 1] = trY - src[i + 1] * height;
++        }
++        break;
++      case 90:
++        for (let i = 0, ii = src.length; i < ii; i += 2) {
++          outline[i] = blX + src[i + 1] * width;
++          outline[i + 1] = blY + src[i] * height;
++        }
++        break;
++      case 180:
++        for (let i = 0, ii = src.length; i < ii; i += 2) {
++          outline[i] = trX - src[i] * width;
++          outline[i + 1] = blY + src[i + 1] * height;
++        }
++        break;
++      case 270:
++        for (let i = 0, ii = src.length; i < ii; i += 2) {
++          outline[i] = trX - src[i + 1] * width;
++          outline[i + 1] = trY - src[i] * height;
++        }
++    }
++    return outline;
++  }
++
++  #computeMinMax(isLTR) {
++    const outline = this.#outline;
++    let lastX = outline[4];
++    let lastY = outline[5];
++    let minX = lastX;
++    let minY = lastY;
++    let maxX = lastX;
++    let maxY = lastY;
++    let lastPointX = lastX;
++    let lastPointY = lastY;
++    const ltrCallback = isLTR ? Math.max : Math.min;
++
++    for (let i = 6, ii = outline.length; i < ii; i += 6) {
++      if (isNaN(outline[i])) {
++        minX = Math.min(minX, outline[i + 4]);
++        minY = Math.min(minY, outline[i + 5]);
++        maxX = Math.max(maxX, outline[i + 4]);
++        maxY = Math.max(maxY, outline[i + 5]);
++        if (lastPointY < outline[i + 5]) {
++          lastPointX = outline[i + 4];
++          lastPointY = outline[i + 5];
++        } else if (lastPointY === outline[i + 5]) {
++          lastPointX = ltrCallback(lastPointX, outline[i + 4]);
++        }
++      } else {
++        const bbox = Util.bezierBoundingBox(
++          lastX,
++          lastY,
++          ...outline.slice(i, i + 6)
++        );
++        minX = Math.min(minX, bbox[0]);
++        minY = Math.min(minY, bbox[1]);
++        maxX = Math.max(maxX, bbox[2]);
++        maxY = Math.max(maxY, bbox[3]);
++        if (lastPointY < bbox[3]) {
++          lastPointX = bbox[2];
++          lastPointY = bbox[3];
++        } else if (lastPointY === bbox[3]) {
++          lastPointX = ltrCallback(lastPointX, bbox[2]);
++        }
++      }
++      lastX = outline[i + 4];
++      lastY = outline[i + 5];
++    }
++
++    const x = minX - this.#innerMargin,
++      y = minY - this.#innerMargin,
++      width = maxX - minX + 2 * this.#innerMargin,
++      height = maxY - minY + 2 * this.#innerMargin;
++    lastPointX = (lastPointX - x) / width;
++    lastPointY = (lastPointY - y) / height;
++    this.#bbox = { x, y, width, height, lastPoint: [lastPointX, lastPointY] };
++  }
++
++  get box() {
++    return this.#bbox;
++  }
++}
++
++export { FreeOutliner, Outliner };
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.7
+- @babel/preset-env: ^7.23.7
+- @babel/runtime: ^7.23.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @javascript-obfuscator/escodegen: 2.3.0
+- @jazzer.js/core: ^2.1.0
+- acorn: ^8.11.3
+- autoprefixer: ^10.4.16
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001574
+- canvas: ^2.11.2
+- core-js: ^3.35.0
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.2
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^50.0.1
+- globals: ^13.24.0
+- gulp: ^4.0.2
+- gulp-cli: ^2.3.0
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.33
+- postcss-dark-theme-class: ^1.1.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.1.1
+- puppeteer: ^21.7.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.1.0
+- stylelint-prettier: ^5.0.0
+- terser: ^5.26.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.89.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n.js`: L10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/draw_layer.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { DOMSVGFactory } from "./display_utils.js";
+17 import { shadow } from "../shared/util.js";
+18 
+19 /**
+20  * Manage the SVGs drawn on top of the page canvas.
+21  * It's important to have them directly on top of the canvas because we want to
+22  * be able to use mix-blend-mode for some of them.
+23  */
+24 class DrawLayer {
+25   #parent = null;
+26 
+27   #id = 0;
+28 
+29   #mapping = new Map();
+30 
+31   constructor({ pageIndex }) {
+32     this.pageIndex = pageIndex;
+33   }
+34 
+35   setParent(parent) {
+36     if (!this.#parent) {
+37       this.#parent = parent;
+38       return;
+39     }
+40 
+41     if (this.#parent !== parent) {
+42       if (this.#mapping.size > 0) {
+43         for (const root of this.#mapping.values()) {
+44           root.remove();
+45           parent.append(root);
+46         }
+47       }
+48       this.#parent = parent;
+49     }
+50   }
+51 
+52   static get _svgFactory() {
+53     return shadow(this, "_svgFactory", new DOMSVGFactory());
+54   }
+55 
+56   static #setBox(element, { x, y, width, height }) {
+57     const { style } = element;
+58     style.top = `${100 * y}%`;
+59     style.left = `${100 * x}%`;
+60     style.width = `${100 * width}%`;
+61     style.height = `${100 * height}%`;
+62   }
+63 
+64   #createSVG(box) {
+65     const svg = DrawLayer._svgFactory.create(1, 1, /* skipDimensions = */ true);
+66     this.#parent.append(svg);
+67     DrawLayer.#setBox(svg, box);
+68 
+69     return svg;
+70   }
+71 
+72   #createClipPath(defs, pathId) {
+73     const clipPath = DrawLayer._svgFactory.createElement("clipPath");
+74     defs.append(clipPath);
+75     const clipPathId = `clip_${pathId}`;
+76     clipPath.setAttribute("id", clipPathId);
+77     clipPath.setAttribute("clipPathUnits", "objectBoundingBox");
+78     const clipPathUse = DrawLayer._svgFactory.createElement("use");
+79     clipPath.append(clipPathUse);
+80     clipPathUse.setAttribute("href", `#${pathId}`);
+81     clipPathUse.classList.add("clip");
+82 
+83     return clipPathId;
+84   }
+85 
+86   highlight(outlines, color, opacity) {
+87     const id = this.#id++;
+88     const root = this.#createSVG(outlines.box);
+89     root.classList.add("highlight");
+90     const defs = DrawLayer._svgFactory.createElement("defs");
+91     root.append(defs);
+92     const path = DrawLayer._svgFactory.createElement("path");
+93     defs.append(path);
+94     const pathId = `path_p${this.pageIndex}_${id}`;
+95     path.setAttribute("id", pathId);
+96     path.setAttribute("d", outlines.toSVGPath());
+97 
+98     // Create the clipping path for the editor div.
+99     const clipPathId = this.#createClipPath(defs, pathId);
+100 
+101     const use = DrawLayer._svgFactory.createElement("use");
+102     root.append(use);
+103     root.setAttribute("fill", color);
+104     root.setAttribute("fill-opacity", opacity);
+105     use.setAttribute("href", `#${pathId}`);
+106 
+107     this.#mapping.set(id, root);
+108 
+109     return { id, clipPathId: `url(#${clipPathId})` };
+110   }
+111 
+112   highlightOutline(outlines) {
+113     // We cannot draw the outline directly in the SVG for highlights because
+114     // it composes with its parent with mix-blend-mode: multiply.
+115     // But the outline has a different mix-blend-mode, so we need to draw it in
+116     // its own SVG.
+117     const id = this.#id++;
+118     const root = this.#createSVG(outlines.box);
+119     root.classList.add("highlightOutline");
+120     const defs = DrawLayer._svgFactory.createElement("defs");
+121     root.append(defs);
+122     const path = DrawLayer._svgFactory.createElement("path");
+123     defs.append(path);
+124     const pathId = `path_p${this.pageIndex}_${id}`;
+125     path.setAttribute("id", pathId);
+126     path.setAttribute("d", outlines.toSVGPath());
+127     path.setAttribute("vector-effect", "non-scaling-stroke");
+128 
+129     const use1 = DrawLayer._svgFactory.createElement("use");
+130     root.append(use1);
+131     use1.setAttribute("href", `#${pathId}`);
+132     const use2 = use1.cloneNode();
+133     root.append(use2);
+134     use1.classList.add("mainOutline");
+135     use2.classList.add("secondaryOutline");
+136 
+137     this.#mapping.set(id, root);
+138 
+139     return id;
+140   }
+141 
+142   updateBox(id, box) {
+143     DrawLayer.#setBox(this.#mapping.get(id), box);
+144   }
+145 
+146   rotate(id, angle) {
+147     this.#mapping.get(id).setAttribute("data-main-rotation", angle);
+148   }
+149 
+150   changeColor(id, color) {
+151     this.#mapping.get(id).setAttribute("fill", color);
+152   }
+153 
+154   changeOpacity(id, opacity) {
+155     this.#mapping.get(id).setAttribute("fill-opacity", opacity);
+156   }
+157 
+158   addClass(id, className) {
+159     this.#mapping.get(id).classList.add(className);
+160   }
+161 
+162   removeClass(id, className) {
+163     this.#mapping.get(id).classList.remove(className);
+164   }
+165 
+166   remove(id) {
+167     if (this.#parent === null) {
+168       return;
+169     }
+170     this.#mapping.get(id).remove();
+171     this.#mapping.delete(id);
+172   }
+173 
+174   destroy() {
+175     this.#parent = null;
+176     for (const root of this.#mapping.values()) {
+177       root.remove();
+178     }
+179     this.#mapping.clear();
+180   }
+181 }
+182 
+183 export { DrawLayer };
+File:
+src/display/editor/annotation_editor_layer.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 // eslint-disable-next-line max-len
+17 /** @typedef {import("./tools.js").AnnotationEditorUIManager} AnnotationEditorUIManager */
+18 /** @typedef {import("../display_utils.js").PageViewport} PageViewport */
+19 // eslint-disable-next-line max-len
+20 /** @typedef {import("../../../web/text_accessibility.js").TextAccessibilityManager} TextAccessibilityManager */
+21 /** @typedef {import("../../../web/interfaces").IL10n} IL10n */
+22 // eslint-disable-next-line max-len
+23 /** @typedef {import("../annotation_layer.js").AnnotationLayer} AnnotationLayer */
+24 /** @typedef {import("../draw_layer.js").DrawLayer} DrawLayer */
+25 
+26 import { AnnotationEditorType, FeatureTest } from "../../shared/util.js";
+27 import { AnnotationEditor } from "./editor.js";
+28 import { FreeTextEditor } from "./freetext.js";
+29 import { HighlightEditor } from "./highlight.js";
+30 import { InkEditor } from "./ink.js";
+31 import { setLayerDimensions } from "../display_utils.js";
+32 import { StampEditor } from "./stamp.js";
+33 
+34 /**
+35  * @typedef {Object} AnnotationEditorLayerOptions
+36  * @property {Object} mode
+37  * @property {HTMLDivElement} div
+38  * @property {AnnotationEditorUIManager} uiManager
+39  * @property {boolean} enabled
+40  * @property {TextAccessibilityManager} [accessibilityManager]
+41  * @property {number} pageIndex
+42  * @property {IL10n} l10n
+43  * @property {AnnotationLayer} [annotationLayer]
+44  * @property {HTMLDivElement} [textLayer]
+45  * @property {DrawLayer} drawLayer
+46  * @property {PageViewport} viewport
+47  */
+48 
+49 /**
+50  * @typedef {Object} RenderEditorLayerOptions
+51  * @property {PageViewport} viewport
+52  */
+53 
+54 /**
+55  * Manage all the different editors on a page.
+56  */
+57 class AnnotationEditorLayer {
+58   #accessibilityManager;
+59 
+60   #allowClick = false;
+61 
+62   #annotationLayer = null;
+63 
+64   #boundPointerup = this.pointerup.bind(this);
+65 
+66   #boundPointerUpAfterSelection = this.pointerUpAfterSelection.bind(this);
+67 
+68   #boundPointerdown = this.pointerdown.bind(this);
+69 
+70   #editorFocusTimeoutId = null;
+71 
+72   #boundSelectionStart = this.selectionStart.bind(this);
+73 
+74   #editors = new Map();
+75 
+76   #hadPointerDown = false;
+77 
+78   #isCleaningUp = false;
+79 
+80   #isDisabling = false;
+81 
+82   #textLayer = null;
+83 
+84   #uiManager;
+85 
+86   static _initialized = false;
+87 
+88   static #editorTypes = new Map(
+89     [FreeTextEditor, InkEditor, StampEditor, HighlightEditor].map(type => [
+90       type._editorType,
+91       type,
+92     ])
+93   );
+94 
+95   /**
+96    * @param {AnnotationEditorLayerOptions} options
+97    */
+98   constructor({
+99     uiManager,
+100     pageIndex,
+101     div,
+102     accessibilityManager,
+103     annotationLayer,
+104     drawLayer,
+105     textLayer,
+106     viewport,
+107     l10n,
+108   }) {
+109     const editorTypes = [...AnnotationEditorLayer.#editorTypes.values()];
+110     if (!AnnotationEditorLayer._initialized) {
+111       AnnotationEditorLayer._initialized = true;
+112       for (const editorType of editorTypes) {
+113         editorType.initialize(l10n, uiManager);
+114       }
+115     }
+116     uiManager.registerEditorTypes(editorTypes);
+117 
+118     this.#uiManager = uiManager;
+119     this.pageIndex = pageIndex;
+120     this.div = div;
+121     this.#accessibilityManager = accessibilityManager;
+122     this.#annotationLayer = annotationLayer;
+123     this.viewport = viewport;
+124     this.#textLayer = textLayer;
+125     this.drawLayer = drawLayer;
+126 
+127     this.#uiManager.addLayer(this);
+128   }
+129 
+130   get isEmpty() {
+131     return this.#editors.size === 0;
+132   }
+133 
+134   /**
+135    * Update the toolbar if it's required to reflect the tool currently used.
+136    * @param {number} mode
+137    */
+138   updateToolbar(mode) {
+139     this.#uiManager.updateToolbar(mode);
+140   }
+141 
+142   /**
+143    * The mode has changed: it must be updated.
+144    * @param {number} mode
+145    */
+146   updateMode(mode = this.#uiManager.getMode()) {
+147     this.#cleanup();
+148     switch (mode) {
+149       case AnnotationEditorType.NONE:
+150         this.disableTextSelection();
+151         this.togglePointerEvents(false);
+152         this.disableClick();
+153         break;
+154       case AnnotationEditorType.INK:
+155         // We always want to have an ink editor ready to draw in.
+156         this.addInkEditorIfNeeded(false);
+157 
+158         this.disableTextSelection();
+159         this.togglePointerEvents(true);
+160         this.disableClick();
+161         break;
+162       case AnnotationEditorType.HIGHLIGHT:
+163         this.enableTextSelection();
+164         this.togglePointerEvents(false);
+165         this.disableClick();
+166         break;
+167       default:
+168         this.disableTextSelection();
+169         this.togglePointerEvents(true);
+170         this.enableClick();
+171     }
+172 
+173     if (mode !== AnnotationEditorType.NONE) {
+174       const { classList } = this.div;
+175       for (const editorType of AnnotationEditorLayer.#editorTypes.values()) {
+176         classList.toggle(
+177           `${editorType._type}Editing`,
+178           mode === editorType._editorType
+179         );
+180       }
+181       this.div.hidden = false;
+182     }
+183   }
+184 
+185   addInkEditorIfNeeded(isCommitting) {
+186     if (this.#uiManager.getMode() !== AnnotationEditorType.INK) {
+187       // We don't want to add an ink editor if we're not in ink mode!
+188       return;
+189     }
+190 
+191     if (!isCommitting) {
+192       // We're removing an editor but an empty one can already exist so in this
+193       // case we don't need to create a new one.
+194       for (const editor of this.#editors.values()) {
+195         if (editor.isEmpty()) {
+196           editor.setInBackground();
+197           return;
+198         }
+199       }
+200     }
+201 
+202     const editor = this.#createAndAddNewEditor(
+203       { offsetX: 0, offsetY: 0 },
+204       /* isCentered = */ false
+205     );
+206     editor.setInBackground();
+207   }
+208 
+209   /**
+210    * Set the editing state.
+211    * @param {boolean} isEditing
+212    */
+213   setEditingState(isEditing) {
+214     this.#uiManager.setEditingState(isEditing);
+215   }
+216 
+217   /**
+218    * Add some commands into the CommandManager (undo/redo stuff).
+219    * @param {Object} params
+220    */
+221   addCommands(params) {
+222     this.#uiManager.addCommands(params);
+223   }
+224 
+225   togglePointerEvents(enabled = false) {
+226     this.div.classList.toggle("disabled", !enabled);
+227   }
+228 
+229   /**
+230    * Enable pointer events on the main div in order to enable
+231    * editor creation.
+232    */
+233   enable() {
+234     this.togglePointerEvents(true);
+235     const annotationElementIds = new Set();
+236     for (const editor of this.#editors.values()) {
+237       editor.enableEditing();
+238       if (editor.annotationElementId) {
+239         annotationElementIds.add(editor.annotationElementId);
+240       }
+241     }
+242 
+243     if (!this.#annotationLayer) {
+244       return;
+245     }
+246 
+247     const editables = this.#annotationLayer.getEditableAnnotations();
+248     for (const editable of editables) {
+249       // The element must be hidden whatever its state is.
+250       editable.hide();
+251       if (this.#uiManager.isDeletedAnnotationElement(editable.data.id)) {
+252         continue;
+253       }
+254       if (annotationElementIds.has(editable.data.id)) {
+255         continue;
+256       }
+257       const editor = this.deserialize(editable);
+258       if (!editor) {
+259         continue;
+260       }
+261       this.addOrRebuild(editor);
+262       editor.enableEditing();
+263     }
+264   }
+265 
+266   /**
+267    * Disable editor creation.
+268    */
+269   disable() {
+270     this.#isDisabling = true;
+271     this.togglePointerEvents(false);
+272     const hiddenAnnotationIds = new Set();
+273     for (const editor of this.#editors.values()) {
+274       editor.disableEditing();
+275       if (!editor.annotationElementId || editor.serialize() !== null) {
+276         hiddenAnnotationIds.add(editor.annotationElementId);
+277         continue;
+278       }
+279       this.getEditableAnnotation(editor.annotationElementId)?.show();
+280       editor.remove();
+281     }
+282 
+283     if (this.#annotationLayer) {
+284       // Show the annotations that were hidden in enable().
+285       const editables = this.#annotationLayer.getEditableAnnotations();
+286       for (const editable of editables) {
+287         const { id } = editable.data;
+288         if (
+289           hiddenAnnotationIds.has(id) ||
+290           this.#uiManager.isDeletedAnnotationElement(id)
+291         ) {
+292           continue;
+293         }
+294         editable.show();
+295       }
+296     }
+297 
+298     this.#cleanup();
+299     if (this.isEmpty) {
+300       this.div.hidden = true;
+301     }
+302     const { classList } = this.div;
+303     for (const editorType of AnnotationEditorLayer.#editorTypes.values()) {
+304       classList.remove(`${editorType._type}Editing`);
+305     }
+306     this.disableTextSelection();
+307 
+308     this.#isDisabling = false;
+309   }
+310 
+311   getEditableAnnotation(id) {
+312     return this.#annotationLayer?.getEditableAnnotation(id) || null;
+313   }
+314 
+315   /**
+316    * Set the current editor.
+317    * @param {AnnotationEditor} editor
+318    */
+319   setActiveEditor(editor) {
+320     const currentActive = this.#uiManager.getActive();
+321     if (currentActive === editor) {
+322       return;
+323     }
+324 
+325     this.#uiManager.setActiveEditor(editor);
+326   }
+327 
+328   enableTextSelection() {
+329     if (this.#textLayer?.div) {
+330       document.addEventListener("selectstart", this.#boundSelectionStart);
+331     }
+332   }
+333 
+334   disableTextSelection() {
+335     if (this.#textLayer?.div) {
+336       document.removeEventListener("selectstart", this.#boundSelectionStart);
+337     }
+338   }
+339 
+340   enableClick() {
+341     this.div.addEventListener("pointerdown", this.#boundPointerdown);
+342     this.div.addEventListener("pointerup", this.#boundPointerup);
+343   }
+344 
+345   disableClick() {
+346     this.div.removeEventListener("pointerdown", this.#boundPointerdown);
+347     this.div.removeEventListener("pointerup", this.#boundPointerup);
+348   }
+349 
+350   attach(editor) {
+351     this.#editors.set(editor.id, editor);
+352     const { annotationElementId } = editor;
+353     if (
+354       annotationElementId &&
+355       this.#uiManager.isDeletedAnnotationElement(annotationElementId)
+356     ) {
+357       this.#uiManager.removeDeletedAnnotationElement(editor);
+358     }
+359   }
+360 
+361   detach(editor) {
+362     this.#editors.delete(editor.id);
+363     this.#accessibilityManager?.removePointerInTextLayer(editor.contentDiv);
+364 
+365     if (!this.#isDisabling && editor.annotationElementId) {
+366       this.#uiManager.addDeletedAnnotationElement(editor);
+367     }
+368   }
+369 
+370   /**
+371    * Remove an editor.
+372    * @param {AnnotationEditor} editor
+373    */
+374   remove(editor) {
+375     // Since we can undo a removal we need to keep the
+376     // parent property as it is, so don't null it!
+377 
+378     this.detach(editor);
+379     this.#uiManager.removeEditor(editor);
+380     editor.div.remove();
+381     editor.isAttachedToDOM = false;
+382 
+383     if (!this.#isCleaningUp) {
+384       this.addInkEditorIfNeeded(/* isCommitting = */ false);
+385     }
+386   }
+387 
+388   /**
+389    * An editor can have a different parent, for example after having
+390    * being dragged and droped from a page to another.
+391    * @param {AnnotationEditor} editor
+392    */
+393   changeParent(editor) {
+394     if (editor.parent === this) {
+395       return;
+396     }
+397 
+398     if (editor.annotationElementId) {
+399       this.#uiManager.addDeletedAnnotationElement(editor.annotationElementId);
+400       AnnotationEditor.deleteAnnotationElement(editor);
+401       editor.annotationElementId = null;
+402     }
+403 
+404     this.attach(editor);
+405     editor.parent?.detach(editor);
+406     editor.setParent(this);
+407     if (editor.div && editor.isAttachedToDOM) {
+408       editor.div.remove();
+409       this.div.append(editor.div);
+410     }
+411   }
+412 
+413   /**
+414    * Add a new editor in the current view.
+415    * @param {AnnotationEditor} editor
+416    */
+417   add(editor) {
+418     this.changeParent(editor);
+419     this.#uiManager.addEditor(editor);
+420     this.attach(editor);
+421 
+422     if (!editor.isAttachedToDOM) {
+423       const div = editor.render();
+424       this.div.append(div);
+425       editor.isAttachedToDOM = true;
+426     }
+427 
+428     // The editor will be correctly moved into the DOM (see fixAndSetPosition).
+429     editor.fixAndSetPosition();
+430     editor.onceAdded();
+431     this.#uiManager.addToAnnotationStorage(editor);
+432   }
+433 
+434   moveEditorInDOM(editor) {
+435     if (!editor.isAttachedToDOM) {
+436       return;
+437     }
+438 
+439     const { activeElement } = document;
+440     if (editor.div.contains(activeElement) && !this.#editorFocusTimeoutId) {
+441       // When the div is moved in the DOM the focus can move somewhere else,
+442       // so we want to be sure that the focus will stay on the editor but we
+443       // don't want to call any focus callbacks, hence we disable them and only
+444       // re-enable them when the editor has the focus.
+445       editor._focusEventsAllowed = false;
+446       this.#editorFocusTimeoutId = setTimeout(() => {
+447         this.#editorFocusTimeoutId = null;
+448         if (!editor.div.contains(document.activeElement)) {
+449           editor.div.addEventListener(
+450             "focusin",
+451             () => {
+452               editor._focusEventsAllowed = true;
+453             },
+454             { once: true }
+455           );
+456           activeElement.focus();
+457         } else {
+458           editor._focusEventsAllowed = true;
+459         }
+460       }, 0);
+461     }
+462 
+463     editor._structTreeParentId = this.#accessibilityManager?.moveElementInDOM(
+464       this.div,
+465       editor.div,
+466       editor.contentDiv,
+467       /* isRemovable = */ true
+468     );
+469   }
+470 
+471   /**
+472    * Add or rebuild depending if it has been removed or not.
+473    * @param {AnnotationEditor} editor
+474    */
+475   addOrRebuild(editor) {
+476     if (editor.needsToBeRebuilt()) {
+477       editor.parent ||= this;
+478       editor.rebuild();
+479     } else {
+480       this.add(editor);
+481     }
+482   }
+483 
+484   /**
+485    * Add a new editor and make this addition undoable.
+486    * @param {AnnotationEditor} editor
+487    */
+488   addUndoableEditor(editor) {
+489     const cmd = () => editor._uiManager.rebuild(editor);
+490     const undo = () => {
+491       editor.remove();
+492     };
+493 
+494     this.addCommands({ cmd, undo, mustExec: false });
+495   }
+496 
+497   /**
+498    * Get an id for an editor.
+499    * @returns {string}
+500    */
+501   getNextId() {
+502     return this.#uiManager.getId();
+503   }
+504 
+505   get #currentEditorType() {
+506     return AnnotationEditorLayer.#editorTypes.get(this.#uiManager.getMode());
+507   }
+508 
+509   /**
+510    * Create a new editor
+511    * @param {Object} params
+512    * @returns {AnnotationEditor}
+513    */
+514   #createNewEditor(params) {
+515     const editorType = this.#currentEditorType;
+516     return editorType ? new editorType.prototype.constructor(params) : null;
+517   }
+518 
+519   canCreateNewEmptyEditor() {
+520     return this.#currentEditorType?.canCreateNewEmptyEditor();
+521   }
+522 
+523   /**
+524    * Paste some content into a new editor.
+525    * @param {number} mode
+526    * @param {Object} params
+527    */
+528   pasteEditor(mode, params) {
+529     this.#uiManager.updateToolbar(mode);
+530     this.#uiManager.updateMode(mode);
+531 
+532     const { offsetX, offsetY } = this.#getCenterPoint();
+533     const id = this.getNextId();
+534     const editor = this.#createNewEditor({
+535       parent: this,
+536       id,
+537       x: offsetX,
+538       y: offsetY,
+539       uiManager: this.#uiManager,
+540       isCentered: true,
+541       ...params,
+542     });
+543     if (editor) {
+544       this.add(editor);
+545     }
+546   }
+547 
+548   /**
+549    * Create a new editor
+550    * @param {Object} data
+551    * @returns {AnnotationEditor | null}
+552    */
+553   deserialize(data) {
+554     return (
+555       AnnotationEditorLayer.#editorTypes
+556         .get(data.annotationType ?? data.annotationEditorType)
+557         ?.deserialize(data, this, this.#uiManager) || null
+558     );
+559   }
+560 
+561   /**
+562    * Create and add a new editor.
+563    * @param {PointerEvent} event
+564    * @param {boolean} isCentered
+565    * @param [Object] data
+566    * @returns {AnnotationEditor}
+567    */
+568   #createAndAddNewEditor(event, isCentered, data = {}) {
+569     const id = this.getNextId();
+570     const editor = this.#createNewEditor({
+571       parent: this,
+572       id,
+573       x: event.offsetX,
+574       y: event.offsetY,
+575       uiManager: this.#uiManager,
+576       isCentered,
+577       ...data,
+578     });
+579     if (editor) {
+580       this.add(editor);
+581     }
+582 
+583     return editor;
+584   }
+585 
+586   #getCenterPoint() {
+587     const { x, y, width, height } = this.div.getBoundingClientRect();
+588     const tlX = Math.max(0, x);
+589     const tlY = Math.max(0, y);
+590     const brX = Math.min(window.innerWidth, x + width);
+591     const brY = Math.min(window.innerHeight, y + height);
+592     const centerX = (tlX + brX) / 2 - x;
+593     const centerY = (tlY + brY) / 2 - y;
+594     const [offsetX, offsetY] =
+595       this.viewport.rotation % 180 === 0
+596         ? [centerX, centerY]
+597         : [centerY, centerX];
+598 
+599     return { offsetX, offsetY };
+600   }
+601 
+602   /**
+603    * Create and add a new editor.
+604    */
+605   addNewEditor() {
+606     this.#createAndAddNewEditor(
+607       this.#getCenterPoint(),
+608       /* isCentered = */ true
+609     );
+610   }
+611 
+612   /**
+613    * Set the last selected editor.
+614    * @param {AnnotationEditor} editor
+615    */
+616   setSelected(editor) {
+617     this.#uiManager.setSelected(editor);
+618   }
+619 
+620   /**
+621    * Add or remove an editor the current selection.
+622    * @param {AnnotationEditor} editor
+623    */
+624   toggleSelected(editor) {
+625     this.#uiManager.toggleSelected(editor);
+626   }
+627 
+628   /**
+629    * Check if the editor is selected.
+630    * @param {AnnotationEditor} editor
+631    */
+632   isSelected(editor) {
+633     return this.#uiManager.isSelected(editor);
+634   }
+635 
+636   /**
+637    * Unselect an editor.
+638    * @param {AnnotationEditor} editor
+639    */
+640   unselect(editor) {
+641     this.#uiManager.unselect(editor);
+642   }
+643 
+644   /**
+645    * SelectionChange callback.
+646    * @param {Event} _event
+647    */
+648   selectionStart(_event) {
+649     this.#textLayer?.div.addEventListener(
+650       "pointerup",
+651       this.#boundPointerUpAfterSelection,
+652       { once: true }
+653     );
+654   }
+655 
+656   /**
+657    * Called when the user releases the mouse button after having selected
+658    * some text.
+659    * @param {PointerEvent} event
+660    */
+661   pointerUpAfterSelection(event) {
+662     const selection = document.getSelection();
+663     if (selection.rangeCount === 0) {
+664       return;
+665     }
+666     const range = selection.getRangeAt(0);
+667     if (range.collapsed) {
+668       return;
+669     }
+670 
+671     if (!this.#textLayer?.div.contains(range.commonAncestorContainer)) {
+672       return;
+673     }
+674 
+675     const {
+676       x: layerX,
+677       y: layerY,
+678       width: parentWidth,
+679       height: parentHeight,
+680     } = this.#textLayer.div.getBoundingClientRect();
+681     const bboxes = range.getClientRects();
+682 
+683     // We must rotate the boxes because we want to have them in the non-rotated
+684     // page coordinates.
+685     let rotator;
+686     switch (this.viewport.rotation) {
+687       case 90:
+688         rotator = (x, y, w, h) => ({
+689           x: (y - layerY) / parentHeight,
+690           y: 1 - (x + w - layerX) / parentWidth,
+691           width: h / parentHeight,
+692           height: w / parentWidth,
+693         });
+694         break;
+695       case 180:
+696         rotator = (x, y, w, h) => ({
+697           x: 1 - (x + w - layerX) / parentWidth,
+698           y: 1 - (y + h - layerY) / parentHeight,
+699           width: w / parentWidth,
+700           height: h / parentHeight,
+701         });
+702         break;
+703       case 270:
+704         rotator = (x, y, w, h) => ({
+705           x: 1 - (y + h - layerY) / parentHeight,
+706           y: (x - layerX) / parentWidth,
+707           width: h / parentHeight,
+708           height: w / parentWidth,
+709         });
+710         break;
+711       default:
+712         rotator = (x, y, w, h) => ({
+713           x: (x - layerX) / parentWidth,
+714           y: (y - layerY) / parentHeight,
+715           width: w / parentWidth,
+716           height: h / parentHeight,
+717         });
+718         break;
+719     }
+720 
+721     const boxes = [];
+722     for (const { x, y, width, height } of bboxes) {
+723       if (width === 0 || height === 0) {
+724         continue;
+725       }
+726       boxes.push(rotator(x, y, width, height));
+727     }
+728     if (boxes.length !== 0) {
+729       this.#createAndAddNewEditor(event, false, {
+730         boxes,
+731       });
+732     }
+733     selection.empty();
+734   }
+735 
+736   /**
+737    * Pointerup callback.
+738    * @param {PointerEvent} event
+739    */
+740   pointerup(event) {
+741     const { isMac } = FeatureTest.platform;
+742     if (event.button !== 0 || (event.ctrlKey && isMac)) {
+743       // Don't create an editor on right click.
+744       return;
+745     }
+746 
+747     if (event.target !== this.div) {
+748       return;
+749     }
+750 
+751     if (!this.#hadPointerDown) {
+752       // It can happen when the user starts a drag inside a text editor
+753       // and then releases the mouse button outside of it. In such a case
+754       // we don't want to create a new editor, hence we check that a pointerdown
+755       // occurred on this div previously.
+756       return;
+757     }
+758     this.#hadPointerDown = false;
+759 
+760     if (!this.#allowClick) {
+761       this.#allowClick = true;
+762       return;
+763     }
+764 
+765     if (this.#uiManager.getMode() === AnnotationEditorType.STAMP) {
+766       this.#uiManager.unselectAll();
+767       return;
+768     }
+769 
+770     this.#createAndAddNewEditor(event, /* isCentered = */ false);
+771   }
+772 
+773   /**
+774    * Pointerdown callback.
+775    * @param {PointerEvent} event
+776    */
+777   pointerdown(event) {
+778     if (this.#uiManager.getMode() === AnnotationEditorType.HIGHLIGHT) {
+779       this.enableTextSelection();
+780     }
+781     if (this.#hadPointerDown) {
+782       // It's possible to have a second pointerdown event before a pointerup one
+783       // when the user puts a finger on a touchscreen and then add a second one
+784       // to start a pinch-to-zoom gesture.
+785       // That said, in case it's possible to have two pointerdown events with
+786       // a mouse, we don't want to create a new editor in such a case either.
+787       this.#hadPointerDown = false;
+788       return;
+789     }
+790     const { isMac } = FeatureTest.platform;
+791     if (event.button !== 0 || (event.ctrlKey && isMac)) {
+792       // Do nothing on right click.
+793       return;
+794     }
+795 
+796     if (event.target !== this.div) {
+797       return;
+798     }
+799 
+800     this.#hadPointerDown = true;
+801 
+802     const editor = this.#uiManager.getActive();
+803     this.#allowClick = !editor || editor.isEmpty();
+804   }
+805 
+806   /**
+807    *
+808    * @param {AnnotationEditor} editor
+809    * @param {number} x
+810    * @param {number} y
+811    * @returns
+812    */
+813   findNewParent(editor, x, y) {
+814     const layer = this.#uiManager.findParent(x, y);
+815     if (layer === null || layer === this) {
+816       return false;
+817     }
+818     layer.changeParent(editor);
+819     return true;
+820   }
+821 
+822   /**
+823    * Destroy the main editor.
+824    */
+825   destroy() {
+826     if (this.#uiManager.getActive()?.parent === this) {
+827       // We need to commit the current editor before destroying the layer.
+828       this.#uiManager.commitOrRemove();
+829       this.#uiManager.setActiveEditor(null);
+830     }
+831 
+832     if (this.#editorFocusTimeoutId) {
+833       clearTimeout(this.#editorFocusTimeoutId);
+834       this.#editorFocusTimeoutId = null;
+835     }
+836 
+837     for (const editor of this.#editors.values()) {
+838       this.#accessibilityManager?.removePointerInTextLayer(editor.contentDiv);
+839       editor.setParent(null);
+840       editor.isAttachedToDOM = false;
+841       editor.div.remove();
+842     }
+843     this.div = null;
+844     this.#editors.clear();
+845     this.#uiManager.removeLayer(this);
+846   }
+847 
+848   #cleanup() {
+849     // When we're cleaning up, some editors are removed but we don't want
+850     // to add a new one which will induce an addition in this.#editors, hence
+851     // an infinite loop.
+852     this.#isCleaningUp = true;
+853     for (const editor of this.#editors.values()) {
+854       if (editor.isEmpty()) {
+855         editor.remove();
+856       }
+857     }
+858     this.#isCleaningUp = false;
+859   }
+860 
+861   /**
+862    * Render the main editor.
+863    * @param {RenderEditorLayerOptions} parameters
+864    */
+865   render({ viewport }) {
+866     this.viewport = viewport;
+867     setLayerDimensions(this.div, viewport);
+868     for (const editor of this.#uiManager.getEditors(this.pageIndex)) {
+869       this.add(editor);
+870     }
+871     this.updateMode();
+872   }
+873 
+874   /**
+875    * Update the main editor.
+876    * @param {RenderEditorLayerOptions} parameters
+877    */
+878   update({ viewport }) {
+879     // Editors have their dimensions/positions in percent so to avoid any
+880     // issues (see #15582), we must commit the current one before changing
+881     // the viewport.
+882     this.#uiManager.commitOrRemove();
+883 
+884     const oldRotation = this.viewport.rotation;
+885     const rotation = viewport.rotation;
+886     this.viewport = viewport;
+887     setLayerDimensions(this.div, { rotation });
+888     if (oldRotation !== rotation) {
+889       for (const editor of this.#editors.values()) {
+890         editor.rotate(rotation);
+891       }
+892     }
+893     this.updateMode();
+894   }
+895 
+896   /**
+897    * Get page dimensions.
+898    * @returns {Object} dimensions.
+899    */
+900   get pageDimensions() {
+901     const { pageWidth, pageHeight } = this.viewport.rawDims;
+902     return [pageWidth, pageHeight];
+903   }
+904 }
+905 
+906 export { AnnotationEditorLayer };
+File:
+src/display/editor/highlight.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorParamsType,
+18   AnnotationEditorType,
+19   Util,
+20 } from "../../shared/util.js";
+21 import { AnnotationEditor } from "./editor.js";
+22 import { bindEvents } from "./tools.js";
+23 import { ColorPicker } from "./color_picker.js";
+24 import { Outliner } from "./outliner.js";
+25 
+26 /**
+27  * Basic draw editor in order to generate an Highlight annotation.
+28  */
+29 class HighlightEditor extends AnnotationEditor {
+30   #boxes;
+31 
+32   #clipPathId = null;
+33 
+34   #colorPicker = null;
+35 
+36   #focusOutlines = null;
+37 
+38   #highlightDiv = null;
+39 
+40   #highlightOutlines = null;
+41 
+42   #id = null;
+43 
+44   #lastPoint = null;
+45 
+46   #opacity;
+47 
+48   #outlineId = null;
+49 
+50   static _defaultColor = null;
+51 
+52   static _defaultOpacity = 1;
+53 
+54   static _l10nPromise;
+55 
+56   static _type = "highlight";
+57 
+58   static _editorType = AnnotationEditorType.HIGHLIGHT;
+59 
+60   constructor(params) {
+61     super({ ...params, name: "highlightEditor" });
+62     this.color = params.color || HighlightEditor._defaultColor;
+63     this.#opacity = params.opacity || HighlightEditor._defaultOpacity;
+64     this.#boxes = params.boxes || null;
+65     this._isDraggable = false;
+66 
+67     this.#createOutlines();
+68     this.#addToDrawLayer();
+69     this.rotate(this.rotation);
+70   }
+71 
+72   #createOutlines() {
+73     const outliner = new Outliner(this.#boxes, /* borderWidth = */ 0.001);
+74     this.#highlightOutlines = outliner.getOutlines();
+75     ({
+76       x: this.x,
+77       y: this.y,
+78       width: this.width,
+79       height: this.height,
+80     } = this.#highlightOutlines.box);
+81 
+82     const outlinerForOutline = new Outliner(
+83       this.#boxes,
+84       /* borderWidth = */ 0.0025,
+85       /* innerMargin = */ 0.001,
+86       this._uiManager.direction === "ltr"
+87     );
+88     this.#focusOutlines = outlinerForOutline.getOutlines();
+89 
+90     // The last point is in the pages coordinate system.
+91     const { lastPoint } = this.#focusOutlines.box;
+92     this.#lastPoint = [
+93       (lastPoint[0] - this.x) / this.width,
+94       (lastPoint[1] - this.y) / this.height,
+95     ];
+96   }
+97 
+98   static initialize(l10n, uiManager) {
+99     AnnotationEditor.initialize(l10n, uiManager);
+100     HighlightEditor._defaultColor ||=
+101       uiManager.highlightColors?.values().next().value || "#fff066";
+102   }
+103 
+104   static updateDefaultParams(type, value) {
+105     switch (type) {
+106       case AnnotationEditorParamsType.HIGHLIGHT_DEFAULT_COLOR:
+107         HighlightEditor._defaultColor = value;
+108         break;
+109     }
+110   }
+111 
+112   /** @inheritdoc */
+113   translateInPage(x, y) {}
+114 
+115   /** @inheritdoc */
+116   get toolbarPosition() {
+117     return this.#lastPoint;
+118   }
+119 
+120   /** @inheritdoc */
+121   updateParams(type, value) {
+122     switch (type) {
+123       case AnnotationEditorParamsType.HIGHLIGHT_COLOR:
+124         this.#updateColor(value);
+125         break;
+126     }
+127   }
+128 
+129   static get defaultPropertiesToUpdate() {
+130     return [
+131       [
+132         AnnotationEditorParamsType.HIGHLIGHT_DEFAULT_COLOR,
+133         HighlightEditor._defaultColor,
+134       ],
+135     ];
+136   }
+137 
+138   /** @inheritdoc */
+139   get propertiesToUpdate() {
+140     return [
+141       [
+142         AnnotationEditorParamsType.HIGHLIGHT_COLOR,
+143         this.color || HighlightEditor._defaultColor,
+144       ],
+145     ];
+146   }
+147 
+148   /**
+149    * Update the color and make this action undoable.
+150    * @param {string} color
+151    */
+152   #updateColor(color) {
+153     const savedColor = this.color;
+154     this.addCommands({
+155       cmd: () => {
+156         this.color = color;
+157         this.parent?.drawLayer.changeColor(this.#id, color);
+158         this.#colorPicker?.updateColor(color);
+159       },
+160       undo: () => {
+161         this.color = savedColor;
+162         this.parent?.drawLayer.changeColor(this.#id, savedColor);
+163         this.#colorPicker?.updateColor(savedColor);
+164       },
+165       mustExec: true,
+166       type: AnnotationEditorParamsType.HIGHLIGHT_COLOR,
+167       overwriteIfSameType: true,
+168       keepUndo: true,
+169     });
+170   }
+171 
+172   /** @inheritdoc */
+173   async addEditToolbar() {
+174     const toolbar = await super.addEditToolbar();
+175     if (!toolbar) {
+176       return null;
+177     }
+178     if (this._uiManager.highlightColors) {
+179       this.#colorPicker = new ColorPicker({ editor: this });
+180       toolbar.addColorPicker(this.#colorPicker);
+181     }
+182     return toolbar;
+183   }
+184 
+185   /** @inheritdoc */
+186   disableEditing() {
+187     super.disableEditing();
+188     this.div.classList.toggle("disabled", true);
+189   }
+190 
+191   /** @inheritdoc */
+192   enableEditing() {
+193     super.enableEditing();
+194     this.div.classList.toggle("disabled", false);
+195   }
+196 
+197   /** @inheritdoc */
+198   fixAndSetPosition() {
+199     return super.fixAndSetPosition(0);
+200   }
+201 
+202   /** @inheritdoc */
+203   getRect(tx, ty) {
+204     return super.getRect(tx, ty, 0);
+205   }
+206 
+207   /** @inheritdoc */
+208   onceAdded() {
+209     this.parent.addUndoableEditor(this);
+210     this.div.focus();
+211   }
+212 
+213   /** @inheritdoc */
+214   remove() {
+215     super.remove();
+216     this.#cleanDrawLayer();
+217   }
+218 
+219   /** @inheritdoc */
+220   rebuild() {
+221     if (!this.parent) {
+222       return;
+223     }
+224     super.rebuild();
+225     if (this.div === null) {
+226       return;
+227     }
+228 
+229     this.#addToDrawLayer();
+230 
+231     if (!this.isAttachedToDOM) {
+232       // At some point this editor was removed and we're rebuilting it,
+233       // hence we must add it to its parent.
+234       this.parent.add(this);
+235     }
+236   }
+237 
+238   setParent(parent) {
+239     let mustBeSelected = false;
+240     if (this.parent && !parent) {
+241       this.#cleanDrawLayer();
+242     } else if (parent) {
+243       this.#addToDrawLayer(parent);
+244       // If mustBeSelected is true it means that this editor was selected
+245       // when its parent has been destroyed, hence we must select it again.
+246       mustBeSelected =
+247         !this.parent && this.div?.classList.contains("selectedEditor");
+248     }
+249     super.setParent(parent);
+250     if (mustBeSelected) {
+251       // We select it after the parent has been set.
+252       this.select();
+253     }
+254   }
+255 
+256   #cleanDrawLayer() {
+257     if (this.#id === null || !this.parent) {
+258       return;
+259     }
+260     this.parent.drawLayer.remove(this.#id);
+261     this.#id = null;
+262     this.parent.drawLayer.remove(this.#outlineId);
+263     this.#outlineId = null;
+264   }
+265 
+266   #addToDrawLayer(parent = this.parent) {
+267     if (this.#id !== null) {
+268       return;
+269     }
+270     ({ id: this.#id, clipPathId: this.#clipPathId } =
+271       parent.drawLayer.highlight(
+272         this.#highlightOutlines,
+273         this.color,
+274         this.#opacity
+275       ));
+276     if (this.#highlightDiv) {
+277       this.#highlightDiv.style.clipPath = this.#clipPathId;
+278     }
+279     this.#outlineId = parent.drawLayer.highlightOutline(this.#focusOutlines);
+280   }
+281 
+282   static #rotateBbox({ x, y, width, height }, angle) {
+283     switch (angle) {
+284       case 90:
+285         return {
+286           x: 1 - y - height,
+287           y: x,
+288           width: height,
+289           height: width,
+290         };
+291       case 180:
+292         return {
+293           x: 1 - x - width,
+294           y: 1 - y - height,
+295           width,
+296           height,
+297         };
+298       case 270:
+299         return {
+300           x: y,
+301           y: 1 - x - width,
+302           width: height,
+303           height: width,
+304         };
+305     }
+306     return {
+307       x,
+308       y,
+309       width,
+310       height,
+311     };
+312   }
+313 
+314   /** @inheritdoc */
+315   rotate(angle) {
+316     const { drawLayer } = this.parent;
+317     drawLayer.rotate(this.#id, angle);
+318     drawLayer.rotate(this.#outlineId, angle);
+319     drawLayer.updateBox(this.#id, HighlightEditor.#rotateBbox(this, angle));
+320     drawLayer.updateBox(
+321       this.#outlineId,
+322       HighlightEditor.#rotateBbox(this.#focusOutlines.box, angle)
+323     );
+324   }
+325 
+326   /** @inheritdoc */
+327   render() {
+328     if (this.div) {
+329       return this.div;
+330     }
+331 
+332     const div = super.render();
+333     const highlightDiv = (this.#highlightDiv = document.createElement("div"));
+334     div.append(highlightDiv);
+335     highlightDiv.className = "internal";
+336     highlightDiv.style.clipPath = this.#clipPathId;
+337     const [parentWidth, parentHeight] = this.parentDimensions;
+338     this.setDims(this.width * parentWidth, this.height * parentHeight);
+339 
+340     bindEvents(this, this.#highlightDiv, ["pointerover", "pointerleave"]);
+341     this.enableEditing();
+342 
+343     return div;
+344   }
+345 
+346   pointerover() {
+347     this.parent.drawLayer.addClass(this.#outlineId, "hovered");
+348   }
+349 
+350   pointerleave() {
+351     this.parent.drawLayer.removeClass(this.#outlineId, "hovered");
+352   }
+353 
+354   /** @inheritdoc */
+355   select() {
+356     super.select();
+357     this.parent?.drawLayer.removeClass(this.#outlineId, "hovered");
+358     this.parent?.drawLayer.addClass(this.#outlineId, "selected");
+359   }
+360 
+361   /** @inheritdoc */
+362   unselect() {
+363     super.unselect();
+364     this.parent?.drawLayer.removeClass(this.#outlineId, "selected");
+365   }
+366 
+367   #serializeBoxes(rect) {
+368     const [pageWidth, pageHeight] = this.pageDimensions;
+369     const boxes = this.#boxes;
+370     const quadPoints = new Array(boxes.length * 8);
+371     const [tx, ty] = rect;
+372     let i = 0;
+373     for (const { x, y, width, height } of boxes) {
+374       const sx = tx + x * pageWidth;
+375       const sy = ty + (1 - y - height) * pageHeight;
+376       // The specifications say that the rectangle should start from the bottom
+377       // left corner and go counter-clockwise.
+378       // But when opening the file in Adobe Acrobat it appears that this isn't
+379       // correct hence the 4th and 6th numbers are just swapped.
+380       quadPoints[i] = quadPoints[i + 4] = sx;
+381       quadPoints[i + 1] = quadPoints[i + 3] = sy;
+382       quadPoints[i + 2] = quadPoints[i + 6] = sx + width * pageWidth;
+383       quadPoints[i + 5] = quadPoints[i + 7] = sy + height * pageHeight;
+384       i += 8;
+385     }
+386     return quadPoints;
+387   }
+388 
+389   #serializeOutlines(rect) {
+390     return this.#highlightOutlines.serialize(rect, 0);
+391   }
+392 
+393   /** @inheritdoc */
+394   static deserialize(data, parent, uiManager) {
+395     const editor = super.deserialize(data, parent, uiManager);
+396 
+397     const {
+398       rect: [blX, blY, trX, trY],
+399       color,
+400       quadPoints,
+401     } = data;
+402     editor.color = Util.makeHexColor(...color);
+403     editor.#opacity = data.opacity;
+404 
+405     const [pageWidth, pageHeight] = editor.pageDimensions;
+406     editor.width = (trX - blX) / pageWidth;
+407     editor.height = (trY - blY) / pageHeight;
+408     const boxes = (editor.#boxes = []);
+409     for (let i = 0; i < quadPoints.length; i += 8) {
+410       boxes.push({
+411         x: (quadPoints[4] - trX) / pageWidth,
+412         y: (trY - (1 - quadPoints[i + 5])) / pageHeight,
+413         width: (quadPoints[i + 2] - quadPoints[i]) / pageWidth,
+414         height: (quadPoints[i + 5] - quadPoints[i + 1]) / pageHeight,
+415       });
+416     }
+417     editor.#createOutlines();
+418 
+419     return editor;
+420   }
+421 
+422   /** @inheritdoc */
+423   serialize(isForCopying = false) {
+424     // It doesn't make sense to copy/paste a highlight annotation.
+425     if (this.isEmpty() || isForCopying) {
+426       return null;
+427     }
+428 
+429     const rect = this.getRect(0, 0);
+430     const color = AnnotationEditor._colorManager.convert(this.color);
+431 
+432     return {
+433       annotationType: AnnotationEditorType.HIGHLIGHT,
+434       color,
+435       opacity: this.#opacity,
+436       quadPoints: this.#serializeBoxes(rect),
+437       outlines: this.#serializeOutlines(rect),
+438       pageIndex: this.pageIndex,
+439       rect,
+440       rotation: 0,
+441       structTreeParentId: this._structTreeParentId,
+442     };
+443   }
+444 
+445   static canCreateNewEmptyEditor() {
+446     return false;
+447   }
+448 }
+449 
+450 export { HighlightEditor };
+File:
+src/display/editor/outliner.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 class Outliner {
+17   #box;
+18 
+19   #verticalEdges = [];
+20 
+21   #intervals = [];
+22 
+23   /**
+24    * Construct an outliner.
+25    * @param {Array<Object>} boxes - An array of axis-aligned rectangles.
+26    * @param {number} borderWidth - The width of the border of the boxes, it
+27    *   allows to make the boxes bigger (or smaller).
+28    * @param {number} innerMargin - The margin between the boxes and the
+29    *   outlines. It's important to not have a null innerMargin when we want to
+30    *   draw the outline else the stroked outline could be clipped because of its
+31    *   width.
+32    * @param {boolean} isLTR - true if we're in LTR mode. It's used to determine
+33    *   the last point of the boxes.
+34    */
+35   constructor(boxes, borderWidth = 0, innerMargin = 0, isLTR = true) {
+36     let minX = Infinity;
+37     let maxX = -Infinity;
+38     let minY = Infinity;
+39     let maxY = -Infinity;
+40 
+41     // We round the coordinates to slightly reduce the number of edges in the
+42     // final outlines.
+43     const NUMBER_OF_DIGITS = 4;
+44     const EPSILON = 10 ** -NUMBER_OF_DIGITS;
+45 
+46     // The coordinates of the boxes are in the page coordinate system.
+47     for (const { x, y, width, height } of boxes) {
+48       const x1 = Math.floor((x - borderWidth) / EPSILON) * EPSILON;
+49       const x2 = Math.ceil((x + width + borderWidth) / EPSILON) * EPSILON;
+50       const y1 = Math.floor((y - borderWidth) / EPSILON) * EPSILON;
+51       const y2 = Math.ceil((y + height + borderWidth) / EPSILON) * EPSILON;
+52       const left = [x1, y1, y2, true];
+53       const right = [x2, y1, y2, false];
+54       this.#verticalEdges.push(left, right);
+55 
+56       minX = Math.min(minX, x1);
+57       maxX = Math.max(maxX, x2);
+58       minY = Math.min(minY, y1);
+59       maxY = Math.max(maxY, y2);
+60     }
+61 
+62     const bboxWidth = maxX - minX + 2 * innerMargin;
+63     const bboxHeight = maxY - minY + 2 * innerMargin;
+64     const shiftedMinX = minX - innerMargin;
+65     const shiftedMinY = minY - innerMargin;
+66     const lastEdge = this.#verticalEdges.at(isLTR ? -1 : -2);
+67     const lastPoint = [lastEdge[0], lastEdge[2]];
+68 
+69     // Convert the coordinates of the edges into box coordinates.
+70     for (const edge of this.#verticalEdges) {
+71       const [x, y1, y2] = edge;
+72       edge[0] = (x - shiftedMinX) / bboxWidth;
+73       edge[1] = (y1 - shiftedMinY) / bboxHeight;
+74       edge[2] = (y2 - shiftedMinY) / bboxHeight;
+75     }
+76 
+77     this.#box = {
+78       x: shiftedMinX,
+79       y: shiftedMinY,
+80       width: bboxWidth,
+81       height: bboxHeight,
+82       lastPoint,
+83     };
+84   }
+85 
+86   getOutlines() {
+87     // We begin to sort lexicographically the vertical edges by their abscissa,
+88     // and then by their ordinate.
+89     this.#verticalEdges.sort(
+90       (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+91     );
+92 
+93     // We're now using a sweep line algorithm to find the outlines.
+94     // We start with the leftmost vertical edge, and we're going to iterate
+95     // over all the vertical edges from left to right.
+96     // Each time we encounter a left edge, we're going to insert the interval
+97     // [y1, y2] in the set of intervals.
+98     // This set of intervals is used to break the vertical edges into chunks:
+99     // we only take the part of the vertical edge that isn't in the union of
+100     // the intervals.
+101     const outlineVerticalEdges = [];
+102     for (const edge of this.#verticalEdges) {
+103       if (edge[3]) {
+104         // Left edge.
+105         outlineVerticalEdges.push(...this.#breakEdge(edge));
+106         this.#insert(edge);
+107       } else {
+108         // Right edge.
+109         this.#remove(edge);
+110         outlineVerticalEdges.push(...this.#breakEdge(edge));
+111       }
+112     }
+113     return this.#getOutlines(outlineVerticalEdges);
+114   }
+115 
+116   #getOutlines(outlineVerticalEdges) {
+117     const edges = [];
+118     const allEdges = new Set();
+119 
+120     for (const edge of outlineVerticalEdges) {
+121       const [x, y1, y2] = edge;
+122       edges.push([x, y1, edge], [x, y2, edge]);
+123     }
+124 
+125     // We sort lexicographically the vertices of each edge by their ordinate and
+126     // by their abscissa.
+127     // Every pair (v_2i, v_{2i + 1}) of vertices defines a horizontal edge.
+128     // So for every vertical edge, we're going to add the two vertical edges
+129     // which are connected to it through a horizontal edge.
+130     edges.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+131     for (let i = 0, ii = edges.length; i < ii; i += 2) {
+132       const edge1 = edges[i][2];
+133       const edge2 = edges[i + 1][2];
+134       edge1.push(edge2);
+135       edge2.push(edge1);
+136       allEdges.add(edge1);
+137       allEdges.add(edge2);
+138     }
+139     const outlines = [];
+140     let outline;
+141 
+142     while (allEdges.size > 0) {
+143       const edge = allEdges.values().next().value;
+144       let [x, y1, y2, edge1, edge2] = edge;
+145       allEdges.delete(edge);
+146       let lastPointX = x;
+147       let lastPointY = y1;
+148 
+149       outline = [x, y2];
+150       outlines.push(outline);
+151 
+152       while (true) {
+153         let e;
+154         if (allEdges.has(edge1)) {
+155           e = edge1;
+156         } else if (allEdges.has(edge2)) {
+157           e = edge2;
+158         } else {
+159           break;
+160         }
+161 
+162         allEdges.delete(e);
+163         [x, y1, y2, edge1, edge2] = e;
+164 
+165         if (lastPointX !== x) {
+166           outline.push(lastPointX, lastPointY, x, lastPointY === y1 ? y1 : y2);
+167           lastPointX = x;
+168         }
+169         lastPointY = lastPointY === y1 ? y2 : y1;
+170       }
+171       outline.push(lastPointX, lastPointY);
+172     }
+173     return new HighlightOutline(outlines, this.#box);
+174   }
+175 
+176   #binarySearch(y) {
+177     const array = this.#intervals;
+178     let start = 0;
+179     let end = array.length - 1;
+180 
+181     while (start <= end) {
+182       const middle = (start + end) >> 1;
+183       const y1 = array[middle][0];
+184       if (y1 === y) {
+185         return middle;
+186       }
+187       if (y1 < y) {
+188         start = middle + 1;
+189       } else {
+190         end = middle - 1;
+191       }
+192     }
+193     return end + 1;
+194   }
+195 
+196   #insert([, y1, y2]) {
+197     const index = this.#binarySearch(y1);
+198     this.#intervals.splice(index, 0, [y1, y2]);
+199   }
+200 
+201   #remove([, y1, y2]) {
+202     const index = this.#binarySearch(y1);
+203     for (let i = index; i < this.#intervals.length; i++) {
+204       const [start, end] = this.#intervals[i];
+205       if (start !== y1) {
+206         break;
+207       }
+208       if (start === y1 && end === y2) {
+209         this.#intervals.splice(i, 1);
+210         return;
+211       }
+212     }
+213     for (let i = index - 1; i >= 0; i--) {
+214       const [start, end] = this.#intervals[i];
+215       if (start !== y1) {
+216         break;
+217       }
+218       if (start === y1 && end === y2) {
+219         this.#intervals.splice(i, 1);
+220         return;
+221       }
+222     }
+223   }
+224 
+225   #breakEdge(edge) {
+226     const [x, y1, y2] = edge;
+227     const results = [[x, y1, y2]];
+228     const index = this.#binarySearch(y2);
+229     for (let i = 0; i < index; i++) {
+230       const [start, end] = this.#intervals[i];
+231       for (let j = 0, jj = results.length; j < jj; j++) {
+232         const [, y3, y4] = results[j];
+233         if (end <= y3 || y4 <= start) {
+234           // There is no intersection between the interval and the edge, hence
+235           // we keep it as is.
+236           continue;
+237         }
+238         if (y3 >= start) {
+239           if (y4 > end) {
+240             results[j][1] = end;
+241           } else {
+242             if (jj === 1) {
+243               return [];
+244             }
+245             // The edge is included in the interval, hence we remove it.
+246             results.splice(j, 1);
+247             j--;
+248             jj--;
+249           }
+250           continue;
+251         }
+252         results[j][2] = start;
+253         if (y4 > end) {
+254           results.push([x, end, y4]);
+255         }
+256       }
+257     }
+258     return results;
+259   }
+260 }
+261 
+262 class Outline {
+263   toSVGPath() {
+264     throw new Error("Abstract method `toSVGPath` must be implemented.");
+265   }
+266 
+267   get box() {
+268     throw new Error("Abstract getter `box` must be implemented.");
+269   }
+270 
+271   serialize(_bbox, _rotation) {
+272     throw new Error("Abstract method `serialize` must be implemented.");
+273   }
+274 }
+275 
+276 class HighlightOutline extends Outline {
+277   #box;
+278 
+279   #outlines;
+280 
+281   constructor(outlines, box) {
+282     super();
+283     this.#outlines = outlines;
+284     this.#box = box;
+285   }
+286 
+287   toSVGPath() {
+288     const buffer = [];
+289     for (const polygon of this.#outlines) {
+290       let [prevX, prevY] = polygon;
+291       buffer.push(`M${prevX} ${prevY}`);
+292       for (let i = 2; i < polygon.length; i += 2) {
+293         const x = polygon[i];
+294         const y = polygon[i + 1];
+295         if (x === prevX) {
+296           buffer.push(`V${y}`);
+297           prevY = y;
+298         } else if (y === prevY) {
+299           buffer.push(`H${x}`);
+300           prevX = x;
+301         }
+302       }
+303       buffer.push("Z");
+304     }
+305     return buffer.join(" ");
+306   }
+307 
+308   /**
+309    * Serialize the outlines into the PDF page coordinate system.
+310    * @param {Array<number>} _bbox - the bounding box of the annotation.
+311    * @param {number} _rotation - the rotation of the annotation.
+312    * @returns {Array<Array<number>>}
+313    */
+314   serialize([blX, blY, trX, trY], _rotation) {
+315     const outlines = [];
+316     const width = trX - blX;
+317     const height = trY - blY;
+318     for (const outline of this.#outlines) {
+319       const points = new Array(outline.length);
+320       for (let i = 0; i < outline.length; i += 2) {
+321         points[i] = blX + outline[i] * width;
+322         points[i + 1] = trY - outline[i + 1] * height;
+323       }
+324       outlines.push(points);
+325     }
+326     return outlines;
+327   }
+328 
+329   get box() {
+330     return this.#box;
+331   }
+332 }
+333 
+334 export { Outliner };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/pdf_spec.js
+/* Copyright 2023 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  AbortException,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationMode,
+  CMapCompressionType,
+  createValidAbsoluteUrl,
+  FeatureTest,
+  ImageKind,
+  InvalidPDFException,
+  isNodeJS,
+  MissingPDFException,
+  normalizeUnicode,
+  OPS,
+  PasswordResponses,
+  PermissionFlag,
+  PromiseCapability,
+  shadow,
+  UnexpectedResponseException,
+  Util,
+  VerbosityLevel,
+} from "../../src/shared/util.js";
+import {
+  build,
+  getDocument,
+  PDFDataRangeTransport,
+  PDFWorker,
+  version,
+} from "../../src/display/api.js";
+import {
+  DOMSVGFactory,
+  fetchData,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getXfaPageViewport,
+  isDataScheme,
+  isPdfFile,
+  noContextMenu,
+  PDFDateString,
+  PixelsPerInch,
+  RenderingCancelledException,
+  setLayerDimensions,
+} from "../../src/display/display_utils.js";
+import {
+  renderTextLayer,
+  updateTextLayer,
+} from "../../src/display/text_layer.js";
+import { AnnotationEditorLayer } from "../../src/display/editor/annotation_editor_layer.js";
+import { AnnotationEditorUIManager } from "../../src/display/editor/tools.js";
+import { AnnotationLayer } from "../../src/display/annotation_layer.js";
+import { ColorPicker } from "../../src/display/editor/color_picker.js";
+import { DrawLayer } from "../../src/display/draw_layer.js";
+import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
+import { Outliner } from "../../src/display/editor/outliner.js";
+import { XfaLayer } from "../../src/display/xfa_layer.js";
+const expectedAPI = Object.freeze({
+  AbortException,
+  AnnotationEditorLayer,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationEditorUIManager,
+  AnnotationLayer,
+  AnnotationMode,
+  build,
+  CMapCompressionType,
+  ColorPicker,
+  createValidAbsoluteUrl,
+  DOMSVGFactory,
+  DrawLayer,
+  FeatureTest,
+  fetchData,
+  getDocument,
+  getFilenameFromUrl,
+  getPdfFilenameFromUrl,
+  getXfaPageViewport,
+  GlobalWorkerOptions,
+  ImageKind,
+  InvalidPDFException,
+  isDataScheme,
+  isPdfFile,
+  MissingPDFException,
+  noContextMenu,
+  normalizeUnicode,
+  OPS,
+  Outliner,
+  PasswordResponses,
+  PDFDataRangeTransport,
+  PDFDateString,
+  PDFWorker,
+  PermissionFlag,
+  PixelsPerInch,
+  PromiseCapability,
+  RenderingCancelledException,
+  renderTextLayer,
+  setLayerDimensions,
+  shadow,
+  UnexpectedResponseException,
+  updateTextLayer,
+  Util,
+  VerbosityLevel,
+  version,
+  XfaLayer,
+});
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

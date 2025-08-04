@@ -1,0 +1,43 @@
+<think>
+Okay, so I need to write a JavaScript test for the issue where PDF.js isn't rendering large images that other renderers do. The user provided a patch, and I need to ensure the test fails before the patch and passes after.
+
+First, I'll look at the problem. The user mentioned that when opening a specific PDF, the scanned image doesn't render. The console logs point to issues with JPX decoding, like "JpxError: JPX error: Invalid tag tree" and dependent images not being ready. The patch seems to replace the JPX decoding with OpenJPEG, which might fix the issue.
+
+So, the test should check if the image is rendered correctly. I'll use the `getDocument` function from `../../src/display/api.js` to load the PDF and access the first page. Then, I'll render it and check if the image exists.
+
+I'll structure the test using Jest. I'll import the necessary modules, load the PDF, and render the page. After rendering, I'll check the rendered pages and ensure the image isn't missing. If the image is present, the test passes.
+
+I need to make sure the test is self-contained. I'll use dynamic imports for compatibility with Node.js. The test will be named appropriately to describe the behavior.
+
+I should handle any potential errors during loading or rendering, maybe with a try-catch block, but the main focus is on checking the rendered output.
+
+So, putting it all together, the test will load the PDF, render the first page, and check that the image is present. If it's there, the test passes, indicating the patch fixed the issue.
+</think>
+
+```javascript
+it("should render large JPX images correctly", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+
+  const loadingTask = getDocument(buildGetDocumentParams('issue17289.pdf'));
+  const pdf = await loadingTask.promise;
+
+  try {
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    const renderTask = page.render({
+      viewport,
+      enableWebGL: false,
+      enableCanvas: true,
+      useTransform: true,
+    });
+
+    await renderTask.promise;
+    const renderedPages = renderTask.renderedPages;
+    expect(renderedPages).toHaveLength(1);
+    expect(renderedPages[0].error).toBeUndefined();
+  } finally {
+    await pdf.destroy();
+  }
+});
+```

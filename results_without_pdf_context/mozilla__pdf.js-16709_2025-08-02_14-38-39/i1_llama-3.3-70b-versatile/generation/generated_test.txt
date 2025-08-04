@@ -1,0 +1,46 @@
+it("should redo an added imagetextdrawing to the PDF file using Keyboard shortcuts", async () => {
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { AnnotationEditorUIManager: OriginalAnnotationEditorUIManager } = await import("../../src/display/editor/tools_original.js");
+  const { PDFDocument, Page } = await import("../../src/core/document.js");
+  const { AnnotationStorage } = await import("../../src/display/annotation_storage.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  const { createIdFactory } = await import("./test_utils.js");
+
+  const pdfDocument = new PDFDocument({
+    annotationStorage: new AnnotationStorage(),
+    filterFactory: null,
+    fingerprint: null,
+  });
+  const page = new Page({
+    pdfDocument,
+    pageIndex: 0,
+    rotate: 0,
+    ref: new Ref(1, 0),
+  });
+  const annotationStorage = pdfDocument.annotationStorage;
+  const filterFactory = null;
+  const pageColors = null;
+  const eventBus = {
+    _on: jest.fn(),
+  };
+  const container = {
+    addEventListener: jest.fn(),
+  };
+
+  const originalEditor = new OriginalAnnotationEditorUIManager(container, eventBus, pdfDocument, pageColors);
+  const patchedEditor = new AnnotationEditorUIManager(container, eventBus, pdfDocument, pageColors);
+
+  const annotation = new MarkupAnnotation({
+    subtype: "Highlight",
+    pageIndices: [0],
+    quadPoints: [[10, 10], [20, 10], [20, 20], [10, 20]],
+  });
+  annotationStorage.addAnnotation(annotation);
+
+  originalEditor.keydown({ key: "y", ctrlKey: true });
+  patchedEditor.keydown({ key: "y", ctrlKey: true });
+  patchedEditor.keydown({ key: "Z", ctrlKey: true, shiftKey: true, metaKey: true });
+
+  expect(annotationStorage.getAnnotations().length).toBe(1);
+  expect(patchedEditor.#commandManager.redoStack.length).toBe(1);
+});

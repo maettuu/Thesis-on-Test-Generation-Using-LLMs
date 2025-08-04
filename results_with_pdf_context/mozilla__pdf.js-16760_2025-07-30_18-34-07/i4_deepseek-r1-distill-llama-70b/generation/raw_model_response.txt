@@ -1,0 +1,33 @@
+<think>
+Okay, so I need to write a regression test for the issue where a PDF file stops rendering in Firefox 115.0.2 but worked in 109.0.1. The user provided a patch that modifies the gEndobjRegExp in xref.js. 
+
+First, I should understand the problem. The PDF in question is a polyglot PDF/MP3 file, which means it's a valid PDF but also a valid MP3. This can sometimes cause issues with PDF parsers if they're not handling the structure correctly. The error message mentions an "Invalid PDF structure," which suggests that the XRef parsing is failing.
+
+Looking at the patch, the gEndobjRegExp is being updated. The original regex was /\b(endobj|\d+\s+\d+\s+obj|xref|trailer)\b/g. The patch changes it to include "trailer\s*<<" to handle cases where the trailer is followed by a dictionary without a space, which might be the case in the polyglot file.
+
+So, the test needs to verify that after applying the patch, the PDF renders correctly. Before the patch, the test should fail because the parser can't handle the trailer format, but after the patch, it should pass.
+
+I need to structure the test as a JavaScript Mocha test. The test will load the problem PDF and check if it can be parsed without errors. 
+
+I'll use the getDocument function from the display API to load the PDF. Then, I'll use buildGetDocumentParams from test_utils.js to set up the parameters. The test should be async because getDocument returns a promise.
+
+In the test, I'll load the document and check if the root dictionary is retrieved without throwing an error. If the root is undefined, it means the PDF failed to parse, which would indicate the regression still exists.
+
+I should make sure the test is self-contained, so I'll include all necessary imports dynamically. Also, I'll structure the test to fail if any error occurs during loading, ensuring it only passes when the PDF is correctly parsed.
+
+So, putting it all together, the test will import the necessary modules, attempt to get the document, and assert that the root is not undefined. This will confirm that the patch fixes the issue.
+</think>
+
+```javascript
+it("should correctly parse the problem PDF with updated gEndobjRegExp", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  
+  const loadingTask = getDocument(buildGetDocumentParams('issue16759.pdf'));
+  const { pdfDoc } = await loadingTask;
+  
+  const root = pdfDoc.root;
+  
+  expect(root).not.toBeNull();
+});
+```

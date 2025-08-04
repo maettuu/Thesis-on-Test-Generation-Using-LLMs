@@ -1,0 +1,27 @@
+it("should render the PDF with font fallback", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { fetchData } = await import("../../src/display/node_utils.js");
+  const pdfData = await fetchData("/tmp/Tax3921.pdf");
+  const pdfDoc = await PDFDocument.load(pdfData);
+  const pageNumber = 1;
+  const page = await pdfDoc.getPage(pageNumber);
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = await import("../../src/display/canvas_factory.js").then(({ DOMCanvasFactory }) => {
+    return new DOMCanvasFactory(100, 100);
+  });
+  const renderTask = page.render({
+    canvasContext: canvas.context,
+    viewport,
+  });
+  await renderTask.promise;
+  const expectedText = "Tax Year 2022";
+  const actualText = await import("../../src/display/text_layer.js").then(({ TextLayer }) => {
+    const textLayer = new TextLayer({
+      textItem: page.getTextContent(),
+      viewport,
+      canvasContext: canvas.context,
+    });
+    return textLayer.getText();
+  });
+  expect(actualText).toContain(expectedText);
+});

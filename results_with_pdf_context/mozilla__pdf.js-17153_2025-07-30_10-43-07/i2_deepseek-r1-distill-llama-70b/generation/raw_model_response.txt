@@ -1,0 +1,46 @@
+<think>
+Okay, I need to write a regression test for the issue where the `navigator` object doesn't have the `platform` property in Node.js, causing an error when using `pdfjs-dist`. The patch modifies `util.js` and `font_loader.js` to handle cases where `navigator` might be undefined or not have `platform`.
+
+First, I should understand what the patch does. In `util.js`, the `platform` getter now checks if `navigator` is undefined or if it's a Node.js environment. If so, it returns `isMac: false`. In `font_loader.js`, the `isSyncFontLoadingSupported` method now includes a check for `navigator.userAgent` to be a string, which might not be present in Node.js.
+
+The test needs to run in a Node.js environment where `navigator` is not available. I'll use `jest` for testing since it's common in Node.js projects. I'll create a test that imports the necessary modules and checks if the methods behave as expected without throwing errors.
+
+I'll import `util.js` and `font_loader.js` dynamically. Then, I'll mock `navigator` to be undefined to simulate the Node.js environment. I'll check if `FeatureTest.platform` returns `isMac: false` and if `FontLoader.isSyncFontLoadingSupported` returns `true` as expected in Node.js.
+
+I need to ensure that the test fails before the patch and passes after. So, without the patch, accessing `navigator.platform` would cause an error, but with the patch, it should handle it gracefully.
+
+I'll structure the test with `jest.spyOn` to mock `navigator` and `PDFJSDev` if necessary. I'll also make sure to clear mocks after each test to avoid interference.
+
+Finally, I'll write the test block using `it` with `async/await` since we're using dynamic imports. The test will import the modules, set up mocks, and assert the expected outcomes.
+</think>
+
+```javascript
+it("should handle missing navigator.platform in Node.js", async () => {
+  const { FeatureTest } = await import("../../src/shared/util.js");
+  const { FontLoader } = await import("../../src/display/font_loader.js");
+
+  // Mock navigator to be undefined (simulate Node.js environment)
+  const originalNavigator = global.navigator;
+  delete global.navigator;
+
+  // Mock PDFJSDev to test the GENERIC environment
+  const originalPDFJSDev = global.PDFJSDev;
+  global.PDFJSDev = { test: () => true };
+
+  try {
+    const featureTest = new FeatureTest();
+    const fontLoader = new FontLoader({});
+
+    // Check if platform property is handled correctly
+    const platform = await FeatureTest.platform;
+    expect(platform.isMac).toBe(false);
+
+    // Check if sync font loading is supported in Node.js
+    const isSyncSupported = fontLoader.isSyncFontLoadingSupported;
+    expect(isSyncSupported).toBe(true);
+  } finally {
+    global.navigator = originalNavigator;
+    global.PDFJSDev = originalPDFJSDev;
+  }
+});
+```

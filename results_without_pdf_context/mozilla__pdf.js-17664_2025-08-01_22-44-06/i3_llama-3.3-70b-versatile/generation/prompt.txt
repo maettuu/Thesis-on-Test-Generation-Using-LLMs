@@ -1,0 +1,1269 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Free Highlighting in PDF will lag behind the mouse cursor
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/outliner.js b/src/display/editor/outliner.js
+--- a/src/display/editor/outliner.js
++++ b/src/display/editor/outliner.js
+@@ -363,6 +363,10 @@ class FreeOutliner {
+   //  - compute the control points of the quadratic Bézier curve.
+   #last = new Float64Array(18);
+ 
++  #lastX;
++
++  #lastY;
++
+   #min;
+ 
+   #min_dist;
+@@ -402,7 +406,22 @@ class FreeOutliner {
+     return isNaN(this.#last[8]);
+   }
+ 
++  #getLastCoords() {
++    const lastTop = this.#last.subarray(4, 6);
++    const lastBottom = this.#last.subarray(16, 18);
++    const [x, y, width, height] = this.#box;
++
++    return [
++      (this.#lastX + (lastTop[0] - lastBottom[0]) / 2 - x) / width,
++      (this.#lastY + (lastTop[1] - lastBottom[1]) / 2 - y) / height,
++      (this.#lastX + (lastBottom[0] - lastTop[0]) / 2 - x) / width,
++      (this.#lastY + (lastBottom[1] - lastTop[1]) / 2 - y) / height,
++    ];
++  }
++
+   add({ x, y }) {
++    this.#lastX = x;
++    this.#lastY = y;
+     const [layerX, layerY, layerWidth, layerHeight] = this.#box;
+     let [x1, y1, x2, y2] = this.#last.subarray(8, 12);
+     const diffX = x - x2;
+@@ -528,12 +547,14 @@ class FreeOutliner {
+     const lastTop = this.#last.subarray(4, 6);
+     const lastBottom = this.#last.subarray(16, 18);
+     const [x, y, width, height] = this.#box;
++    const [lastTopX, lastTopY, lastBottomX, lastBottomY] =
++      this.#getLastCoords();
+ 
+     if (isNaN(this.#last[6]) && !this.isEmpty()) {
+       // We've only two points.
+       return `M${(this.#last[2] - x) / width} ${
+         (this.#last[3] - y) / height
+-      } L${(this.#last[4] - x) / width} ${(this.#last[5] - y) / height} L${
++      } L${(this.#last[4] - x) / width} ${(this.#last[5] - y) / height} L${lastTopX} ${lastTopY} L${lastBottomX} ${lastBottomY} L${
+         (this.#last[16] - x) / width
+       } ${(this.#last[17] - y) / height} L${(this.#last[14] - x) / width} ${
+         (this.#last[15] - y) / height
+@@ -553,8 +574,9 @@ class FreeOutliner {
+         );
+       }
+     }
++
+     buffer.push(
+-      `L${(lastTop[0] - x) / width} ${(lastTop[1] - y) / height} L${
++      `L${(lastTop[0] - x) / width} ${(lastTop[1] - y) / height} L${lastTopX} ${lastTopY} L${lastBottomX} ${lastBottomY} L${
+         (lastBottom[0] - x) / width
+       } ${(lastBottom[1] - y) / height}`
+     );
+@@ -582,15 +604,19 @@ class FreeOutliner {
+     const lastBottom = last.subarray(16, 18);
+     const [layerX, layerY, layerWidth, layerHeight] = this.#box;
+ 
+-    const points = new Float64Array(this.#points?.length ?? 0);
+-    for (let i = 0, ii = points.length; i < ii; i += 2) {
++    const points = new Float64Array((this.#points?.length ?? 0) + 2);
++    for (let i = 0, ii = points.length - 2; i < ii; i += 2) {
+       points[i] = (this.#points[i] - layerX) / layerWidth;
+       points[i + 1] = (this.#points[i + 1] - layerY) / layerHeight;
+     }
++    points[points.length - 2] = (this.#lastX - layerX) / layerWidth;
++    points[points.length - 1] = (this.#lastY - layerY) / layerHeight;
++    const [lastTopX, lastTopY, lastBottomX, lastBottomY] =
++      this.#getLastCoords();
+ 
+     if (isNaN(last[6]) && !this.isEmpty()) {
+       // We've only two points.
+-      const outline = new Float64Array(24);
++      const outline = new Float64Array(36);
+       outline.set(
+         [
+           NaN,
+@@ -609,6 +635,18 @@ class FreeOutliner {
+           NaN,
+           NaN,
+           NaN,
++          lastTopX,
++          lastTopY,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          lastBottomX,
++          lastBottomY,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
+           (last[16] - layerX) / layerWidth,
+           (last[17] - layerY) / layerHeight,
+           NaN,
+@@ -631,7 +669,7 @@ class FreeOutliner {
+     }
+ 
+     const outline = new Float64Array(
+-      this.#top.length + 12 + this.#bottom.length
++      this.#top.length + 24 + this.#bottom.length
+     );
+     let N = top.length;
+     for (let i = 0; i < N; i += 2) {
+@@ -642,6 +680,7 @@ class FreeOutliner {
+       outline[i] = top[i];
+       outline[i + 1] = top[i + 1];
+     }
++
+     outline.set(
+       [
+         NaN,
+@@ -654,12 +693,24 @@ class FreeOutliner {
+         NaN,
+         NaN,
+         NaN,
++        lastTopX,
++        lastTopY,
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        lastBottomX,
++        lastBottomY,
++        NaN,
++        NaN,
++        NaN,
++        NaN,
+         (lastBottom[0] - layerX) / layerWidth,
+         (lastBottom[1] - layerY) / layerHeight,
+       ],
+       N
+     );
+-    N += 12;
++    N += 24;
+ 
+     for (let i = bottom.length - 6; i >= 6; i -= 6) {
+       for (let j = 0; j < 6; j += 2) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.9
+- @babel/preset-env: ^7.23.9
+- @babel/runtime: ^7.23.9
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @jazzer.js/core: ^2.1.0
+- autoprefixer: ^10.4.17
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001585
+- canvas: ^2.11.2
+- core-js: ^3.35.1
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^51.0.1
+- globals: ^14.0.0
+- gulp: ^4.0.2
+- gulp-cli: ^2.3.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.35
+- postcss-dark-theme-class: ^1.1.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.2.5
+- puppeteer: ^22.0.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.2.1
+- stylelint-prettier: ^5.0.0
+- terser: ^5.27.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.90.1
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/outliner.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { Util } from "../../shared/util.js";
+17 
+18 class Outliner {
+19   #box;
+20 
+21   #verticalEdges = [];
+22 
+23   #intervals = [];
+24 
+25   /**
+26    * Construct an outliner.
+27    * @param {Array<Object>} boxes - An array of axis-aligned rectangles.
+28    * @param {number} borderWidth - The width of the border of the boxes, it
+29    *   allows to make the boxes bigger (or smaller).
+30    * @param {number} innerMargin - The margin between the boxes and the
+31    *   outlines. It's important to not have a null innerMargin when we want to
+32    *   draw the outline else the stroked outline could be clipped because of its
+33    *   width.
+34    * @param {boolean} isLTR - true if we're in LTR mode. It's used to determine
+35    *   the last point of the boxes.
+36    */
+37   constructor(boxes, borderWidth = 0, innerMargin = 0, isLTR = true) {
+38     let minX = Infinity;
+39     let maxX = -Infinity;
+40     let minY = Infinity;
+41     let maxY = -Infinity;
+42 
+43     // We round the coordinates to slightly reduce the number of edges in the
+44     // final outlines.
+45     const NUMBER_OF_DIGITS = 4;
+46     const EPSILON = 10 ** -NUMBER_OF_DIGITS;
+47 
+48     // The coordinates of the boxes are in the page coordinate system.
+49     for (const { x, y, width, height } of boxes) {
+50       const x1 = Math.floor((x - borderWidth) / EPSILON) * EPSILON;
+51       const x2 = Math.ceil((x + width + borderWidth) / EPSILON) * EPSILON;
+52       const y1 = Math.floor((y - borderWidth) / EPSILON) * EPSILON;
+53       const y2 = Math.ceil((y + height + borderWidth) / EPSILON) * EPSILON;
+54       const left = [x1, y1, y2, true];
+55       const right = [x2, y1, y2, false];
+56       this.#verticalEdges.push(left, right);
+57 
+58       minX = Math.min(minX, x1);
+59       maxX = Math.max(maxX, x2);
+60       minY = Math.min(minY, y1);
+61       maxY = Math.max(maxY, y2);
+62     }
+63 
+64     const bboxWidth = maxX - minX + 2 * innerMargin;
+65     const bboxHeight = maxY - minY + 2 * innerMargin;
+66     const shiftedMinX = minX - innerMargin;
+67     const shiftedMinY = minY - innerMargin;
+68     const lastEdge = this.#verticalEdges.at(isLTR ? -1 : -2);
+69     const lastPoint = [lastEdge[0], lastEdge[2]];
+70 
+71     // Convert the coordinates of the edges into box coordinates.
+72     for (const edge of this.#verticalEdges) {
+73       const [x, y1, y2] = edge;
+74       edge[0] = (x - shiftedMinX) / bboxWidth;
+75       edge[1] = (y1 - shiftedMinY) / bboxHeight;
+76       edge[2] = (y2 - shiftedMinY) / bboxHeight;
+77     }
+78 
+79     this.#box = {
+80       x: shiftedMinX,
+81       y: shiftedMinY,
+82       width: bboxWidth,
+83       height: bboxHeight,
+84       lastPoint,
+85     };
+86   }
+87 
+88   getOutlines() {
+89     // We begin to sort lexicographically the vertical edges by their abscissa,
+90     // and then by their ordinate.
+91     this.#verticalEdges.sort(
+92       (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+93     );
+94 
+95     // We're now using a sweep line algorithm to find the outlines.
+96     // We start with the leftmost vertical edge, and we're going to iterate
+97     // over all the vertical edges from left to right.
+98     // Each time we encounter a left edge, we're going to insert the interval
+99     // [y1, y2] in the set of intervals.
+100     // This set of intervals is used to break the vertical edges into chunks:
+101     // we only take the part of the vertical edge that isn't in the union of
+102     // the intervals.
+103     const outlineVerticalEdges = [];
+104     for (const edge of this.#verticalEdges) {
+105       if (edge[3]) {
+106         // Left edge.
+107         outlineVerticalEdges.push(...this.#breakEdge(edge));
+108         this.#insert(edge);
+109       } else {
+110         // Right edge.
+111         this.#remove(edge);
+112         outlineVerticalEdges.push(...this.#breakEdge(edge));
+113       }
+114     }
+115     return this.#getOutlines(outlineVerticalEdges);
+116   }
+117 
+118   #getOutlines(outlineVerticalEdges) {
+119     const edges = [];
+120     const allEdges = new Set();
+121 
+122     for (const edge of outlineVerticalEdges) {
+123       const [x, y1, y2] = edge;
+124       edges.push([x, y1, edge], [x, y2, edge]);
+125     }
+126 
+127     // We sort lexicographically the vertices of each edge by their ordinate and
+128     // by their abscissa.
+129     // Every pair (v_2i, v_{2i + 1}) of vertices defines a horizontal edge.
+130     // So for every vertical edge, we're going to add the two vertical edges
+131     // which are connected to it through a horizontal edge.
+132     edges.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+133     for (let i = 0, ii = edges.length; i < ii; i += 2) {
+134       const edge1 = edges[i][2];
+135       const edge2 = edges[i + 1][2];
+136       edge1.push(edge2);
+137       edge2.push(edge1);
+138       allEdges.add(edge1);
+139       allEdges.add(edge2);
+140     }
+141     const outlines = [];
+142     let outline;
+143 
+144     while (allEdges.size > 0) {
+145       const edge = allEdges.values().next().value;
+146       let [x, y1, y2, edge1, edge2] = edge;
+147       allEdges.delete(edge);
+148       let lastPointX = x;
+149       let lastPointY = y1;
+150 
+151       outline = [x, y2];
+152       outlines.push(outline);
+153 
+154       while (true) {
+155         let e;
+156         if (allEdges.has(edge1)) {
+157           e = edge1;
+158         } else if (allEdges.has(edge2)) {
+159           e = edge2;
+160         } else {
+161           break;
+162         }
+163 
+164         allEdges.delete(e);
+165         [x, y1, y2, edge1, edge2] = e;
+166 
+167         if (lastPointX !== x) {
+168           outline.push(lastPointX, lastPointY, x, lastPointY === y1 ? y1 : y2);
+169           lastPointX = x;
+170         }
+171         lastPointY = lastPointY === y1 ? y2 : y1;
+172       }
+173       outline.push(lastPointX, lastPointY);
+174     }
+175     return new HighlightOutline(outlines, this.#box);
+176   }
+177 
+178   #binarySearch(y) {
+179     const array = this.#intervals;
+180     let start = 0;
+181     let end = array.length - 1;
+182 
+183     while (start <= end) {
+184       const middle = (start + end) >> 1;
+185       const y1 = array[middle][0];
+186       if (y1 === y) {
+187         return middle;
+188       }
+189       if (y1 < y) {
+190         start = middle + 1;
+191       } else {
+192         end = middle - 1;
+193       }
+194     }
+195     return end + 1;
+196   }
+197 
+198   #insert([, y1, y2]) {
+199     const index = this.#binarySearch(y1);
+200     this.#intervals.splice(index, 0, [y1, y2]);
+201   }
+202 
+203   #remove([, y1, y2]) {
+204     const index = this.#binarySearch(y1);
+205     for (let i = index; i < this.#intervals.length; i++) {
+206       const [start, end] = this.#intervals[i];
+207       if (start !== y1) {
+208         break;
+209       }
+210       if (start === y1 && end === y2) {
+211         this.#intervals.splice(i, 1);
+212         return;
+213       }
+214     }
+215     for (let i = index - 1; i >= 0; i--) {
+216       const [start, end] = this.#intervals[i];
+217       if (start !== y1) {
+218         break;
+219       }
+220       if (start === y1 && end === y2) {
+221         this.#intervals.splice(i, 1);
+222         return;
+223       }
+224     }
+225   }
+226 
+227   #breakEdge(edge) {
+228     const [x, y1, y2] = edge;
+229     const results = [[x, y1, y2]];
+230     const index = this.#binarySearch(y2);
+231     for (let i = 0; i < index; i++) {
+232       const [start, end] = this.#intervals[i];
+233       for (let j = 0, jj = results.length; j < jj; j++) {
+234         const [, y3, y4] = results[j];
+235         if (end <= y3 || y4 <= start) {
+236           // There is no intersection between the interval and the edge, hence
+237           // we keep it as is.
+238           continue;
+239         }
+240         if (y3 >= start) {
+241           if (y4 > end) {
+242             results[j][1] = end;
+243           } else {
+244             if (jj === 1) {
+245               return [];
+246             }
+247             // The edge is included in the interval, hence we remove it.
+248             results.splice(j, 1);
+249             j--;
+250             jj--;
+251           }
+252           continue;
+253         }
+254         results[j][2] = start;
+255         if (y4 > end) {
+256           results.push([x, end, y4]);
+257         }
+258       }
+259     }
+260     return results;
+261   }
+262 }
+263 
+264 class Outline {
+265   /**
+266    * @returns {string} The SVG path of the outline.
+267    */
+268   toSVGPath() {
+269     throw new Error("Abstract method `toSVGPath` must be implemented.");
+270   }
+271 
+272   /**
+273    * @type {Object|null} The bounding box of the outline.
+274    */
+275   get box() {
+276     throw new Error("Abstract getter `box` must be implemented.");
+277   }
+278 
+279   serialize(_bbox, _rotation) {
+280     throw new Error("Abstract method `serialize` must be implemented.");
+281   }
+282 
+283   get free() {
+284     return this instanceof FreeHighlightOutline;
+285   }
+286 }
+287 
+288 class HighlightOutline extends Outline {
+289   #box;
+290 
+291   #outlines;
+292 
+293   constructor(outlines, box) {
+294     super();
+295     this.#outlines = outlines;
+296     this.#box = box;
+297   }
+298 
+299   toSVGPath() {
+300     const buffer = [];
+301     for (const polygon of this.#outlines) {
+302       let [prevX, prevY] = polygon;
+303       buffer.push(`M${prevX} ${prevY}`);
+304       for (let i = 2; i < polygon.length; i += 2) {
+305         const x = polygon[i];
+306         const y = polygon[i + 1];
+307         if (x === prevX) {
+308           buffer.push(`V${y}`);
+309           prevY = y;
+310         } else if (y === prevY) {
+311           buffer.push(`H${x}`);
+312           prevX = x;
+313         }
+314       }
+315       buffer.push("Z");
+316     }
+317     return buffer.join(" ");
+318   }
+319 
+320   /**
+321    * Serialize the outlines into the PDF page coordinate system.
+322    * @param {Array<number>} _bbox - the bounding box of the annotation.
+323    * @param {number} _rotation - the rotation of the annotation.
+324    * @returns {Array<Array<number>>}
+325    */
+326   serialize([blX, blY, trX, trY], _rotation) {
+327     const outlines = [];
+328     const width = trX - blX;
+329     const height = trY - blY;
+330     for (const outline of this.#outlines) {
+331       const points = new Array(outline.length);
+332       for (let i = 0; i < outline.length; i += 2) {
+333         points[i] = blX + outline[i] * width;
+334         points[i + 1] = trY - outline[i + 1] * height;
+335       }
+336       outlines.push(points);
+337     }
+338     return outlines;
+339   }
+340 
+341   get box() {
+342     return this.#box;
+343   }
+344 }
+345 
+346 class FreeOutliner {
+347   #box;
+348 
+349   #bottom = [];
+350 
+351   #innerMargin;
+352 
+353   #isLTR;
+354 
+355   #top = [];
+356 
+357   // The first 6 elements are the last 3 points of the top part of the outline.
+358   // The next 6 elements are the last 3 points of the line.
+359   // The next 6 elements are the last 3 points of the bottom part of the
+360   // outline.
+361   // We track the last 3 points in order to be able to:
+362   //  - compute the normal of the line,
+363   //  - compute the control points of the quadratic Bézier curve.
+364   #last = new Float64Array(18);
+365 
+366   #min;
+367 
+368   #min_dist;
+369 
+370   #scaleFactor;
+371 
+372   #thickness;
+373 
+374   #points = [];
+375 
+376   static #MIN_DIST = 8;
+377 
+378   static #MIN_DIFF = 2;
+379 
+380   static #MIN = FreeOutliner.#MIN_DIST + FreeOutliner.#MIN_DIFF;
+381 
+382   constructor({ x, y }, box, scaleFactor, thickness, isLTR, innerMargin = 0) {
+383     this.#box = box;
+384     this.#thickness = thickness * scaleFactor;
+385     this.#isLTR = isLTR;
+386     this.#last.set([NaN, NaN, NaN, NaN, x, y], 6);
+387     this.#innerMargin = innerMargin;
+388     this.#min_dist = FreeOutliner.#MIN_DIST * scaleFactor;
+389     this.#min = FreeOutliner.#MIN * scaleFactor;
+390     this.#scaleFactor = scaleFactor;
+391     this.#points.push(x, y);
+392   }
+393 
+394   get free() {
+395     return true;
+396   }
+397 
+398   isEmpty() {
+399     // When we add a second point then this.#last.slice(6) will be something
+400     // like [NaN, NaN, firstX, firstY, secondX, secondY,...] so having a NaN
+401     // at index 8 means that we've only one point.
+402     return isNaN(this.#last[8]);
+403   }
+404 
+405   add({ x, y }) {
+406     const [layerX, layerY, layerWidth, layerHeight] = this.#box;
+407     let [x1, y1, x2, y2] = this.#last.subarray(8, 12);
+408     const diffX = x - x2;
+409     const diffY = y - y2;
+410     const d = Math.hypot(diffX, diffY);
+411     if (d < this.#min) {
+412       // The idea is to avoid garbage points around the last point.
+413       // When the points are too close, it just leads to bad normal vectors and
+414       // control points.
+415       return false;
+416     }
+417     const diffD = d - this.#min_dist;
+418     const K = diffD / d;
+419     const shiftX = K * diffX;
+420     const shiftY = K * diffY;
+421 
+422     // We update the last 3 points of the line.
+423     let x0 = x1;
+424     let y0 = y1;
+425     x1 = x2;
+426     y1 = y2;
+427     x2 += shiftX;
+428     y2 += shiftY;
+429 
+430     // We keep track of the points in order to be able to compute the focus
+431     // outline.
+432     this.#points?.push(x, y);
+433 
+434     // Create the normal unit vector.
+435     // |(shiftX, shiftY)| = |K| * |(diffX, diffY)| = |K| * d = diffD.
+436     const nX = -shiftY / diffD;
+437     const nY = shiftX / diffD;
+438     const thX = nX * this.#thickness;
+439     const thY = nY * this.#thickness;
+440     this.#last.set(this.#last.subarray(2, 8), 0);
+441     this.#last.set([x2 + thX, y2 + thY], 4);
+442     this.#last.set(this.#last.subarray(14, 18), 12);
+443     this.#last.set([x2 - thX, y2 - thY], 16);
+444 
+445     if (isNaN(this.#last[6])) {
+446       if (this.#top.length === 0) {
+447         this.#last.set([x1 + thX, y1 + thY], 2);
+448         this.#top.push(
+449           NaN,
+450           NaN,
+451           NaN,
+452           NaN,
+453           (x1 + thX - layerX) / layerWidth,
+454           (y1 + thY - layerY) / layerHeight
+455         );
+456         this.#last.set([x1 - thX, y1 - thY], 14);
+457         this.#bottom.push(
+458           NaN,
+459           NaN,
+460           NaN,
+461           NaN,
+462           (x1 - thX - layerX) / layerWidth,
+463           (y1 - thY - layerY) / layerHeight
+464         );
+465       }
+466       this.#last.set([x0, y0, x1, y1, x2, y2], 6);
+467       return !this.isEmpty();
+468     }
+469 
+470     this.#last.set([x0, y0, x1, y1, x2, y2], 6);
+471 
+472     const angle = Math.abs(
+473       Math.atan2(y0 - y1, x0 - x1) - Math.atan2(shiftY, shiftX)
+474     );
+475     if (angle < Math.PI / 2) {
+476       // In order to avoid some possible artifacts, we're going to use the a
+477       // straight line instead of a quadratic Bézier curve.
+478       [x1, y1, x2, y2] = this.#last.subarray(2, 6);
+479       this.#top.push(
+480         NaN,
+481         NaN,
+482         NaN,
+483         NaN,
+484         ((x1 + x2) / 2 - layerX) / layerWidth,
+485         ((y1 + y2) / 2 - layerY) / layerHeight
+486       );
+487       [x1, y1, x0, y0] = this.#last.subarray(14, 18);
+488       this.#bottom.push(
+489         NaN,
+490         NaN,
+491         NaN,
+492         NaN,
+493         ((x0 + x1) / 2 - layerX) / layerWidth,
+494         ((y0 + y1) / 2 - layerY) / layerHeight
+495       );
+496       return true;
+497     }
+498 
+499     // Control points and the final point for the quadratic Bézier curve.
+500     [x0, y0, x1, y1, x2, y2] = this.#last.subarray(0, 6);
+501     this.#top.push(
+502       ((x0 + 5 * x1) / 6 - layerX) / layerWidth,
+503       ((y0 + 5 * y1) / 6 - layerY) / layerHeight,
+504       ((5 * x1 + x2) / 6 - layerX) / layerWidth,
+505       ((5 * y1 + y2) / 6 - layerY) / layerHeight,
+506       ((x1 + x2) / 2 - layerX) / layerWidth,
+507       ((y1 + y2) / 2 - layerY) / layerHeight
+508     );
+509     [x2, y2, x1, y1, x0, y0] = this.#last.subarray(12, 18);
+510     this.#bottom.push(
+511       ((x0 + 5 * x1) / 6 - layerX) / layerWidth,
+512       ((y0 + 5 * y1) / 6 - layerY) / layerHeight,
+513       ((5 * x1 + x2) / 6 - layerX) / layerWidth,
+514       ((5 * y1 + y2) / 6 - layerY) / layerHeight,
+515       ((x1 + x2) / 2 - layerX) / layerWidth,
+516       ((y1 + y2) / 2 - layerY) / layerHeight
+517     );
+518     return true;
+519   }
+520 
+521   toSVGPath() {
+522     if (this.isEmpty()) {
+523       // We've only one point.
+524       return "";
+525     }
+526     const top = this.#top;
+527     const bottom = this.#bottom;
+528     const lastTop = this.#last.subarray(4, 6);
+529     const lastBottom = this.#last.subarray(16, 18);
+530     const [x, y, width, height] = this.#box;
+531 
+532     if (isNaN(this.#last[6]) && !this.isEmpty()) {
+533       // We've only two points.
+534       return `M${(this.#last[2] - x) / width} ${
+535         (this.#last[3] - y) / height
+536       } L${(this.#last[4] - x) / width} ${(this.#last[5] - y) / height} L${
+537         (this.#last[16] - x) / width
+538       } ${(this.#last[17] - y) / height} L${(this.#last[14] - x) / width} ${
+539         (this.#last[15] - y) / height
+540       } Z`;
+541     }
+542 
+543     const buffer = [];
+544     buffer.push(`M${top[4]} ${top[5]}`);
+545     for (let i = 6; i < top.length; i += 6) {
+546       if (isNaN(top[i])) {
+547         buffer.push(`L${top[i + 4]} ${top[i + 5]}`);
+548       } else {
+549         buffer.push(
+550           `C${top[i]} ${top[i + 1]} ${top[i + 2]} ${top[i + 3]} ${top[i + 4]} ${
+551             top[i + 5]
+552           }`
+553         );
+554       }
+555     }
+556     buffer.push(
+557       `L${(lastTop[0] - x) / width} ${(lastTop[1] - y) / height} L${
+558         (lastBottom[0] - x) / width
+559       } ${(lastBottom[1] - y) / height}`
+560     );
+561     for (let i = bottom.length - 6; i >= 6; i -= 6) {
+562       if (isNaN(bottom[i])) {
+563         buffer.push(`L${bottom[i + 4]} ${bottom[i + 5]}`);
+564       } else {
+565         buffer.push(
+566           `C${bottom[i]} ${bottom[i + 1]} ${bottom[i + 2]} ${bottom[i + 3]} ${
+567             bottom[i + 4]
+568           } ${bottom[i + 5]}`
+569         );
+570       }
+571     }
+572     buffer.push(`L${bottom[4]} ${bottom[5]} Z`);
+573 
+574     return buffer.join(" ");
+575   }
+576 
+577   getOutlines() {
+578     const top = this.#top;
+579     const bottom = this.#bottom;
+580     const last = this.#last;
+581     const lastTop = last.subarray(4, 6);
+582     const lastBottom = last.subarray(16, 18);
+583     const [layerX, layerY, layerWidth, layerHeight] = this.#box;
+584 
+585     const points = new Float64Array(this.#points?.length ?? 0);
+586     for (let i = 0, ii = points.length; i < ii; i += 2) {
+587       points[i] = (this.#points[i] - layerX) / layerWidth;
+588       points[i + 1] = (this.#points[i + 1] - layerY) / layerHeight;
+589     }
+590 
+591     if (isNaN(last[6]) && !this.isEmpty()) {
+592       // We've only two points.
+593       const outline = new Float64Array(24);
+594       outline.set(
+595         [
+596           NaN,
+597           NaN,
+598           NaN,
+599           NaN,
+600           (last[2] - layerX) / layerWidth,
+601           (last[3] - layerY) / layerHeight,
+602           NaN,
+603           NaN,
+604           NaN,
+605           NaN,
+606           (last[4] - layerX) / layerWidth,
+607           (last[5] - layerY) / layerHeight,
+608           NaN,
+609           NaN,
+610           NaN,
+611           NaN,
+612           (last[16] - layerX) / layerWidth,
+613           (last[17] - layerY) / layerHeight,
+614           NaN,
+615           NaN,
+616           NaN,
+617           NaN,
+618           (last[14] - layerX) / layerWidth,
+619           (last[15] - layerY) / layerHeight,
+620         ],
+621         0
+622       );
+623       return new FreeHighlightOutline(
+624         outline,
+625         points,
+626         this.#box,
+627         this.#scaleFactor,
+628         this.#innerMargin,
+629         this.#isLTR
+630       );
+631     }
+632 
+633     const outline = new Float64Array(
+634       this.#top.length + 12 + this.#bottom.length
+635     );
+636     let N = top.length;
+637     for (let i = 0; i < N; i += 2) {
+638       if (isNaN(top[i])) {
+639         outline[i] = outline[i + 1] = NaN;
+640         continue;
+641       }
+642       outline[i] = top[i];
+643       outline[i + 1] = top[i + 1];
+644     }
+645     outline.set(
+646       [
+647         NaN,
+648         NaN,
+649         NaN,
+650         NaN,
+651         (lastTop[0] - layerX) / layerWidth,
+652         (lastTop[1] - layerY) / layerHeight,
+653         NaN,
+654         NaN,
+655         NaN,
+656         NaN,
+657         (lastBottom[0] - layerX) / layerWidth,
+658         (lastBottom[1] - layerY) / layerHeight,
+659       ],
+660       N
+661     );
+662     N += 12;
+663 
+664     for (let i = bottom.length - 6; i >= 6; i -= 6) {
+665       for (let j = 0; j < 6; j += 2) {
+666         if (isNaN(bottom[i + j])) {
+667           outline[N] = outline[N + 1] = NaN;
+668           N += 2;
+669           continue;
+670         }
+671         outline[N] = bottom[i + j];
+672         outline[N + 1] = bottom[i + j + 1];
+673         N += 2;
+674       }
+675     }
+676     outline.set([NaN, NaN, NaN, NaN, bottom[4], bottom[5]], N);
+677     return new FreeHighlightOutline(
+678       outline,
+679       points,
+680       this.#box,
+681       this.#scaleFactor,
+682       this.#innerMargin,
+683       this.#isLTR
+684     );
+685   }
+686 }
+687 
+688 class FreeHighlightOutline extends Outline {
+689   #box;
+690 
+691   #bbox = null;
+692 
+693   #innerMargin;
+694 
+695   #isLTR;
+696 
+697   #points;
+698 
+699   #scaleFactor;
+700 
+701   #outline;
+702 
+703   constructor(outline, points, box, scaleFactor, innerMargin, isLTR) {
+704     super();
+705     this.#outline = outline;
+706     this.#points = points;
+707     this.#box = box;
+708     this.#scaleFactor = scaleFactor;
+709     this.#innerMargin = innerMargin;
+710     this.#isLTR = isLTR;
+711     this.#computeMinMax(isLTR);
+712 
+713     const { x, y, width, height } = this.#bbox;
+714     for (let i = 0, ii = outline.length; i < ii; i += 2) {
+715       outline[i] = (outline[i] - x) / width;
+716       outline[i + 1] = (outline[i + 1] - y) / height;
+717     }
+718     for (let i = 0, ii = points.length; i < ii; i += 2) {
+719       points[i] = (points[i] - x) / width;
+720       points[i + 1] = (points[i + 1] - y) / height;
+721     }
+722   }
+723 
+724   toSVGPath() {
+725     const buffer = [`M${this.#outline[4]} ${this.#outline[5]}`];
+726     for (let i = 6, ii = this.#outline.length; i < ii; i += 6) {
+727       if (isNaN(this.#outline[i])) {
+728         buffer.push(`L${this.#outline[i + 4]} ${this.#outline[i + 5]}`);
+729         continue;
+730       }
+731       buffer.push(
+732         `C${this.#outline[i]} ${this.#outline[i + 1]} ${this.#outline[i + 2]} ${
+733           this.#outline[i + 3]
+734         } ${this.#outline[i + 4]} ${this.#outline[i + 5]}`
+735       );
+736     }
+737     buffer.push("Z");
+738     return buffer.join(" ");
+739   }
+740 
+741   serialize([blX, blY, trX, trY], rotation) {
+742     const width = trX - blX;
+743     const height = trY - blY;
+744     let outline;
+745     let points;
+746     switch (rotation) {
+747       case 0:
+748         outline = this.#rescale(this.#outline, blX, trY, width, -height);
+749         points = this.#rescale(this.#points, blX, trY, width, -height);
+750         break;
+751       case 90:
+752         outline = this.#rescaleAndSwap(this.#outline, blX, blY, width, height);
+753         points = this.#rescaleAndSwap(this.#points, blX, blY, width, height);
+754         break;
+755       case 180:
+756         outline = this.#rescale(this.#outline, trX, blY, -width, height);
+757         points = this.#rescale(this.#points, trX, blY, -width, height);
+758         break;
+759       case 270:
+760         outline = this.#rescaleAndSwap(
+761           this.#outline,
+762           trX,
+763           trY,
+764           -width,
+765           -height
+766         );
+767         points = this.#rescaleAndSwap(this.#points, trX, trY, -width, -height);
+768         break;
+769     }
+770     return { outline: Array.from(outline), points: [Array.from(points)] };
+771   }
+772 
+773   #rescale(src, tx, ty, sx, sy) {
+774     const dest = new Float64Array(src.length);
+775     for (let i = 0, ii = src.length; i < ii; i += 2) {
+776       dest[i] = tx + src[i] * sx;
+777       dest[i + 1] = ty + src[i + 1] * sy;
+778     }
+779     return dest;
+780   }
+781 
+782   #rescaleAndSwap(src, tx, ty, sx, sy) {
+783     const dest = new Float64Array(src.length);
+784     for (let i = 0, ii = src.length; i < ii; i += 2) {
+785       dest[i] = tx + src[i + 1] * sx;
+786       dest[i + 1] = ty + src[i] * sy;
+787     }
+788     return dest;
+789   }
+790 
+791   #computeMinMax(isLTR) {
+792     const outline = this.#outline;
+793     let lastX = outline[4];
+794     let lastY = outline[5];
+795     let minX = lastX;
+796     let minY = lastY;
+797     let maxX = lastX;
+798     let maxY = lastY;
+799     let lastPointX = lastX;
+800     let lastPointY = lastY;
+801     const ltrCallback = isLTR ? Math.max : Math.min;
+802 
+803     for (let i = 6, ii = outline.length; i < ii; i += 6) {
+804       if (isNaN(outline[i])) {
+805         minX = Math.min(minX, outline[i + 4]);
+806         minY = Math.min(minY, outline[i + 5]);
+807         maxX = Math.max(maxX, outline[i + 4]);
+808         maxY = Math.max(maxY, outline[i + 5]);
+809         if (lastPointY < outline[i + 5]) {
+810           lastPointX = outline[i + 4];
+811           lastPointY = outline[i + 5];
+812         } else if (lastPointY === outline[i + 5]) {
+813           lastPointX = ltrCallback(lastPointX, outline[i + 4]);
+814         }
+815       } else {
+816         const bbox = Util.bezierBoundingBox(
+817           lastX,
+818           lastY,
+819           ...outline.slice(i, i + 6)
+820         );
+821         minX = Math.min(minX, bbox[0]);
+822         minY = Math.min(minY, bbox[1]);
+823         maxX = Math.max(maxX, bbox[2]);
+824         maxY = Math.max(maxY, bbox[3]);
+825         if (lastPointY < bbox[3]) {
+826           lastPointX = bbox[2];
+827           lastPointY = bbox[3];
+828         } else if (lastPointY === bbox[3]) {
+829           lastPointX = ltrCallback(lastPointX, bbox[2]);
+830         }
+831       }
+832       lastX = outline[i + 4];
+833       lastY = outline[i + 5];
+834     }
+835 
+836     const x = minX - this.#innerMargin,
+837       y = minY - this.#innerMargin,
+838       width = maxX - minX + 2 * this.#innerMargin,
+839       height = maxY - minY + 2 * this.#innerMargin;
+840     this.#bbox = { x, y, width, height, lastPoint: [lastPointX, lastPointY] };
+841   }
+842 
+843   get box() {
+844     return this.#bbox;
+845   }
+846 
+847   getNewOutline(thickness, innerMargin) {
+848     // Build the outline of the highlight to use as the focus outline.
+849     const { x, y, width, height } = this.#bbox;
+850     const [layerX, layerY, layerWidth, layerHeight] = this.#box;
+851     const sx = width * layerWidth;
+852     const sy = height * layerHeight;
+853     const tx = x * layerWidth + layerX;
+854     const ty = y * layerHeight + layerY;
+855     const outliner = new FreeOutliner(
+856       {
+857         x: this.#points[0] * sx + tx,
+858         y: this.#points[1] * sy + ty,
+859       },
+860       this.#box,
+861       this.#scaleFactor,
+862       thickness,
+863       this.#isLTR,
+864       innerMargin ?? this.#innerMargin
+865     );
+866     for (let i = 2; i < this.#points.length; i += 2) {
+867       outliner.add({
+868         x: this.#points[i] * sx + tx,
+869         y: this.#points[i + 1] * sy + ty,
+870       });
+871     }
+872     return outliner.getOutlines();
+873   }
+874 }
+875 
+876 export { FreeOutliner, Outliner };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/annotation_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  Annotation,
+  AnnotationBorderStyle,
+  AnnotationFactory,
+  getQuadPoints,
+  MarkupAnnotation,
+} from "../../src/core/annotation.js";
+import {
+  AnnotationBorderStyleType,
+  AnnotationEditorType,
+  AnnotationFieldFlag,
+  AnnotationFlag,
+  AnnotationType,
+  OPS,
+  RenderingIntentFlag,
+  stringToBytes,
+  stringToUTF8String,
+} from "../../src/shared/util.js";
+import {
+  CMAP_URL,
+  createIdFactory,
+  STANDARD_FONT_DATA_URL,
+  XRefMock,
+} from "./test_utils.js";
+import {
+  DefaultCMapReaderFactory,
+  DefaultStandardFontDataFactory,
+} from "../../src/display/api.js";
+import { Dict, Name, Ref, RefSetCache } from "../../src/core/primitives.js";
+import { Lexer, Parser } from "../../src/core/parser.js";
+import { FlateStream } from "../../src/core/flate_stream.js";
+import { PartialEvaluator } from "../../src/core/evaluator.js";
+import { StringStream } from "../../src/core/stream.js";
+import { WorkerTask } from "../../src/core/worker.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

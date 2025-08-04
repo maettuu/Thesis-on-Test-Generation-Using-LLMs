@@ -1,0 +1,52 @@
+<think>
+Okay, I need to write a regression test for the issue where the PDF text is rendering incorrectly. The user provided a patch that adds mappings for GillSansMT fonts to standard_fonts.js. So, the test should fail before the patch and pass after.
+
+First, I should look at the existing test file, test/unit/api_spec.js. It imports several modules, including getDocument from the display API. I can use that to load the PDF.
+
+I need a sample PDF that uses GillSansMT fonts. Since I don't have the exact file, I'll assume it's in the test PDFs directory. I'll create a temporary server to serve it using createTemporaryNodeServer from test_utils.js.
+
+The test will load the PDF and check if the text is rendered correctly. I'll open the first page, get the text content, and compare it to the expected string.
+
+Before the patch, the text would be incorrect, so the test would fail. After applying the patch, the text should match, making the test pass.
+
+I'll structure the test with async/await, using try-catch to handle any errors. The test will fetch the PDF, get the first page, extract text, and assert it equals the expected value.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll import the necessary modules dynamically to avoid issues with Node.js compatibility.
+
+So, the test will look like this: it loads the PDF, extracts text, and checks if it's correct. This should validate that the font substitution fix works.
+</think>
+
+```javascript
+it("should correctly render GillSansMT fonts as Helvetica", async () => {
+  const { createTemporaryNodeServer } = await import("./test_utils.js");
+  const { getDocument } = await import("../../src/display/api.js");
+  
+  const server = createTemporaryNodeServer({
+    pdf: `${TEST_PDFS_PATH}/gill-sans-test.pdf`
+  });
+  
+  try {
+    const loadingTask = getDocument({
+      url: server.url,
+      cMapUrl: CMAP_URL,
+      workerSrc: WORKER_SRC
+    });
+    
+    const pdfDocument = await loadingTask.promise;
+    const pdfPage = await pdfDocument.getPage(1);
+    const pageViewport = new PageViewport(pdfPage, 1);
+    
+    const renderTask = pdfPage.render({
+      viewport: pageViewport,
+      textLayer: true
+    });
+    
+    const textContent = await renderTask.promise.then(() => pdfPage.getTextContent());
+    const expectedText = "Hello World";
+    
+    assert.strictEqual(textContent.items[0].str, expectedText);
+  } finally {
+    server.close();
+  }
+});
+```

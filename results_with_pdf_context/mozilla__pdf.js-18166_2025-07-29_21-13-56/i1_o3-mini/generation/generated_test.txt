@@ -1,0 +1,63 @@
+it("should gracefully recover when xreffetchIfRef throws", async () => {
+  const { Ref } = await import("../../src/core/primitives.js");
+  const { PartialEvaluator } = await import("../../src/core/evaluator.js");
+  const { createIdFactory } = await import("./test_utils.js");
+
+  const fakeXRef = {
+    fetchIfRef: () => {
+      throw new Error("Test error");
+    },
+  };
+
+  const fontCache = {
+    _cache: new Map(),
+    has(key) {
+      return this._cache.has(key);
+    },
+    get(key) {
+      return this._cache.get(key);
+    },
+    put(key, value) {
+      this._cache.set(key, value);
+    },
+    putAlias(key, alias) {
+      this._cache.set(key, this._cache.get(alias));
+    },
+  };
+
+  const evaluator = new PartialEvaluator({
+    xref: fakeXRef,
+    handler: {},
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache,
+    builtInCMapCache: {},
+    standardFontDataCache: {},
+    globalImageCache: {},
+    systemFontCache: {},
+    options: { ignoreErrors: false },
+  });
+
+  const fakeFontRef = new Ref(0, 0);
+  const resources = {
+    get(key) {
+      if (key === "Font") {
+        return {
+          getRaw: (name) => fakeFontRef,
+        };
+      }
+    },
+  };
+
+  const result = await evaluator.loadFont("testFont", null, resources);
+  if (result.loadedName !== "g_font_error") {
+    throw new Error("Expected fallback font loadedName to be 'g_font_error'");
+  }
+  if (
+    !result.font ||
+    typeof result.font.message !== "string" ||
+    result.font.message !== 'Font "testFont" is not available.'
+  ) {
+    throw new Error("Expected error font with correct message");
+  }
+});

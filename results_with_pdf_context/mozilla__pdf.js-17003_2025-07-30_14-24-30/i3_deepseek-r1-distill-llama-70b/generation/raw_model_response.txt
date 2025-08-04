@@ -1,0 +1,98 @@
+<think>
+Okay, I need to write a test that checks if the warning "Unknown field name, falling back to empty field name." is no longer present after the patch. The issue is that when printing a PDF with an added annotation, this warning appears in the console. 
+
+First, I should understand the problem. The warning is triggered in the `_constructFieldName` method of the Annotation class. Before the patch, this method was called when `pageIndex` was null, but after the patch, it's called when `collectFields` is true. So, the warning should only appear when `collectFields` is true.
+
+I need to create a test that simulates adding an annotation and then printing it, checking if the warning is logged. 
+
+Looking at the test file provided, I can see that the necessary classes are already imported. I'll need to set up a mock PDF document with an annotation that triggers the warning.
+
+I'll create a mock XRef, a mock annotation dictionary, and set up the annotation factory. I'll set `collectFields` to true to ensure the warning is triggered. 
+
+I'll use a spy to track if the warning is logged. Then, I'll create the annotation and check if the warning was called.
+
+So, the test will:
+1. Import the necessary modules.
+2. Set up mocks for XRef, Dict, and Ref.
+3. Create an annotation with `collectFields` set to true.
+4. Use a spy to monitor the `warn` function.
+5. Assert that the warning was called, indicating the issue is present before the patch.
+
+Wait, no. Actually, after the patch, the warning should not appear when printing because `collectFields` is controlled properly. But in the test, I need to ensure that the warning is not present after the patch. Hmm, perhaps I need to structure the test to check both before and after scenarios, but that's complicated.
+
+Alternatively, the test should check that when `collectFields` is true, the warning isn't logged. Or perhaps the test should simulate the conditions that led to the warning before the patch and ensure that after the patch, it doesn't occur.
+
+Wait, the patch changes when `_constructFieldName` is called. Before, it was called when `pageIndex` was null, which happened during printing. After the patch, it's called when `collectFields` is true, which is during annotation collection, not during printing.
+
+So the test should simulate the scenario where an annotation is being printed, and `collectFields` is false. Thus, `_constructFieldName` shouldn't be called, and the warning shouldn't appear.
+
+But I'm a bit confused. Let me think again.
+
+The warning is in `_constructFieldName`, which is called when the annotation is constructed. The patch changes the condition for calling this method. Before the patch, it was called when `pageIndex` was null, which happens during printing. After the patch, it's called when `collectFields` is true, which is during annotation collection, not during printing.
+
+So, the test should check that when printing (where `collectFields` is false), the warning isn't logged. But how to simulate that.
+
+Alternatively, perhaps the test should create an annotation without a parent, which would trigger the warning before the patch, but after the patch, the warning is only triggered during collection.
+
+Wait, perhaps the test should create an annotation without a parent and without collectFields, and check that no warning is logged.
+
+But I'm getting a bit stuck. Maybe I should proceed step by step.
+
+In the test, I'll create a mock annotation without a parent. Then, I'll create an instance of the Annotation class with `collectFields` set to true. I'll use a spy on the `warn` function to see if the warning is called.
+
+Wait, no. The warning is called in `_constructFieldName`, which is part of the constructor. So, when creating an annotation without a parent, the warning should be triggered only if `collectFields` is true.
+
+So, the test will create an annotation with `collectFields` set to true, and check that the warning is called. Then, perhaps, another test with `collectFields` false to ensure it's not called.
+
+But since the test is to verify the fix, perhaps the test should simulate the scenario that caused the warning before the patch and ensure it doesn't happen after.
+
+Alternatively, perhaps the test should mock the conditions and check that the warning is not logged when printing.
+
+I think the best approach is to set up the test to create an annotation without a parent, with `collectFields` set to false (simulating the print scenario), and ensure that the warning isn't called.
+
+Wait, but the patch changes the condition to `if (!collectFields) { ... }`. So, in the print scenario, `collectFields` is false, so the warning should not be called.
+
+So, the test will create an annotation without a parent, with `collectFields` set to false, and check that no warning is logged.
+
+But how to set up that scenario.
+
+I'll proceed to write the test, using the provided imports and mocks. I'll create a mock annotation dictionary without a Parent, and set `collectFields` to false. Then, I'll instantiate the Annotation and check if the warning was called.
+
+Wait, no. The warning is in the constructor of Annotation, which is called via the factory. So perhaps the test should create an annotation via the factory, with `collectFields` set to false, and check that the warning isn't logged.
+
+Alternatively, perhaps it's easier to directly call the `_constructFieldName` method.
+
+But I think the proper way is to simulate the creation of an annotation during printing, which would have `collectFields` set to false, and thus the warning shouldn't be triggered.
+
+So, in the test:
+
+- Create a mock XRef, Dict, Ref, etc.
+- Create an annotation dict without a Parent.
+- Create an AnnotationFactory with collectFields set to false.
+- Use a spy on the warn function.
+- Create the annotation and check if the warning was called.
+
+If the test passes, it means the warning wasn't logged, indicating the patch fixed the issue.
+
+So, the test will look like this:
+
+it("should not warn when constructing annotation without parent and collectFields is false", async () => {
+  const xref = new XRefMock();
+  const dict = new Dict(xref, {});
+  const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+  const annotation = await AnnotationFactory.create(xref, dict, {}, createIdFactory(), false, null);
+  expect(warnSpy).not.toHaveBeenCalledWith('Unknown field name, falling back to empty field name.');
+});
+</think>
+
+```javascript
+it("should not warn when printing an annotation without a parent", async () => {
+  const xref = new XRefMock();
+  const dict = new Dict(xref, {});
+  const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+  const annotation = await AnnotationFactory.create(xref, dict, {}, createIdFactory(), false);
+  expect(warnSpy).not.toHaveBeenCalledWith("Unknown field name, falling back to empty field name.");
+});
+```

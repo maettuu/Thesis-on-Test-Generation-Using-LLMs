@@ -1,0 +1,37 @@
+<think>
+Okay, I need to create a regression test for the bug where font fallback doesn't work on the node-js/legacy build. The user provided a patch that adds a mapping for "HelveticaLTStd-Bold" to "Helvetica-Bold" in the standard_fonts.js file. 
+
+First, I should understand the issue. The problem is that when rendering a PDF that uses HelveticaLTStd fonts, the text isn't showing up because the fallback isn't working. The patch adds a new entry to the font map, so the test should verify that after this change, the font is correctly substituted.
+
+I'll look at the existing test file, test/unit/api_spec.js, to see what imports and setup I can reuse. The test needs to load the PDF, render it, and check if the text is present.
+
+I'll need to import the necessary modules. Since the test runs in Node.js, I'll use dynamic imports for getDocument and buildGetDocumentParams. I'll also need to set up a PDFDocumentLoadingTask and a PDFDocumentProxy to load the PDF.
+
+I should set up a PDFPageProxy for the first page and render it using Canvas. After rendering, I'll extract the text from the page. The expected text is "Blue". If the font fallback works, this text should be present.
+
+In the test, I'll create a new it block. I'll load the PDF, get the first page, render it, and then extract the text. I'll check if the text includes "Blue". If it does, the test passes, indicating the font fallback is working.
+
+I need to make sure the test is self-contained and doesn't rely on any external dependencies beyond what's provided. I'll use the provided PDF file, issue19234.pdf, which is attached to the issue.
+
+So, the steps are: import necessary modules, load the PDF, render the page, extract text, and assert the expected text is present. This should fail before the patch and pass after.
+</think>
+
+```javascript
+it("should render HelveticaLTStd fonts with proper fallback", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue19234.pdf'));
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+  const canvas = new Canvas(1000, 1000);
+  const ctx = canvas.getContext('2d');
+  const renderTask = pdfPage.render({
+    canvasContext: ctx,
+    viewport: pdfPage.getViewport({ scale: 1 }),
+  });
+  await renderTask.promise;
+  const textContent = await pdfPage.getTextContent();
+  const expectedText = "Blue";
+  expect(textContent.items.some(item => item.str === expectedText)).toBe(true);
+});
+```

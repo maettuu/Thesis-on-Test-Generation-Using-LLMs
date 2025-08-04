@@ -1,0 +1,94 @@
+<think>
+Okay, so I need to write a regression test for the patch that uses ImageDecoder to speed up decoding images in PDFs. The test should fail before the patch and pass after. Let me think about how to approach this.
+
+First, I should understand what the patch does. From the patch, it looks like they're adding support for ImageDecoder in the JpegStream class. The getTransferableImage method checks if ImageDecoder can be used, and if so, it decodes the image using it. This should make image decoding faster.
+
+So, the test needs to verify that when ImageDecoder is available and supported, the image is decoded using it, which should be faster. But how do I measure that in a test? Maybe by checking if the image is decoded without errors when using ImageDecoder.
+
+I should create a test that loads a JPEG image from a PDF, checks if it's decoded correctly when ImageDecoder is enabled, and then compare the results. But how do I ensure that the test fails before the patch?
+
+Before the patch, the ImageDecoder wasn't used, so the image would be decoded using the old method. If the patch is applied, the ImageDecoder should take over. So the test should pass only when the patch is applied.
+
+Wait, but how do I know if the ImageDecoder was actually used? Maybe I can check the bitmap property in the image data. If it's present, it means ImageDecoder was used.
+
+I'll structure the test as follows: load a PDF with a JPEG image, render it, and check if the image data includes a bitmap. If it does, the test passes because ImageDecoder was used. Before the patch, this would fail because the bitmap wouldn't be present.
+
+I need to import the necessary modules. Since the test is in Node.js, I'll use dynamic imports. I'll need PDFDocument, PDFPage, and the required utilities.
+
+I'll create a sample PDF with a JPEG image or use an existing one. For simplicity, maybe generate a small PDF with a JPEG image. Alternatively, use a base64 encoded JPEG string.
+
+Wait, using a base64 encoded string might be easier. I can create a PDF that embeds this image. Then, when the PDF is parsed, the image should be decoded using ImageDecoder.
+
+In the test, I'll open the PDF, get the first page, and render it. Then, I'll check the image data. If the image's bitmap exists, the test passes.
+
+So, the test will look something like this:
+
+- Import PDFDocument and other necessary modules.
+- Create a sample PDF with a JPEG image.
+- Load the PDF into PDFDocument.
+- Get the first page and render it.
+- Check if the image data includes a bitmap.
+
+But how do I access the image data after rendering? Maybe I need to look into the internal structures, but that's not ideal. Alternatively, perhaps I can check the rendering output, but that's more complex.
+
+Alternatively, I can check if the getTransferableImage method returns a non-null value, indicating that ImageDecoder was used. But that might require modifying the code to expose that method, which isn't ideal for a test.
+
+Hmm, perhaps the test can check the performance improvement, but that's tricky in a unit test. Maybe the test just ensures that the image is rendered correctly when ImageDecoder is used, which it wouldn't before the patch.
+
+Wait, no. Before the patch, the image would still be decoded, just not using ImageDecoder. So the test needs to specifically check for the use of ImageDecoder.
+
+Another approach: in the test, force the use of ImageDecoder and check if the image is decoded without errors. But I'm not sure how to do that.
+
+Alternatively, the test can create a scenario where without the patch, the image isn't decoded (or throws an error), and with the patch, it works. But that might require mocking or specific conditions.
+
+Wait, perhaps the test can check if the image's bitmap property is present after rendering. Before the patch, this would be null, and after, it would be a valid bitmap.
+
+So, in the test, after rendering the page, I'll look for images in the page's operators and check if any have a bitmap. If so, the test passes.
+
+Putting it all together, the test will:
+
+1. Import necessary modules.
+2. Create a sample PDF with a JPEG image.
+3. Load the PDF.
+4. Render the page.
+5. Check if the image data includes a bitmap.
+
+I'll write the test using async/await and Jest's it function. I'll need to handle any setup and teardown, but since it's a unit test, I'll keep it self-contained.
+
+So, the code will involve creating a PDF document, adding a page with a JPEG image, then rendering it, and checking the image data.
+
+I think that's a solid plan. Now, I'll write the code accordingly.
+</think>
+
+```javascript
+it("should use ImageDecoder for jpeg images", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { JpegImage } = await import("../../src/core/jpg.js");
+  const { ImageDecoder } = globalThis;
+
+  // Create a test image
+  const jpegData = new Uint8Array([
+    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xFF, 0xE0, 0x00, 0x14, 0x4A, 0x46, 0x49, 0x46, 0x50, 0x54,
+    0x52, 0x4E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFF, 0xDA, 0x00, 0x0C, 0x01, 0x00, 0x00, 0x00, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00
+  ]);
+
+  // Load the image
+  const image = await JpegImage.parse(jpegData);
+
+  // Check if ImageDecoder is supported and image uses it
+  const canUseImageDecoder = await JpegStream.canUseImageDecoder;
+  if (!canUseImageDecoder) {
+    throw new Error("ImageDecoder is not supported");
+  }
+
+  const transferableImage = await image.getTransferableImage();
+  expect(transferableImage).not.toBeNull();
+
+  // Verify the image was decoded using ImageDecoder
+  expect(transferableImage.bitmap).toBeDefined();
+});
+```

@@ -1,0 +1,37 @@
+#test/unit/stamp_spec.js
+import { StampEditor } from "../../display/editor/stamp.js";
+import { AnnotationEditorType } from "../../shared/util.js";
+import { PixelsPerInch } from "../display_utils.js";
+
+describe("StampEditor image type validation", () => {
+  it("should only allow supported image types", async () => {
+    const supportedTypes = [
+      "apng",
+      "avif",
+      "bmp",
+      "gif",
+      "jpeg",
+      "png",
+      "svg+xml",
+      "webp",
+      "x-icon",
+    ].map(type => `image/${type}`).join(",");
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = supportedTypes;
+    const editor = new StampEditor({});
+
+    const file = new File([""], "test.tiff", { type: "image/tiff" });
+    const files = [file];
+    const event = { target: { files } };
+    const changeEvent = new Event("change");
+    Object.defineProperty(changeEvent, "target", { value: { files } });
+    input.addEventListener("change", async () => {
+      await editor.#getBitmap();
+    });
+    input.dispatchEvent(changeEvent);
+
+    const bitmapPromise = editor.#bitmapPromise;
+    await expect(bitmapPromise).rejects.toThrow();
+  });
+});

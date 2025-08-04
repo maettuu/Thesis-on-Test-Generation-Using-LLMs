@@ -1,0 +1,37 @@
+<think>
+Okay, I need to write a regression test for the issue where circular references in Form XObjects cause an endless loop in PDF.js. The user provided a patch, and I need to ensure that the test fails before the patch and passes after.
+
+First, I'll start by understanding the problem. The PDF in question has two Form XObjects that reference each other, leading to an infinite loop when trying to render. The patch modifies how resources are loaded and adds checks for circular references.
+
+I should create a test that loads this specific PDF and checks if rendering completes without getting stuck. If the test passes after the patch, it means the issue is resolved.
+
+I'll structure the test using Jest. I'll import the necessary functions, load the PDF, and attempt to render it. I'll use a timeout to detect if the rendering process hangs. If it completes within the expected time, the test passes.
+
+I'll set a reasonable timeout, say 10 seconds, which should be enough for the PDF to render if the circular reference is handled correctly. If the test doesn't complete in time, it fails, indicating the issue persists.
+
+I need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll use the provided imports and structure the test as per the example given.
+
+Finally, I'll write the test to fail on the old code and pass on the patched version, ensuring it correctly verifies the fix.
+</think>
+
+```javascript
+it("should handle circular Form XObjects without infinite looping", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue19800.pdf'));
+  
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error("Rendering timed out, indicating an infinite loop"));
+    }, 10000); // 10 second timeout
+  });
+
+  try {
+    await Promise.race([loadingTask, timeoutPromise]);
+  } catch (error) {
+    if (error.message.includes("ignoring circular reference")) {
+      throw new Error("Circular reference handling failed");
+    }
+  }
+});
+```

@@ -1,0 +1,37 @@
+it("should not throw when aborting null touchMoveAC", async () => {
+  const { PDFDocument, PDFViewer } = await import("../../web/pdf_viewer.js");
+  const { TouchManager } = await import("../../src/display/touch_manager.js");
+
+  const container = document.createElement("div");
+  const viewer = new PDFViewer({
+    container,
+    defaultZoom: "page-width",
+  });
+
+  await viewer.setDocument(new PDFDocument({ url: "/blank.pdf" }));
+  const touchManager = new TouchManager({
+    container,
+    isPinchingDisabled: false,
+    isPinchingStopped: () => false,
+    onPinchStart: () => {},
+    onPinching: () => {},
+    onPinchEnd: () => {},
+    signal: new AbortController().signal,
+  });
+
+  const error = await new Promise(resolve => {
+    const originalConsoleError = console.error;
+    console.error = (...args) => {
+      if (args[0].includes("null is not an object (evaluating 'this.#touchMoveAC.abort')")) {
+        resolve(args[0]);
+      }
+    };
+
+    touchManager.#touchMoveAC = null;
+    touchManager.#onTouchEnd({ touches: [] });
+
+    console.error = originalConsoleError;
+  });
+
+  expect(error).not.toMatch("null is not an object");
+});

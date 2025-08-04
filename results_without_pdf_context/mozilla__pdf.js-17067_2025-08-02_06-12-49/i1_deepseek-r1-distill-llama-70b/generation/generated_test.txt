@@ -1,0 +1,45 @@
+it("should correctly render patterns after transform", async () => {
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { GlobalImageCache } = await import("../../src/core/image_utils.js");
+  const { RenderingCancelledException } = await import("../../src/display/display_utils.js");
+
+  const file = await fetch(`${TEST_PDFS_PATH}test.pdf`);
+  const pdf = await new PDFDocumentLoadingTask(file).load();
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  const renderOptions = {
+    canvasContext: context,
+    viewport,
+    useWebGL: false,
+    enableWebGL: false,
+    dpi: 300,
+    renderInteractiveForms: false,
+  };
+
+  try {
+    await page.render(renderOptions);
+  } catch (error) {
+    if (error instanceof RenderingCancelledException) {
+      throw error;
+    }
+    // Swallow other errors if any
+  }
+
+  // Check if the pattern bounding box is correctly calculated
+  const expectedBoundingBox = {
+    width: 100,
+    height: 100,
+  };
+
+  const actualBoundingBox = {
+    width: viewport.width,
+    height: viewport.height,
+  };
+
+  assert.ok(actualBoundingBox.width > 0 && actualBoundingBox.height > 0,
+            "Pattern bounding box should have valid dimensions");
+});

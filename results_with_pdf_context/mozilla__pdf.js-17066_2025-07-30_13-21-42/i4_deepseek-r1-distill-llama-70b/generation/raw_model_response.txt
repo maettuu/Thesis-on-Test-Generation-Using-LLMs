@@ -1,0 +1,70 @@
+<think>
+Okay, I need to write a regression test for the issue where a read-only form field isn't rendered when AnnotationMode is set to ENABLED (1). The test should fail before the patch and pass after.
+
+First, I'll start by understanding the problem. The user reported that when AnnotationMode is set to 1, the read-only text field doesn't show up. In the default mode (2), it works fine. The problem lies in the isRenderable condition in TextWidgetAnnotationElement.
+
+Looking at the patch, it modifies the isRenderable logic. Before, it was using parameters.renderForms or checking if there's no appearance and a field value. The patch adds a condition to check if the field has its own canvas, which probably affects rendering.
+
+So, the test needs to verify that the field is rendered correctly when AnnotationMode is 1. I'll set up the test to open the provided PDF, which has a read-only field.
+
+I'll use the getDocument function from the API and the test utilities. I'll set renderForms to false to simulate AnnotationMode 1. Then, I'll check if the text field element exists and is visible.
+
+In the test, after loading the PDF and the specific page, I'll look for the text widget annotation. If it's rendered, the test passes; otherwise, it fails.
+
+I need to make sure the test is self-contained, so I'll include all necessary imports and steps. I'll also handle any potential errors, like the element not being found.
+
+So, the test will:
+1. Import necessary modules.
+2. Load the PDF and the page.
+3. Set up the annotation layer with renderForms set to false.
+4. Check if the text field is rendered and visible.
+
+If the test passes after the patch, it confirms the fix works.
+</think>
+
+```javascript
+it("should render read-only text fields when AnnotationMode is ENABLED", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue17064_readonly.pdf'));
+  
+  const { numPages, page } = await loadingTask;
+  const pdfPage = await page(0);
+  
+  const annotationLayer = {
+    div: document.createElement("div"),
+    viewport: pdfPage.viewport,
+    renderForms: false,
+    annotationStorage: new (await import("../../src/shared/util.js")).AnnotationStorage(),
+    linkService: {},
+    enableScripting: false,
+  };
+  
+  const AnnotationLayer = (await import("../../src/display/annotation_layer.js")).AnnotationLayer;
+  const annotationLayerInstance = new AnnotationLayer({
+    div: annotationLayer.div,
+    page: pdfPage,
+    viewport: annotationLayer.viewport,
+    linkService: annotationLayer.linkService,
+    annotationStorage: annotationLayer.annotationStorage,
+    renderForms: annotationLayer.renderForms,
+    enableScripting: annotationLayer.enableScripting,
+  });
+  
+  await annotationLayerInstance.render({
+    annotations: await pdfPage.getAnnotations(),
+    div: annotationLayer.div,
+    page: pdfPage,
+    viewport: annotationLayer.viewport,
+    linkService: annotationLayer.linkService,
+    downloadManager: {},
+    annotationStorage: annotationLayer.annotationStorage,
+    renderForms: annotationLayer.renderForms,
+    enableScripting: annotationLayer.enableScripting,
+  });
+  
+  const textWidget = annotationLayer.div.querySelector(".textWidgetAnnotation");
+  
+  expect(textWidget).toBeTruthy();
+});
+```

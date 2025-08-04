@@ -1,0 +1,86 @@
+```javascript
+it("should handle circular references in Form XObjects without endless loop", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Ref } = await import("../../src/core/primitives.js");
+  const { StringStream } = await import("../../src/core/stream.js");
+  const { PartialEvaluator } = await import("../../src/core/evaluator.js");
+  const { OperatorList } = await import("../../src/core/operator_list.js");
+  const { WorkerTask } = await import("../../src/core/worker.js");
+
+  const pdfManager = {
+    evaluatorOptions: {},
+    ensureDoc: () => Promise.resolve({}),
+  };
+  const xref = {
+    fetch: ref => {
+      if (ref.num === 1) {
+        return new StringStream("q 1 0 0 1 0 0 cm /XObject1 Do Q");
+      }
+      if (ref.num === 2) {
+        return new StringStream("q 1 0 0 1 0 0 cm /XObject2 Do Q");
+      }
+      return null;
+    },
+  };
+  const pageIndex = 0;
+  const pageDict = {
+    get: key => {
+      if (key === "Resources") {
+        return {
+          get: resKey => {
+            if (resKey === "XObject") {
+              return {
+                getRaw: name => {
+                  if (name === "XObject1") return new Ref(1, 0);
+                  if (name === "XObject2") return new Ref(2, 0);
+                  return null;
+                },
+              };
+            }
+            return null;
+          },
+        };
+      }
+      return null;
+    },
+  };
+  const page = new PDFDocument({
+    pdfManager,
+    xref,
+    pageIndex,
+    pageDict,
+    ref: new Ref(3, 0),
+    globalIdFactory: class {},
+  });
+
+  const task = new WorkerTask("test");
+  const operatorList = new OperatorList();
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: null,
+    pageIndex,
+    idFactory: null,
+    fontCache: null,
+    builtInCMapCache: null,
+    standardFontDataCache: null,
+    globalColorSpaceCache: null,
+    globalImageCache: null,
+    systemFontCache: null,
+    options: {},
+  });
+
+  let errorCaught = false;
+  try {
+    await page.getOperatorList({
+      handler: null,
+      sink: operatorList,
+      task,
+      intent: 0,
+    });
+  } catch (error) {
+    errorCaught = true;
+  }
+
+  expect(errorCaught).toBe(true);
+});
+```

@@ -1,0 +1,59 @@
+<think>
+Okay, I need to create a regression test for the issue where the font fallback isn't working on the node-js/legacy build. The user provided a patch that adds a mapping for "HelveticaLTStd-Bold" to "Helvetica-Bold" in the standard_fonts.js file. 
+
+First, I should understand the problem. The user's output shows warnings about HelveticaLTStd paths not being resolved, leading to missing text in the rendered image. This suggests that the font isn't being correctly substituted, causing the text to not render.
+
+The patch adds a line to the standard font map, which should help the system recognize HelveticaLTStd-Bold as Helvetica-Bold. So, the test needs to verify that after this patch, the font substitution works correctly.
+
+Looking at the existing test file, I see that it imports several modules, but I might need to import the necessary ones for this test. I'll probably need to use getDocument from the display API and some utilities for handling the PDF data.
+
+The test should load the provided PDF, render it, and check if the text is present. If the font substitution works, the text should be there. I'll need to extract the text from the first page and check for specific content.
+
+I'll structure the test using Jest's it function. I'll set up a temporary file for the PDF, load it using getDocument, render the first page, extract the text, and then check if the expected string is present.
+
+I should make sure that the test is self-contained and only relies on the provided imports. Since the test runs in Node.js, I'll need to handle any necessary setup, like creating a temporary file.
+
+I also need to ensure that the test fails before the patch and passes after. So, without the patch, the text would be missing, causing the test to fail, and with the patch, the text is present, making the test pass.
+
+Finally, I'll write the code, making sure to import all necessary modules and handle any potential errors or timeouts.
+</think>
+
+```javascript
+it("should correctly substitute HelveticaLTStd fonts with standard Helvetica fonts", async () => {
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const { PageViewport } = await import("../../src/display/display_utils.js");
+  const { GlobalImageCache } = await import("../../src/core/image_utils.js");
+
+  // Setup server and PDF file
+  const server = new TestPdfsServer();
+  const pdfPath = `${TEST_PDFS_PATH}/Tax3921.pdf`;
+  const pdfUrl = getCrossOriginHostname() + pdfPath;
+
+  // Load the PDF document
+  const transport = new PDFDataRangeTransport(pdfUrl);
+  const loadingTask = getDocument({
+    cMapUrl: CMAP_URL,
+    range: transport,
+    isEvalSupported: false,
+  });
+  const doc = await loadingTask.promise;
+
+  try {
+    // Get the first page
+    const page = await doc.getPage(1);
+    const viewport = new PageViewport(page, PageViewport.SCALE_100);
+    const textContent = await page.getTextContent();
+    
+    // Extract and check the text content
+    const actualText = textContent.items.map(item => item.str).join("");
+    const expectedText = "Blue";
+    
+    expect(actualText).toContain(expectedText);
+  } finally {
+    // Clean up
+    await doc.close();
+    server.close();
+  }
+});
+```

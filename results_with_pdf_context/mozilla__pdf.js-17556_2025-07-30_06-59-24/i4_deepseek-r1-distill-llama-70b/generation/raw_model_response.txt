@@ -1,0 +1,32 @@
+<think>
+Okay, I need to write a test that checks if the issue with the PDF operator 'toString' being considered valid is fixed. The problem was that the opMap was using a regular object which includes inherited properties like 'toString', causing it to mistakenly treat it as a valid operator.
+
+First, I should understand how the patch works. The patch changes the opMap to use Object.create(null), which doesn't have prototype properties. So, 'toString' and other inherited properties won't be present, making the operator invalid as intended.
+
+Now, I need to create a test that fails before the patch and passes after. The test should load the provided PDF file, which includes a stream with the 'toString' token. Before the patch, this token was treated as a valid operator, leading to an exception. After the patch, it should be ignored, allowing the PDF to render without errors.
+
+I'll use the getDocument function from the API to load the PDF. Then, I'll try to get the first page and render it. If the rendering is successful, the test passes. Before the patch, this should throw an error, but after, it should not.
+
+So, the test will import the necessary modules, load the PDF, and check if rendering the page works without throwing an exception. If it doesn't throw, the test passes, indicating the issue is fixed.
+</think>
+
+```javascript
+it("should ignore 'toString' as an invalid PDF operator", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue17554.pdf'));
+  
+  try {
+    const pdfDocument = await loadingTask.promise;
+    const page = await pdfDocument.getPage(1);
+    await page.render({
+      canvasContext: null, // Using null to avoid actual rendering
+      viewport: null, // Using null to avoid layout calculations
+    });
+    // If no exception is thrown, the test passes
+  } catch (error) {
+    // Before the patch, this would throw an exception
+    throw new Error("Expected no exception, but got: " + error.message);
+  }
+});
+```

@@ -1,0 +1,56 @@
+<think>
+Okay, I need to write a regression test for the issue where Firefox is slow to render poster PDFs. The patch provided modifies the canvas.js file, specifically the resetCtxToDefault function and the paintInlineImageXObject method. The changes ensure that the ctx.filter is only set to "none" if it's not already "none" or an empty string. This should prevent unnecessary filter resets, which might have been causing performance issues.
+
+First, I should understand what the patch does. Before the patch, ctx.filter was set to "none" every time, which could reset the filter even when it wasn't necessary. After the patch, it only sets the filter if it's different from "none" or an empty string. This should improve performance by avoiding redundant operations.
+
+Now, I need to write a test that fails before the patch and passes after. The test should measure the time it takes to render a PDF with a poster image, which should be slow before the patch and faster after.
+
+I'll use the existing test setup. The test file already imports necessary modules, so I can use them. I'll create a test case that loads a sample PDF with a poster image, measures the render time, and asserts that it's within an expected range.
+
+I'll use the getDocument function from the API to load the PDF. Then, I'll get the first page and its viewport. I'll create a canvas element and set its size based on the viewport. Using the render method of the page, I'll render the PDF page onto the canvas.
+
+I'll measure the time before and after rendering to calculate the duration. The test should check if the rendering time is less than a certain threshold, say 500ms, which should be the case after the patch.
+
+I should also handle any potential errors, maybe with a try-catch block, but since the test is about performance, I might not need it unless I expect specific errors.
+
+I need to make sure that the test is self-contained and only uses the provided imports. I won't add any new dependencies. The test should be concise and focused on verifying the performance improvement.
+
+So, putting it all together, the test will load a PDF, render it, measure the time, and assert that the rendering is fast enough. This should ensure that the patch resolves the slow rendering issue.
+</think>
+
+```javascript
+it("should render poster PDFs quickly", async () => {
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const { PageViewport } = await import("../../src/display/display_utils.js");
+  const { CMAP_URL } = await import("./test_utils.js");
+
+  // Use a sample PDF with a poster image
+  const pdfPath = `${TEST_PDFS_PATH}/poster.pdf`;
+  const params = buildGetDocumentParams(pdfPath, CMAP_URL);
+  const pdfDocument = await PDFDocumentProxy.create(params);
+
+  // Get the first page
+  const page = await pdfDocument.getPage(1);
+  const viewport = new PageViewport(page, PageViewport.SCALE_100);
+
+  // Create a canvas to render to
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d");
+
+  // Measure the rendering time
+  const startTime = Date.now();
+  await page.render({
+    canvasContext: ctx,
+    viewport,
+    renderInteractive: false,
+  });
+  const endTime = Date.now();
+  const renderTime = endTime - startTime;
+
+  // Verify that rendering is fast enough
+  expect(renderTime).toBeLessThan(500);
+});
+```

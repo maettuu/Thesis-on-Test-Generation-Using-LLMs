@@ -1,0 +1,49 @@
+<think>
+Okay, so I need to write a regression test for this issue where the signature page of a digitally signed PDF isn't rendering correctly. The user provided a patch that modifies the StreamsSequenceStream class in decode_stream.js. The patch filters out streams that aren't instances of BaseStream. 
+
+First, I should understand what the issue is. The problem occurs when the PDF has a digitally signed signature page, and it's not displayed correctly. The user mentioned that in Firefox with PDF.js version 4.8.30, the page doesn't render as expected, showing an error instead. However, in Edge, it works fine, but not in Adobe Reader. So the issue is specific to how PDF.js handles certain streams.
+
+The patch changes the constructor of StreamsSequenceStream. It adds a line that filters the streams, only keeping those that are instances of BaseStream. This means that any stream that isn't a BaseStream (or a subclass like DecodeStream) will be skipped. The idea is that these invalid streams might be causing the rendering issue.
+
+To write a test that fails before the patch and passes after, I need to simulate the scenario where the PDF has invalid streams. The test should load the problematic PDF and check if the page renders correctly.
+
+I'll structure the test using Jest. I'll use the getDocument function from the PDF.js API to load the PDF. Then, I'll navigate to page 45, which is the signature page. I'll render it and check if the text is displayed correctly.
+
+I need to import the necessary modules. Since the test is in Node.js, I'll use dynamic imports. I'll import getDocument from '../../src/display/api.js' and buildGetDocumentParams from './test_utils.js' to get the PDF file.
+
+In the test, I'll create a loadingTask using getDocument with the parameters for 'issue18973.pdf'. Then, I'll wait for the document to load, get the first page (since page 45 is the signature page), render it, and check if the text is present.
+
+I should handle any errors that might occur during loading or rendering. If the PDF can't be loaded or the page can't be rendered, the test should fail.
+
+So, the test will look something like this: load the PDF, get the specific page, render it, and check for the expected text. If the patch works, the text should be found, and the test passes. Without the patch, it might throw an error or not find the text, causing the test to fail.
+
+I also need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll use async/await for the asynchronous operations and wrap everything in a try-catch block to handle any exceptions.
+
+Finally, I'll structure the test as an it block, describing the expected behavior clearly so it's easy to understand what's being tested.
+</think>
+
+```javascript
+it("should correctly render the signature page of a digitally signed PDF", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  
+  const loadingTask = getDocument(buildGetDocumentParams('issue18973.pdf'));
+  const doc = await loadingTask;
+  const page = await doc.getPage(45);
+  
+  const container = {
+    height: 1024,
+    width: 1024,
+    scroll: () => {}, 
+  };
+  
+  await page.render({
+    container,
+    spreadMode: 'none',
+    viewport: page.getViewport({ scale: 1 }),
+  });
+  
+  const text = await page.getTextContent();
+  expect(text.items.some(item => /Signature/.test(item.str))).toBe(true);
+});
+```

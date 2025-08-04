@@ -1,0 +1,66 @@
+<think>
+Okay, I need to create a regression test for the issue where text isn't shown because `browser.display.use_document_fonts` is set to 0. The user provided a patch and the code, so I should focus on understanding how the patch affects the behavior and then write a test that fails before the patch and passes after.
+
+First, I'll look at the issue details. The problem occurs when `browser.display.use_document_fonts` is disabled, causing some text to be hidden. The error messages indicate problems with font rendering, like "Web fonts are disabled" and issues with character paths. The patch modifies `src/display/canvas.js`, specifically in the `paintChar` and `endText` methods.
+
+Looking at the patch, in `paintChar`, the condition for generating the path now includes a check for `!font.missingFile`. This means that if the font is missing, it won't attempt to generate the path, which could prevent errors when fonts aren't available. Also, in `endText`, there's a skip for empty paths, which might prevent adding invalid paths to the canvas.
+
+The test needs to verify that with `use_document_fonts` disabled, the text is correctly rendered. So, the test should check if the text is visible when this setting is off.
+
+I'll structure the test using the provided imports. I'll use `getDocument` from `api.js` and `buildGetDocumentParams` from `test_utils.js` to load the PDF. Then, I'll create a dummy canvas element to render the PDF page.
+
+The test will involve loading the PDF, rendering it, and checking if the expected text is present in the canvas. Since the issue is visual, perhaps checking for the presence of a specific string in the rendered text would suffice. Alternatively, I could check if any rendering errors occur.
+
+Wait, but how do I check if the text is rendered correctly? Maybe I can use the `getTextContent` method of the PDF page to extract the text and compare it to the expected content. That way, if the text is missing, the test will fail.
+
+So, the steps are:
+1. Import necessary modules.
+2. Load the PDF document using `getDocument`.
+3. Get the first page and render it.
+4. Extract the text content from the page.
+5. Check if the expected text is present.
+
+I need to ensure that the test runs in a way that `browser.display.use_document_fonts` is set to 0. Since this is a browser setting, in the test environment, I might need to mock this behavior. Alternatively, since the patch is in the PDF.js code, the test should reflect the scenario where fonts are disabled, which the patch should handle.
+
+Wait, perhaps the patch ensures that even when `use_document_fonts` is 0, the text is rendered using alternative methods. So, the test should simulate that condition.
+
+In the test, after rendering, I can check if the text is correctly extracted. If the bug is fixed, the text should be present.
+
+So, the test will:
+- Load the PDF.
+- Render the first page.
+- Get the text content.
+- Assert that the expected text is found.
+
+I'll write this as an `it` block, ensuring all necessary imports are included. The test should fail before the patch because the text isn't rendered, and pass after because the patch fixes the rendering issue.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll structure the code accordingly, making sure to handle async operations properly.
+</think>
+
+```javascript
+it("should render text when browser.display.use_document_fonts is disabled", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue20065.pdf'));
+  
+  const pdfDoc = await loadingTask.promise;
+  const pages = await pdfDoc.getPages();
+  const page = pages[0];
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  
+  // Render the page
+  await page.render({
+    canvasContext: ctx,
+    viewport: page.getViewport({ scale: 1 }),
+  });
+  
+  // Get the text content
+  const textContent = await page.getTextContent();
+  
+  // Expected text from the PDF
+  const expectedText = "山";
+  
+  assert.includes(textContent.items[0].str, expectedText);
+});
+```

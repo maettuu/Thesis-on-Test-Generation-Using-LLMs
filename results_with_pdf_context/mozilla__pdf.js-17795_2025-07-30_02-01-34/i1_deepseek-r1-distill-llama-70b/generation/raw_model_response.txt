@@ -1,0 +1,85 @@
+<think>
+Okay, I need to write a regression test for the issue where some inlined images aren't rendering correctly. The user provided a patch that adds a try-catch block around the image processing code. My test should fail before the patch and pass after.
+
+First, I'll look at the test file they provided. It's in test/unit/evaluator_spec.js. I see they import necessary modules like PartialEvaluator, OperatorList, and some primitives. I can reuse these imports.
+
+The test should load the specific PDF file, issue17794.pdf, which has inlined images without the closing EI. Before the patch, this would cause an error, so the test should expect an error. After the patch, the error should be caught, a warning logged, and the test should handle it gracefully.
+
+I'll structure the test using Jest's it function. I'll need to import getDocument and buildGetDocumentParams for loading the PDF. Then, I'll set up a mock for the handler to prevent actual network requests.
+
+In the test, I'll create a PartialEvaluator instance with options to ignore errors. Then, I'll mock the handler's send method to return a response that triggers the error case. 
+
+I'll call buildPaintImageXObject with the necessary parameters. Before the patch, this should throw an error. After the patch, it should log a warning but not throw. Since the test is for the regression, I'll check that the warning is logged and no error is thrown.
+
+I'll use Jest's expect with a regex to match the warning message. This way, the test ensures the patch correctly handles the error case.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll also ensure that the test doesn't introduce any new dependencies and adheres to the project's structure.
+
+Finally, I'll write the test block, making sure it's concise and directly tests the scenario addressed by the patch.
+</think>
+
+```javascript
+it("should handle inlined images without closing EI", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue17794.pdf'));
+
+  const handler = {
+    send: () => {
+      const response = new Response(new Uint8Array(), {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' }
+      });
+      return Promise.resolve({ response });
+    },
+    sendWithPromise: jest.fn()
+  };
+
+  const options = {
+    ignoreErrors: true
+  };
+
+  const idFactory = createIdFactory();
+  const xref = new XRefMock();
+
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler,
+    pageIndex: 0,
+    idFactory,
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options,
+  });
+
+  const resources = new Dict();
+  resources.set("ProcSet", new Name("PDF"));
+  resources.set("ColorSpace", new Name("DeviceRGB"));
+
+  const imageStream = new StringStream("q q");
+  const image = {
+    dict: new Dict(),
+    getBytes: () => new Uint8Array(),
+  };
+
+  const operatorList = new OperatorList();
+
+  const cacheKey = `img-${idFactory.createObjId()}`;
+  const localImageCache = new Map();
+
+  const result = await evaluator.buildPaintImageXObject({
+    resources,
+    image,
+    isInline: true,
+    operatorList,
+    cacheKey,
+    localImageCache,
+    localColorSpaceCache: new Map(),
+  });
+
+  expect(console.warn).toHaveBeenCalledWith(/Unable to decode inline image/);
+});
+```

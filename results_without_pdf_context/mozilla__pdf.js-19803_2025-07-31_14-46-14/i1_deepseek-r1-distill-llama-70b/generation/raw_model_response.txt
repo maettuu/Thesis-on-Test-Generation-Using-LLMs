@@ -1,0 +1,74 @@
+<think>
+Okay, so I need to write a test for the circular reference issue in Form XObjects. The problem is that when two XObjects reference each other, it causes an infinite loop, making the PDF viewer hang. The patch is supposed to fix this by detecting such circular references and throwing an error to prevent the loop.
+
+First, I'll look at the existing test file to see what's available. The test file already imports several modules, including Annotation, PartialEvaluator, and some utilities. I can use these imports in my test.
+
+I need to create a test that, when run before the patch, results in an infinite loop (or at least a timeout), and after the patch, it should throw an error and not loop forever. 
+
+I'll start by setting up a mock PDF document. The idea is to create two Form XObjects, each referencing the other. This setup should trigger the circular reference detection.
+
+I'll create a mock XRef using XRefMock, which is already imported. Then, I'll define two Form XObjects, each with a "Form" type and a "Ref" to the other. 
+
+Next, I'll create a PartialEvaluator instance with the mock XRef. The evaluator will process the content stream, which in this case is just an operator to paint the XObject.
+
+When the evaluator tries to process the stream, if the patch is correct, it should detect the circular reference and throw an error. Without the patch, it would loop indefinitely.
+
+I'll wrap the evaluation in a promise and use a timeout to simulate the infinite loop scenario. If the evaluation doesn't complete within a certain time, the test will fail, indicating the issue isn't resolved.
+
+So, the test will:
+1. Set up the circular XObjects.
+2. Attempt to evaluate the content.
+3. Expect an error to be thrown if the patch is applied.
+4. Use a timeout to catch cases where the evaluation doesn't complete.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll structure the test using async/await for clarity and use Jest's expect with a timeout.
+
+Putting it all together, the test will check if the circular reference is correctly detected and an error is thrown, thus passing after the patch is applied.
+</think>
+
+```javascript
+it("should detect circular references in Form XObjects", async () => {
+  const xref = new XRefMock();
+  const form1 = new Dict({
+    Type: new Name("Form"),
+    Ref: new Ref(2, 0),
+    BBox: [0, 0, 1, 1],
+    Matrix: [1, 0, 0, 1, 0, 0],
+  });
+  const form2 = new Dict({
+    Type: new Name("Form"),
+    Ref: new Ref(1, 0),
+    BBox: [0, 0, 1, 1],
+    Matrix: [1, 0, 0, 1, 0, 0],
+  });
+  xref.addRef(form1, 1, 0);
+  xref.addRef(form2, 2, 0);
+  
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: { send: () => {} },
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalColorSpaceCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options: {},
+  });
+
+  const stream = new StringStream("q\n");
+  const task = new WorkerTask();
+
+  await expect(
+    evaluator.getOperatorList({
+      stream,
+      task,
+      resources: new Dict(),
+      operatorList: new OperatorList(),
+      initialState: new EvalState(),
+    })
+  ).rejects.toThrow("getOperatorList - ignoring circular reference");
+});
+```

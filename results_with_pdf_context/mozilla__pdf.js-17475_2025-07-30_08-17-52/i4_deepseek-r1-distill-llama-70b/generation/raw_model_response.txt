@@ -1,0 +1,53 @@
+<think>
+Okay, I need to write a regression test for the issue where the highlight on a cropped PDF isn't visible when saving or printing. The patch provided modifies the `serializeBoxes` and `serializeOutlines` methods in `highlight.js` to include a translation based on a `rect` parameter. 
+
+First, I should understand what the patch does. It looks like the patch adds `rect` as a parameter to these methods. In `serializeBoxes`, it uses `tx` and `ty` from `rect` to calculate `sx` and `sy`, which are the starting x and y coordinates. Similarly, in `serializeOutlines`, `tx` and `ty` are taken from `rect` instead of being calculated based on `this.x` and `this.y`.
+
+The issue arises because, without this patch, when the PDF is cropped, the highlight doesn't adjust its position correctly, making it invisible when saved or printed. The patch ensures that the highlight's position is correctly translated relative to the cropped area.
+
+To write the test, I need to:
+
+1. Load the PDF file `bug1872721.pdf` using the provided imports.
+2. Create a PDF document and get the first page.
+3. Draw the page to a canvas to ensure the content is rendered.
+4. Create a highlight annotation with specific dimensions and position.
+5. Serialize the highlight data.
+6. Deserialize the data back into a HighlightEditor instance to simulate saving/printing.
+7. Check if the deserialized highlight's position matches the expected values, ensuring it's visible.
+
+I should structure the test to compare the expected and actual positions of the highlight after deserialization. If the patch is correct, the deserialized highlight should have the correct `x` and `y` coordinates relative to the cropped area.
+
+I'll use Jest for the test structure, importing necessary modules dynamically. The test will create a highlight, serialize it, deserialize it, and then check if the deserialized highlight's `x` and `y` match the expected values. This ensures that the patch correctly translates the highlight's position when saved or printed.
+</think>
+
+```javascript
+it("should correctly position highlights on cropped PDFs when serialized/deserialized", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1872721.pdf'));
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  await pdfPage.render({
+    canvasContext: context,
+    viewport: pdfPage.getViewport({ scale: 1 })
+  });
+
+  const highlight = new HighlightEditor({
+    color: "#ff0000",
+    opacity: 0.5,
+    width: 0.2,
+    height: 0.1,
+    x: 0.1,
+    y: 0.1,
+    pageIndex: 0
+  });
+
+  const serialized = highlight.serialize();
+  const deserialized = HighlightEditor.deserialize(serialized, null, null);
+
+  expect(deserialized.x).toBeCloseTo(0.1);
+  expect(deserialized.y).toBeCloseTo(0.1);
+});
+```

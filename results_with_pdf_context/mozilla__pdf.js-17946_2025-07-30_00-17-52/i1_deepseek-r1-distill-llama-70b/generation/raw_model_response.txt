@@ -1,0 +1,71 @@
+<think>
+Okay, I need to create a test that verifies the patch resolves the issue where large images in PDFs aren't rendered by PDF.js. The user provided a PDF file called 'issue17289.pdf' which has this problem. 
+
+First, I should understand the problem. The issue is that when opening the PDF, the scanned book page image doesn't render. The console logs show warnings about unsupported COD options and dependent images not being ready. The patch involves changes to handle JPX images better, particularly by using an external library, OpenJPEG, for decoding.
+
+So, the test needs to check if after applying the patch, the image is rendered correctly. 
+
+Looking at the provided test file, it's a unit test for annotations. I can't use that directly, but I can create a new test in a similar structure. The test should load the problem PDF, render it, and check if the image is present.
+
+I'll need to import the necessary modules. The user provided a way to get the document using `getDocument` from the API and `buildGetDocumentParams` from test utilities. 
+
+I'll structure the test as follows:
+1. Import the required modules.
+2. Use `buildGetDocumentParams` to get the parameters for the test PDF.
+3. Use `getDocument` to load the PDF.
+4. Render the first page.
+5. Check if the rendered page contains the image data.
+
+I'll use `renderTask` to get the rendered page and then check the internal data structure for the presence of image data. If the image is rendered, the internal data should include the expected dimensions and data.
+
+I should make sure the test is self-contained, using only the provided imports and structure. I'll write the test in a way that it fails before the patch (image not found) and passes after (image found).
+
+I need to handle any potential loading issues, so I'll wrap it in a try-catch block to catch any errors during loading or rendering.
+
+Finally, I'll write the test code, ensuring it's concise and to the point, fitting into the existing test file structure.
+</think>
+
+```javascript
+it("should render large JPX images in PDF", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue17289.pdf'));
+  
+  try {
+    const pdfDocument = await loadingTask;
+    const pdfPage = await pdfDocument.getPage(1);
+    const renderTask = pdfPage.render({
+      viewport: pdfPage.getViewport({ scale: 1 }),
+      useAuth: null,
+      renderInteractive: false,
+      cancelable: true,
+      includeAnnotations: false,
+      annotationMode: null,
+      renderAnnotations: false,
+      preventAutoScaling: false,
+    });
+    
+    const renderedPage = await renderTask;
+    const renderedCanvas = renderedPage.canvas;
+    
+    // Verify that the image data is present and has expected dimensions
+    const expectedWidth = 1024;
+    const expectedHeight = 768;
+    
+    if (!renderedCanvas) {
+      throw new Error("Failed to render the page");
+    }
+    
+    const ctx = renderedCanvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, expectedWidth, expectedHeight);
+    
+    // Check if the image data contains non-empty pixels (not all transparent)
+    if (imageData.data.some((value, index) => 
+      index !== 3 || value !== 0)) {
+      throw new Error("Image not rendered");
+    }
+  } catch (error) {
+    throw new Error("Failed to load or render the PDF");
+  }
+});
+```

@@ -1,0 +1,1170 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: Gradient is not applied when stroking text
+### Attach (recommended) or Link to PDF file
+
+[linear-gradient-on-rect_text.pdf](https://github.com/user-attachments/files/17703776/linear-gradient-on-rect_text.pdf)
+
+
+### Web browser and its version
+
+Firefox nightly
+
+### Operating system and its version
+
+Windows 11
+
+### PDF.js version
+
+built-in
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+Open the pdf.
+
+### What is the expected behavior?
+
+![image](https://github.com/user-attachments/assets/89b71d01-dafd-48b1-a0e9-4ec8c6e44cf7)
+
+
+### What went wrong?
+
+![image](https://github.com/user-attachments/assets/9bb11860-3459-4d29-934d-18080202ef2d)
+
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+For reference:
+https://gitlab.freedesktop.org/poppler/poppler/-/issues/1532
+</issue>
+
+PDF File:
+<pdf>
+issue19022.pdf
+</pdf>
+
+Patch:
+<patch>
+diff --git a/src/display/canvas.js b/src/display/canvas.js
+--- a/src/display/canvas.js
++++ b/src/display/canvas.js
+@@ -484,6 +484,7 @@ class CanvasExtraState {
+     this.fillColor = "#000000";
+     this.strokeColor = "#000000";
+     this.patternFill = false;
++    this.patternStroke = false;
+     // Note: fill alpha applies to all non-stroking operations
+     this.fillAlpha = 1;
+     this.strokeAlpha = 1;
+@@ -586,7 +587,7 @@ class CanvasExtraState {
+ }
+ 
+ function putBinaryImageData(ctx, imgData) {
+-  if (imgData instanceof ImageData) {
++  if (typeof ImageData !== "undefined" && imgData instanceof ImageData) {
+     ctx.putImageData(imgData, 0, 0);
+     return;
+   }
+@@ -2001,7 +2002,7 @@ class CanvasGraphics {
+     this.moveText(0, this.current.leading);
+   }
+ 
+-  paintChar(character, x, y, patternTransform) {
++  paintChar(character, x, y, patternFillTransform, patternStrokeTransform) {
+     const ctx = this.ctx;
+     const current = this.current;
+     const font = current.font;
+@@ -2013,30 +2014,39 @@ class CanvasGraphics {
+       textRenderingMode & TextRenderingMode.ADD_TO_PATH_FLAG
+     );
+     const patternFill = current.patternFill && !font.missingFile;
++    const patternStroke = current.patternStroke && !font.missingFile;
+ 
+     let addToPath;
+-    if (font.disableFontFace || isAddToPathSet || patternFill) {
++    if (
++      font.disableFontFace ||
++      isAddToPathSet ||
++      patternFill ||
++      patternStroke
++    ) {
+       addToPath = font.getPathGenerator(this.commonObjs, character);
+     }
+ 
+-    if (font.disableFontFace || patternFill) {
++    if (font.disableFontFace || patternFill || patternStroke) {
+       ctx.save();
+       ctx.translate(x, y);
+       ctx.beginPath();
+       addToPath(ctx, fontSize);
+-      if (patternTransform) {
+-        ctx.setTransform(...patternTransform);
+-      }
+       if (
+         fillStrokeMode === TextRenderingMode.FILL ||
+         fillStrokeMode === TextRenderingMode.FILL_STROKE
+       ) {
++        if (patternFillTransform) {
++          ctx.setTransform(...patternFillTransform);
++        }
+         ctx.fill();
+       }
+       if (
+         fillStrokeMode === TextRenderingMode.STROKE ||
+         fillStrokeMode === TextRenderingMode.FILL_STROKE
+       ) {
++        if (patternStrokeTransform) {
++          ctx.setTransform(...patternStrokeTransform);
++        }
+         ctx.stroke();
+       }
+       ctx.restore();
+@@ -2127,7 +2137,7 @@ class CanvasGraphics {
+       ctx.scale(textHScale, 1);
+     }
+ 
+-    let patternTransform;
++    let patternFillTransform, patternStrokeTransform;
+     if (current.patternFill) {
+       ctx.save();
+       const pattern = current.fillColor.getPattern(
+@@ -2136,11 +2146,24 @@ class CanvasGraphics {
+         getCurrentTransformInverse(ctx),
+         PathType.FILL
+       );
+-      patternTransform = getCurrentTransform(ctx);
++      patternFillTransform = getCurrentTransform(ctx);
+       ctx.restore();
+       ctx.fillStyle = pattern;
+     }
+ 
++    if (current.patternStroke) {
++      ctx.save();
++      const pattern = current.strokeColor.getPattern(
++        ctx,
++        this,
++        getCurrentTransformInverse(ctx),
++        PathType.STROKE
++      );
++      patternStrokeTransform = getCurrentTransform(ctx);
++      ctx.restore();
++      ctx.strokeStyle = pattern;
++    }
++
+     let lineWidth = current.lineWidth;
+     const scale = current.textMatrixScale;
+     if (scale === 0 || lineWidth === 0) {
+@@ -2233,7 +2256,13 @@ class CanvasGraphics {
+           // common case
+           ctx.fillText(character, scaledX, scaledY);
+         } else {
+-          this.paintChar(character, scaledX, scaledY, patternTransform);
++          this.paintChar(
++            character,
++            scaledX,
++            scaledY,
++            patternFillTransform,
++            patternStrokeTransform
++          );
+           if (accent) {
+             const scaledAccentX =
+               scaledX + (fontSize * accent.offset.x) / fontSizeScale;
+@@ -2243,7 +2272,8 @@ class CanvasGraphics {
+               accent.fontChar,
+               scaledAccentX,
+               scaledAccentY,
+-              patternTransform
++              patternFillTransform,
++              patternStrokeTransform
+             );
+           }
+         }
+@@ -2379,6 +2409,7 @@ class CanvasGraphics {
+ 
+   setStrokeColorN() {
+     this.current.strokeColor = this.getColorN_Pattern(arguments);
++    this.current.patternStroke = true;
+   }
+ 
+   setFillColorN() {
+@@ -2392,10 +2423,12 @@ class CanvasGraphics {
+       g,
+       b
+     );
++    this.current.patternStroke = false;
+   }
+ 
+   setStrokeTransparent() {
+     this.ctx.strokeStyle = this.current.strokeColor = "transparent";
++    this.current.patternStroke = false;
+   }
+ 
+   setFillRGBColor(r, g, b) {
+
+diff --git a/src/display/font_loader.js b/src/display/font_loader.js
+--- a/src/display/font_loader.js
++++ b/src/display/font_loader.js
+@@ -498,6 +498,9 @@ class FontFaceObject {
+           break;
+       }
+     }
++    // From https://learn.microsoft.com/en-us/typography/opentype/spec/cff2#paths
++    // All contours must be closed with a lineto operation.
++    commands.push(ctx => ctx.closePath());
+ 
+     return (this.compiledGlyphs[character] = function glyphDrawer(ctx, size) {
+       commands[0](ctx);
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.0
+- @babel/preset-env: ^7.26.0
+- @babel/runtime: ^7.26.0
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.60
+- @types/node: ^22.8.7
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001677
+- core-js: ^3.39.0
+- eslint: ^8.57.1
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^3.9.1
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-unicorn: ^56.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.4.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.5
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.4.47
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.10.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.3
+- vinyl: ^3.0.0
+- webpack: ^5.96.1
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: fetchData
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/canvas.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   FeatureTest,
+18   FONT_IDENTITY_MATRIX,
+19   IDENTITY_MATRIX,
+20   ImageKind,
+21   info,
+22   isNodeJS,
+23   OPS,
+24   shadow,
+25   TextRenderingMode,
+26   unreachable,
+27   Util,
+28   warn,
+29 } from "../shared/util.js";
+30 import {
+31   getCurrentTransform,
+32   getCurrentTransformInverse,
+33   PixelsPerInch,
+34 } from "./display_utils.js";
+35 import {
+36   getShadingPattern,
+37   PathType,
+38   TilingPattern,
+39 } from "./pattern_helper.js";
+40 import { convertBlackAndWhiteToRGBA } from "../shared/image_utils.js";
+41 
+42 // <canvas> contexts store most of the state we need natively.
+43 // However, PDF needs a bit more state, which we store here.
+44 // Minimal font size that would be used during canvas fillText operations.
+45 const MIN_FONT_SIZE = 16;
+46 // Maximum font size that would be used during canvas fillText operations.
+47 const MAX_FONT_SIZE = 100;
+48 
+49 // Defines the time the `executeOperatorList`-method is going to be executing
+50 // before it stops and schedules a continue of execution.
+51 const EXECUTION_TIME = 15; // ms
+52 // Defines the number of steps before checking the execution time.
+53 const EXECUTION_STEPS = 10;
+54 
+55 // To disable Type3 compilation, set the value to `-1`.
+56 const MAX_SIZE_TO_COMPILE = 1000;
+57 
+58 const FULL_CHUNK_HEIGHT = 16;
+59 
+461 class CanvasExtraState {
+462   constructor(width, height) {
+463     // Are soft masks and alpha values shapes or opacities?
+464     this.alphaIsShape = false;
+465     this.fontSize = 0;
+466     this.fontSizeScale = 1;
+467     this.textMatrix = IDENTITY_MATRIX;
+468     this.textMatrixScale = 1;
+469     this.fontMatrix = FONT_IDENTITY_MATRIX;
+470     this.leading = 0;
+471     // Current point (in user coordinates)
+472     this.x = 0;
+473     this.y = 0;
+474     // Start of text line (in text coordinates)
+475     this.lineX = 0;
+476     this.lineY = 0;
+477     // Character and word spacing
+478     this.charSpacing = 0;
+479     this.wordSpacing = 0;
+480     this.textHScale = 1;
+481     this.textRenderingMode = TextRenderingMode.FILL;
+482     this.textRise = 0;
+483     // Default fore and background colors
+484     this.fillColor = "#000000";
+485     this.strokeColor = "#000000";
+486     this.patternFill = false;
+487     // Note: fill alpha applies to all non-stroking operations
+488     this.fillAlpha = 1;
+489     this.strokeAlpha = 1;
+490     this.lineWidth = 1;
+491     this.activeSMask = null;
+492     this.transferMaps = "none";
+493 
+494     this.startNewPathAndClipBox([0, 0, width, height]);
+495   }
+496 
+586 }
+587 
+588 function putBinaryImageData(ctx, imgData) {
+589   if (imgData instanceof ImageData) {
+590     ctx.putImageData(imgData, 0, 0);
+591     return;
+592   }
+593 
+594   // Put the image data to the canvas in chunks, rather than putting the
+595   // whole image at once.  This saves JS memory, because the ImageData object
+596   // is smaller. It also possibly saves C++ memory within the implementation
+597   // of putImageData(). (E.g. in Firefox we make two short-lived copies of
+598   // the data passed to putImageData()). |n| shouldn't be too small, however,
+599   // because too many putImageData() calls will slow things down.
+600   //
+601   // Note: as written, if the last chunk is partial, the putImageData() call
+602   // will (conceptually) put pixels past the bounds of the canvas.  But
+603   // that's ok; any such pixels are ignored.
+604 
+605   const height = imgData.height,
+606     width = imgData.width;
+607   const partialChunkHeight = height % FULL_CHUNK_HEIGHT;
+608   const fullChunks = (height - partialChunkHeight) / FULL_CHUNK_HEIGHT;
+609   const totalChunks = partialChunkHeight === 0 ? fullChunks : fullChunks + 1;
+610 
+611   const chunkImgData = ctx.createImageData(width, FULL_CHUNK_HEIGHT);
+612   let srcPos = 0,
+613     destPos;
+614   const src = imgData.data;
+615   const dest = chunkImgData.data;
+616   let i, j, thisChunkHeight, elemsInThisChunk;
+617 
+618   // There are multiple forms in which the pixel data can be passed, and
+619   // imgData.kind tells us which one this is.
+620   if (imgData.kind === ImageKind.GRAYSCALE_1BPP) {
+621     // Grayscale, 1 bit per pixel (i.e. black-and-white).
+622     const srcLength = src.byteLength;
+623     const dest32 = new Uint32Array(dest.buffer, 0, dest.byteLength >> 2);
+624     const dest32DataLength = dest32.length;
+625     const fullSrcDiff = (width + 7) >> 3;
+626     const white = 0xffffffff;
+627     const black = FeatureTest.isLittleEndian ? 0xff000000 : 0x000000ff;
+628 
+629     for (i = 0; i < totalChunks; i++) {
+630       thisChunkHeight = i < fullChunks ? FULL_CHUNK_HEIGHT : partialChunkHeight;
+631       destPos = 0;
+632       for (j = 0; j < thisChunkHeight; j++) {
+633         const srcDiff = srcLength - srcPos;
+634         let k = 0;
+635         const kEnd = srcDiff > fullSrcDiff ? width : srcDiff * 8 - 7;
+636         const kEndUnrolled = kEnd & ~7;
+637         let mask = 0;
+638         let srcByte = 0;
+639         for (; k < kEndUnrolled; k += 8) {
+640           srcByte = src[srcPos++];
+641           dest32[destPos++] = srcByte & 128 ? white : black;
+642           dest32[destPos++] = srcByte & 64 ? white : black;
+643           dest32[destPos++] = srcByte & 32 ? white : black;
+644           dest32[destPos++] = srcByte & 16 ? white : black;
+645           dest32[destPos++] = srcByte & 8 ? white : black;
+646           dest32[destPos++] = srcByte & 4 ? white : black;
+647           dest32[destPos++] = srcByte & 2 ? white : black;
+648           dest32[destPos++] = srcByte & 1 ? white : black;
+649         }
+650         for (; k < kEnd; k++) {
+651           if (mask === 0) {
+652             srcByte = src[srcPos++];
+653             mask = 128;
+654           }
+655 
+656           dest32[destPos++] = srcByte & mask ? white : black;
+657           mask >>= 1;
+658         }
+659       }
+660       // We ran out of input. Make all remaining pixels transparent.
+661       while (destPos < dest32DataLength) {
+662         dest32[destPos++] = 0;
+663       }
+664 
+665       ctx.putImageData(chunkImgData, 0, i * FULL_CHUNK_HEIGHT);
+666     }
+667   } else if (imgData.kind === ImageKind.RGBA_32BPP) {
+668     // RGBA, 32-bits per pixel.
+669     j = 0;
+670     elemsInThisChunk = width * FULL_CHUNK_HEIGHT * 4;
+671     for (i = 0; i < fullChunks; i++) {
+672       dest.set(src.subarray(srcPos, srcPos + elemsInThisChunk));
+673       srcPos += elemsInThisChunk;
+674 
+675       ctx.putImageData(chunkImgData, 0, j);
+676       j += FULL_CHUNK_HEIGHT;
+677     }
+678     if (i < totalChunks) {
+679       elemsInThisChunk = width * partialChunkHeight * 4;
+680       dest.set(src.subarray(srcPos, srcPos + elemsInThisChunk));
+681 
+682       ctx.putImageData(chunkImgData, 0, j);
+683     }
+684   } else if (imgData.kind === ImageKind.RGB_24BPP) {
+685     // RGB, 24-bits per pixel.
+686     thisChunkHeight = FULL_CHUNK_HEIGHT;
+687     elemsInThisChunk = width * thisChunkHeight;
+688     for (i = 0; i < totalChunks; i++) {
+689       if (i >= fullChunks) {
+690         thisChunkHeight = partialChunkHeight;
+691         elemsInThisChunk = width * thisChunkHeight;
+692       }
+693 
+694       destPos = 0;
+695       for (j = elemsInThisChunk; j--; ) {
+696         dest[destPos++] = src[srcPos++];
+697         dest[destPos++] = src[srcPos++];
+698         dest[destPos++] = src[srcPos++];
+699         dest[destPos++] = 255;
+700       }
+701 
+702       ctx.putImageData(chunkImgData, 0, i * FULL_CHUNK_HEIGHT);
+703     }
+704   } else {
+705     throw new Error(`bad image kind: ${imgData.kind}`);
+706   }
+707 }
+708 
+818 const LINE_CAP_STYLES = ["butt", "round", "square"];
+819 const LINE_JOIN_STYLES = ["miter", "round", "bevel"];
+820 const NORMAL_CLIP = {};
+821 const EO_CLIP = {};
+822 
+823 class CanvasGraphics {
+824   constructor(
+825     canvasCtx,
+826     commonObjs,
+827     objs,
+828     canvasFactory,
+829     filterFactory,
+830     { optionalContentConfig, markedContentStack = null },
+831     annotationCanvasMap,
+832     pageColors
+833   ) {
+834     this.ctx = canvasCtx;
+835     this.current = new CanvasExtraState(
+836       this.ctx.canvas.width,
+837       this.ctx.canvas.height
+838     );
+839     this.stateStack = [];
+840     this.pendingClip = null;
+841     this.pendingEOFill = false;
+842     this.res = null;
+843     this.xobjs = null;
+844     this.commonObjs = commonObjs;
+845     this.objs = objs;
+846     this.canvasFactory = canvasFactory;
+847     this.filterFactory = filterFactory;
+848     this.groupStack = [];
+849     this.processingType3 = null;
+850     // Patterns are painted relative to the initial page/form transform, see
+851     // PDF spec 8.7.2 NOTE 1.
+852     this.baseTransform = null;
+853     this.baseTransformStack = [];
+854     this.groupLevel = 0;
+855     this.smaskStack = [];
+856     this.smaskCounter = 0;
+857     this.tempSMask = null;
+858     this.suspendedCtx = null;
+859     this.contentVisible = true;
+860     this.markedContentStack = markedContentStack || [];
+861     this.optionalContentConfig = optionalContentConfig;
+862     this.cachedCanvases = new CachedCanvases(this.canvasFactory);
+863     this.cachedPatterns = new Map();
+864     this.annotationCanvasMap = annotationCanvasMap;
+865     this.viewportScale = 1;
+866     this.outputScaleX = 1;
+867     this.outputScaleY = 1;
+868     this.pageColors = pageColors;
+869 
+870     this._cachedScaleForStroking = [-1, 0];
+871     this._cachedGetSinglePixelWidth = null;
+872     this._cachedBitmapsMap = new Map();
+873   }
+874 
+1280   // Graphics state
+1288 
+1612   // Path
+1757 
+1862   // Clipping
+1866 
+1871   // Text
+1878 
+2004   paintChar(character, x, y, patternTransform) {
+2005     const ctx = this.ctx;
+2006     const current = this.current;
+2007     const font = current.font;
+2008     const textRenderingMode = current.textRenderingMode;
+2009     const fontSize = current.fontSize / current.fontSizeScale;
+2010     const fillStrokeMode =
+2011       textRenderingMode & TextRenderingMode.FILL_STROKE_MASK;
+2012     const isAddToPathSet = !!(
+2013       textRenderingMode & TextRenderingMode.ADD_TO_PATH_FLAG
+2014     );
+2015     const patternFill = current.patternFill && !font.missingFile;
+2016 
+2017     let addToPath;
+2018     if (font.disableFontFace || isAddToPathSet || patternFill) {
+2019       addToPath = font.getPathGenerator(this.commonObjs, character);
+2020     }
+2021 
+2022     if (font.disableFontFace || patternFill) {
+2023       ctx.save();
+2024       ctx.translate(x, y);
+2025       ctx.beginPath();
+2026       addToPath(ctx, fontSize);
+2027       if (patternTransform) {
+2028         ctx.setTransform(...patternTransform);
+2029       }
+2030       if (
+2031         fillStrokeMode === TextRenderingMode.FILL ||
+2032         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2033       ) {
+2034         ctx.fill();
+2035       }
+2036       if (
+2037         fillStrokeMode === TextRenderingMode.STROKE ||
+2038         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2039       ) {
+2040         ctx.stroke();
+2041       }
+2042       ctx.restore();
+2043     } else {
+2044       if (
+2045         fillStrokeMode === TextRenderingMode.FILL ||
+2046         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2047       ) {
+2048         ctx.fillText(character, x, y);
+2049       }
+2050       if (
+2051         fillStrokeMode === TextRenderingMode.STROKE ||
+2052         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2053       ) {
+2054         ctx.strokeText(character, x, y);
+2055       }
+2056     }
+2057 
+2058     if (isAddToPathSet) {
+2059       const paths = (this.pendingTextPaths ||= []);
+2060       paths.push({
+2061         transform: getCurrentTransform(ctx),
+2062         x,
+2063         y,
+2064         fontSize,
+2065         addToPath,
+2066       });
+2067     }
+2068   }
+2069 
+2091   showText(glyphs) {
+2092     const current = this.current;
+2093     const font = current.font;
+2094     if (font.isType3Font) {
+2095       return this.showType3Text(glyphs);
+2096     }
+2097 
+2098     const fontSize = current.fontSize;
+2099     if (fontSize === 0) {
+2100       return undefined;
+2101     }
+2102 
+2103     const ctx = this.ctx;
+2104     const fontSizeScale = current.fontSizeScale;
+2105     const charSpacing = current.charSpacing;
+2106     const wordSpacing = current.wordSpacing;
+2107     const fontDirection = current.fontDirection;
+2108     const textHScale = current.textHScale * fontDirection;
+2109     const glyphsLength = glyphs.length;
+2110     const vertical = font.vertical;
+2111     const spacingDir = vertical ? 1 : -1;
+2112     const defaultVMetrics = font.defaultVMetrics;
+2113     const widthAdvanceScale = fontSize * current.fontMatrix[0];
+2114 
+2115     const simpleFillText =
+2116       current.textRenderingMode === TextRenderingMode.FILL &&
+2117       !font.disableFontFace &&
+2118       !current.patternFill;
+2119 
+2120     ctx.save();
+2121     ctx.transform(...current.textMatrix);
+2122     ctx.translate(current.x, current.y + current.textRise);
+2123 
+2124     if (fontDirection > 0) {
+2125       ctx.scale(textHScale, -1);
+2126     } else {
+2127       ctx.scale(textHScale, 1);
+2128     }
+2129 
+2130     let patternTransform;
+2131     if (current.patternFill) {
+2132       ctx.save();
+2133       const pattern = current.fillColor.getPattern(
+2134         ctx,
+2135         this,
+2136         getCurrentTransformInverse(ctx),
+2137         PathType.FILL
+2138       );
+2139       patternTransform = getCurrentTransform(ctx);
+2140       ctx.restore();
+2141       ctx.fillStyle = pattern;
+2142     }
+2143 
+2144     let lineWidth = current.lineWidth;
+2145     const scale = current.textMatrixScale;
+2146     if (scale === 0 || lineWidth === 0) {
+2147       const fillStrokeMode =
+2148         current.textRenderingMode & TextRenderingMode.FILL_STROKE_MASK;
+2149       if (
+2150         fillStrokeMode === TextRenderingMode.STROKE ||
+2151         fillStrokeMode === TextRenderingMode.FILL_STROKE
+2152       ) {
+2153         lineWidth = this.getSinglePixelWidth();
+2154       }
+2155     } else {
+2156       lineWidth /= scale;
+2157     }
+2158 
+2159     if (fontSizeScale !== 1.0) {
+2160       ctx.scale(fontSizeScale, fontSizeScale);
+2161       lineWidth /= fontSizeScale;
+2162     }
+2163 
+2164     ctx.lineWidth = lineWidth;
+2165 
+2166     if (font.isInvalidPDFjsFont) {
+2167       const chars = [];
+2168       let width = 0;
+2169       for (const glyph of glyphs) {
+2170         chars.push(glyph.unicode);
+2171         width += glyph.width;
+2172       }
+2173       ctx.fillText(chars.join(""), 0, 0);
+2174       current.x += width * widthAdvanceScale * textHScale;
+2175       ctx.restore();
+2176       this.compose();
+2177 
+2178       return undefined;
+2179     }
+2180 
+2181     let x = 0,
+2182       i;
+2183     for (i = 0; i < glyphsLength; ++i) {
+2184       const glyph = glyphs[i];
+2185       if (typeof glyph === "number") {
+2186         x += (spacingDir * glyph * fontSize) / 1000;
+2187         continue;
+2188       }
+2189 
+2190       let restoreNeeded = false;
+2191       const spacing = (glyph.isSpace ? wordSpacing : 0) + charSpacing;
+2192       const character = glyph.fontChar;
+2193       const accent = glyph.accent;
+2194       let scaledX, scaledY;
+2195       let width = glyph.width;
+2196       if (vertical) {
+2197         const vmetric = glyph.vmetric || defaultVMetrics;
+2198         const vx =
+2199           -(glyph.vmetric ? vmetric[1] : width * 0.5) * widthAdvanceScale;
+2200         const vy = vmetric[2] * widthAdvanceScale;
+2201 
+2202         width = vmetric ? -vmetric[0] : width;
+2203         scaledX = vx / fontSizeScale;
+2204         scaledY = (x + vy) / fontSizeScale;
+2205       } else {
+2206         scaledX = x / fontSizeScale;
+2207         scaledY = 0;
+2208       }
+2209 
+2210       if (font.remeasure && width > 0) {
+2211         // Some standard fonts may not have the exact width: rescale per
+2212         // character if measured width is greater than expected glyph width
+2213         // and subpixel-aa is enabled, otherwise just center the glyph.
+2214         const measuredWidth =
+2215           ((ctx.measureText(character).width * 1000) / fontSize) *
+2216           fontSizeScale;
+2217         if (width < measuredWidth && this.isFontSubpixelAAEnabled) {
+2218           const characterScaleX = width / measuredWidth;
+2219           restoreNeeded = true;
+2220           ctx.save();
+2221           ctx.scale(characterScaleX, 1);
+2222           scaledX /= characterScaleX;
+2223         } else if (width !== measuredWidth) {
+2224           scaledX +=
+2225             (((width - measuredWidth) / 2000) * fontSize) / fontSizeScale;
+2226         }
+2227       }
+2228 
+2229       // Only attempt to draw the glyph if it is actually in the embedded font
+2230       // file or if there isn't a font file so the fallback font is shown.
+2231       if (this.contentVisible && (glyph.isInFont || font.missingFile)) {
+2232         if (simpleFillText && !accent) {
+2233           // common case
+2234           ctx.fillText(character, scaledX, scaledY);
+2235         } else {
+2236           this.paintChar(character, scaledX, scaledY, patternTransform);
+2237           if (accent) {
+2238             const scaledAccentX =
+2239               scaledX + (fontSize * accent.offset.x) / fontSizeScale;
+2240             const scaledAccentY =
+2241               scaledY - (fontSize * accent.offset.y) / fontSizeScale;
+2242             this.paintChar(
+2243               accent.fontChar,
+2244               scaledAccentX,
+2245               scaledAccentY,
+2246               patternTransform
+2247             );
+2248           }
+2249         }
+2250       }
+2251 
+2252       const charWidth = vertical
+2253         ? width * widthAdvanceScale - spacing * fontDirection
+2254         : width * widthAdvanceScale + spacing * fontDirection;
+2255       x += charWidth;
+2256 
+2257       if (restoreNeeded) {
+2258         ctx.restore();
+2259       }
+2260     }
+2261     if (vertical) {
+2262       current.y -= x;
+2263     } else {
+2264       current.x += x * textHScale;
+2265     }
+2266     ctx.restore();
+2267     this.compose();
+2268 
+2269     return undefined;
+2270   }
+2271 
+2335   // Type3 fonts
+2340 
+2347   // Color
+2379 
+2380   setStrokeColorN() {
+2381     this.current.strokeColor = this.getColorN_Pattern(arguments);
+2382   }
+2383 
+2389   setStrokeRGBColor(r, g, b) {
+2390     this.ctx.strokeStyle = this.current.strokeColor = Util.makeHexColor(
+2391       r,
+2392       g,
+2393       b
+2394     );
+2395   }
+2396 
+2397   setStrokeTransparent() {
+2398     this.ctx.strokeStyle = this.current.strokeColor = "transparent";
+2399   }
+2400 
+2463   // Images
+2467 
+3053   // Marked content
+3054 
+3087   // Compatibility
+3088 
+3097   // Helper functions
+3098 
+3196   // Rescale before stroking in order to have a final lineWidth
+3197   // with both thicknesses greater or equal to 1.
+3236 
+3245 }
+3246 
+3252 
+File:
+src/display/font_loader.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   FontRenderOps,
+19   isNodeJS,
+20   shadow,
+21   string32,
+22   toBase64Util,
+23   unreachable,
+24   warn,
+25 } from "../shared/util.js";
+26 
+362 class FontFaceObject {
+363   constructor(translatedData, { disableFontFace = false, inspectFont = null }) {
+364     this.compiledGlyphs = Object.create(null);
+365     // importing translated data
+366     for (const i in translatedData) {
+367       this[i] = translatedData[i];
+368     }
+369     this.disableFontFace = disableFontFace === true;
+370     this._inspectFont = inspectFont;
+371   }
+372 
+419   getPathGenerator(objs, character) {
+420     if (this.compiledGlyphs[character] !== undefined) {
+421       return this.compiledGlyphs[character];
+422     }
+423 
+424     let cmds;
+425     try {
+426       cmds = objs.get(this.loadedName + "_path_" + character);
+427     } catch (ex) {
+428       warn(`getPathGenerator - ignoring character: "${ex}".`);
+429     }
+430 
+431     if (!Array.isArray(cmds) || cmds.length === 0) {
+432       return (this.compiledGlyphs[character] = function (c, size) {
+433         // No-op function, to allow rendering to continue.
+434       });
+435     }
+436 
+437     const commands = [];
+438     for (let i = 0, ii = cmds.length; i < ii; ) {
+439       switch (cmds[i++]) {
+440         case FontRenderOps.BEZIER_CURVE_TO:
+441           {
+442             const [a, b, c, d, e, f] = cmds.slice(i, i + 6);
+443             commands.push(ctx => ctx.bezierCurveTo(a, b, c, d, e, f));
+444             i += 6;
+445           }
+446           break;
+447         case FontRenderOps.MOVE_TO:
+448           {
+449             const [a, b] = cmds.slice(i, i + 2);
+450             commands.push(ctx => ctx.moveTo(a, b));
+451             i += 2;
+452           }
+453           break;
+454         case FontRenderOps.LINE_TO:
+455           {
+456             const [a, b] = cmds.slice(i, i + 2);
+457             commands.push(ctx => ctx.lineTo(a, b));
+458             i += 2;
+459           }
+460           break;
+461         case FontRenderOps.QUADRATIC_CURVE_TO:
+462           {
+463             const [a, b, c, d] = cmds.slice(i, i + 4);
+464             commands.push(ctx => ctx.quadraticCurveTo(a, b, c, d));
+465             i += 4;
+466           }
+467           break;
+468         case FontRenderOps.RESTORE:
+469           commands.push(ctx => ctx.restore());
+470           break;
+471         case FontRenderOps.SAVE:
+472           commands.push(ctx => ctx.save());
+473           break;
+474         case FontRenderOps.SCALE:
+475           // The scale command must be at the third position, after save and
+476           // transform (for the font matrix) commands (see also
+477           // font_renderer.js).
+478           // The goal is to just scale the canvas and then run the commands loop
+479           // without the need to pass the size parameter to each command.
+480           assert(
+481             commands.length === 2,
+482             "Scale command is only valid at the third position."
+483           );
+484           break;
+485         case FontRenderOps.TRANSFORM:
+486           {
+487             const [a, b, c, d, e, f] = cmds.slice(i, i + 6);
+488             commands.push(ctx => ctx.transform(a, b, c, d, e, f));
+489             i += 6;
+490           }
+491           break;
+492         case FontRenderOps.TRANSLATE:
+493           {
+494             const [a, b] = cmds.slice(i, i + 2);
+495             commands.push(ctx => ctx.translate(a, b));
+496             i += 2;
+497           }
+498           break;
+499       }
+500     }
+501 
+502     return (this.compiledGlyphs[character] = function glyphDrawer(ctx, size) {
+503       commands[0](ctx);
+504       commands[1](ctx);
+505       ctx.scale(size, -size);
+506       for (let i = 2, ii = commands.length; i < ii; i++) {
+507         commands[i](ctx);
+508       }
+509     });
+510   }
+511 }
+512 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/api_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  AnnotationEditorType,
+  AnnotationMode,
+  AnnotationType,
+  ImageKind,
+  InvalidPDFException,
+  isNodeJS,
+  MissingPDFException,
+  objectSize,
+  OPS,
+  PasswordException,
+  PasswordResponses,
+  PermissionFlag,
+  UnknownErrorException,
+} from "../../src/shared/util.js";
+import {
+  buildGetDocumentParams,
+  CMAP_URL,
+  createTemporaryNodeServer,
+  DefaultFileReaderFactory,
+  TEST_PDFS_PATH,
+} from "./test_utils.js";
+import {
+  DefaultCanvasFactory,
+  getDocument,
+  PDFDataRangeTransport,
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  PDFWorker,
+  RenderTask,
+} from "../../src/display/api.js";
+import {
+  fetchData as fetchDataDOM,
+  PageViewport,
+  RenderingCancelledException,
+  StatTimer,
+} from "../../src/display/display_utils.js";
+import { AutoPrintRegExp } from "../../web/ui_utils.js";
+import { GlobalImageCache } from "../../src/core/image_utils.js";
+import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
+import { Metadata } from "../../src/display/metadata.js";
+const WORKER_SRC = "../../build/generic/build/pdf.worker.mjs";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. You can use the PDF file for testing as follows:
+const { getDocument } = await import('../../src/display/api.js');
+const { buildGetDocumentParams } = await import('./test_utils.js');
+const loadingTask = getDocument(buildGetDocumentParams('issue19022.pdf'))
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

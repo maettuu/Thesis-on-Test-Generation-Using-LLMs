@@ -1,0 +1,38 @@
+<think>
+Okay, so I need to write a regression test for this bug where radio buttons in the print view don't reflect their real state on the PDF form. The patch was made in the annotation.js file, specifically in the _processRadioButton method. 
+
+First, I should understand what the patch does. Looking at the patch, it changes the line where this.data.fieldValue is set. Before the patch, both fieldValue and buttonValue were set to null. Now, only buttonValue is set to null, and fieldValue is left as is. The comment says it's using the field's V entry when there's no Parent. So, the issue was that when a radio button didn't have a Parent field, the fieldValue wasn't being set correctly, causing the state not to show up in print.
+
+So, the test needs to check if the radio button's state is correctly reflected. I'll need a PDF that has radio buttons without a Parent field. The user provided bug1860602.pdf, so I'll use that.
+
+I'll structure the test using Jest. I'll import getDocument from the display API and buildGetDocumentParams from test_utils. Then, load the PDF and get the first page. 
+
+Next, I'll get the annotations on that page. Since it's a radio button, I'll find the first annotation of type WidgetAnnotation. Then, I'll check if the data.fieldValue is set correctly. 
+
+In the buggy version, after the patch, the fieldValue should be null when there's no Parent. Wait, no, the patch is supposed to fix that. So before the patch, fieldValue was null, causing the problem. After the patch, it should have the correct value.
+
+Wait, the patch removes setting fieldValue to null. So in the test, after the patch, the fieldValue should not be null. So the test should expect that the fieldValue is as per the PDF's state.
+
+In the test, I'll load the PDF, get the annotation, and check if data.fieldValue is truthy or matches the expected value. Since the PDF has a radio button in a certain state, I'll check that the fieldValue reflects that state.
+
+I need to make sure the test fails before the patch and passes after. So in the test, after applying the patch, the fieldValue should be correct.
+
+I'll write the test to fetch the annotation, then assert that data.fieldValue is truthy. If it's truthy, the test passes, indicating the patch worked.
+
+I should also handle any potential errors, like if the annotation isn't found, but I'll assume the PDF has one for this test.
+
+So, putting it all together, the test will load the PDF, find the radio button annotation, and check that fieldValue is not null. This should fail before the patch because fieldValue was being set to null, and pass after the patch because it's correctly set.
+</think>
+
+```javascript
+it("should correctly reflect radio button state in print view", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('bug1860602.pdf'));
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const annotations = await page.getAnnotations();
+  const buttonAnnotation = annotations.find(annotation => annotation instanceof ButtonWidgetAnnotation);
+  expect(buttonAnnotation.data.fieldValue).toBeTruthy();
+});
+```

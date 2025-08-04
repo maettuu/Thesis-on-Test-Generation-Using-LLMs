@@ -1,0 +1,60 @@
+<think>
+Okay, I need to write a regression test for the issue where SVG images couldn't be resized in pdf.js. The patch provided is supposed to fix this by adjusting how SVGs are handled when drawing on a canvas. 
+
+First, I should understand the problem. Before the patch, when an SVG was added as an image, it couldn't be resized correctly because of how the aspect ratio was handled. The patch introduces a check to see if the SVG can be resized without preserving the aspect ratio and, if needed, appends a specific URL fragment to the SVG URL to fix this.
+
+So, the test needs to verify that after the patch, resizing an SVG image works as expected. 
+
+I'll start by setting up a test SVG image. The test will create an SVG with a red rectangle. Then, it will draw this SVG onto a canvas in two scenarios: with the aspect ratio preserved and without. 
+
+I'll use the `ImageManager` class to handle the image loading. The `ImageManager` now has a method `_checkIfSVGFitsInCanvas` which checks if the SVG can be resized without preserving the aspect ratio. Depending on the result, it appends `#svgView(preserveAspectRatio(none))` to the SVG URL.
+
+The test will create a canvas, draw the SVG, and check the pixel color after resizing. If the patch works, the SVG should be resized correctly, and the pixel color should match the expected result when the aspect ratio isn't preserved.
+
+I'll structure the test as follows:
+1. Create an SVG URL with a red rectangle.
+2. Use `ImageManager` to load the SVG.
+3. Check the result of `_checkIfSVGFitsInCanvas` to determine if the aspect ratio needs to be adjusted.
+4. Draw the SVG on a canvas with and without resizing, checking the pixel color.
+
+I need to import the necessary modules, like `ImageManager` and `shadow` from the shared utilities. I'll set up the test using Jest and ensure it's asynchronous since image loading is involved.
+
+I should also handle any potential errors during image loading, but the test should fail if the resizing doesn't work as expected after the patch.
+
+Finally, the test will assert that the pixel color matches the expected value after resizing, indicating the SVG was correctly scaled.
+</think>
+
+```javascript
+it("should correctly resize SVG images when aspect ratio is not preserved", async () => {
+  const { ImageManager, shadow } = await import("../../src/display/editor/tools.js");
+  const svg = `data:image/svg+xml;charset=UTF-8,<svg viewBox="0 0 1 1" width="1" height="1" xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1" style="fill:red;"/></svg>`;
+  const canvas = new OffscreenCanvas(1, 3);
+  const ctx = canvas.getContext("2d");
+  const image = new Image();
+  image.src = svg;
+  
+  // Create ImageManager instance
+  const imageManager = new ImageManager();
+  
+  // Check if aspect ratio needs to be removed
+  const mustRemoveAspectRatio = await ImageManager._checkIfSVGFitsInCanvas();
+  
+  // Generate the final SVG URL
+  const finalSvgUrl = mustRemoveAspectRatio 
+    ? `${svg}#svgView(preserveAspectRatio(none))` 
+    : svg;
+  
+  // Load the image using ImageManager
+  const imageData = await imageManager.getFromUrl(finalSvgUrl);
+  
+  // Draw the image on the canvas
+  ctx.drawImage(image, 0, 0, 1, 1, 0, 0, 1, 3);
+  
+  // Check the pixel color after resizing
+  const pixels = ctx.getImageData(0, 0, 1, 1).data;
+  const pixelColor = `rgb(${pixels[0]}, ${pixels[1]}, ${pixels[2]})`;
+  
+  // The expected color should be red (rgb(255, 0, 0))
+  expect(pixelColor).toBe("rgb(255, 0, 0)");
+});
+```

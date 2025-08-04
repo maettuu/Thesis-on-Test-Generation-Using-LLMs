@@ -1,0 +1,42 @@
+it("should render large JPX images in PDF", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue17289.pdf'));
+
+  try {
+    const pdfDocument = await loadingTask;
+    const pdfPage = await pdfDocument.getPage(1);
+    const renderTask = pdfPage.render({
+      viewport: pdfPage.getViewport({ scale: 1 }),
+      useAuth: null,
+      renderInteractive: false,
+      cancelable: true,
+      includeAnnotations: false,
+      annotationMode: null,
+      renderAnnotations: false,
+      preventAutoScaling: false,
+    });
+
+    const renderedPage = await renderTask;
+    const renderedCanvas = renderedPage.canvas;
+
+    // Verify that the image data is present and has expected dimensions
+    const expectedWidth = 1024;
+    const expectedHeight = 768;
+
+    if (!renderedCanvas) {
+      throw new Error("Failed to render the page");
+    }
+
+    const ctx = renderedCanvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, expectedWidth, expectedHeight);
+
+    // Check if the image data contains non-empty pixels (not all transparent)
+    if (imageData.data.some((value, index) => 
+      index !== 3 || value !== 0)) {
+      throw new Error("Image not rendered");
+    }
+  } catch (error) {
+    throw new Error("Failed to load or render the PDF");
+  }
+});

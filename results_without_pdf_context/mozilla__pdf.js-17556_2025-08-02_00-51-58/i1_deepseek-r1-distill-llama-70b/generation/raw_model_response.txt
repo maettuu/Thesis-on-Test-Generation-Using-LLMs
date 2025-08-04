@@ -1,0 +1,38 @@
+<think>
+Okay, I need to write a regression test for the issue where certain JavaScript object default properties like `toString` are considered valid PDF operators. The test should fail before the patch and pass after applying the patch.
+
+First, I'll look at the problem description. The issue is that the `opMap` in `evaluator.js` uses a regular JavaScript object, which inherits properties like `toString` from the prototype. This causes invalid operators to be treated as valid, leading to exceptions later.
+
+The patch changes `opMap` to use `Object.create(null)`, which creates an object without a prototype. This should prevent inherited properties from being considered.
+
+So, the test needs to check if `toString` is considered a valid operator. Before the patch, it should be valid, causing an error when trying to process it. After the patch, it should be ignored.
+
+I'll use the test file `evaluator_spec.js` to write the test. I'll import the necessary modules like `PartialEvaluator`, `Stream`, `OperatorList`, and `XRefMock`.
+
+In the test, I'll create a `PartialEvaluator` instance. Then, I'll create a token stream that includes `toString` as an operator. I'll process this stream using the evaluator and check if it correctly identifies `toString` as an invalid operator.
+
+Before the patch, the evaluator would treat `toString` as a valid operator, leading to an error when trying to access its properties. After the patch, it should be ignored, and no error should occur.
+
+I'll structure the test to create a mock XRef, a stream with the content, and process it. If the processing doesn't throw an error, the test passes, indicating that `toString` is now ignored.
+
+So, the test will generate a stream with `toString` and check that processing it doesn't cause an exception, confirming the patch works.
+</think>
+
+it("should ignore invalid operators like toString", async () => {
+  const { PartialEvaluator, OperatorList } = await import("../../src/core/evaluator.js");
+  const { XRefMock } = await import("./test_utils.js");
+  const { Dict } = await import("../../src/core/primitives.js");
+  
+  const xref = new XRefMock();
+  const content = new StringStream("q 1 0 0 1 0 0 cm\n" +
+                                   "/toString { 0 d0 } def\n" +
+                                   "toString\n");
+  
+  const evaluator = new PartialEvaluator({
+    lexer: new PartialEvaluator.Lexer(content, PartialEvaluator.opMap),
+    xref,
+  });
+  
+  const result = evaluator.read();
+  expect(() => evaluator.read()).not.toThrow();
+});

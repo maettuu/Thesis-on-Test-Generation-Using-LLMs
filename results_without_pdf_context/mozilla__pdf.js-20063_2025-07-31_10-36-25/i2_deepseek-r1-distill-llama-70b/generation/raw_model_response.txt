@@ -1,0 +1,58 @@
+<think>
+Okay, so I need to write a regression test for the issue where the PolygonAnnotation fill wasn't rendering in PDF.js. The patch provided is supposed to fix this by adjusting how the fill and stroke are handled in the annotation's appearance.
+
+First, I should understand what the patch does. Looking at the code changes, it seems that in the PolylineAnnotation class, the code now checks for a fill color. If a fill color is present, it sets the operator to 'f' or 'B' depending on whether the stroke and fill colors are the same. Otherwise, it uses 'S' for stroke only.
+
+So the test needs to verify that when a PolygonAnnotation with both fill and stroke is rendered, the fill is correctly applied.
+
+I'll start by creating a test case. The test should load a PDF that has a polygon annotation with both fill and stroke. Then, it should render the page and check if the fill color is present.
+
+I'll use the PDF from the issue, which is attached as document.pdf. The test will fetch this PDF and open the first page. After rendering, it will check the SVG data to see if both fill and stroke are present.
+
+I need to import the necessary modules. Since this is a Node.js test, I'll use dynamic imports for PDFJS and the test PDF.
+
+The steps are:
+1. Import pdfjsLib and the test PDF.
+2. Create a mock DOM environment for PDF.js to render.
+3. Load the PDF document and get the first page.
+4. Render the page into an SVG.
+5. Check the SVG for both fill and stroke attributes in the path elements.
+
+I should structure the test to fail if either fill or stroke is missing. This ensures that the patch correctly adds both properties.
+
+I also need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. So, I'll set up the DOM mock within the test.
+
+Finally, the test will assert that the SVG contains both fill and stroke attributes. If either is missing, the test fails, indicating the bug is still present.
+</think>
+
+```javascript
+it("should render polygon annotation with fill color", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { PDFPage } = await import("../../src/display/pdf_page.js");
+  const { PDFJS } = await import("../../src/display/pdf_viewer.js");
+  const { document } = await import("./document.pdf");
+
+  // Mock DOM for PDF.js rendering
+  const dom = {
+    createSVGElement: () => ({ outerHTML: "" }),
+    createElement: () => ({}),
+    getElementById: () => ({}),
+  };
+
+  // Initialize PDF.js with mock DOM
+  PDFJS.setDocument(document);
+  const pdf = await PDFDocument.load(document);
+  const page = await pdf.getPage(1);
+  const svg = await page.render({
+    format: "svg",
+    canvas: null,
+    viewport: page.getViewport({ scale: 1 }),
+  });
+
+  // Check if SVG contains both fill and stroke attributes
+  const hasFill = svg.outerHTML.includes("fill=");
+  const hasStroke = svg.outerHTML.includes("stroke=");
+
+  expect(hasFill && hasStroke).toBe(true);
+});
+```

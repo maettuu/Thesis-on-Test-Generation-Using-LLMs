@@ -1,0 +1,40 @@
+```javascript
+it("should not warn about unknown field name when printing a PDF with annotations", async () => {
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { Dict, Ref } = await import("../../src/core/primitives.js");
+  const { XRefMock } = await import("./test_utils.js");
+
+  const xref = new XRefMock();
+  const ref = new Ref(1, 0);
+  const annotationDict = new Dict(xref);
+  annotationDict.set("Subtype", Name.get("Widget"));
+  annotationDict.set("T", "TestField");
+  annotationDict.set("V", "TestValue");
+
+  const annotationGlobals = {
+    acroForm: new Dict(xref),
+    pdfManager: {
+      ensure: (context, methodName, args) => {
+        return context[methodName](...args);
+      },
+    },
+  };
+
+  const idFactory = createIdFactory(0);
+  const annotation = await AnnotationFactory.create(
+    xref,
+    ref,
+    annotationGlobals,
+    idFactory,
+    false,
+    null
+  );
+
+  const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+  annotation._constructFieldName(annotationDict);
+  expect(consoleWarnSpy).not.toHaveBeenCalledWith(
+    "Unknown field name, falling back to empty field name."
+  );
+  consoleWarnSpy.mockRestore();
+});
+```

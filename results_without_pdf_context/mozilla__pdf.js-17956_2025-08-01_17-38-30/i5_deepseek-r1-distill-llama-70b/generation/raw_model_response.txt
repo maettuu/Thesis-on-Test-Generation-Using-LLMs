@@ -1,0 +1,47 @@
+<think>
+Okay, I need to write a regression test for the issue where the JPX fuzzer was spamming logs with "OpenJPEG: Unknown format". The patch provided changes how the JpxImage.decode method handles errors. 
+
+First, I should understand what the patch does. Before the patch, when imageData was null, it threw a generic JpxError. Now, if imageData is a string, it throws that string as the error message. So, the OpenJPEG logs are probably coming from the C code, and the patch is trying to prevent those logs from appearing in the fuzzer output.
+
+The goal is to write a test that fails before the patch and passes after. The test should check that no "OpenJPEG: Unknown format" logs are printed when decoding an invalid JPX file.
+
+I'll use the test_utils.js module for setup. I'll create a test where I try to decode an empty buffer, which should trigger the error. I'll capture any console.error messages during this process.
+
+In the test, I'll mock console.error to see if it's called with the OpenJPEG message. If the patch is correct, after applying it, the console.error should not be called with that message.
+
+So, the test structure will be:
+- Import JpxImage and TestReporter.
+- Create a test function that tries to decode an empty buffer.
+- Use a try-catch block to handle the JpxError.
+- Capture any console.error calls and check if the OpenJPEG message was logged.
+
+If the test passes after the patch, it means the logs are no longer being printed, which is what we want.
+</think>
+
+```javascript
+it("should not log OpenJPEG errors when decoding invalid JPX", async () => {
+  const { JpxImage } = await import("../../src/core/jpx.js");
+  const { TestReporter } = await import("./testreporter.js");
+
+  const reporter = new TestReporter();
+  let errorLogged = false;
+  const originalConsoleError = console.error;
+
+  console.error = (message) => {
+    if (message.includes("OpenJPEG: Unknown format")) {
+      errorLogged = true;
+    }
+    originalConsoleError(message);
+  };
+
+  try {
+    await JpxImage.decode(Buffer.alloc(0), false);
+  } catch (error) {
+    if (error instanceof JpxImage.JpxError) {
+      // Expected error, but we check for the logs
+    }
+  }
+
+  assert.equal(errorLogged, false);
+});
+```

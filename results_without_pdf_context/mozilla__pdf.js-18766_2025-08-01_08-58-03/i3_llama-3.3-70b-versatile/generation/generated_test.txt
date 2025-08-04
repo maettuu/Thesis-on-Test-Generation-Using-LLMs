@@ -1,0 +1,44 @@
+it("should ignore shadingFill errors when ignoreErrors is enabled", () => {
+  const xref = new XRefMock();
+  const opList = new OperatorList();
+  const resources = new Dict();
+  const shadingDict = new Dict();
+  // Do not add any shading object named "Foo".
+  resources.set("Shading", shadingDict);
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: {},
+    pageIndex: 0,
+    idFactory: {},
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options: { ignoreErrors: true },
+  });
+  const fakeStream = {
+    called: false,
+    read(operation) {
+      if (!this.called) {
+        this.called = true;
+        operation.fn = OPS.shadingFill;
+        operation.args = [{ name: "Foo" }];
+        return true;
+      }
+      return false;
+    },
+  };
+  const fakeTask = new WorkerTask("fake", null);
+  return evaluator
+    .getOperatorList({
+      stream: fakeStream,
+      task: fakeTask,
+      resources,
+      operatorList: opList,
+    })
+    .then(() => {
+      // The shadingFill operator should be ignored, so no op added.
+      assert.equal(opList.fnArray.length, 0);
+    });
+});

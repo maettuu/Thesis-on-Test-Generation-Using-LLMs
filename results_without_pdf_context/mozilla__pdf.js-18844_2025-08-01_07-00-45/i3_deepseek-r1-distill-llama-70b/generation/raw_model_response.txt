@@ -1,0 +1,79 @@
+<think>
+Alright, I need to create a regression test for the issue where the text layer and canvas don't always match in the PDF viewer on Windows. The patch provided modifies the TextLayer.js and util.js files to adjust font families based on the platform and browser, specifically for Windows and Firefox.
+
+First, I'll look at the existing test file. It imports necessary modules and sets up the environment. My test should be self-contained, so I'll need to import the required modules and set up a PDF document.
+
+The issue is specific to Windows and Firefox, so I'll need to mock the platform and browser. I'll use FeatureTest.platform to set isWindows and isFirefox to true.
+
+I'll create a test PDF with a simple structure, maybe a single page with some text. Then, I'll render the text layer and compare it with the canvas rendering. The comparison should check if the text positions match.
+
+I'll use the getDocument function to load the PDF and extract the first page. After rendering, I'll extract the text items and compare their positions and fonts with those rendered on the canvas.
+
+If the patch is correct, the text positions and fonts should match after the fix, making the test pass. Before the patch, the test should fail because the fonts and positions wouldn't align.
+
+I'll structure the test with async/await for setup and use toBeCloseTo for position comparisons to account for minor floating-point differences.
+
+Finally, I'll write the test block, ensuring it's concise and only tests the specific behavior addressed by the patch.
+</think>
+
+```javascript
+it("should match text layer with canvas on Windows in Firefox", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { FeatureTest } = await import("../../src/shared/util.js");
+  const { TextLayer } = await import("../../src/display/text_layer.js");
+  
+  // Mock Windows and Firefox platform
+  const originalPlatform = FeatureTest.platform;
+  FeatureTest.platform = shadow(FeatureTest, "platform", {
+    isWindows: true,
+    isFirefox: true,
+  });
+
+  // Create a test PDF with text
+  const pdfData = new Uint8Array([
+    0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x30, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd0, 0x0a, 0x31, 0x30, 0x30, 0x30, 0x0a,
+    0x25, 0x50, 0x44, 0x46, 0x2d, 0x49, 0x6e, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x69, 0x61, 0x6e, 0x74, 0x0a, 0x31, 0x30, 0x30, 0x30, 0x0a,
+    0x25, 0x53, 0x74, 0x6f, 0x72, 0x65, 0x0a, 0x25, 0x55, 0x6e, 0x64, 0x65, 0x72, 0x2f, 0x46, 0x6f, 0x6e, 0x74, 0x0a,
+    0x25, 0x45, 0x6e, 0x63, 0x6f, 0x64, 0x69, 0x6e, 0x67, 0x2d, 0x49, 0x6e, 0x66, 0x6f, 0x0a, 0x31, 0x30, 0x30, 0x30, 0x0a,
+    0x25, 0x50, 0x44, 0x46, 0x2d, 0x50, 0x61, 0x67, 0x65, 0x73, 0x0a, 0x31, 0x30, 0x30, 0x30, 0x0a,
+    0x25, 0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74, 0x0a, 0x3c, 0x3c, 0x2f, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x30, 0x3e,
+    0x0a
+  ]);
+
+  const pdf = await getDocument({
+    data: pdfData,
+    ...buildGetDocumentParams(pdfData)
+  });
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const textLayer = new TextLayer({
+    textContentSource: page.getTextContent(),
+    container: document.createElement("div"),
+    viewport,
+  });
+
+  await textLayer.render();
+
+  const textItems = await page.getTextContent();
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.font = "14px Calibri, sans-serif";
+  ctx.fillStyle = "black";
+
+  for (const item of textItems.items) {
+    if (item.str) {
+      const { x, y } = item.transform;
+      const text = item.str;
+      const textDiv = textLayer.textDivs.find(div => div.textContent === text);
+      const divRect = textDiv.getBoundingClientRect();
+      const canvasRect = ctx.measureText(text).width;
+
+      expect(divRect.left).toBeCloseTo(x, 1);
+      expect(divRect.top).toBeCloseTo(y, 1);
+      expect(divRect.width).toBeCloseTo(canvasRect.width, 1);
+    }
+  }
+
+  FeatureTest.platform = originalPlatform;
+});
+```

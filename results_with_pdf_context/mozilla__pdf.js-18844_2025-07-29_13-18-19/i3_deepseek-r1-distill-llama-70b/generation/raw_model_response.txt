@@ -1,0 +1,75 @@
+<think>
+Okay, so I need to write a regression test for the issue where the text layer and canvas don't always match in the PDF viewer on Windows. The patch provided is supposed to fix this, so the test should fail before the patch and pass after.
+
+First, I'll look at the patch to understand what changes were made. The main changes are in the TextLayer class. They added a static fontFamilyMap property that uses FeatureTest.platform to check if it's Windows and Firefox. Then, they modified the fontFamily assignment to use this map, which adds specific fonts for Windows/Firefox.
+
+So the issue is that on Windows, especially Firefox, the font family wasn't being correctly mapped, causing the text layer and canvas to mismatch. The patch ensures that the correct fonts are used.
+
+To test this, I need to simulate the Windows environment, particularly for Firefox. I'll set up mocks for FeatureTest.platform to return isWindows and isFirefox as true.
+
+I'll create a test that generates text and compares the rendered text layer with the expected output. The test will check if the correct font family is applied.
+
+I'll import the necessary modules, including TextLayer and FeatureTest. Then, I'll mock FeatureTest.platform to return the desired values. I'll create a text content sample and render it using TextLayer. After rendering, I'll check the font family of the text divs to ensure they match the expected fonts from the patch.
+
+So, the test will:
+1. Mock FeatureTest.platform to return isWindows and isFirefox as true.
+2. Create a text content object with a sample string and font information.
+3. Render the text using TextLayer and wait for it to complete.
+4. Check the font family of the rendered text divs to see if they use Calibri, Lucida Console, etc., as expected.
+
+If the test passes after the patch, it means the font families are correctly applied, and the text layer matches the canvas.
+</think>
+
+it("should use correct font families on Windows", async () => {
+  const { TextLayer } = await import("../../src/display/text_layer.js");
+  const { FeatureTest } = await import("../../src/shared/util.js");
+
+  // Mock platform detection for Windows and Firefox
+  const originalPlatform = FeatureTest.platform;
+  FeatureTest.platform = () => ({
+    isMac: false,
+    isWindows: true,
+    isFirefox: true,
+  });
+
+  // Test content with specific font families
+  const textContent = {
+    items: [
+      {
+        type: "text",
+        str: "Sample text",
+        fontName: "sans-serif",
+        fontSize: 30,
+        fontSubstitution: true,
+      },
+      {
+        type: "text",
+        str: "Monospace text",
+        fontName: "monospace",
+        fontSize: 30,
+        fontSubstitution: true,
+      },
+    ],
+  };
+
+  // Render the text layer
+  const container = document.createElement("div");
+  const viewport = {
+    scale: 1,
+    rawDims: { pageWidth: 100, pageHeight: 100 },
+    rotation: 0,
+  };
+  const textLayer = new TextLayer({ textContentSource: textContent, container, viewport });
+  await textLayer.render();
+
+  // Verify font families are correctly applied
+  const sansSerifFont = textLayer.textDivs[0].style.fontFamily;
+  const monospaceFont = textLayer.textDivs[1].style.fontFamily;
+
+  expect(sansSerifFont).toContain("Calibri");
+  expect(monospaceFont).toContain("Lucida Console");
+
+  // Cleanup
+  FeatureTest.platform = originalPlatform;
+  container.remove();
+});

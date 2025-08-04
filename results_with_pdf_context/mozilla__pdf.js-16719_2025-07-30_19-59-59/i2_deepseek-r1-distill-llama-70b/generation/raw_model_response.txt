@@ -1,0 +1,60 @@
+<think>
+Okay, I need to write a regression test for the issue where pressing the Delete key should delete the selected element when editing a PDF. The patch adds "mac+Delete" to the list of key bindings for the delete action. 
+
+First, I should understand the problem. Before the patch, on macOS, using the Delete key (which might be fn+Backspace) didn't trigger the delete action. The patch includes "mac+Delete" in the key bindings, so now it should work.
+
+The test needs to simulate pressing Delete on macOS and check if the selected annotation gets deleted. 
+
+I'll use the test utilities provided. I'll create a PDF document with an annotation, select it, and simulate the keydown event with the Delete key. Then, I'll verify that the annotation was removed.
+
+I'll import the necessary modules: PDFDocument, Annotation, and the test utils. Then, I'll create a sample PDF page with an annotation. 
+
+In the test, I'll set up the annotation editor, select the annotation, and dispatch a keydown event with the code 'Delete' and meta key (since it's macOS). 
+
+After triggering the event, I'll check if the annotation is no longer in the storage. 
+
+This should fail before the patch because the key binding wasn't present, and pass after the patch is applied.
+</think>
+
+```javascript
+it("should delete selected annotation when Delete key is pressed on macOS", async () => {
+  const { PDFDocument, Annotation } = await import("../../src/core/document.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+
+  // Create a PDF document with one page containing an annotation
+  const pdfDoc = await PDFDocument.load(
+    buildGetDocumentParams("test.pdf", new Uint8Array())
+  );
+  const page = (await pdfDoc.getPage(1));
+  const annotation = new Annotation();
+  page.addAnnotation(annotation);
+
+  // Set up the annotation editor
+  const editorManager = new AnnotationEditorUIManager(
+    document.createElement("div"),
+    {
+      _on: () => {},
+      _off: () => {},
+      _dispatch: () => {},
+    },
+    pdfDoc,
+    new Map()
+  );
+
+  // Select the annotation
+  editorManager.selectAnnotation(annotation);
+
+  // Simulate pressing Delete key on macOS (meta + Delete)
+  const event = new KeyboardEvent("keydown", {
+    key: "Delete",
+    code: "Delete",
+    metaKey: true,
+  });
+
+  // Dispatch the event
+  editorManager.element.dispatchEvent(event);
+
+  // Verify that the annotation was deleted
+  expect(page.getAnnotations().length).toBe(0);
+});
+```

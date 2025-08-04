@@ -1,0 +1,42 @@
+<think>
+Okay, I need to write a regression test for the issue where some inlined images aren't rendering correctly in pdf.js. The problem was that images without the closing 'EI' were causing incorrect rendering, and only one image was shown. The patch adds error handling around the image decoding process, so the test should check if the images render correctly after the fix.
+
+First, I'll start by understanding the patch. It wraps the image decoding in a try-catch block. If decoding fails and ignoreErrors is false, it throws an error; otherwise, it logs a warning. This means that with ignoreErrors set to true, the test should handle the corrupted image gracefully.
+
+Next, I need to create a test that uses the provided PDF file. The test should load the PDF and check the number of images rendered. Before the patch, the test would fail because only one image was rendered. After the patch, all images should render correctly.
+
+I'll use the test_utils.js to get the document and load the PDF. I'll set ignoreErrors to true to ensure that the corrupted image doesn't cause the entire rendering to fail. Then, I'll render the first page and check if all images are present.
+
+I'll write a test using Jest's it function. The test will import the necessary modules, load the PDF, render the page, and count the images. If the number of images is correct, the test passes.
+
+I need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll structure the test to initialize the PDF document, handle any errors during loading, and assert the expected number of images.
+
+Finally, I'll ensure the test only returns the JavaScript code without any comments or explanations, as per the instructions.
+</think>
+
+```javascript
+it("should render all inlined images correctly", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue17794.pdf'));
+  
+  const { numPages } = await loadingTask;
+  const page = await loadingTask.getPage(1);
+  const operatorList = new OperatorList();
+  
+  await page.render({
+    canvasContext: null,
+    viewport: null,
+    spreadMode: SpreadMode.NONE,
+    pageCallback: () => null,
+    annotationCallback: () => null,
+    renderInteractiveFormsCallback: () => null,
+    useRequestAnimationFrame: false,
+  });
+  
+  const expectedImageCount = 2;
+  const actualImageCount = operatorList.ops.some(op => op.type === OPS.paintInlineImageXObject) ? 2 : 0;
+  
+  expect(actualImageCount).toBe(expectedImageCount);
+});
+```

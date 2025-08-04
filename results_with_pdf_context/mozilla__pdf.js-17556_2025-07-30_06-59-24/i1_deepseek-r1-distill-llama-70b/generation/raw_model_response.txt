@@ -1,0 +1,44 @@
+<think>
+Okay, I need to write a regression test for the issue where PDF.js incorrectly treats default JavaScript object properties like `toString` as valid PDF operators. The test should fail before the patch and pass after applying the patch.
+
+First, I'll look at the provided code and the patch. The problem was that the `opMap` was using a regular JavaScript object, which includes inherited properties like `toString`. The patch changes `opMap` to use `Object.create(null)`, ensuring it doesn't have these inherited properties.
+
+To test this, I'll create a PDF that includes a stream with the `toString` token. The test will load this PDF and check if `toString` is treated as an invalid operator.
+
+I'll use the existing test file `test/unit/evaluator_spec.js` and add a new test case. I'll import necessary modules like `PartialEvaluator` and `OperatorList` from the provided imports.
+
+In the test, I'll set up a mock XRef and create a `StringStream` with the content containing `toString`. Then, I'll initialize the `PartialEvaluator` with this stream and XRef.
+
+Next, I'll process the operator list. If `toString` is considered a valid operator, the processing should throw an error because `toString` doesn't have the expected properties like `id` or `numArgs`.
+
+I'll wrap this in a try-catch block. If no error is thrown, the test fails because it means `toString` was incorrectly accepted as a valid operator. If an error is thrown, the test passes, indicating the patch works.
+
+I need to ensure the test is self-contained and only uses the provided imports. I'll structure the test with `it` and include all necessary setup within the async function.
+
+Finally, I'll return only the JavaScript code for the new test block without any comments or explanations.
+</think>
+
+```javascript
+it("should ignore default object properties as operators", async () => {
+  const { PartialEvaluator } = await import("../../src/core/evaluator.js");
+  const { OperatorList } = await import("../../src/core/operator_list.js");
+  const { XRefMock } = await import("./test_utils.js");
+
+  const xref = new XRefMock();
+  const content = new StringStream("toString\n");
+  const evaluator = new PartialEvaluator(
+    content,
+    xref,
+    new StateManager(),
+    new OperatorList()
+  );
+
+  const opList = evaluator.read();
+  try {
+    await evaluator.processOperatorList(opList);
+    throw new Error("Expected error to be thrown for 'toString' operator");
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+  }
+});
+```

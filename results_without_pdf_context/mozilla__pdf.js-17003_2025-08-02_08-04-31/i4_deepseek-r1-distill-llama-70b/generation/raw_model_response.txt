@@ -1,0 +1,50 @@
+<think>
+Okay, I need to write a test that checks if the warning "Unknown field name, falling back to empty field name." is no longer present after the patch. The issue was that when printing a PDF with an added annotation, this warning appeared in the console. 
+
+First, I should understand the problem. The warning comes from the `_constructFieldName` method in `annotation.js`. Before the patch, this method was called during the creation of annotations, which could lead to the warning when the field name wasn't properly constructed, especially when `collectFields` was true.
+
+The patch modifies the condition in the `_constructFieldName` method. It changes from checking if `pageIndex` is null to checking if `collectFields` is false. This means that when `collectFields` is true, the method will return early, avoiding the warning.
+
+So, the test should simulate a scenario where an annotation is created with `collectFields` set to true. Before the patch, this would trigger the warning, but after the patch, it shouldn't.
+
+I'll create a test that creates an annotation with `collectFields: true` and checks that no warning is emitted. To do this, I'll mock the `warn` function and check if it's called.
+
+I'll import the necessary modules, set up a fake annotation, and use `jest.spyOn` to monitor the `warn` function. After creating the annotation, I'll assert that `warn` wasn't called with the expected message.
+
+This should ensure that the patch correctly fixes the issue, and the test will pass only after the patch is applied.
+</think>
+
+```javascript
+it("should not warn about unknown field name when collectFields is true", async () => {
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { warn } = await import("../../shared/util.js");
+
+  // Mock the warn function
+  const mockWarn = jest.spyOn(util, "warn").mockImplementation(() => {});
+
+  // Create a mock annotation dictionary
+  const dict = {
+    get: (key) => {
+      if (key === "P") return new Ref();
+      return null;
+    },
+  };
+
+  // Create annotation with collectFields: true
+  const annotation = await AnnotationFactory.create(
+    null,
+    null,
+    null,
+    null,
+    true, // collectFields
+    null
+  );
+
+  // Verify no warning was emitted
+  expect(mockWarn).not.toHaveBeenCalledWith(
+    "Unknown field name, falling back to empty field name."
+  );
+
+  mockWarn.mockRestore();
+});
+```

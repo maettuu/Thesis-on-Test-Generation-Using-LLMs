@@ -1,0 +1,37 @@
+<think>
+Okay, I need to write a regression test for the issue where a TypeError occurs when using JpegImage.parse with an incomplete JPEG. The user provided a patch that adds a check for the frame data, so the test should fail before the patch and pass after.
+
+First, I'll look at the existing test file. It's test/unit/api_spec.js, which imports various modules. I can reuse the setup here. I notice that it imports from test_utils.js, which has TEST_PDFS_PATH, so I can use that for test files.
+
+I need to create a test that triggers the bug. The issue happens when parsing a JPEG without an EOI marker. So, I'll create a minimal JPEG buffer that starts with 0xffd8 but doesn't have 0xffd9. For example, just 'ffd8' in hex.
+
+In the test, I'll import JpegImage from the correct path. Then, I'll create a buffer using Buffer.from('ffd8', 'hex'). I'll wrap the parse call in a try-catch to check for the error.
+
+Before the patch, the parse method should throw a TypeError because frame.samplesPerLine is undefined. After the patch, it should throw a JpegError with the message about no frame data.
+
+So, the test will mock the data and expect the specific error. I'll use async/await since the parse method is probably asynchronous. 
+
+I'll structure the test with it("should...", async () => {...}). Inside, I'll import JpegImage, create the buffer, and call parse. Then, I'll check if the error is caught and matches the expected message.
+
+I need to make sure the test is self-contained and doesn't rely on external files except for the necessary imports. I'll use the provided relative imports and ensure no new dependencies are added.
+
+Finally, I'll write the test code, making sure it's concise and directly tests the scenario.
+</think>
+
+```javascript
+it("should handle incomplete JPEG data without throwing TypeError", async () => {
+  const { JpegImage } = await import("../../src/core/jpg.js");
+  const data = Buffer.from("ffd8", "hex");
+  const error = new JpegError("JpegImage.parse - no frame data found.");
+  
+  try {
+    await new JpegImage().parse(data);
+  } catch (e) {
+    if (e instanceof JpegError && e.message === error.message) {
+      // Expected error caught
+    } else {
+      throw e;
+    }
+  }
+});
+```

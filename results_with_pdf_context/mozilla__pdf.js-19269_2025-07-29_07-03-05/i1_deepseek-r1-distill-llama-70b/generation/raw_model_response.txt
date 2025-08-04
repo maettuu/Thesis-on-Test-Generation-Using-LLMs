@@ -1,0 +1,56 @@
+<think>
+Okay, I need to write a regression test for the issue where the top and bottom images are not displayed in the PDF file. The patch provided modifies the evaluator.js and operator_list.js files. Let me understand what the patch does.
+
+Looking at the patch, I see that in evaluator.js, the addLocallyCachedImageOps function is modified to pass an additional hasMask parameter to addImageOps. Also, in the buildPaintImageXObject method, there are changes in how images with masks are handled. The operator_list.js now has the addImageOps method accept a hasMask parameter, which adds save and setGState operations if a mask is present.
+
+The problem was that images with masks (like SMask or Mask) weren't being displayed correctly. The patch ensures that when an image has a mask, the operator list includes the necessary save and restore operations along with setting the SMask, which should fix the rendering issue.
+
+So, the test should verify that when an image with a mask is processed, the correct operations are added to the operator list. 
+
+I'll create a test case where an image has an SMask. I'll set up a mock XRef, create a PartialEvaluator, and process the image. Then, I'll check if the operator list includes the save, setGState, paintImageXObject, and restore operations in the correct order.
+
+I'll structure the test by importing necessary modules, setting up mocks, creating the evaluator, and then asserting the expected operations are present. This should ensure that after the patch, the test passes, whereas before the patch, it would have failed because the mask wasn't handled properly.
+</think>
+
+```javascript
+it("should correctly handle images with SMask", async () => {
+  const xref = new XRefMock();
+  const idFactory = createIdFactory();
+  const operatorList = new OperatorList();
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: new WorkerTask(),
+    pageIndex: 0,
+    idFactory,
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+  });
+
+  const dict = new Dict();
+  dict.set("Subtype", new Name("Image"));
+  dict.set("SMask", new Name("Mask"));
+  const image = new Stream(new StringStream(" "), dict);
+
+  await evaluator.buildPaintImageXObject({
+    resources: new Dict(),
+    image,
+    operatorList,
+    cacheKey: "test",
+    localImageCache: new Map(),
+    localColorSpaceCache: new Map(),
+  });
+
+  const ops = operatorList.fnArray;
+  const expectedOps = [
+    OPS.save,
+    OPS.setGState,
+    OPS.paintImageXObject,
+    OPS.restore,
+  ];
+
+  assert.deepEqual(ops, expectedOps);
+});
+```

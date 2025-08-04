@@ -1,0 +1,563 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+PDF not displaying in viewer. 
+Attach (recommended) or Link to PDF file here:
+[Factuur_1105490.pdf](https://github.com/mozilla/pdf.js/files/15385405/Factuur_1105490.pdf)
+
+Configuration:
+
+- Web browser and its version:
+- Operating system and its version:
+- PDF.js version:
+- Is a browser extension:
+
+Steps to reproduce the problem:
+1. Open attached PDF in viewer
+2.
+
+What is the expected behavior? (add screenshot)
+
+What went wrong? (add screenshot)
+
+Screenshot from Chrome
+![image](https://github.com/mozilla/pdf.js/assets/141902311/ef9bef1f-6e4a-48a7-873c-b952ac35ef0b)
+
+Screenshot from Adobe
+![image](https://github.com/mozilla/pdf.js/assets/141902311/c4476d3d-cc2b-470c-a4f6-9563f750f465)
+
+Screenshot from https://mozilla.github.io/pdf.js/web/viewer.html 
+
+
+![image](https://github.com/mozilla/pdf.js/assets/141902311/e89c30cf-1a9f-4c3a-8b20-50952bbba610)
+
+
+
+Link to a viewer (if hosted on a site other than mozilla.github.io/pdf.js or as Firefox/Chrome extension):
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/parser.js b/src/core/parser.js
+--- a/src/core/parser.js
++++ b/src/core/parser.js
+@@ -609,12 +609,27 @@ class Parser {
+     return imageStream;
+   }
+ 
+-  _findStreamLength(startPos, signature) {
++  #findStreamLength(startPos) {
+     const { stream } = this.lexer;
+     stream.pos = startPos;
+ 
+     const SCAN_BLOCK_LENGTH = 2048;
+-    const signatureLength = signature.length;
++    const signatureLength = "endstream".length;
++
++    const END_SIGNATURE = new Uint8Array([0x65, 0x6e, 0x64]);
++    const endLength = END_SIGNATURE.length;
++
++    // Ideally we'd directly search for "endstream", however there are corrupt
++    // PDF documents where the command is incomplete; hence we search for:
++    //  1. The normal case.
++    //  2. The misspelled case (fixes issue18122.pdf).
++    //  3. The truncated case (fixes issue10004.pdf).
++    const PARTIAL_SIGNATURE = [
++      new Uint8Array([0x73, 0x74, 0x72, 0x65, 0x61, 0x6d]), // "stream"
++      new Uint8Array([0x73, 0x74, 0x65, 0x61, 0x6d]), // "steam",
++      new Uint8Array([0x73, 0x74, 0x72, 0x65, 0x61]), // "strea"
++    ];
++    const normalLength = signatureLength - endLength;
+ 
+     while (stream.pos < stream.end) {
+       const scanBytes = stream.peekBytes(SCAN_BLOCK_LENGTH);
+@@ -626,13 +641,43 @@ class Parser {
+       let pos = 0;
+       while (pos < scanLength) {
+         let j = 0;
+-        while (j < signatureLength && scanBytes[pos + j] === signature[j]) {
++        while (j < endLength && scanBytes[pos + j] === END_SIGNATURE[j]) {
+           j++;
+         }
+-        if (j >= signatureLength) {
+-          // `signature` found.
+-          stream.pos += pos;
+-          return stream.pos - startPos;
++        if (j >= endLength) {
++          // "end" found, find the complete command.
++          let found = false;
++          for (const part of PARTIAL_SIGNATURE) {
++            const partLen = part.length;
++            let k = 0;
++            while (k < partLen && scanBytes[pos + j + k] === part[k]) {
++              k++;
++            }
++            if (k >= normalLength) {
++              // Found "endstream" command.
++              found = true;
++              break;
++            }
++            if (k >= partLen) {
++              // Found "endsteam" or "endstea" command.
++              // Ensure that the byte immediately following the corrupt
++              // endstream command is a space, to prevent false positives.
++              const lastByte = scanBytes[pos + j + k];
++              if (isWhiteSpace(lastByte)) {
++                info(
++                  `Found "${bytesToString([...END_SIGNATURE, ...part])}" when ` +
++                    "searching for endstream command."
++                );
++                found = true;
++              }
++              break;
++            }
++          }
++
++          if (found) {
++            stream.pos += pos;
++            return stream.pos - startPos;
++          }
+         }
+         pos++;
+       }
+@@ -665,43 +710,9 @@ class Parser {
+       this.shift(); // 'stream'
+     } else {
+       // Bad stream length, scanning for endstream command.
+-      const ENDSTREAM_SIGNATURE = new Uint8Array([
+-        0x65, 0x6e, 0x64, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
+-      ]);
+-      let actualLength = this._findStreamLength(startPos, ENDSTREAM_SIGNATURE);
++      const actualLength = this.#findStreamLength(startPos);
+       if (actualLength < 0) {
+-        // Only allow limited truncation of the endstream signature,
+-        // to prevent false positives.
+-        const MAX_TRUNCATION = 1;
+-        // Check if the PDF generator included truncated endstream commands,
+-        // such as e.g. "endstrea" (fixes issue10004.pdf).
+-        for (let i = 1; i <= MAX_TRUNCATION; i++) {
+-          const end = ENDSTREAM_SIGNATURE.length - i;
+-          const TRUNCATED_SIGNATURE = ENDSTREAM_SIGNATURE.slice(0, end);
+-
+-          const maybeLength = this._findStreamLength(
+-            startPos,
+-            TRUNCATED_SIGNATURE
+-          );
+-          if (maybeLength >= 0) {
+-            // Ensure that the byte immediately following the truncated
+-            // endstream command is a space, to prevent false positives.
+-            const lastByte = stream.peekBytes(end + 1)[end];
+-            if (!isWhiteSpace(lastByte)) {
+-              break;
+-            }
+-            info(
+-              `Found "${bytesToString(TRUNCATED_SIGNATURE)}" when ` +
+-                "searching for endstream command."
+-            );
+-            actualLength = maybeLength;
+-            break;
+-          }
+-        }
+-
+-        if (actualLength < 0) {
+-          throw new FormatError("Missing endstream command.");
+-        }
++        throw new FormatError("Missing endstream command.");
+       }
+       length = actualLength;
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.24.5
+- @babel/preset-env: ^7.24.5
+- @babel/runtime: ^7.24.5
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @jazzer.js/core: ^2.1.0
+- autoprefixer: ^10.4.19
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001618
+- canvas: ^2.11.2
+- core-js: ^3.37.1
+- cross-env: ^7.0.3
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.1
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.7.3
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^53.0.0
+- globals: ^15.2.0
+- gulp: ^4.0.2
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.3
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- path2d: ^0.2.0
+- pngjs: ^7.0.0
+- postcss: ^8.4.38
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^7.0.0
+- postcss-nesting: ^12.1.4
+- prettier: ^3.2.5
+- puppeteer: ^22.8.1
+- streamqueue: ^1.1.2
+- stylelint: ^16.5.0
+- stylelint-prettier: ^5.0.0
+- terser-webpack-plugin: ^5.3.10
+- through2: ^4.0.2
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.4.5
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.91.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/parser.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   bytesToString,
+19   FormatError,
+20   info,
+21   warn,
+22 } from "../shared/util.js";
+23 import { Cmd, Dict, EOF, isCmd, Name, Ref } from "./primitives.js";
+24 import {
+25   isWhiteSpace,
+26   MissingDataException,
+27   ParserEOFException,
+28 } from "./core_utils.js";
+29 import { NullStream, Stream } from "./stream.js";
+30 import { Ascii85Stream } from "./ascii_85_stream.js";
+31 import { AsciiHexStream } from "./ascii_hex_stream.js";
+32 import { CCITTFaxStream } from "./ccitt_stream.js";
+33 import { FlateStream } from "./flate_stream.js";
+34 import { Jbig2Stream } from "./jbig2_stream.js";
+35 import { JpegStream } from "./jpeg_stream.js";
+36 import { JpxStream } from "./jpx_stream.js";
+37 import { LZWStream } from "./lzw_stream.js";
+38 import { PredictorStream } from "./predictor_stream.js";
+39 import { RunLengthStream } from "./run_length_stream.js";
+40 
+41 const MAX_LENGTH_TO_CACHE = 1000;
+42 
+61 class Parser {
+62   constructor({ lexer, xref, allowStreams = false, recoveryMode = false }) {
+63     this.lexer = lexer;
+64     this.xref = xref;
+65     this.allowStreams = allowStreams;
+66     this.recoveryMode = recoveryMode;
+67 
+68     this.imageCache = Object.create(null);
+69     this._imageId = 0;
+70     this.refill();
+71   }
+72 
+612   _findStreamLength(startPos, signature) {
+613     const { stream } = this.lexer;
+614     stream.pos = startPos;
+615 
+616     const SCAN_BLOCK_LENGTH = 2048;
+617     const signatureLength = signature.length;
+618 
+619     while (stream.pos < stream.end) {
+620       const scanBytes = stream.peekBytes(SCAN_BLOCK_LENGTH);
+621       const scanLength = scanBytes.length - signatureLength;
+622 
+623       if (scanLength <= 0) {
+624         break;
+625       }
+626       let pos = 0;
+627       while (pos < scanLength) {
+628         let j = 0;
+629         while (j < signatureLength && scanBytes[pos + j] === signature[j]) {
+630           j++;
+631         }
+632         if (j >= signatureLength) {
+633           // `signature` found.
+634           stream.pos += pos;
+635           return stream.pos - startPos;
+636         }
+637         pos++;
+638       }
+639       stream.pos += scanLength;
+640     }
+641     return -1;
+642   }
+643 
+644   makeStream(dict, cipherTransform) {
+645     const lexer = this.lexer;
+646     let stream = lexer.stream;
+647 
+648     // Get the stream's start position.
+649     lexer.skipToNextLine();
+650     const startPos = stream.pos - 1;
+651 
+652     // Get the length.
+653     let length = dict.get("Length");
+654     if (!Number.isInteger(length)) {
+655       info(`Bad length "${length && length.toString()}" in stream.`);
+656       length = 0;
+657     }
+658 
+659     // Skip over the stream data.
+660     stream.pos = startPos + length;
+661     lexer.nextChar();
+662 
+663     // Shift '>>' and check whether the new object marks the end of the stream.
+664     if (this.tryShift() && isCmd(this.buf2, "endstream")) {
+665       this.shift(); // 'stream'
+666     } else {
+667       // Bad stream length, scanning for endstream command.
+668       const ENDSTREAM_SIGNATURE = new Uint8Array([
+669         0x65, 0x6e, 0x64, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
+670       ]);
+671       let actualLength = this._findStreamLength(startPos, ENDSTREAM_SIGNATURE);
+672       if (actualLength < 0) {
+673         // Only allow limited truncation of the endstream signature,
+674         // to prevent false positives.
+675         const MAX_TRUNCATION = 1;
+676         // Check if the PDF generator included truncated endstream commands,
+677         // such as e.g. "endstrea" (fixes issue10004.pdf).
+678         for (let i = 1; i <= MAX_TRUNCATION; i++) {
+679           const end = ENDSTREAM_SIGNATURE.length - i;
+680           const TRUNCATED_SIGNATURE = ENDSTREAM_SIGNATURE.slice(0, end);
+681 
+682           const maybeLength = this._findStreamLength(
+683             startPos,
+684             TRUNCATED_SIGNATURE
+685           );
+686           if (maybeLength >= 0) {
+687             // Ensure that the byte immediately following the truncated
+688             // endstream command is a space, to prevent false positives.
+689             const lastByte = stream.peekBytes(end + 1)[end];
+690             if (!isWhiteSpace(lastByte)) {
+691               break;
+692             }
+693             info(
+694               `Found "${bytesToString(TRUNCATED_SIGNATURE)}" when ` +
+695                 "searching for endstream command."
+696             );
+697             actualLength = maybeLength;
+698             break;
+699           }
+700         }
+701 
+702         if (actualLength < 0) {
+703           throw new FormatError("Missing endstream command.");
+704         }
+705       }
+706       length = actualLength;
+707 
+708       lexer.nextChar();
+709       this.shift();
+710       this.shift();
+711     }
+712     this.shift(); // 'endstream'
+713 
+714     stream = stream.makeSubStream(startPos, length, dict);
+715     if (cipherTransform) {
+716       stream = cipherTransform.createStream(stream, length);
+717     }
+718     stream = this.filter(stream, dict, length);
+719     stream.dict = dict;
+720     return stream;
+721   }
+722 
+822 }
+823 
+824 // A '1' in this array means the character is white space. A '1' or
+825 // '2' means the character ends a name or command.
+826 // prettier-ignore
+827 const specialChars = [
+828   1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, // 0x
+829   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 1x
+830   1, 0, 0, 0, 0, 2, 0, 0, 2, 2, 0, 0, 0, 0, 0, 2, // 2x
+831   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, // 3x
+832   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 4x
+833   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, // 5x
+834   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 6x
+835   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, // 7x
+836   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 8x
+837   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 9x
+838   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // ax
+839   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // bx
+840   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // cx
+841   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // dx
+842   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // ex
+843   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0  // fx
+844 ];
+845 
+1409 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/parser_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { Cmd, EOF, Name } from "../../src/core/primitives.js";
+import { Lexer, Linearization, Parser } from "../../src/core/parser.js";
+import { FormatError } from "../../src/shared/util.js";
+import { StringStream } from "../../src/core/stream.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

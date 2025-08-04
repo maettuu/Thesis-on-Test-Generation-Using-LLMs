@@ -1,0 +1,41 @@
+<think>
+Okay, I need to write a regression test for the issue where the font fallback doesn't work on the node-js/legacy build, specifically with the HelveticaLTStd-Bold font. The user provided a patch that adds a mapping in standard_fonts.js, so the test should verify that this mapping fixes the issue.
+
+First, I'll start by understanding the problem. The user mentioned that when running the example, the output PNG has missing blue text because the font isn't falling back correctly. The warnings indicate that the HelveticaLTStd paths aren't resolved, leading to ignored characters.
+
+The patch adds a line to standard_fonts.js: t["HelveticaLTStd-Bold"] = "Helvetica-Bold";. This should map the non-embedded HelveticaLTStd-Bold font to Helvetica-Bold, which should be available.
+
+To write the test, I need to ensure it fails before the patch and passes after. The test should load the provided PDF, render it, and check if the text is present.
+
+I'll structure the test using Jest. I'll import the necessary modules: getDocument from api.js and buildGetDocumentParams from test_utils.js. Then, I'll load the PDF and get the first page. I'll create a render task and wait for it to complete.
+
+I need to extract the text from the first page. If the font fallback works, the text should be present. I'll check for the presence of a specific string, like "Form W-4", which should be in the rendered text.
+
+Before the patch, the text would be missing, so the test would fail. After the patch, the text should be present, making the test pass.
+
+I'll set up the test to try to find the expected text. If it's found, the test passes; otherwise, it fails. This way, the test directly verifies the font fallback behavior.
+
+I should make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. Also, I'll use dynamic imports to maintain compatibility with Node.js.
+
+So, putting it all together, the test will load the PDF, render it, extract the text, and check for the expected content. This should accurately test whether the font fallback issue is resolved by the patch.
+</think>
+
+```javascript
+it("should correctly render HelveticaLTStd-Bold font with fallback", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue19234.pdf'));
+  const pdfDoc = await loadingTask.promise;
+  const page = await pdfDoc.getPage(1);
+  const renderTask = page.render({
+    viewport: page.getViewport({ scale: 1 }),
+    useCanvas: false,
+    useTextLayer: true
+  });
+  await renderTask.promise;
+  const textContent = await page.getTextContent();
+  const text = textContent.items.map(item => item.str).join('');
+  
+  expect(text).toMatch(/Form W-4/);
+});
+```

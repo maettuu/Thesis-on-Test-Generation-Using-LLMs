@@ -1,0 +1,56 @@
+<think>
+Okay, I need to write a regression test for the issue where the free highlighting in PDF lags behind the mouse cursor. The patch provided modifies the outliner.js file, so my test should target that specific behavior.
+
+First, I'll start by understanding the problem. The user mentioned that when using free highlighting, the cursor doesn't keep up with the mouse movements, causing a lag. The patch introduces new variables and methods in the FreeOutliner class to track the last coordinates more accurately.
+
+My test should simulate the free highlighting and check if the outline follows the cursor correctly. Since this is a visual issue, I can't directly test it with Jest, but I can simulate the actions and check the internal state.
+
+I'll use the PDFDocumentProxy and PDFPageProxy to load a test PDF. Then, I'll access the outliner from the annotation layer. I'll simulate adding points to the outliner, which should update the lastX and lastY properties.
+
+After applying the patch, the outliner's getLastCoords method should return the correct coordinates. I'll write the test to check if these coordinates are updated as expected when points are added.
+
+I'll structure the test with Jest, using async/await for asynchronous operations. I'll import the necessary modules dynamically to ensure compatibility with Node.js.
+
+In the test, I'll load a sample PDF, get the first page, and access the outliner. Then, I'll add a series of points and check if the last coordinates match the expected values. This will ensure that the lag issue is resolved.
+
+I need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll use a simple PDF file from the test utils for this purpose.
+
+Finally, I'll write the test block, ensuring it fails before the patch and passes after, confirming the fix.
+</think>
+
+```javascript
+it("should fix free highlighting lag behind cursor", async () => {
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { Outliner } = await import("../../src/display/editor/outliner.js");
+  const { XRefMock } = await import("./test_utils.js");
+
+  // Create a mock PDF document with one page
+  const xRef = new XRefMock();
+  const pdf = await PDFDocumentProxy.create({
+    xref: xRef,
+    filename: "test.pdf",
+    length: 1,
+  });
+  const page = (await pdf.getPages())[0];
+
+  // Get the outliner instance
+  const annotationLayer = page.annotationLayer;
+  const outliner = new Outliner(annotationLayer);
+
+  // Simulate adding points to the outliner
+  const points = [
+    { x: 100, y: 100 },
+    { x: 150, y: 150 },
+    { x: 200, y: 200 },
+  ];
+
+  points.forEach((point) => outliner.add(point));
+
+  // Check if the last coordinates are correctly updated
+  const [lastTopX, lastTopY, lastBottomX, lastBottomY] = outliner.#getLastCoords();
+  expect(lastTopX).toBeCloseTo(points[points.length - 1].x / page.viewport.width);
+  expect(lastTopY).toBeCloseTo(points[points.length - 1].y / page.viewport.height);
+  expect(lastBottomX).toBeCloseTo(points[points.length - 1].x / page.viewport.width);
+  expect(lastBottomY).toBeCloseTo(points[points.length - 1].y / page.viewport.height);
+});
+```

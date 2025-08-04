@@ -1,0 +1,74 @@
+<think>
+Okay, I need to create a regression test for the issue where the font size slider in the text editor isn't working smoothly. The patch provided modifies the moveInDOM method to use a timeout, which should prevent blocking the UI during font size changes.
+
+First, I'll look at the existing test file. It's test/unit/editor_spec.js, and it imports CommandManager. I might need to import other modules like AnnotationEditor and AnnotationEditorLayer if they aren't already imported.
+
+The test should simulate changing the font size using the slider and check if the editor's position updates correctly without causing UI blockage. I'll create a test case that adjusts the font size multiple times and ensures each change is reflected.
+
+I'll set up a mock editor, perhaps using a MinimalEditor class that extends AnnotationEditor. This editor will have a simple implementation that just sets the font size when updated. 
+
+I'll initialize the editor with some dimensions and content. Then, I'll simulate the slider by changing the fontSize property multiple times. After each change, I'll check if the moveInDOM method was called. 
+
+Since the patch introduces a timeout, I'll need to use async/await and possibly flush any pending timeouts to ensure the moveInDOM completes. I'll use Jest's fake timers to manage the asynchronous behavior.
+
+The test will verify that after each font size change, the editor's position is updated correctly, indicating that the moveInDOM method is working as intended without blocking the UI.
+
+I'll structure the test with setup, multiple font size changes, and assertions to ensure each change is processed. This should cover the scenario where the slider is used extensively, and the patch ensures smooth operation.
+</think>
+
+```javascript
+it("should update font size with slider without blocking UI", async () => {
+  const { AnnotationEditor, AnnotationEditorLayer } = await import("../../src/display/editor/editor.js");
+  const { CommandManager } = await import("../../src/display/editor/tools.js");
+
+  class MinimalEditor extends AnnotationEditor {
+    constructor(params) {
+      super(params);
+      this.fontSize = 16;
+    }
+
+    set fontSize(value) {
+      this._fontSize = value;
+      this.moveInDOM();
+    }
+
+    get fontSize() {
+      return this._fontSize;
+    }
+
+    isEmpty() {
+      return false;
+    }
+
+    render() {
+      const div = super.render();
+      div.style.fontSize = `${this.fontSize}px`;
+      return div;
+    }
+  }
+
+  const layer = new AnnotationEditorLayer({ page: {} });
+  const editor = new MinimalEditor({
+    parent: layer,
+    id: "test-editor",
+    uiManager: new CommandManager(),
+  });
+
+  editor.render();
+  editor.setDims(100, 100);
+  editor.fixAndSetPosition();
+
+  const fontSizeChanges = [16, 18, 20, 22, 24];
+  const moveInDOMSpy = jest.spyOn(editor, "moveInDOM");
+
+  for (const fontSize of fontSizeChanges) {
+    editor.fontSize = fontSize;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(moveInDOMSpy).toHaveBeenCalled();
+    moveInDOMSpy.mockClear();
+  }
+
+  const finalFontSize = 24;
+  expect(editor.fontSize).toBe(finalFontSize);
+});
+```

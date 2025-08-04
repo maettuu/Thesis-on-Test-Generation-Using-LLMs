@@ -1,0 +1,70 @@
+<think>
+Okay, I need to write a test that checks if the Voice Over reads highlighted text during editing inside a PDF. The issue is that before the patch, it doesn't, but after the patch, it should work.
+
+First, I'll look at the patch provided. It seems several files were modified. The main changes are adding `aria-hidden` attributes and making the highlighted text visible to screen readers by using `visuallyHidden` class.
+
+So, the test should verify that the highlighted text is accessible to screen readers. I'll use the `getComputedAccessibilityTree` method in Puppeteer to check the accessibility tree.
+
+I'll set up a test PDF with some text. Then, I'll create a highlight annotation over the text. After that, I'll check the accessibility tree to see if the highlighted text is present and not hidden.
+
+I'll use Jest and Puppeteer for this test. I'll import the necessary modules and set up the test structure. The test will navigate to a test PDF, create a highlight, and then check the accessibility.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll structure the test with async/await for readability.
+
+So, the test will:
+
+1. Import required modules.
+2. Launch a browser instance.
+3. Navigate to the test PDF.
+4. Create a highlight annotation.
+5. Get the accessibility tree.
+6. Check if the highlighted text is present and readable.
+
+This should fail before the patch because the text isn't accessible, and pass after the patch because the text becomes accessible.
+</think>
+
+```javascript
+it("should allow Voice Over to read highlighted text during editing", async () => {
+  const { PDFDocument, PDFWorker } = await import("../../src/display/api.js");
+  const { DOMSVGFactory } = await import("../../src/display/display_utils.js");
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { renderTextLayer } = await import("../../src/display/text_layer.js");
+
+  // Setup Puppeteer and get accessibility tree
+  const { _accessibility } = await import("puppeteer/frames");
+  const browser = await require("puppeteer").launch();
+  const page = await browser.newPage();
+  await page.setContent(`
+    <html>
+      <body>
+        <div class="textLayer" style="width: 400px; height: 300px;">
+          <p id="text">Sample text for highlighting</p>
+        </div>
+      </body>
+    </html>
+  `);
+
+  // Create highlight editor
+  const textLayer = page.querySelector(".textLayer");
+  const highlightEditor = new HighlightEditor({
+    anchorNode: textLayer.querySelector("#text").firstChild,
+    anchorOffset: 0,
+    focusNode: textLayer.querySelector("#text").firstChild,
+    focusOffset: 10,
+    boxes: [{ x: 0, y: 0, width: 100, height: 20 }]
+  });
+
+  // Apply highlight
+  highlightEditor.render();
+  page.addScriptTag({ content: highlightEditor.render().outerHTML });
+
+  // Get accessibility tree
+  const accessibilityTree = await _accessibility.getAccessibilityTree(page);
+  const highlightedText = accessibilityTree.find(
+    node => node.role === "mark" && node.name === "Sample text for highlighting"
+  );
+
+  expect(highlightedText).toBeTruthy();
+});
+```

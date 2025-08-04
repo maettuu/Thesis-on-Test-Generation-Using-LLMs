@@ -1,0 +1,3496 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Change the style of the line and the resizers around a selected editor
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/editor.js b/src/display/editor/editor.js
+--- a/src/display/editor/editor.js
++++ b/src/display/editor/editor.js
+@@ -58,6 +58,8 @@ class AnnotationEditor {
+ 
+   #zIndex = AnnotationEditor._zIndex++;
+ 
++  static _borderLineWidth = -1;
++
+   static _colorManager = new ColorManager();
+ 
+   static _zIndex = 1;
+@@ -124,7 +126,14 @@ class AnnotationEditor {
+    * Initialize the l10n stuff for this type of editor.
+    * @param {Object} _l10n
+    */
+-  static initialize(_l10n) {}
++  static initialize(_l10n) {
++    if (AnnotationEditor._borderLineWidth !== -1) {
++      return;
++    }
++    const style = getComputedStyle(document.documentElement);
++    AnnotationEditor._borderLineWidth =
++      parseFloat(style.getPropertyValue("--outline-width")) || 0;
++  }
+ 
+   /**
+    * Update the default parameters for this type of editor.
+@@ -365,11 +374,34 @@ class AnnotationEditor {
+ 
+     // The editor can be moved wherever the user wants, so we don't need to fix
+     // the position: it'll be done when the user will release the mouse button.
+-    this.div.style.left = `${(100 * this.x).toFixed(2)}%`;
+-    this.div.style.top = `${(100 * this.y).toFixed(2)}%`;
++
++    let { x, y } = this;
++    const [bx, by] = this.#getBaseTranslation();
++    x += bx;
++    y += by;
++
++    this.div.style.left = `${(100 * x).toFixed(2)}%`;
++    this.div.style.top = `${(100 * y).toFixed(2)}%`;
+     this.div.scrollIntoView({ block: "nearest" });
+   }
+ 
++  #getBaseTranslation() {
++    const [parentWidth, parentHeight] = this.parentDimensions;
++    const { _borderLineWidth } = AnnotationEditor;
++    const x = _borderLineWidth / parentWidth;
++    const y = _borderLineWidth / parentHeight;
++    switch (this.rotation) {
++      case 90:
++        return [-x, y];
++      case 180:
++        return [x, y];
++      case 270:
++        return [x, -y];
++      default:
++        return [-x, -y];
++    }
++  }
++
+   fixAndSetPosition() {
+     const [pageWidth, pageHeight] = this.pageDimensions;
+     let { x, y, width, height } = this;
+@@ -400,6 +432,10 @@ class AnnotationEditor {
+     this.x = x /= pageWidth;
+     this.y = y /= pageHeight;
+ 
++    const [bx, by] = this.#getBaseTranslation();
++    x += bx;
++    y += by;
++
+     const { style } = this.div;
+     style.left = `${(100 * x).toFixed(2)}%`;
+     style.top = `${(100 * y).toFixed(2)}%`;
+
+diff --git a/src/display/editor/freetext.js b/src/display/editor/freetext.js
+--- a/src/display/editor/freetext.js
++++ b/src/display/editor/freetext.js
+@@ -145,6 +145,7 @@ class FreeTextEditor extends AnnotationEditor {
+ 
+   /** @inheritdoc */
+   static initialize(l10n) {
++    super.initialize(l10n);
+     this._l10nPromise = new Map(
+       ["free_text2_default_content", "editor_free_text2_aria_label"].map(
+         str => [str, l10n.get(str)]
+
+diff --git a/src/display/editor/ink.js b/src/display/editor/ink.js
+--- a/src/display/editor/ink.js
++++ b/src/display/editor/ink.js
+@@ -84,6 +84,7 @@ class InkEditor extends AnnotationEditor {
+ 
+   /** @inheritdoc */
+   static initialize(l10n) {
++    super.initialize(l10n);
+     this._l10nPromise = new Map(
+       ["editor_ink_canvas_aria_label", "editor_ink2_aria_label"].map(str => [
+         str,
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.17
+- @babel/plugin-transform-modules-commonjs: ^7.22.15
+- @babel/preset-env: ^7.22.15
+- @babel/runtime: ^7.22.15
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.15
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001532
+- canvas: ^2.11.2
+- core-js: ^3.32.2
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.49.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.28.1
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.2.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.1
+- globals: ^13.21.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.29
+- postcss-dir-pseudo-class: ^8.0.0
+- postcss-nesting: ^12.0.1
+- prettier: ^3.0.3
+- puppeteer: ^21.1.1
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.3
+- stylelint-prettier: ^4.0.2
+- terser: ^5.19.4
+- through2: ^4.0.2
+- tsc-alias: ^1.8.7
+- ttest: ^4.0.0
+- typescript: ^5.2.2
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/editor.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 // eslint-disable-next-line max-len
+17 /** @typedef {import("./annotation_editor_layer.js").AnnotationEditorLayer} AnnotationEditorLayer */
+18 // eslint-disable-next-line max-len
+19 /** @typedef {import("./tools.js").AnnotationEditorUIManager} AnnotationEditorUIManager */
+20 
+21 import { bindEvents, ColorManager } from "./tools.js";
+22 import { FeatureTest, shadow, unreachable } from "../../shared/util.js";
+23 
+24 /**
+25  * @typedef {Object} AnnotationEditorParameters
+26  * @property {AnnotationEditorUIManager} uiManager - the global manager
+27  * @property {AnnotationEditorLayer} parent - the layer containing this editor
+28  * @property {string} id - editor id
+29  * @property {number} x - x-coordinate
+30  * @property {number} y - y-coordinate
+31  */
+32 
+33 /**
+34  * Base class for editors.
+35  */
+36 class AnnotationEditor {
+37   #keepAspectRatio = false;
+38 
+39   #resizersDiv = null;
+40 
+41   #boundFocusin = this.focusin.bind(this);
+42 
+43   #boundFocusout = this.focusout.bind(this);
+44 
+45   #hasBeenClicked = false;
+46 
+47   #isEditing = false;
+48 
+49   #isInEditMode = false;
+50 
+51   _initialOptions = Object.create(null);
+52 
+53   _uiManager = null;
+54 
+55   _focusEventsAllowed = true;
+56 
+57   #isDraggable = false;
+58 
+59   #zIndex = AnnotationEditor._zIndex++;
+60 
+61   static _colorManager = new ColorManager();
+62 
+63   static _zIndex = 1;
+64 
+65   /**
+66    * @param {AnnotationEditorParameters} parameters
+67    */
+68   constructor(parameters) {
+69     if (this.constructor === AnnotationEditor) {
+70       unreachable("Cannot initialize AnnotationEditor.");
+71     }
+72 
+73     this.parent = parameters.parent;
+74     this.id = parameters.id;
+75     this.width = this.height = null;
+76     this.pageIndex = parameters.parent.pageIndex;
+77     this.name = parameters.name;
+78     this.div = null;
+79     this._uiManager = parameters.uiManager;
+80     this.annotationElementId = null;
+81     this._willKeepAspectRatio = false;
+82     this._initialOptions.isCentered = parameters.isCentered;
+83     this._structTreeParentId = null;
+84 
+85     const {
+86       rotation,
+87       rawDims: { pageWidth, pageHeight, pageX, pageY },
+88     } = this.parent.viewport;
+89 
+90     this.rotation = rotation;
+91     this.pageRotation =
+92       (360 + rotation - this._uiManager.viewParameters.rotation) % 360;
+93     this.pageDimensions = [pageWidth, pageHeight];
+94     this.pageTranslation = [pageX, pageY];
+95 
+96     const [width, height] = this.parentDimensions;
+97     this.x = parameters.x / width;
+98     this.y = parameters.y / height;
+99 
+100     this.isAttachedToDOM = false;
+101     this.deleted = false;
+102   }
+103 
+104   static get _defaultLineColor() {
+105     return shadow(
+106       this,
+107       "_defaultLineColor",
+108       this._colorManager.getHexCode("CanvasText")
+109     );
+110   }
+111 
+112   static deleteAnnotationElement(editor) {
+113     const fakeEditor = new FakeEditor({
+114       id: editor.parent.getNextId(),
+115       parent: editor.parent,
+116       uiManager: editor._uiManager,
+117     });
+118     fakeEditor.annotationElementId = editor.annotationElementId;
+119     fakeEditor.deleted = true;
+120     fakeEditor._uiManager.addToAnnotationStorage(fakeEditor);
+121   }
+122 
+123   /**
+124    * Initialize the l10n stuff for this type of editor.
+125    * @param {Object} _l10n
+126    */
+127   static initialize(_l10n) {}
+128 
+129   /**
+130    * Update the default parameters for this type of editor.
+131    * @param {number} _type
+132    * @param {*} _value
+133    */
+134   static updateDefaultParams(_type, _value) {}
+135 
+136   /**
+137    * Get the default properties to set in the UI for this type of editor.
+138    * @returns {Array}
+139    */
+140   static get defaultPropertiesToUpdate() {
+141     return [];
+142   }
+143 
+144   /**
+145    * Check if this kind of editor is able to handle the given mime type for
+146    * pasting.
+147    * @param {string} mime
+148    * @returns {boolean}
+149    */
+150   static isHandlingMimeForPasting(mime) {
+151     return false;
+152   }
+153 
+154   /**
+155    * Extract the data from the clipboard item and delegate the creation of the
+156    * editor to the parent.
+157    * @param {DataTransferItem} item
+158    * @param {AnnotationEditorLayer} parent
+159    */
+160   static paste(item, parent) {
+161     unreachable("Not implemented");
+162   }
+163 
+164   /**
+165    * Get the properties to update in the UI for this editor.
+166    * @returns {Array}
+167    */
+168   get propertiesToUpdate() {
+169     return [];
+170   }
+171 
+172   get _isDraggable() {
+173     return this.#isDraggable;
+174   }
+175 
+176   set _isDraggable(value) {
+177     this.#isDraggable = value;
+178     this.div?.classList.toggle("draggable", value);
+179   }
+180 
+181   center() {
+182     const [pageWidth, pageHeight] = this.pageDimensions;
+183     switch (this.parentRotation) {
+184       case 90:
+185         this.x -= (this.height * pageHeight) / (pageWidth * 2);
+186         this.y += (this.width * pageWidth) / (pageHeight * 2);
+187         break;
+188       case 180:
+189         this.x += this.width / 2;
+190         this.y += this.height / 2;
+191         break;
+192       case 270:
+193         this.x += (this.height * pageHeight) / (pageWidth * 2);
+194         this.y -= (this.width * pageWidth) / (pageHeight * 2);
+195         break;
+196       default:
+197         this.x -= this.width / 2;
+198         this.y -= this.height / 2;
+199         break;
+200     }
+201     this.fixAndSetPosition();
+202   }
+203 
+204   /**
+205    * Add some commands into the CommandManager (undo/redo stuff).
+206    * @param {Object} params
+207    */
+208   addCommands(params) {
+209     this._uiManager.addCommands(params);
+210   }
+211 
+212   get currentLayer() {
+213     return this._uiManager.currentLayer;
+214   }
+215 
+216   /**
+217    * This editor will be behind the others.
+218    */
+219   setInBackground() {
+220     this.div.style.zIndex = 0;
+221   }
+222 
+223   /**
+224    * This editor will be in the foreground.
+225    */
+226   setInForeground() {
+227     this.div.style.zIndex = this.#zIndex;
+228   }
+229 
+230   setParent(parent) {
+231     if (parent !== null) {
+232       this.pageIndex = parent.pageIndex;
+233       this.pageDimensions = parent.pageDimensions;
+234     }
+235     this.parent = parent;
+236   }
+237 
+238   /**
+239    * onfocus callback.
+240    */
+241   focusin(event) {
+242     if (!this._focusEventsAllowed) {
+243       return;
+244     }
+245     if (!this.#hasBeenClicked) {
+246       this.parent.setSelected(this);
+247     } else {
+248       this.#hasBeenClicked = false;
+249     }
+250   }
+251 
+252   /**
+253    * onblur callback.
+254    * @param {FocusEvent} event
+255    */
+256   focusout(event) {
+257     if (!this._focusEventsAllowed) {
+258       return;
+259     }
+260 
+261     if (!this.isAttachedToDOM) {
+262       return;
+263     }
+264 
+265     // In case of focusout, the relatedTarget is the element which
+266     // is grabbing the focus.
+267     // So if the related target is an element under the div for this
+268     // editor, then the editor isn't unactive.
+269     const target = event.relatedTarget;
+270     if (target?.closest(`#${this.id}`)) {
+271       return;
+272     }
+273 
+274     event.preventDefault();
+275 
+276     if (!this.parent?.isMultipleSelection) {
+277       this.commitOrRemove();
+278     }
+279   }
+280 
+281   commitOrRemove() {
+282     if (this.isEmpty()) {
+283       this.remove();
+284     } else {
+285       this.commit();
+286     }
+287   }
+288 
+289   /**
+290    * Commit the data contained in this editor.
+291    */
+292   commit() {
+293     this.addToAnnotationStorage();
+294   }
+295 
+296   addToAnnotationStorage() {
+297     this._uiManager.addToAnnotationStorage(this);
+298   }
+299 
+300   /**
+301    * Set the editor position within its parent.
+302    * @param {number} x
+303    * @param {number} y
+304    * @param {number} tx - x-translation in screen coordinates.
+305    * @param {number} ty - y-translation in screen coordinates.
+306    */
+307   setAt(x, y, tx, ty) {
+308     const [width, height] = this.parentDimensions;
+309     [tx, ty] = this.screenToPageTranslation(tx, ty);
+310 
+311     this.x = (x + tx) / width;
+312     this.y = (y + ty) / height;
+313 
+314     this.fixAndSetPosition();
+315   }
+316 
+317   #translate([width, height], x, y) {
+318     [x, y] = this.screenToPageTranslation(x, y);
+319 
+320     this.x += x / width;
+321     this.y += y / height;
+322 
+323     this.fixAndSetPosition();
+324   }
+325 
+326   /**
+327    * Translate the editor position within its parent.
+328    * @param {number} x - x-translation in screen coordinates.
+329    * @param {number} y - y-translation in screen coordinates.
+330    */
+331   translate(x, y) {
+332     this.#translate(this.parentDimensions, x, y);
+333   }
+334 
+335   /**
+336    * Translate the editor position within its page and adjust the scroll
+337    * in order to have the editor in the view.
+338    * @param {number} x - x-translation in page coordinates.
+339    * @param {number} y - y-translation in page coordinates.
+340    */
+341   translateInPage(x, y) {
+342     this.#translate(this.pageDimensions, x, y);
+343     this.div.scrollIntoView({ block: "nearest" });
+344   }
+345 
+346   drag(tx, ty) {
+347     const [parentWidth, parentHeight] = this.parentDimensions;
+348     this.x += tx / parentWidth;
+349     this.y += ty / parentHeight;
+350     if (this.parent && (this.x < 0 || this.x > 1 || this.y < 0 || this.y > 1)) {
+351       // It's possible to not have a parent: for example, when the user is
+352       // dragging all the selected editors but this one on a page which has been
+353       // destroyed.
+354       // It's why we need to check for it. In such a situation, it isn't really
+355       // a problem to not find a new parent: it's something which is related to
+356       // what the user is seeing, hence it depends on how pages are layed out.
+357 
+358       // The element will be outside of its parent so change the parent.
+359       const { x, y } = this.div.getBoundingClientRect();
+360       if (this.parent.findNewParent(this, x, y)) {
+361         this.x -= Math.floor(this.x);
+362         this.y -= Math.floor(this.y);
+363       }
+364     }
+365 
+366     // The editor can be moved wherever the user wants, so we don't need to fix
+367     // the position: it'll be done when the user will release the mouse button.
+368     this.div.style.left = `${(100 * this.x).toFixed(2)}%`;
+369     this.div.style.top = `${(100 * this.y).toFixed(2)}%`;
+370     this.div.scrollIntoView({ block: "nearest" });
+371   }
+372 
+373   fixAndSetPosition() {
+374     const [pageWidth, pageHeight] = this.pageDimensions;
+375     let { x, y, width, height } = this;
+376     width *= pageWidth;
+377     height *= pageHeight;
+378     x *= pageWidth;
+379     y *= pageHeight;
+380 
+381     switch (this.rotation) {
+382       case 0:
+383         x = Math.max(0, Math.min(pageWidth - width, x));
+384         y = Math.max(0, Math.min(pageHeight - height, y));
+385         break;
+386       case 90:
+387         x = Math.max(0, Math.min(pageWidth - height, x));
+388         y = Math.min(pageHeight, Math.max(width, y));
+389         break;
+390       case 180:
+391         x = Math.min(pageWidth, Math.max(width, x));
+392         y = Math.min(pageHeight, Math.max(height, y));
+393         break;
+394       case 270:
+395         x = Math.min(pageWidth, Math.max(height, x));
+396         y = Math.max(0, Math.min(pageHeight - width, y));
+397         break;
+398     }
+399 
+400     this.x = x /= pageWidth;
+401     this.y = y /= pageHeight;
+402 
+403     const { style } = this.div;
+404     style.left = `${(100 * x).toFixed(2)}%`;
+405     style.top = `${(100 * y).toFixed(2)}%`;
+406 
+407     this.moveInDOM();
+408   }
+409 
+410   static #rotatePoint(x, y, angle) {
+411     switch (angle) {
+412       case 90:
+413         return [y, -x];
+414       case 180:
+415         return [-x, -y];
+416       case 270:
+417         return [-y, x];
+418       default:
+419         return [x, y];
+420     }
+421   }
+422 
+423   /**
+424    * Convert a screen translation into a page one.
+425    * @param {number} x
+426    * @param {number} y
+427    */
+428   screenToPageTranslation(x, y) {
+429     return AnnotationEditor.#rotatePoint(x, y, this.parentRotation);
+430   }
+431 
+432   /**
+433    * Convert a page translation into a screen one.
+434    * @param {number} x
+435    * @param {number} y
+436    */
+437   pageTranslationToScreen(x, y) {
+438     return AnnotationEditor.#rotatePoint(x, y, 360 - this.parentRotation);
+439   }
+440 
+441   #getRotationMatrix(rotation) {
+442     switch (rotation) {
+443       case 90: {
+444         const [pageWidth, pageHeight] = this.pageDimensions;
+445         return [0, -pageWidth / pageHeight, pageHeight / pageWidth, 0];
+446       }
+447       case 180:
+448         return [-1, 0, 0, -1];
+449       case 270: {
+450         const [pageWidth, pageHeight] = this.pageDimensions;
+451         return [0, pageWidth / pageHeight, -pageHeight / pageWidth, 0];
+452       }
+453       default:
+454         return [1, 0, 0, 1];
+455     }
+456   }
+457 
+458   get parentScale() {
+459     return this._uiManager.viewParameters.realScale;
+460   }
+461 
+462   get parentRotation() {
+463     return (this._uiManager.viewParameters.rotation + this.pageRotation) % 360;
+464   }
+465 
+466   get parentDimensions() {
+467     const {
+468       parentScale,
+469       pageDimensions: [pageWidth, pageHeight],
+470     } = this;
+471     const scaledWidth = pageWidth * parentScale;
+472     const scaledHeight = pageHeight * parentScale;
+473     return FeatureTest.isCSSRoundSupported
+474       ? [Math.round(scaledWidth), Math.round(scaledHeight)]
+475       : [scaledWidth, scaledHeight];
+476   }
+477 
+478   /**
+479    * Set the dimensions of this editor.
+480    * @param {number} width
+481    * @param {number} height
+482    */
+483   setDims(width, height) {
+484     const [parentWidth, parentHeight] = this.parentDimensions;
+485     this.div.style.width = `${((100 * width) / parentWidth).toFixed(2)}%`;
+486     if (!this.#keepAspectRatio) {
+487       this.div.style.height = `${((100 * height) / parentHeight).toFixed(2)}%`;
+488     }
+489   }
+490 
+491   fixDims() {
+492     const { style } = this.div;
+493     const { height, width } = style;
+494     const widthPercent = width.endsWith("%");
+495     const heightPercent = !this.#keepAspectRatio && height.endsWith("%");
+496     if (widthPercent && heightPercent) {
+497       return;
+498     }
+499 
+500     const [parentWidth, parentHeight] = this.parentDimensions;
+501     if (!widthPercent) {
+502       style.width = `${((100 * parseFloat(width)) / parentWidth).toFixed(2)}%`;
+503     }
+504     if (!this.#keepAspectRatio && !heightPercent) {
+505       style.height = `${((100 * parseFloat(height)) / parentHeight).toFixed(
+506         2
+507       )}%`;
+508     }
+509   }
+510 
+511   /**
+512    * Get the translation used to position this editor when it's created.
+513    * @returns {Array<number>}
+514    */
+515   getInitialTranslation() {
+516     return [0, 0];
+517   }
+518 
+519   static #noContextMenu(e) {
+520     e.preventDefault();
+521   }
+522 
+523   #createResizers() {
+524     if (this.#resizersDiv) {
+525       return;
+526     }
+527     this.#resizersDiv = document.createElement("div");
+528     this.#resizersDiv.classList.add("resizers");
+529     const classes = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
+530     if (!this._willKeepAspectRatio) {
+531       classes.push("topMiddle", "middleRight", "bottomMiddle", "middleLeft");
+532     }
+533     for (const name of classes) {
+534       const div = document.createElement("div");
+535       this.#resizersDiv.append(div);
+536       div.classList.add("resizer", name);
+537       div.addEventListener(
+538         "pointerdown",
+539         this.#resizerPointerdown.bind(this, name)
+540       );
+541       div.addEventListener("contextmenu", AnnotationEditor.#noContextMenu);
+542     }
+543     this.div.prepend(this.#resizersDiv);
+544   }
+545 
+546   #resizerPointerdown(name, event) {
+547     event.preventDefault();
+548     const { isMac } = FeatureTest.platform;
+549     if (event.button !== 0 || (event.ctrlKey && isMac)) {
+550       return;
+551     }
+552 
+553     const boundResizerPointermove = this.#resizerPointermove.bind(this, name);
+554     const savedDraggable = this._isDraggable;
+555     this._isDraggable = false;
+556     const pointerMoveOptions = { passive: true, capture: true };
+557     window.addEventListener(
+558       "pointermove",
+559       boundResizerPointermove,
+560       pointerMoveOptions
+561     );
+562     const savedX = this.x;
+563     const savedY = this.y;
+564     const savedWidth = this.width;
+565     const savedHeight = this.height;
+566     const savedParentCursor = this.parent.div.style.cursor;
+567     const savedCursor = this.div.style.cursor;
+568     this.div.style.cursor = this.parent.div.style.cursor =
+569       window.getComputedStyle(event.target).cursor;
+570 
+571     const pointerUpCallback = () => {
+572       this._isDraggable = savedDraggable;
+573       window.removeEventListener("pointerup", pointerUpCallback);
+574       window.removeEventListener("blur", pointerUpCallback);
+575       window.removeEventListener(
+576         "pointermove",
+577         boundResizerPointermove,
+578         pointerMoveOptions
+579       );
+580       this.parent.div.style.cursor = savedParentCursor;
+581       this.div.style.cursor = savedCursor;
+582 
+583       const newX = this.x;
+584       const newY = this.y;
+585       const newWidth = this.width;
+586       const newHeight = this.height;
+587       if (
+588         newX === savedX &&
+589         newY === savedY &&
+590         newWidth === savedWidth &&
+591         newHeight === savedHeight
+592       ) {
+593         return;
+594       }
+595 
+596       this.addCommands({
+597         cmd: () => {
+598           this.width = newWidth;
+599           this.height = newHeight;
+600           this.x = newX;
+601           this.y = newY;
+602           const [parentWidth, parentHeight] = this.parentDimensions;
+603           this.setDims(parentWidth * newWidth, parentHeight * newHeight);
+604           this.fixAndSetPosition();
+605         },
+606         undo: () => {
+607           this.width = savedWidth;
+608           this.height = savedHeight;
+609           this.x = savedX;
+610           this.y = savedY;
+611           const [parentWidth, parentHeight] = this.parentDimensions;
+612           this.setDims(parentWidth * savedWidth, parentHeight * savedHeight);
+613           this.fixAndSetPosition();
+614         },
+615         mustExec: true,
+616       });
+617     };
+618     window.addEventListener("pointerup", pointerUpCallback);
+619     // If the user switches to another window (with alt+tab), then we end the
+620     // resize session.
+621     window.addEventListener("blur", pointerUpCallback);
+622   }
+623 
+624   #resizerPointermove(name, event) {
+625     const [parentWidth, parentHeight] = this.parentDimensions;
+626     const savedX = this.x;
+627     const savedY = this.y;
+628     const savedWidth = this.width;
+629     const savedHeight = this.height;
+630     const minWidth = AnnotationEditor.MIN_SIZE / parentWidth;
+631     const minHeight = AnnotationEditor.MIN_SIZE / parentHeight;
+632 
+633     // 10000 because we multiply by 100 and use toFixed(2) in fixAndSetPosition.
+634     // Without rounding, the positions of the corners other than the top left
+635     // one can be slightly wrong.
+636     const round = x => Math.round(x * 10000) / 10000;
+637     const rotationMatrix = this.#getRotationMatrix(this.rotation);
+638     const transf = (x, y) => [
+639       rotationMatrix[0] * x + rotationMatrix[2] * y,
+640       rotationMatrix[1] * x + rotationMatrix[3] * y,
+641     ];
+642     const invRotationMatrix = this.#getRotationMatrix(360 - this.rotation);
+643     const invTransf = (x, y) => [
+644       invRotationMatrix[0] * x + invRotationMatrix[2] * y,
+645       invRotationMatrix[1] * x + invRotationMatrix[3] * y,
+646     ];
+647     let getPoint;
+648     let getOpposite;
+649     let isDiagonal = false;
+650     let isHorizontal = false;
+651 
+652     switch (name) {
+653       case "topLeft":
+654         isDiagonal = true;
+655         getPoint = (w, h) => [0, 0];
+656         getOpposite = (w, h) => [w, h];
+657         break;
+658       case "topMiddle":
+659         getPoint = (w, h) => [w / 2, 0];
+660         getOpposite = (w, h) => [w / 2, h];
+661         break;
+662       case "topRight":
+663         isDiagonal = true;
+664         getPoint = (w, h) => [w, 0];
+665         getOpposite = (w, h) => [0, h];
+666         break;
+667       case "middleRight":
+668         isHorizontal = true;
+669         getPoint = (w, h) => [w, h / 2];
+670         getOpposite = (w, h) => [0, h / 2];
+671         break;
+672       case "bottomRight":
+673         isDiagonal = true;
+674         getPoint = (w, h) => [w, h];
+675         getOpposite = (w, h) => [0, 0];
+676         break;
+677       case "bottomMiddle":
+678         getPoint = (w, h) => [w / 2, h];
+679         getOpposite = (w, h) => [w / 2, 0];
+680         break;
+681       case "bottomLeft":
+682         isDiagonal = true;
+683         getPoint = (w, h) => [0, h];
+684         getOpposite = (w, h) => [w, 0];
+685         break;
+686       case "middleLeft":
+687         isHorizontal = true;
+688         getPoint = (w, h) => [0, h / 2];
+689         getOpposite = (w, h) => [w, h / 2];
+690         break;
+691     }
+692 
+693     const point = getPoint(savedWidth, savedHeight);
+694     const oppositePoint = getOpposite(savedWidth, savedHeight);
+695     let transfOppositePoint = transf(...oppositePoint);
+696     const oppositeX = round(savedX + transfOppositePoint[0]);
+697     const oppositeY = round(savedY + transfOppositePoint[1]);
+698     let ratioX = 1;
+699     let ratioY = 1;
+700 
+701     let [deltaX, deltaY] = this.screenToPageTranslation(
+702       event.movementX,
+703       event.movementY
+704     );
+705     [deltaX, deltaY] = invTransf(deltaX / parentWidth, deltaY / parentHeight);
+706 
+707     if (isDiagonal) {
+708       const oldDiag = Math.hypot(savedWidth, savedHeight);
+709       ratioX = ratioY = Math.max(
+710         Math.min(
+711           Math.hypot(
+712             oppositePoint[0] - point[0] - deltaX,
+713             oppositePoint[1] - point[1] - deltaY
+714           ) / oldDiag,
+715           // Avoid the editor to be larger than the page.
+716           1 / savedWidth,
+717           1 / savedHeight
+718         ),
+719         // Avoid the editor to be smaller than the minimum size.
+720         minWidth / savedWidth,
+721         minHeight / savedHeight
+722       );
+723     } else if (isHorizontal) {
+724       ratioX =
+725         Math.max(
+726           minWidth,
+727           Math.min(1, Math.abs(oppositePoint[0] - point[0] - deltaX))
+728         ) / savedWidth;
+729     } else {
+730       ratioY =
+731         Math.max(
+732           minHeight,
+733           Math.min(1, Math.abs(oppositePoint[1] - point[1] - deltaY))
+734         ) / savedHeight;
+735     }
+736 
+737     const newWidth = round(savedWidth * ratioX);
+738     const newHeight = round(savedHeight * ratioY);
+739     transfOppositePoint = transf(...getOpposite(newWidth, newHeight));
+740     const newX = oppositeX - transfOppositePoint[0];
+741     const newY = oppositeY - transfOppositePoint[1];
+742 
+743     this.width = newWidth;
+744     this.height = newHeight;
+745     this.x = newX;
+746     this.y = newY;
+747 
+748     this.setDims(parentWidth * newWidth, parentHeight * newHeight);
+749     this.fixAndSetPosition();
+750   }
+751 
+752   /**
+753    * Render this editor in a div.
+754    * @returns {HTMLDivElement}
+755    */
+756   render() {
+757     this.div = document.createElement("div");
+758     this.div.setAttribute("data-editor-rotation", (360 - this.rotation) % 360);
+759     this.div.className = this.name;
+760     this.div.setAttribute("id", this.id);
+761     this.div.setAttribute("tabIndex", 0);
+762 
+763     this.setInForeground();
+764 
+765     this.div.addEventListener("focusin", this.#boundFocusin);
+766     this.div.addEventListener("focusout", this.#boundFocusout);
+767 
+768     const [parentWidth, parentHeight] = this.parentDimensions;
+769     if (this.parentRotation % 180 !== 0) {
+770       this.div.style.maxWidth = `${((100 * parentHeight) / parentWidth).toFixed(
+771         2
+772       )}%`;
+773       this.div.style.maxHeight = `${(
+774         (100 * parentWidth) /
+775         parentHeight
+776       ).toFixed(2)}%`;
+777     }
+778 
+779     const [tx, ty] = this.getInitialTranslation();
+780     this.translate(tx, ty);
+781 
+782     bindEvents(this, this.div, ["pointerdown"]);
+783 
+784     return this.div;
+785   }
+786 
+787   /**
+788    * Onpointerdown callback.
+789    * @param {PointerEvent} event
+790    */
+791   pointerdown(event) {
+792     const { isMac } = FeatureTest.platform;
+793     if (event.button !== 0 || (event.ctrlKey && isMac)) {
+794       // Avoid to focus this editor because of a non-left click.
+795       event.preventDefault();
+796       return;
+797     }
+798 
+799     this.#hasBeenClicked = true;
+800 
+801     this.#setUpDragSession(event);
+802   }
+803 
+804   #setUpDragSession(event) {
+805     if (!this._isDraggable) {
+806       return;
+807     }
+808 
+809     const isSelected = this._uiManager.isSelected(this);
+810     this._uiManager.setUpDragSession();
+811 
+812     let pointerMoveOptions, pointerMoveCallback;
+813     if (isSelected) {
+814       pointerMoveOptions = { passive: true, capture: true };
+815       pointerMoveCallback = e => {
+816         const [tx, ty] = this.screenToPageTranslation(e.movementX, e.movementY);
+817         this._uiManager.dragSelectedEditors(tx, ty);
+818       };
+819       window.addEventListener(
+820         "pointermove",
+821         pointerMoveCallback,
+822         pointerMoveOptions
+823       );
+824     }
+825 
+826     const pointerUpCallback = () => {
+827       window.removeEventListener("pointerup", pointerUpCallback);
+828       window.removeEventListener("blur", pointerUpCallback);
+829       if (isSelected) {
+830         window.removeEventListener(
+831           "pointermove",
+832           pointerMoveCallback,
+833           pointerMoveOptions
+834         );
+835       }
+836 
+837       this.#hasBeenClicked = false;
+838       if (!this._uiManager.endDragSession()) {
+839         const { isMac } = FeatureTest.platform;
+840         if (
+841           (event.ctrlKey && !isMac) ||
+842           event.shiftKey ||
+843           (event.metaKey && isMac)
+844         ) {
+845           this.parent.toggleSelected(this);
+846         } else {
+847           this.parent.setSelected(this);
+848         }
+849       }
+850     };
+851     window.addEventListener("pointerup", pointerUpCallback);
+852     // If the user is using alt+tab during the dragging session, the pointerup
+853     // event could be not fired, but a blur event is fired so we can use it in
+854     // order to interrupt the dragging session.
+855     window.addEventListener("blur", pointerUpCallback);
+856   }
+857 
+858   moveInDOM() {
+859     this.parent?.moveEditorInDOM(this);
+860   }
+861 
+862   _setParentAndPosition(parent, x, y) {
+863     parent.changeParent(this);
+864     this.x = x;
+865     this.y = y;
+866     this.fixAndSetPosition();
+867   }
+868 
+869   /**
+870    * Convert the current rect into a page one.
+871    */
+872   getRect(tx, ty) {
+873     const scale = this.parentScale;
+874     const [pageWidth, pageHeight] = this.pageDimensions;
+875     const [pageX, pageY] = this.pageTranslation;
+876     const shiftX = tx / scale;
+877     const shiftY = ty / scale;
+878     const x = this.x * pageWidth;
+879     const y = this.y * pageHeight;
+880     const width = this.width * pageWidth;
+881     const height = this.height * pageHeight;
+882 
+883     switch (this.rotation) {
+884       case 0:
+885         return [
+886           x + shiftX + pageX,
+887           pageHeight - y - shiftY - height + pageY,
+888           x + shiftX + width + pageX,
+889           pageHeight - y - shiftY + pageY,
+890         ];
+891       case 90:
+892         return [
+893           x + shiftY + pageX,
+894           pageHeight - y + shiftX + pageY,
+895           x + shiftY + height + pageX,
+896           pageHeight - y + shiftX + width + pageY,
+897         ];
+898       case 180:
+899         return [
+900           x - shiftX - width + pageX,
+901           pageHeight - y + shiftY + pageY,
+902           x - shiftX + pageX,
+903           pageHeight - y + shiftY + height + pageY,
+904         ];
+905       case 270:
+906         return [
+907           x - shiftY - height + pageX,
+908           pageHeight - y - shiftX - width + pageY,
+909           x - shiftY + pageX,
+910           pageHeight - y - shiftX + pageY,
+911         ];
+912       default:
+913         throw new Error("Invalid rotation");
+914     }
+915   }
+916 
+917   getRectInCurrentCoords(rect, pageHeight) {
+918     const [x1, y1, x2, y2] = rect;
+919 
+920     const width = x2 - x1;
+921     const height = y2 - y1;
+922 
+923     switch (this.rotation) {
+924       case 0:
+925         return [x1, pageHeight - y2, width, height];
+926       case 90:
+927         return [x1, pageHeight - y1, height, width];
+928       case 180:
+929         return [x2, pageHeight - y1, width, height];
+930       case 270:
+931         return [x2, pageHeight - y2, height, width];
+932       default:
+933         throw new Error("Invalid rotation");
+934     }
+935   }
+936 
+937   /**
+938    * Executed once this editor has been rendered.
+939    */
+940   onceAdded() {}
+941 
+942   /**
+943    * Check if the editor contains something.
+944    * @returns {boolean}
+945    */
+946   isEmpty() {
+947     return false;
+948   }
+949 
+950   /**
+951    * Enable edit mode.
+952    */
+953   enableEditMode() {
+954     this.#isInEditMode = true;
+955   }
+956 
+957   /**
+958    * Disable edit mode.
+959    */
+960   disableEditMode() {
+961     this.#isInEditMode = false;
+962   }
+963 
+964   /**
+965    * Check if the editor is edited.
+966    * @returns {boolean}
+967    */
+968   isInEditMode() {
+969     return this.#isInEditMode;
+970   }
+971 
+972   /**
+973    * If it returns true, then this editor handle the keyboard
+974    * events itself.
+975    * @returns {boolean}
+976    */
+977   shouldGetKeyboardEvents() {
+978     return false;
+979   }
+980 
+981   /**
+982    * Check if this editor needs to be rebuilt or not.
+983    * @returns {boolean}
+984    */
+985   needsToBeRebuilt() {
+986     return this.div && !this.isAttachedToDOM;
+987   }
+988 
+989   /**
+990    * Rebuild the editor in case it has been removed on undo.
+991    *
+992    * To implement in subclasses.
+993    */
+994   rebuild() {
+995     this.div?.addEventListener("focusin", this.#boundFocusin);
+996     this.div?.addEventListener("focusout", this.#boundFocusout);
+997   }
+998 
+999   /**
+1000    * Serialize the editor.
+1001    * The result of the serialization will be used to construct a
+1002    * new annotation to add to the pdf document.
+1003    *
+1004    * To implement in subclasses.
+1005    * @param {boolean} isForCopying
+1006    * @param {Object} [context]
+1007    */
+1008   serialize(isForCopying = false, context = null) {
+1009     unreachable("An editor must be serializable");
+1010   }
+1011 
+1012   /**
+1013    * Deserialize the editor.
+1014    * The result of the deserialization is a new editor.
+1015    *
+1016    * @param {Object} data
+1017    * @param {AnnotationEditorLayer} parent
+1018    * @param {AnnotationEditorUIManager} uiManager
+1019    * @returns {AnnotationEditor}
+1020    */
+1021   static deserialize(data, parent, uiManager) {
+1022     const editor = new this.prototype.constructor({
+1023       parent,
+1024       id: parent.getNextId(),
+1025       uiManager,
+1026     });
+1027     editor.rotation = data.rotation;
+1028 
+1029     const [pageWidth, pageHeight] = editor.pageDimensions;
+1030     const [x, y, width, height] = editor.getRectInCurrentCoords(
+1031       data.rect,
+1032       pageHeight
+1033     );
+1034     editor.x = x / pageWidth;
+1035     editor.y = y / pageHeight;
+1036     editor.width = width / pageWidth;
+1037     editor.height = height / pageHeight;
+1038 
+1039     return editor;
+1040   }
+1041 
+1042   /**
+1043    * Remove this editor.
+1044    * It's used on ctrl+backspace action.
+1045    */
+1046   remove() {
+1047     this.div.removeEventListener("focusin", this.#boundFocusin);
+1048     this.div.removeEventListener("focusout", this.#boundFocusout);
+1049 
+1050     if (!this.isEmpty()) {
+1051       // The editor is removed but it can be back at some point thanks to
+1052       // undo/redo so we must commit it before.
+1053       this.commit();
+1054     }
+1055     if (this.parent) {
+1056       this.parent.remove(this);
+1057     } else {
+1058       this._uiManager.removeEditor(this);
+1059     }
+1060   }
+1061 
+1062   /**
+1063    * @returns {boolean} true if this editor can be resized.
+1064    */
+1065   get isResizable() {
+1066     return false;
+1067   }
+1068 
+1069   /**
+1070    * Add the resizers to this editor.
+1071    */
+1072   makeResizable() {
+1073     if (this.isResizable) {
+1074       this.#createResizers();
+1075       this.#resizersDiv.classList.remove("hidden");
+1076     }
+1077   }
+1078 
+1079   /**
+1080    * Select this editor.
+1081    */
+1082   select() {
+1083     this.makeResizable();
+1084     this.div?.classList.add("selectedEditor");
+1085   }
+1086 
+1087   /**
+1088    * Unselect this editor.
+1089    */
+1090   unselect() {
+1091     this.#resizersDiv?.classList.add("hidden");
+1092     this.div?.classList.remove("selectedEditor");
+1093     if (this.div?.contains(document.activeElement)) {
+1094       // Don't use this.div.blur() because we don't know where the focus will
+1095       // go.
+1096       this._uiManager.currentLayer.div.focus();
+1097     }
+1098   }
+1099 
+1100   /**
+1101    * Update some parameters which have been changed through the UI.
+1102    * @param {number} type
+1103    * @param {*} value
+1104    */
+1105   updateParams(type, value) {}
+1106 
+1107   /**
+1108    * When the user disables the editing mode some editors can change some of
+1109    * their properties.
+1110    */
+1111   disableEditing() {}
+1112 
+1113   /**
+1114    * When the user enables the editing mode some editors can change some of
+1115    * their properties.
+1116    */
+1117   enableEditing() {}
+1118 
+1119   /**
+1120    * The editor is about to be edited.
+1121    */
+1122   enterInEditMode() {}
+1123 
+1124   /**
+1125    * Get the div which really contains the displayed content.
+1126    */
+1127   get contentDiv() {
+1128     return this.div;
+1129   }
+1130 
+1131   /**
+1132    * If true then the editor is currently edited.
+1133    * @type {boolean}
+1134    */
+1135   get isEditing() {
+1136     return this.#isEditing;
+1137   }
+1138 
+1139   /**
+1140    * When set to true, it means that this editor is currently edited.
+1141    * @param {boolean} value
+1142    */
+1143   set isEditing(value) {
+1144     this.#isEditing = value;
+1145     if (!this.parent) {
+1146       return;
+1147     }
+1148     if (value) {
+1149       this.parent.setSelected(this);
+1150       this.parent.setActiveEditor(this);
+1151     } else {
+1152       this.parent.setActiveEditor(null);
+1153     }
+1154   }
+1155 
+1156   /**
+1157    * Set the aspect ratio to use when resizing.
+1158    * @param {number} width
+1159    * @param {number} height
+1160    */
+1161   setAspectRatio(width, height) {
+1162     this.#keepAspectRatio = true;
+1163     const aspectRatio = width / height;
+1164     const { style } = this.div;
+1165     style.aspectRatio = aspectRatio;
+1166     style.height = "auto";
+1167   }
+1168 
+1169   static get MIN_SIZE() {
+1170     return 16;
+1171   }
+1172 }
+1173 
+1174 // This class is used to fake an editor which has been deleted.
+1175 class FakeEditor extends AnnotationEditor {
+1176   constructor(params) {
+1177     super(params);
+1178     this.annotationElementId = params.annotationElementId;
+1179     this.deleted = true;
+1180   }
+1181 
+1182   serialize() {
+1183     return {
+1184       id: this.annotationElementId,
+1185       deleted: true,
+1186       pageIndex: this.pageIndex,
+1187     };
+1188   }
+1189 }
+1190 
+1191 export { AnnotationEditor };
+File:
+src/display/editor/freetext.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 // eslint-disable-next-line max-len
+17 /** @typedef {import("./annotation_editor_layer.js").AnnotationEditorLayer} AnnotationEditorLayer */
+18 
+19 import {
+20   AnnotationEditorParamsType,
+21   AnnotationEditorType,
+22   assert,
+23   LINE_FACTOR,
+24   shadow,
+25   Util,
+26 } from "../../shared/util.js";
+27 import {
+28   AnnotationEditorUIManager,
+29   bindEvents,
+30   KeyboardManager,
+31 } from "./tools.js";
+32 import { AnnotationEditor } from "./editor.js";
+33 import { FreeTextAnnotationElement } from "../annotation_layer.js";
+34 
+35 /**
+36  * Basic text editor in order to create a FreeTex annotation.
+37  */
+38 class FreeTextEditor extends AnnotationEditor {
+39   #boundEditorDivBlur = this.editorDivBlur.bind(this);
+40 
+41   #boundEditorDivFocus = this.editorDivFocus.bind(this);
+42 
+43   #boundEditorDivInput = this.editorDivInput.bind(this);
+44 
+45   #boundEditorDivKeydown = this.editorDivKeydown.bind(this);
+46 
+47   #color;
+48 
+49   #content = "";
+50 
+51   #editorDivId = `${this.id}-editor`;
+52 
+53   #fontSize;
+54 
+55   #initialData = null;
+56 
+57   static _freeTextDefaultContent = "";
+58 
+59   static _l10nPromise;
+60 
+61   static _internalPadding = 0;
+62 
+63   static _defaultColor = null;
+64 
+65   static _defaultFontSize = 10;
+66 
+67   static get _keyboardManager() {
+68     const proto = FreeTextEditor.prototype;
+69 
+70     const arrowChecker = self => self.isEmpty();
+71 
+72     const small = AnnotationEditorUIManager.TRANSLATE_SMALL;
+73     const big = AnnotationEditorUIManager.TRANSLATE_BIG;
+74 
+75     return shadow(
+76       this,
+77       "_keyboardManager",
+78       new KeyboardManager([
+79         [
+80           // Commit the text in case the user use ctrl+s to save the document.
+81           // The event must bubble in order to be caught by the viewer.
+82           // See bug 1831574.
+83           ["ctrl+s", "mac+meta+s", "ctrl+p", "mac+meta+p"],
+84           proto.commitOrRemove,
+85           { bubbles: true },
+86         ],
+87         [
+88           ["ctrl+Enter", "mac+meta+Enter", "Escape", "mac+Escape"],
+89           proto.commitOrRemove,
+90         ],
+91         [
+92           ["ArrowLeft", "mac+ArrowLeft"],
+93           proto._translateEmpty,
+94           { args: [-small, 0], checker: arrowChecker },
+95         ],
+96         [
+97           ["ctrl+ArrowLeft", "mac+shift+ArrowLeft"],
+98           proto._translateEmpty,
+99           { args: [-big, 0], checker: arrowChecker },
+100         ],
+101         [
+102           ["ArrowRight", "mac+ArrowRight"],
+103           proto._translateEmpty,
+104           { args: [small, 0], checker: arrowChecker },
+105         ],
+106         [
+107           ["ctrl+ArrowRight", "mac+shift+ArrowRight"],
+108           proto._translateEmpty,
+109           { args: [big, 0], checker: arrowChecker },
+110         ],
+111         [
+112           ["ArrowUp", "mac+ArrowUp"],
+113           proto._translateEmpty,
+114           { args: [0, -small], checker: arrowChecker },
+115         ],
+116         [
+117           ["ctrl+ArrowUp", "mac+shift+ArrowUp"],
+118           proto._translateEmpty,
+119           { args: [0, -big], checker: arrowChecker },
+120         ],
+121         [
+122           ["ArrowDown", "mac+ArrowDown"],
+123           proto._translateEmpty,
+124           { args: [0, small], checker: arrowChecker },
+125         ],
+126         [
+127           ["ctrl+ArrowDown", "mac+shift+ArrowDown"],
+128           proto._translateEmpty,
+129           { args: [0, big], checker: arrowChecker },
+130         ],
+131       ])
+132     );
+133   }
+134 
+135   static _type = "freetext";
+136 
+137   constructor(params) {
+138     super({ ...params, name: "freeTextEditor" });
+139     this.#color =
+140       params.color ||
+141       FreeTextEditor._defaultColor ||
+142       AnnotationEditor._defaultLineColor;
+143     this.#fontSize = params.fontSize || FreeTextEditor._defaultFontSize;
+144   }
+145 
+146   /** @inheritdoc */
+147   static initialize(l10n) {
+148     this._l10nPromise = new Map(
+149       ["free_text2_default_content", "editor_free_text2_aria_label"].map(
+150         str => [str, l10n.get(str)]
+151       )
+152     );
+153 
+154     const style = getComputedStyle(document.documentElement);
+155 
+156     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+157       const lineHeight = parseFloat(
+158         style.getPropertyValue("--freetext-line-height")
+159       );
+160       assert(
+161         lineHeight === LINE_FACTOR,
+162         "Update the CSS variable to agree with the constant."
+163       );
+164     }
+165 
+166     this._internalPadding = parseFloat(
+167       style.getPropertyValue("--freetext-padding")
+168     );
+169   }
+170 
+171   /** @inheritdoc */
+172   static updateDefaultParams(type, value) {
+173     switch (type) {
+174       case AnnotationEditorParamsType.FREETEXT_SIZE:
+175         FreeTextEditor._defaultFontSize = value;
+176         break;
+177       case AnnotationEditorParamsType.FREETEXT_COLOR:
+178         FreeTextEditor._defaultColor = value;
+179         break;
+180     }
+181   }
+182 
+183   /** @inheritdoc */
+184   updateParams(type, value) {
+185     switch (type) {
+186       case AnnotationEditorParamsType.FREETEXT_SIZE:
+187         this.#updateFontSize(value);
+188         break;
+189       case AnnotationEditorParamsType.FREETEXT_COLOR:
+190         this.#updateColor(value);
+191         break;
+192     }
+193   }
+194 
+195   /** @inheritdoc */
+196   static get defaultPropertiesToUpdate() {
+197     return [
+198       [
+199         AnnotationEditorParamsType.FREETEXT_SIZE,
+200         FreeTextEditor._defaultFontSize,
+201       ],
+202       [
+203         AnnotationEditorParamsType.FREETEXT_COLOR,
+204         FreeTextEditor._defaultColor || AnnotationEditor._defaultLineColor,
+205       ],
+206     ];
+207   }
+208 
+209   /** @inheritdoc */
+210   get propertiesToUpdate() {
+211     return [
+212       [AnnotationEditorParamsType.FREETEXT_SIZE, this.#fontSize],
+213       [AnnotationEditorParamsType.FREETEXT_COLOR, this.#color],
+214     ];
+215   }
+216 
+217   /**
+218    * Update the font size and make this action as undoable.
+219    * @param {number} fontSize
+220    */
+221   #updateFontSize(fontSize) {
+222     const setFontsize = size => {
+223       this.editorDiv.style.fontSize = `calc(${size}px * var(--scale-factor))`;
+224       this.translate(0, -(size - this.#fontSize) * this.parentScale);
+225       this.#fontSize = size;
+226       this.#setEditorDimensions();
+227     };
+228     const savedFontsize = this.#fontSize;
+229     this.addCommands({
+230       cmd: () => {
+231         setFontsize(fontSize);
+232       },
+233       undo: () => {
+234         setFontsize(savedFontsize);
+235       },
+236       mustExec: true,
+237       type: AnnotationEditorParamsType.FREETEXT_SIZE,
+238       overwriteIfSameType: true,
+239       keepUndo: true,
+240     });
+241   }
+242 
+243   /**
+244    * Update the color and make this action undoable.
+245    * @param {string} color
+246    */
+247   #updateColor(color) {
+248     const savedColor = this.#color;
+249     this.addCommands({
+250       cmd: () => {
+251         this.#color = this.editorDiv.style.color = color;
+252       },
+253       undo: () => {
+254         this.#color = this.editorDiv.style.color = savedColor;
+255       },
+256       mustExec: true,
+257       type: AnnotationEditorParamsType.FREETEXT_COLOR,
+258       overwriteIfSameType: true,
+259       keepUndo: true,
+260     });
+261   }
+262 
+263   /**
+264    * Helper to translate the editor with the keyboard when it's empty.
+265    * @param {number} x in page units.
+266    * @param {number} y in page units.
+267    */
+268   _translateEmpty(x, y) {
+269     this._uiManager.translateSelectedEditors(x, y, /* noCommit = */ true);
+270   }
+271 
+272   /** @inheritdoc */
+273   getInitialTranslation() {
+274     // The start of the base line is where the user clicked.
+275     const scale = this.parentScale;
+276     return [
+277       -FreeTextEditor._internalPadding * scale,
+278       -(FreeTextEditor._internalPadding + this.#fontSize) * scale,
+279     ];
+280   }
+281 
+282   /** @inheritdoc */
+283   rebuild() {
+284     if (!this.parent) {
+285       return;
+286     }
+287     super.rebuild();
+288     if (this.div === null) {
+289       return;
+290     }
+291 
+292     if (!this.isAttachedToDOM) {
+293       // At some point this editor was removed and we're rebuilting it,
+294       // hence we must add it to its parent.
+295       this.parent.add(this);
+296     }
+297   }
+298 
+299   /** @inheritdoc */
+300   enableEditMode() {
+301     if (this.isInEditMode()) {
+302       return;
+303     }
+304 
+305     this.parent.setEditingState(false);
+306     this.parent.updateToolbar(AnnotationEditorType.FREETEXT);
+307     super.enableEditMode();
+308     this.overlayDiv.classList.remove("enabled");
+309     this.editorDiv.contentEditable = true;
+310     this._isDraggable = false;
+311     this.div.removeAttribute("aria-activedescendant");
+312     this.editorDiv.addEventListener("keydown", this.#boundEditorDivKeydown);
+313     this.editorDiv.addEventListener("focus", this.#boundEditorDivFocus);
+314     this.editorDiv.addEventListener("blur", this.#boundEditorDivBlur);
+315     this.editorDiv.addEventListener("input", this.#boundEditorDivInput);
+316   }
+317 
+318   /** @inheritdoc */
+319   disableEditMode() {
+320     if (!this.isInEditMode()) {
+321       return;
+322     }
+323 
+324     this.parent.setEditingState(true);
+325     super.disableEditMode();
+326     this.overlayDiv.classList.add("enabled");
+327     this.editorDiv.contentEditable = false;
+328     this.div.setAttribute("aria-activedescendant", this.#editorDivId);
+329     this._isDraggable = true;
+330     this.editorDiv.removeEventListener("keydown", this.#boundEditorDivKeydown);
+331     this.editorDiv.removeEventListener("focus", this.#boundEditorDivFocus);
+332     this.editorDiv.removeEventListener("blur", this.#boundEditorDivBlur);
+333     this.editorDiv.removeEventListener("input", this.#boundEditorDivInput);
+334 
+335     // On Chrome, the focus is given to <body> when contentEditable is set to
+336     // false, hence we focus the div.
+337     this.div.focus({
+338       preventScroll: true /* See issue #15744 */,
+339     });
+340 
+341     // In case the blur callback hasn't been called.
+342     this.isEditing = false;
+343     this.parent.div.classList.add("freeTextEditing");
+344   }
+345 
+346   /** @inheritdoc */
+347   focusin(event) {
+348     if (!this._focusEventsAllowed) {
+349       return;
+350     }
+351     super.focusin(event);
+352     if (event.target !== this.editorDiv) {
+353       this.editorDiv.focus();
+354     }
+355   }
+356 
+357   /** @inheritdoc */
+358   onceAdded() {
+359     if (this.width) {
+360       this.#cheatInitialRect();
+361       // The editor was created in using ctrl+c.
+362       return;
+363     }
+364     this.enableEditMode();
+365     this.editorDiv.focus();
+366     if (this._initialOptions?.isCentered) {
+367       this.center();
+368     }
+369     this._initialOptions = null;
+370   }
+371 
+372   /** @inheritdoc */
+373   isEmpty() {
+374     return !this.editorDiv || this.editorDiv.innerText.trim() === "";
+375   }
+376 
+377   /** @inheritdoc */
+378   remove() {
+379     this.isEditing = false;
+380     if (this.parent) {
+381       this.parent.setEditingState(true);
+382       this.parent.div.classList.add("freeTextEditing");
+383     }
+384     super.remove();
+385   }
+386 
+387   /**
+388    * Extract the text from this editor.
+389    * @returns {string}
+390    */
+391   #extractText() {
+392     const divs = this.editorDiv.getElementsByTagName("div");
+393     if (divs.length === 0) {
+394       return this.editorDiv.innerText;
+395     }
+396     const buffer = [];
+397     for (const div of divs) {
+398       buffer.push(div.innerText.replace(/\r\n?|\n/, ""));
+399     }
+400     return buffer.join("\n");
+401   }
+402 
+403   #setEditorDimensions() {
+404     const [parentWidth, parentHeight] = this.parentDimensions;
+405 
+406     let rect;
+407     if (this.isAttachedToDOM) {
+408       rect = this.div.getBoundingClientRect();
+409     } else {
+410       // This editor isn't on screen but we need to get its dimensions, so
+411       // we just insert it in the DOM, get its bounding box and then remove it.
+412       const { currentLayer, div } = this;
+413       const savedDisplay = div.style.display;
+414       div.style.display = "hidden";
+415       currentLayer.div.append(this.div);
+416       rect = div.getBoundingClientRect();
+417       div.remove();
+418       div.style.display = savedDisplay;
+419     }
+420 
+421     // The dimensions are relative to the rotation of the page, hence we need to
+422     // take that into account (see issue #16636).
+423     if (this.rotation % 180 === this.parentRotation % 180) {
+424       this.width = rect.width / parentWidth;
+425       this.height = rect.height / parentHeight;
+426     } else {
+427       this.width = rect.height / parentWidth;
+428       this.height = rect.width / parentHeight;
+429     }
+430     this.fixAndSetPosition();
+431   }
+432 
+433   /**
+434    * Commit the content we have in this editor.
+435    * @returns {undefined}
+436    */
+437   commit() {
+438     if (!this.isInEditMode()) {
+439       return;
+440     }
+441 
+442     super.commit();
+443     this.disableEditMode();
+444     const savedText = this.#content;
+445     const newText = (this.#content = this.#extractText().trimEnd());
+446     if (savedText === newText) {
+447       return;
+448     }
+449 
+450     const setText = text => {
+451       this.#content = text;
+452       if (!text) {
+453         this.remove();
+454         return;
+455       }
+456       this.#setContent();
+457       this._uiManager.rebuild(this);
+458       this.#setEditorDimensions();
+459     };
+460     this.addCommands({
+461       cmd: () => {
+462         setText(newText);
+463       },
+464       undo: () => {
+465         setText(savedText);
+466       },
+467       mustExec: false,
+468     });
+469     this.#setEditorDimensions();
+470   }
+471 
+472   /** @inheritdoc */
+473   shouldGetKeyboardEvents() {
+474     return this.isInEditMode();
+475   }
+476 
+477   /** @inheritdoc */
+478   enterInEditMode() {
+479     this.enableEditMode();
+480     this.editorDiv.focus();
+481   }
+482 
+483   /**
+484    * ondblclick callback.
+485    * @param {MouseEvent} event
+486    */
+487   dblclick(event) {
+488     this.enterInEditMode();
+489   }
+490 
+491   /**
+492    * onkeydown callback.
+493    * @param {KeyboardEvent} event
+494    */
+495   keydown(event) {
+496     if (event.target === this.div && event.key === "Enter") {
+497       this.enterInEditMode();
+498       // Avoid to add an unwanted new line.
+499       event.preventDefault();
+500     }
+501   }
+502 
+503   editorDivKeydown(event) {
+504     FreeTextEditor._keyboardManager.exec(this, event);
+505   }
+506 
+507   editorDivFocus(event) {
+508     this.isEditing = true;
+509   }
+510 
+511   editorDivBlur(event) {
+512     this.isEditing = false;
+513   }
+514 
+515   editorDivInput(event) {
+516     this.parent.div.classList.toggle("freeTextEditing", this.isEmpty());
+517   }
+518 
+519   /** @inheritdoc */
+520   disableEditing() {
+521     this.editorDiv.setAttribute("role", "comment");
+522     this.editorDiv.removeAttribute("aria-multiline");
+523   }
+524 
+525   /** @inheritdoc */
+526   enableEditing() {
+527     this.editorDiv.setAttribute("role", "textbox");
+528     this.editorDiv.setAttribute("aria-multiline", true);
+529   }
+530 
+531   /** @inheritdoc */
+532   render() {
+533     if (this.div) {
+534       return this.div;
+535     }
+536 
+537     let baseX, baseY;
+538     if (this.width) {
+539       baseX = this.x;
+540       baseY = this.y;
+541     }
+542 
+543     super.render();
+544     this.editorDiv = document.createElement("div");
+545     this.editorDiv.className = "internal";
+546 
+547     this.editorDiv.setAttribute("id", this.#editorDivId);
+548     this.enableEditing();
+549 
+550     FreeTextEditor._l10nPromise
+551       .get("editor_free_text2_aria_label")
+552       .then(msg => this.editorDiv?.setAttribute("aria-label", msg));
+553 
+554     FreeTextEditor._l10nPromise
+555       .get("free_text2_default_content")
+556       .then(msg => this.editorDiv?.setAttribute("default-content", msg));
+557     this.editorDiv.contentEditable = true;
+558 
+559     const { style } = this.editorDiv;
+560     style.fontSize = `calc(${this.#fontSize}px * var(--scale-factor))`;
+561     style.color = this.#color;
+562 
+563     this.div.append(this.editorDiv);
+564 
+565     this.overlayDiv = document.createElement("div");
+566     this.overlayDiv.classList.add("overlay", "enabled");
+567     this.div.append(this.overlayDiv);
+568 
+569     // TODO: implement paste callback.
+570     // The goal is to sanitize and have something suitable for this
+571     // editor.
+572     bindEvents(this, this.div, ["dblclick", "keydown"]);
+573 
+574     if (this.width) {
+575       // This editor was created in using copy (ctrl+c).
+576       const [parentWidth, parentHeight] = this.parentDimensions;
+577       if (this.annotationElementId) {
+578         // This stuff is hard to test: if something is changed here, please
+579         // test with the following PDF file:
+580         //  - freetexts.pdf
+581         //  - rotated_freetexts.pdf
+582         // Only small variations between the original annotation and its editor
+583         // are allowed.
+584 
+585         // position is the position of the first glyph in the annotation
+586         // and it's relative to its container.
+587         const { position } = this.#initialData;
+588         let [tx, ty] = this.getInitialTranslation();
+589         [tx, ty] = this.pageTranslationToScreen(tx, ty);
+590         const [pageWidth, pageHeight] = this.pageDimensions;
+591         const [pageX, pageY] = this.pageTranslation;
+592         let posX, posY;
+593         switch (this.rotation) {
+594           case 0:
+595             posX = baseX + (position[0] - pageX) / pageWidth;
+596             posY = baseY + this.height - (position[1] - pageY) / pageHeight;
+597             break;
+598           case 90:
+599             posX = baseX + (position[0] - pageX) / pageWidth;
+600             posY = baseY - (position[1] - pageY) / pageHeight;
+601             [tx, ty] = [ty, -tx];
+602             break;
+603           case 180:
+604             posX = baseX - this.width + (position[0] - pageX) / pageWidth;
+605             posY = baseY - (position[1] - pageY) / pageHeight;
+606             [tx, ty] = [-tx, -ty];
+607             break;
+608           case 270:
+609             posX =
+610               baseX +
+611               (position[0] - pageX - this.height * pageHeight) / pageWidth;
+612             posY =
+613               baseY +
+614               (position[1] - pageY - this.width * pageWidth) / pageHeight;
+615             [tx, ty] = [-ty, tx];
+616             break;
+617         }
+618         this.setAt(posX * parentWidth, posY * parentHeight, tx, ty);
+619       } else {
+620         this.setAt(
+621           baseX * parentWidth,
+622           baseY * parentHeight,
+623           this.width * parentWidth,
+624           this.height * parentHeight
+625         );
+626       }
+627 
+628       this.#setContent();
+629       this._isDraggable = true;
+630       this.editorDiv.contentEditable = false;
+631     } else {
+632       this._isDraggable = false;
+633       this.editorDiv.contentEditable = true;
+634     }
+635 
+636     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+637       this.div.setAttribute("annotation-id", this.annotationElementId);
+638     }
+639 
+640     return this.div;
+641   }
+642 
+643   #setContent() {
+644     this.editorDiv.replaceChildren();
+645     if (!this.#content) {
+646       return;
+647     }
+648     for (const line of this.#content.split("\n")) {
+649       const div = document.createElement("div");
+650       div.append(
+651         line ? document.createTextNode(line) : document.createElement("br")
+652       );
+653       this.editorDiv.append(div);
+654     }
+655   }
+656 
+657   get contentDiv() {
+658     return this.editorDiv;
+659   }
+660 
+661   /** @inheritdoc */
+662   static deserialize(data, parent, uiManager) {
+663     let initialData = null;
+664     if (data instanceof FreeTextAnnotationElement) {
+665       const {
+666         data: {
+667           defaultAppearanceData: { fontSize, fontColor },
+668           rect,
+669           rotation,
+670           id,
+671         },
+672         textContent,
+673         textPosition,
+674         parent: {
+675           page: { pageNumber },
+676         },
+677       } = data;
+678       // textContent is supposed to be an array of strings containing each line
+679       // of text. However, it can be null or empty.
+680       if (!textContent || textContent.length === 0) {
+681         // Empty annotation.
+682         return null;
+683       }
+684       initialData = data = {
+685         annotationType: AnnotationEditorType.FREETEXT,
+686         color: Array.from(fontColor),
+687         fontSize,
+688         value: textContent.join("\n"),
+689         position: textPosition,
+690         pageIndex: pageNumber - 1,
+691         rect,
+692         rotation,
+693         id,
+694         deleted: false,
+695       };
+696     }
+697     const editor = super.deserialize(data, parent, uiManager);
+698 
+699     editor.#fontSize = data.fontSize;
+700     editor.#color = Util.makeHexColor(...data.color);
+701     editor.#content = data.value;
+702     editor.annotationElementId = data.id || null;
+703     editor.#initialData = initialData;
+704 
+705     return editor;
+706   }
+707 
+708   /** @inheritdoc */
+709   serialize(isForCopying = false) {
+710     if (this.isEmpty()) {
+711       return null;
+712     }
+713 
+714     if (this.deleted) {
+715       return {
+716         pageIndex: this.pageIndex,
+717         id: this.annotationElementId,
+718         deleted: true,
+719       };
+720     }
+721 
+722     const padding = FreeTextEditor._internalPadding * this.parentScale;
+723     const rect = this.getRect(padding, padding);
+724     const color = AnnotationEditor._colorManager.convert(
+725       this.isAttachedToDOM
+726         ? getComputedStyle(this.editorDiv).color
+727         : this.#color
+728     );
+729 
+730     const serialized = {
+731       annotationType: AnnotationEditorType.FREETEXT,
+732       color,
+733       fontSize: this.#fontSize,
+734       value: this.#content,
+735       pageIndex: this.pageIndex,
+736       rect,
+737       rotation: this.rotation,
+738       structTreeParentId: this._structTreeParentId,
+739     };
+740 
+741     if (isForCopying) {
+742       // Don't add the id when copying because the pasted editor mustn't be
+743       // linked to an existing annotation.
+744       return serialized;
+745     }
+746 
+747     if (this.annotationElementId && !this.#hasElementChanged(serialized)) {
+748       return null;
+749     }
+750 
+751     serialized.id = this.annotationElementId;
+752 
+753     return serialized;
+754   }
+755 
+756   #hasElementChanged(serialized) {
+757     const { value, fontSize, color, rect, pageIndex } = this.#initialData;
+758 
+759     return (
+760       serialized.value !== value ||
+761       serialized.fontSize !== fontSize ||
+762       serialized.rect.some((x, i) => Math.abs(x - rect[i]) >= 1) ||
+763       serialized.color.some((c, i) => c !== color[i]) ||
+764       serialized.pageIndex !== pageIndex
+765     );
+766   }
+767 
+768   #cheatInitialRect(delayed = false) {
+769     // The annotation has a rect but the editor has an other one.
+770     // When we want to know if the annotation has changed (e.g. has been moved)
+771     // we must compare the editor initial rect with the current one.
+772     // So this method is a hack to have a way to compare the real rects.
+773     if (!this.annotationElementId) {
+774       return;
+775     }
+776 
+777     this.#setEditorDimensions();
+778     if (!delayed && (this.width === 0 || this.height === 0)) {
+779       setTimeout(() => this.#cheatInitialRect(/* delayed = */ true), 0);
+780       return;
+781     }
+782 
+783     const padding = FreeTextEditor._internalPadding * this.parentScale;
+784     this.#initialData.rect = this.getRect(padding, padding);
+785   }
+786 }
+787 
+788 export { FreeTextEditor };
+File:
+src/display/editor/ink.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorParamsType,
+18   AnnotationEditorType,
+19   Util,
+20 } from "../../shared/util.js";
+21 import { AnnotationEditor } from "./editor.js";
+22 import { InkAnnotationElement } from "../annotation_layer.js";
+23 import { opacityToHex } from "./tools.js";
+24 
+25 /**
+26  * Basic draw editor in order to generate an Ink annotation.
+27  */
+28 class InkEditor extends AnnotationEditor {
+29   #baseHeight = 0;
+30 
+31   #baseWidth = 0;
+32 
+33   #boundCanvasContextMenu = this.canvasContextMenu.bind(this);
+34 
+35   #boundCanvasPointermove = this.canvasPointermove.bind(this);
+36 
+37   #boundCanvasPointerleave = this.canvasPointerleave.bind(this);
+38 
+39   #boundCanvasPointerup = this.canvasPointerup.bind(this);
+40 
+41   #boundCanvasPointerdown = this.canvasPointerdown.bind(this);
+42 
+43   #currentPath2D = new Path2D();
+44 
+45   #disableEditing = false;
+46 
+47   #hasSomethingToDraw = false;
+48 
+49   #isCanvasInitialized = false;
+50 
+51   #observer = null;
+52 
+53   #realWidth = 0;
+54 
+55   #realHeight = 0;
+56 
+57   #requestFrameCallback = null;
+58 
+59   static _defaultColor = null;
+60 
+61   static _defaultOpacity = 1;
+62 
+63   static _defaultThickness = 1;
+64 
+65   static _l10nPromise;
+66 
+67   static _type = "ink";
+68 
+69   constructor(params) {
+70     super({ ...params, name: "inkEditor" });
+71     this.color = params.color || null;
+72     this.thickness = params.thickness || null;
+73     this.opacity = params.opacity || null;
+74     this.paths = [];
+75     this.bezierPath2D = [];
+76     this.allRawPaths = [];
+77     this.currentPath = [];
+78     this.scaleFactor = 1;
+79     this.translationX = this.translationY = 0;
+80     this.x = 0;
+81     this.y = 0;
+82     this._willKeepAspectRatio = true;
+83   }
+84 
+85   /** @inheritdoc */
+86   static initialize(l10n) {
+87     this._l10nPromise = new Map(
+88       ["editor_ink_canvas_aria_label", "editor_ink2_aria_label"].map(str => [
+89         str,
+90         l10n.get(str),
+91       ])
+92     );
+93   }
+94 
+95   /** @inheritdoc */
+96   static updateDefaultParams(type, value) {
+97     switch (type) {
+98       case AnnotationEditorParamsType.INK_THICKNESS:
+99         InkEditor._defaultThickness = value;
+100         break;
+101       case AnnotationEditorParamsType.INK_COLOR:
+102         InkEditor._defaultColor = value;
+103         break;
+104       case AnnotationEditorParamsType.INK_OPACITY:
+105         InkEditor._defaultOpacity = value / 100;
+106         break;
+107     }
+108   }
+109 
+110   /** @inheritdoc */
+111   updateParams(type, value) {
+112     switch (type) {
+113       case AnnotationEditorParamsType.INK_THICKNESS:
+114         this.#updateThickness(value);
+115         break;
+116       case AnnotationEditorParamsType.INK_COLOR:
+117         this.#updateColor(value);
+118         break;
+119       case AnnotationEditorParamsType.INK_OPACITY:
+120         this.#updateOpacity(value);
+121         break;
+122     }
+123   }
+124 
+125   /** @inheritdoc */
+126   static get defaultPropertiesToUpdate() {
+127     return [
+128       [AnnotationEditorParamsType.INK_THICKNESS, InkEditor._defaultThickness],
+129       [
+130         AnnotationEditorParamsType.INK_COLOR,
+131         InkEditor._defaultColor || AnnotationEditor._defaultLineColor,
+132       ],
+133       [
+134         AnnotationEditorParamsType.INK_OPACITY,
+135         Math.round(InkEditor._defaultOpacity * 100),
+136       ],
+137     ];
+138   }
+139 
+140   /** @inheritdoc */
+141   get propertiesToUpdate() {
+142     return [
+143       [
+144         AnnotationEditorParamsType.INK_THICKNESS,
+145         this.thickness || InkEditor._defaultThickness,
+146       ],
+147       [
+148         AnnotationEditorParamsType.INK_COLOR,
+149         this.color ||
+150           InkEditor._defaultColor ||
+151           AnnotationEditor._defaultLineColor,
+152       ],
+153       [
+154         AnnotationEditorParamsType.INK_OPACITY,
+155         Math.round(100 * (this.opacity ?? InkEditor._defaultOpacity)),
+156       ],
+157     ];
+158   }
+159 
+160   /**
+161    * Update the thickness and make this action undoable.
+162    * @param {number} thickness
+163    */
+164   #updateThickness(thickness) {
+165     const savedThickness = this.thickness;
+166     this.addCommands({
+167       cmd: () => {
+168         this.thickness = thickness;
+169         this.#fitToContent();
+170       },
+171       undo: () => {
+172         this.thickness = savedThickness;
+173         this.#fitToContent();
+174       },
+175       mustExec: true,
+176       type: AnnotationEditorParamsType.INK_THICKNESS,
+177       overwriteIfSameType: true,
+178       keepUndo: true,
+179     });
+180   }
+181 
+182   /**
+183    * Update the color and make this action undoable.
+184    * @param {string} color
+185    */
+186   #updateColor(color) {
+187     const savedColor = this.color;
+188     this.addCommands({
+189       cmd: () => {
+190         this.color = color;
+191         this.#redraw();
+192       },
+193       undo: () => {
+194         this.color = savedColor;
+195         this.#redraw();
+196       },
+197       mustExec: true,
+198       type: AnnotationEditorParamsType.INK_COLOR,
+199       overwriteIfSameType: true,
+200       keepUndo: true,
+201     });
+202   }
+203 
+204   /**
+205    * Update the opacity and make this action undoable.
+206    * @param {number} opacity
+207    */
+208   #updateOpacity(opacity) {
+209     opacity /= 100;
+210     const savedOpacity = this.opacity;
+211     this.addCommands({
+212       cmd: () => {
+213         this.opacity = opacity;
+214         this.#redraw();
+215       },
+216       undo: () => {
+217         this.opacity = savedOpacity;
+218         this.#redraw();
+219       },
+220       mustExec: true,
+221       type: AnnotationEditorParamsType.INK_OPACITY,
+222       overwriteIfSameType: true,
+223       keepUndo: true,
+224     });
+225   }
+226 
+227   /** @inheritdoc */
+228   rebuild() {
+229     if (!this.parent) {
+230       return;
+231     }
+232     super.rebuild();
+233     if (this.div === null) {
+234       return;
+235     }
+236 
+237     if (!this.canvas) {
+238       this.#createCanvas();
+239       this.#createObserver();
+240     }
+241 
+242     if (!this.isAttachedToDOM) {
+243       // At some point this editor was removed and we're rebuilding it,
+244       // hence we must add it to its parent.
+245       this.parent.add(this);
+246       this.#setCanvasDims();
+247     }
+248     this.#fitToContent();
+249   }
+250 
+251   /** @inheritdoc */
+252   remove() {
+253     if (this.canvas === null) {
+254       return;
+255     }
+256 
+257     if (!this.isEmpty()) {
+258       this.commit();
+259     }
+260 
+261     // Destroy the canvas.
+262     this.canvas.width = this.canvas.height = 0;
+263     this.canvas.remove();
+264     this.canvas = null;
+265 
+266     this.#observer.disconnect();
+267     this.#observer = null;
+268 
+269     super.remove();
+270   }
+271 
+272   setParent(parent) {
+273     if (!this.parent && parent) {
+274       // We've a parent hence the rescale will be handled thanks to the
+275       // ResizeObserver.
+276       this._uiManager.removeShouldRescale(this);
+277     } else if (this.parent && parent === null) {
+278       // The editor is removed from the DOM, hence we handle the rescale thanks
+279       // to the onScaleChanging callback.
+280       // This way, it'll be saved/printed correctly.
+281       this._uiManager.addShouldRescale(this);
+282     }
+283     super.setParent(parent);
+284   }
+285 
+286   onScaleChanging() {
+287     const [parentWidth, parentHeight] = this.parentDimensions;
+288     const width = this.width * parentWidth;
+289     const height = this.height * parentHeight;
+290     this.setDimensions(width, height);
+291   }
+292 
+293   /** @inheritdoc */
+294   enableEditMode() {
+295     if (this.#disableEditing || this.canvas === null) {
+296       return;
+297     }
+298 
+299     super.enableEditMode();
+300     this._isDraggable = false;
+301     this.canvas.addEventListener("pointerdown", this.#boundCanvasPointerdown);
+302   }
+303 
+304   /** @inheritdoc */
+305   disableEditMode() {
+306     if (!this.isInEditMode() || this.canvas === null) {
+307       return;
+308     }
+309 
+310     super.disableEditMode();
+311     this._isDraggable = !this.isEmpty();
+312     this.div.classList.remove("editing");
+313 
+314     this.canvas.removeEventListener(
+315       "pointerdown",
+316       this.#boundCanvasPointerdown
+317     );
+318   }
+319 
+320   /** @inheritdoc */
+321   onceAdded() {
+322     this._isDraggable = !this.isEmpty();
+323   }
+324 
+325   /** @inheritdoc */
+326   isEmpty() {
+327     return (
+328       this.paths.length === 0 ||
+329       (this.paths.length === 1 && this.paths[0].length === 0)
+330     );
+331   }
+332 
+333   #getInitialBBox() {
+334     const {
+335       parentRotation,
+336       parentDimensions: [width, height],
+337     } = this;
+338     switch (parentRotation) {
+339       case 90:
+340         return [0, height, height, width];
+341       case 180:
+342         return [width, height, width, height];
+343       case 270:
+344         return [width, 0, height, width];
+345       default:
+346         return [0, 0, width, height];
+347     }
+348   }
+349 
+350   /**
+351    * Set line styles.
+352    */
+353   #setStroke() {
+354     const { ctx, color, opacity, thickness, parentScale, scaleFactor } = this;
+355     ctx.lineWidth = (thickness * parentScale) / scaleFactor;
+356     ctx.lineCap = "round";
+357     ctx.lineJoin = "round";
+358     ctx.miterLimit = 10;
+359     ctx.strokeStyle = `${color}${opacityToHex(opacity)}`;
+360   }
+361 
+362   /**
+363    * Start to draw on the canvas.
+364    * @param {number} x
+365    * @param {number} y
+366    */
+367   #startDrawing(x, y) {
+368     this.canvas.addEventListener("contextmenu", this.#boundCanvasContextMenu);
+369     this.canvas.addEventListener("pointerleave", this.#boundCanvasPointerleave);
+370     this.canvas.addEventListener("pointermove", this.#boundCanvasPointermove);
+371     this.canvas.addEventListener("pointerup", this.#boundCanvasPointerup);
+372     this.canvas.removeEventListener(
+373       "pointerdown",
+374       this.#boundCanvasPointerdown
+375     );
+376 
+377     this.isEditing = true;
+378     if (!this.#isCanvasInitialized) {
+379       this.#isCanvasInitialized = true;
+380       this.#setCanvasDims();
+381       this.thickness ||= InkEditor._defaultThickness;
+382       this.color ||=
+383         InkEditor._defaultColor || AnnotationEditor._defaultLineColor;
+384       this.opacity ??= InkEditor._defaultOpacity;
+385     }
+386     this.currentPath.push([x, y]);
+387     this.#hasSomethingToDraw = false;
+388     this.#setStroke();
+389 
+390     this.#requestFrameCallback = () => {
+391       this.#drawPoints();
+392       if (this.#requestFrameCallback) {
+393         window.requestAnimationFrame(this.#requestFrameCallback);
+394       }
+395     };
+396     window.requestAnimationFrame(this.#requestFrameCallback);
+397   }
+398 
+399   /**
+400    * Draw on the canvas.
+401    * @param {number} x
+402    * @param {number} y
+403    */
+404   #draw(x, y) {
+405     const [lastX, lastY] = this.currentPath.at(-1);
+406     if (this.currentPath.length > 1 && x === lastX && y === lastY) {
+407       return;
+408     }
+409     const currentPath = this.currentPath;
+410     let path2D = this.#currentPath2D;
+411     currentPath.push([x, y]);
+412     this.#hasSomethingToDraw = true;
+413 
+414     if (currentPath.length <= 2) {
+415       path2D.moveTo(...currentPath[0]);
+416       path2D.lineTo(x, y);
+417       return;
+418     }
+419 
+420     if (currentPath.length === 3) {
+421       this.#currentPath2D = path2D = new Path2D();
+422       path2D.moveTo(...currentPath[0]);
+423     }
+424 
+425     this.#makeBezierCurve(
+426       path2D,
+427       ...currentPath.at(-3),
+428       ...currentPath.at(-2),
+429       x,
+430       y
+431     );
+432   }
+433 
+434   #endPath() {
+435     if (this.currentPath.length === 0) {
+436       return;
+437     }
+438     const lastPoint = this.currentPath.at(-1);
+439     this.#currentPath2D.lineTo(...lastPoint);
+440   }
+441 
+442   /**
+443    * Stop to draw on the canvas.
+444    * @param {number} x
+445    * @param {number} y
+446    */
+447   #stopDrawing(x, y) {
+448     this.#requestFrameCallback = null;
+449 
+450     x = Math.min(Math.max(x, 0), this.canvas.width);
+451     y = Math.min(Math.max(y, 0), this.canvas.height);
+452 
+453     this.#draw(x, y);
+454     this.#endPath();
+455 
+456     // Interpolate the path entered by the user with some
+457     // Bezier's curves in order to have a smoother path and
+458     // to reduce the data size used to draw it in the PDF.
+459     let bezier;
+460     if (this.currentPath.length !== 1) {
+461       bezier = this.#generateBezierPoints();
+462     } else {
+463       // We have only one point finally.
+464       const xy = [x, y];
+465       bezier = [[xy, xy.slice(), xy.slice(), xy]];
+466     }
+467     const path2D = this.#currentPath2D;
+468     const currentPath = this.currentPath;
+469     this.currentPath = [];
+470     this.#currentPath2D = new Path2D();
+471 
+472     const cmd = () => {
+473       this.allRawPaths.push(currentPath);
+474       this.paths.push(bezier);
+475       this.bezierPath2D.push(path2D);
+476       this.rebuild();
+477     };
+478 
+479     const undo = () => {
+480       this.allRawPaths.pop();
+481       this.paths.pop();
+482       this.bezierPath2D.pop();
+483       if (this.paths.length === 0) {
+484         this.remove();
+485       } else {
+486         if (!this.canvas) {
+487           this.#createCanvas();
+488           this.#createObserver();
+489         }
+490         this.#fitToContent();
+491       }
+492     };
+493 
+494     this.addCommands({ cmd, undo, mustExec: true });
+495   }
+496 
+497   #drawPoints() {
+498     if (!this.#hasSomethingToDraw) {
+499       return;
+500     }
+501     this.#hasSomethingToDraw = false;
+502 
+503     const thickness = Math.ceil(this.thickness * this.parentScale);
+504     const lastPoints = this.currentPath.slice(-3);
+505     const x = lastPoints.map(xy => xy[0]);
+506     const y = lastPoints.map(xy => xy[1]);
+507     const xMin = Math.min(...x) - thickness;
+508     const xMax = Math.max(...x) + thickness;
+509     const yMin = Math.min(...y) - thickness;
+510     const yMax = Math.max(...y) + thickness;
+511 
+512     const { ctx } = this;
+513     ctx.save();
+514 
+515     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+516       // In Chrome, the clip() method doesn't work as expected.
+517       ctx.clearRect(xMin, yMin, xMax - xMin, yMax - yMin);
+518       ctx.beginPath();
+519       ctx.rect(xMin, yMin, xMax - xMin, yMax - yMin);
+520       ctx.clip();
+521     } else {
+522       ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+523     }
+524 
+525     for (const path of this.bezierPath2D) {
+526       ctx.stroke(path);
+527     }
+528     ctx.stroke(this.#currentPath2D);
+529 
+530     ctx.restore();
+531   }
+532 
+533   #makeBezierCurve(path2D, x0, y0, x1, y1, x2, y2) {
+534     const prevX = (x0 + x1) / 2;
+535     const prevY = (y0 + y1) / 2;
+536     const x3 = (x1 + x2) / 2;
+537     const y3 = (y1 + y2) / 2;
+538 
+539     path2D.bezierCurveTo(
+540       prevX + (2 * (x1 - prevX)) / 3,
+541       prevY + (2 * (y1 - prevY)) / 3,
+542       x3 + (2 * (x1 - x3)) / 3,
+543       y3 + (2 * (y1 - y3)) / 3,
+544       x3,
+545       y3
+546     );
+547   }
+548 
+549   #generateBezierPoints() {
+550     const path = this.currentPath;
+551     if (path.length <= 2) {
+552       return [[path[0], path[0], path.at(-1), path.at(-1)]];
+553     }
+554 
+555     const bezierPoints = [];
+556     let i;
+557     let [x0, y0] = path[0];
+558     for (i = 1; i < path.length - 2; i++) {
+559       const [x1, y1] = path[i];
+560       const [x2, y2] = path[i + 1];
+561       const x3 = (x1 + x2) / 2;
+562       const y3 = (y1 + y2) / 2;
+563 
+564       // The quadratic is: [[x0, y0], [x1, y1], [x3, y3]].
+565       // Convert the quadratic to a cubic
+566       // (see https://fontforge.org/docs/techref/bezier.html#converting-truetype-to-postscript)
+567       const control1 = [x0 + (2 * (x1 - x0)) / 3, y0 + (2 * (y1 - y0)) / 3];
+568       const control2 = [x3 + (2 * (x1 - x3)) / 3, y3 + (2 * (y1 - y3)) / 3];
+569 
+570       bezierPoints.push([[x0, y0], control1, control2, [x3, y3]]);
+571 
+572       [x0, y0] = [x3, y3];
+573     }
+574 
+575     const [x1, y1] = path[i];
+576     const [x2, y2] = path[i + 1];
+577 
+578     // The quadratic is: [[x0, y0], [x1, y1], [x2, y2]].
+579     const control1 = [x0 + (2 * (x1 - x0)) / 3, y0 + (2 * (y1 - y0)) / 3];
+580     const control2 = [x2 + (2 * (x1 - x2)) / 3, y2 + (2 * (y1 - y2)) / 3];
+581 
+582     bezierPoints.push([[x0, y0], control1, control2, [x2, y2]]);
+583     return bezierPoints;
+584   }
+585 
+586   /**
+587    * Redraw all the paths.
+588    */
+589   #redraw() {
+590     if (this.isEmpty()) {
+591       this.#updateTransform();
+592       return;
+593     }
+594     this.#setStroke();
+595 
+596     const { canvas, ctx } = this;
+597     ctx.setTransform(1, 0, 0, 1, 0, 0);
+598     ctx.clearRect(0, 0, canvas.width, canvas.height);
+599     this.#updateTransform();
+600 
+601     for (const path of this.bezierPath2D) {
+602       ctx.stroke(path);
+603     }
+604   }
+605 
+606   /**
+607    * Commit the curves we have in this editor.
+608    */
+609   commit() {
+610     if (this.#disableEditing) {
+611       return;
+612     }
+613 
+614     super.commit();
+615 
+616     this.isEditing = false;
+617     this.disableEditMode();
+618 
+619     // This editor must be on top of the main ink editor.
+620     this.setInForeground();
+621 
+622     this.#disableEditing = true;
+623     this.div.classList.add("disabled");
+624 
+625     this.#fitToContent(/* firstTime = */ true);
+626     this.makeResizable();
+627 
+628     this.parent.addInkEditorIfNeeded(/* isCommitting = */ true);
+629 
+630     // When commiting, the position of this editor is changed, hence we must
+631     // move it to the right position in the DOM.
+632     this.moveInDOM();
+633     this.div.focus({
+634       preventScroll: true /* See issue #15744 */,
+635     });
+636   }
+637 
+638   /** @inheritdoc */
+639   focusin(event) {
+640     if (!this._focusEventsAllowed) {
+641       return;
+642     }
+643     super.focusin(event);
+644     this.enableEditMode();
+645   }
+646 
+647   /**
+648    * onpointerdown callback for the canvas we're drawing on.
+649    * @param {PointerEvent} event
+650    */
+651   canvasPointerdown(event) {
+652     if (event.button !== 0 || !this.isInEditMode() || this.#disableEditing) {
+653       return;
+654     }
+655 
+656     // We want to draw on top of any other editors.
+657     // Since it's the last child, there's no need to give it a higher z-index.
+658     this.setInForeground();
+659 
+660     event.preventDefault();
+661 
+662     if (event.type !== "mouse") {
+663       this.div.focus();
+664     }
+665 
+666     this.#startDrawing(event.offsetX, event.offsetY);
+667   }
+668 
+669   /**
+670    * oncontextmenu callback for the canvas we're drawing on.
+671    * @param {PointerEvent} event
+672    */
+673   canvasContextMenu(event) {
+674     event.preventDefault();
+675   }
+676 
+677   /**
+678    * onpointermove callback for the canvas we're drawing on.
+679    * @param {PointerEvent} event
+680    */
+681   canvasPointermove(event) {
+682     event.preventDefault();
+683     this.#draw(event.offsetX, event.offsetY);
+684   }
+685 
+686   /**
+687    * onpointerup callback for the canvas we're drawing on.
+688    * @param {PointerEvent} event
+689    */
+690   canvasPointerup(event) {
+691     event.preventDefault();
+692     this.#endDrawing(event);
+693   }
+694 
+695   /**
+696    * onpointerleave callback for the canvas we're drawing on.
+697    * @param {PointerEvent} event
+698    */
+699   canvasPointerleave(event) {
+700     this.#endDrawing(event);
+701   }
+702 
+703   /**
+704    * End the drawing.
+705    * @param {PointerEvent} event
+706    */
+707   #endDrawing(event) {
+708     this.canvas.removeEventListener(
+709       "pointerleave",
+710       this.#boundCanvasPointerleave
+711     );
+712     this.canvas.removeEventListener(
+713       "pointermove",
+714       this.#boundCanvasPointermove
+715     );
+716     this.canvas.removeEventListener("pointerup", this.#boundCanvasPointerup);
+717     this.canvas.addEventListener("pointerdown", this.#boundCanvasPointerdown);
+718 
+719     // Slight delay to avoid the context menu to appear (it can happen on a long
+720     // tap with a pen).
+721     setTimeout(() => {
+722       this.canvas.removeEventListener(
+723         "contextmenu",
+724         this.#boundCanvasContextMenu
+725       );
+726     }, 10);
+727 
+728     this.#stopDrawing(event.offsetX, event.offsetY);
+729 
+730     this.addToAnnotationStorage();
+731 
+732     // Since the ink editor covers all of the page and we want to be able
+733     // to select another editor, we just put this one in the background.
+734     this.setInBackground();
+735   }
+736 
+737   /**
+738    * Create the canvas element.
+739    */
+740   #createCanvas() {
+741     this.canvas = document.createElement("canvas");
+742     this.canvas.width = this.canvas.height = 0;
+743     this.canvas.className = "inkEditorCanvas";
+744 
+745     InkEditor._l10nPromise
+746       .get("editor_ink_canvas_aria_label")
+747       .then(msg => this.canvas?.setAttribute("aria-label", msg));
+748     this.div.append(this.canvas);
+749     this.ctx = this.canvas.getContext("2d");
+750   }
+751 
+752   /**
+753    * Create the resize observer.
+754    */
+755   #createObserver() {
+756     this.#observer = new ResizeObserver(entries => {
+757       const rect = entries[0].contentRect;
+758       if (rect.width && rect.height) {
+759         this.setDimensions(rect.width, rect.height);
+760       }
+761     });
+762     this.#observer.observe(this.div);
+763   }
+764 
+765   /** @inheritdoc */
+766   get isResizable() {
+767     return !this.isEmpty() && this.#disableEditing;
+768   }
+769 
+770   /** @inheritdoc */
+771   render() {
+772     if (this.div) {
+773       return this.div;
+774     }
+775 
+776     let baseX, baseY;
+777     if (this.width) {
+778       baseX = this.x;
+779       baseY = this.y;
+780     }
+781 
+782     super.render();
+783 
+784     InkEditor._l10nPromise
+785       .get("editor_ink2_aria_label")
+786       .then(msg => this.div?.setAttribute("aria-label", msg));
+787 
+788     const [x, y, w, h] = this.#getInitialBBox();
+789     this.setAt(x, y, 0, 0);
+790     this.setDims(w, h);
+791 
+792     this.#createCanvas();
+793 
+794     if (this.width) {
+795       // This editor was created in using copy (ctrl+c).
+796       const [parentWidth, parentHeight] = this.parentDimensions;
+797       this.setAspectRatio(this.width * parentWidth, this.height * parentHeight);
+798       this.setAt(
+799         baseX * parentWidth,
+800         baseY * parentHeight,
+801         this.width * parentWidth,
+802         this.height * parentHeight
+803       );
+804       this.#isCanvasInitialized = true;
+805       this.#setCanvasDims();
+806       this.setDims(this.width * parentWidth, this.height * parentHeight);
+807       this.#redraw();
+808       this.div.classList.add("disabled");
+809     } else {
+810       this.div.classList.add("editing");
+811       this.enableEditMode();
+812     }
+813 
+814     this.#createObserver();
+815 
+816     return this.div;
+817   }
+818 
+819   #setCanvasDims() {
+820     if (!this.#isCanvasInitialized) {
+821       return;
+822     }
+823     const [parentWidth, parentHeight] = this.parentDimensions;
+824     this.canvas.width = Math.ceil(this.width * parentWidth);
+825     this.canvas.height = Math.ceil(this.height * parentHeight);
+826     this.#updateTransform();
+827   }
+828 
+829   /**
+830    * When the dimensions of the div change the inner canvas must
+831    * renew its dimensions, hence it must redraw its own contents.
+832    * @param {number} width - the new width of the div
+833    * @param {number} height - the new height of the div
+834    * @returns
+835    */
+836   setDimensions(width, height) {
+837     const roundedWidth = Math.round(width);
+838     const roundedHeight = Math.round(height);
+839     if (
+840       this.#realWidth === roundedWidth &&
+841       this.#realHeight === roundedHeight
+842     ) {
+843       return;
+844     }
+845 
+846     this.#realWidth = roundedWidth;
+847     this.#realHeight = roundedHeight;
+848 
+849     this.canvas.style.visibility = "hidden";
+850 
+851     const [parentWidth, parentHeight] = this.parentDimensions;
+852     this.width = width / parentWidth;
+853     this.height = height / parentHeight;
+854     this.fixAndSetPosition();
+855 
+856     if (this.#disableEditing) {
+857       this.#setScaleFactor(width, height);
+858     }
+859 
+860     this.#setCanvasDims();
+861     this.#redraw();
+862 
+863     this.canvas.style.visibility = "visible";
+864 
+865     // For any reason the dimensions couldn't be in percent but in pixels, hence
+866     // we must fix them.
+867     this.fixDims();
+868   }
+869 
+870   #setScaleFactor(width, height) {
+871     const padding = this.#getPadding();
+872     const scaleFactorW = (width - padding) / this.#baseWidth;
+873     const scaleFactorH = (height - padding) / this.#baseHeight;
+874     this.scaleFactor = Math.min(scaleFactorW, scaleFactorH);
+875   }
+876 
+877   /**
+878    * Update the canvas transform.
+879    */
+880   #updateTransform() {
+881     const padding = this.#getPadding() / 2;
+882     this.ctx.setTransform(
+883       this.scaleFactor,
+884       0,
+885       0,
+886       this.scaleFactor,
+887       this.translationX * this.scaleFactor + padding,
+888       this.translationY * this.scaleFactor + padding
+889     );
+890   }
+891 
+892   /**
+893    * Convert into a Path2D.
+894    * @param {Array<Array<number>>} bezier
+895    * @returns {Path2D}
+896    */
+897   static #buildPath2D(bezier) {
+898     const path2D = new Path2D();
+899     for (let i = 0, ii = bezier.length; i < ii; i++) {
+900       const [first, control1, control2, second] = bezier[i];
+901       if (i === 0) {
+902         path2D.moveTo(...first);
+903       }
+904       path2D.bezierCurveTo(
+905         control1[0],
+906         control1[1],
+907         control2[0],
+908         control2[1],
+909         second[0],
+910         second[1]
+911       );
+912     }
+913     return path2D;
+914   }
+915 
+916   static #toPDFCoordinates(points, rect, rotation) {
+917     const [blX, blY, trX, trY] = rect;
+918 
+919     switch (rotation) {
+920       case 0:
+921         for (let i = 0, ii = points.length; i < ii; i += 2) {
+922           points[i] += blX;
+923           points[i + 1] = trY - points[i + 1];
+924         }
+925         break;
+926       case 90:
+927         for (let i = 0, ii = points.length; i < ii; i += 2) {
+928           const x = points[i];
+929           points[i] = points[i + 1] + blX;
+930           points[i + 1] = x + blY;
+931         }
+932         break;
+933       case 180:
+934         for (let i = 0, ii = points.length; i < ii; i += 2) {
+935           points[i] = trX - points[i];
+936           points[i + 1] += blY;
+937         }
+938         break;
+939       case 270:
+940         for (let i = 0, ii = points.length; i < ii; i += 2) {
+941           const x = points[i];
+942           points[i] = trX - points[i + 1];
+943           points[i + 1] = trY - x;
+944         }
+945         break;
+946       default:
+947         throw new Error("Invalid rotation");
+948     }
+949     return points;
+950   }
+951 
+952   static #fromPDFCoordinates(points, rect, rotation) {
+953     const [blX, blY, trX, trY] = rect;
+954 
+955     switch (rotation) {
+956       case 0:
+957         for (let i = 0, ii = points.length; i < ii; i += 2) {
+958           points[i] -= blX;
+959           points[i + 1] = trY - points[i + 1];
+960         }
+961         break;
+962       case 90:
+963         for (let i = 0, ii = points.length; i < ii; i += 2) {
+964           const x = points[i];
+965           points[i] = points[i + 1] - blY;
+966           points[i + 1] = x - blX;
+967         }
+968         break;
+969       case 180:
+970         for (let i = 0, ii = points.length; i < ii; i += 2) {
+971           points[i] = trX - points[i];
+972           points[i + 1] -= blY;
+973         }
+974         break;
+975       case 270:
+976         for (let i = 0, ii = points.length; i < ii; i += 2) {
+977           const x = points[i];
+978           points[i] = trY - points[i + 1];
+979           points[i + 1] = trX - x;
+980         }
+981         break;
+982       default:
+983         throw new Error("Invalid rotation");
+984     }
+985     return points;
+986   }
+987 
+988   /**
+989    * Transform and serialize the paths.
+990    * @param {number} s - scale factor
+991    * @param {number} tx - abscissa of the translation
+992    * @param {number} ty - ordinate of the translation
+993    * @param {Array<number>} rect - the bounding box of the annotation
+994    */
+995   #serializePaths(s, tx, ty, rect) {
+996     const paths = [];
+997     const padding = this.thickness / 2;
+998     const shiftX = s * tx + padding;
+999     const shiftY = s * ty + padding;
+1000     for (const bezier of this.paths) {
+1001       const buffer = [];
+1002       const points = [];
+1003       for (let j = 0, jj = bezier.length; j < jj; j++) {
+1004         const [first, control1, control2, second] = bezier[j];
+1005         const p10 = s * first[0] + shiftX;
+1006         const p11 = s * first[1] + shiftY;
+1007         const p20 = s * control1[0] + shiftX;
+1008         const p21 = s * control1[1] + shiftY;
+1009         const p30 = s * control2[0] + shiftX;
+1010         const p31 = s * control2[1] + shiftY;
+1011         const p40 = s * second[0] + shiftX;
+1012         const p41 = s * second[1] + shiftY;
+1013 
+1014         if (j === 0) {
+1015           buffer.push(p10, p11);
+1016           points.push(p10, p11);
+1017         }
+1018         buffer.push(p20, p21, p30, p31, p40, p41);
+1019         points.push(p20, p21);
+1020         if (j === jj - 1) {
+1021           points.push(p40, p41);
+1022         }
+1023       }
+1024       paths.push({
+1025         bezier: InkEditor.#toPDFCoordinates(buffer, rect, this.rotation),
+1026         points: InkEditor.#toPDFCoordinates(points, rect, this.rotation),
+1027       });
+1028     }
+1029 
+1030     return paths;
+1031   }
+1032 
+1033   /**
+1034    * Get the bounding box containing all the paths.
+1035    * @returns {Array<number>}
+1036    */
+1037   #getBbox() {
+1038     let xMin = Infinity;
+1039     let xMax = -Infinity;
+1040     let yMin = Infinity;
+1041     let yMax = -Infinity;
+1042 
+1043     for (const path of this.paths) {
+1044       for (const [first, control1, control2, second] of path) {
+1045         const bbox = Util.bezierBoundingBox(
+1046           ...first,
+1047           ...control1,
+1048           ...control2,
+1049           ...second
+1050         );
+1051         xMin = Math.min(xMin, bbox[0]);
+1052         yMin = Math.min(yMin, bbox[1]);
+1053         xMax = Math.max(xMax, bbox[2]);
+1054         yMax = Math.max(yMax, bbox[3]);
+1055       }
+1056     }
+1057 
+1058     return [xMin, yMin, xMax, yMax];
+1059   }
+1060 
+1061   /**
+1062    * The bounding box is computed with null thickness, so we must take
+1063    * it into account for the display.
+1064    * It corresponds to the total padding, hence it should be divided by 2
+1065    * in order to have left/right paddings.
+1066    * @returns {number}
+1067    */
+1068   #getPadding() {
+1069     return this.#disableEditing
+1070       ? Math.ceil(this.thickness * this.parentScale)
+1071       : 0;
+1072   }
+1073 
+1074   /**
+1075    * Set the div position and dimensions in order to fit to
+1076    * the bounding box of the contents.
+1077    * @returns {undefined}
+1078    */
+1079   #fitToContent(firstTime = false) {
+1080     if (this.isEmpty()) {
+1081       return;
+1082     }
+1083 
+1084     if (!this.#disableEditing) {
+1085       this.#redraw();
+1086       return;
+1087     }
+1088 
+1089     const bbox = this.#getBbox();
+1090     const padding = this.#getPadding();
+1091     this.#baseWidth = Math.max(AnnotationEditor.MIN_SIZE, bbox[2] - bbox[0]);
+1092     this.#baseHeight = Math.max(AnnotationEditor.MIN_SIZE, bbox[3] - bbox[1]);
+1093 
+1094     const width = Math.ceil(padding + this.#baseWidth * this.scaleFactor);
+1095     const height = Math.ceil(padding + this.#baseHeight * this.scaleFactor);
+1096 
+1097     const [parentWidth, parentHeight] = this.parentDimensions;
+1098     this.width = width / parentWidth;
+1099     this.height = height / parentHeight;
+1100 
+1101     this.setAspectRatio(width, height);
+1102 
+1103     const prevTranslationX = this.translationX;
+1104     const prevTranslationY = this.translationY;
+1105 
+1106     this.translationX = -bbox[0];
+1107     this.translationY = -bbox[1];
+1108     this.#setCanvasDims();
+1109     this.#redraw();
+1110 
+1111     this.#realWidth = width;
+1112     this.#realHeight = height;
+1113 
+1114     this.setDims(width, height);
+1115     const unscaledPadding = firstTime ? padding / this.scaleFactor / 2 : 0;
+1116     this.translate(
+1117       prevTranslationX - this.translationX - unscaledPadding,
+1118       prevTranslationY - this.translationY - unscaledPadding
+1119     );
+1120   }
+1121 
+1122   /** @inheritdoc */
+1123   static deserialize(data, parent, uiManager) {
+1124     if (data instanceof InkAnnotationElement) {
+1125       return null;
+1126     }
+1127     const editor = super.deserialize(data, parent, uiManager);
+1128 
+1129     editor.thickness = data.thickness;
+1130     editor.color = Util.makeHexColor(...data.color);
+1131     editor.opacity = data.opacity;
+1132 
+1133     const [pageWidth, pageHeight] = editor.pageDimensions;
+1134     const width = editor.width * pageWidth;
+1135     const height = editor.height * pageHeight;
+1136     const scaleFactor = editor.parentScale;
+1137     const padding = data.thickness / 2;
+1138 
+1139     editor.#disableEditing = true;
+1140     editor.#realWidth = Math.round(width);
+1141     editor.#realHeight = Math.round(height);
+1142 
+1143     const { paths, rect, rotation } = data;
+1144 
+1145     for (let { bezier } of paths) {
+1146       bezier = InkEditor.#fromPDFCoordinates(bezier, rect, rotation);
+1147       const path = [];
+1148       editor.paths.push(path);
+1149       let p0 = scaleFactor * (bezier[0] - padding);
+1150       let p1 = scaleFactor * (bezier[1] - padding);
+1151       for (let i = 2, ii = bezier.length; i < ii; i += 6) {
+1152         const p10 = scaleFactor * (bezier[i] - padding);
+1153         const p11 = scaleFactor * (bezier[i + 1] - padding);
+1154         const p20 = scaleFactor * (bezier[i + 2] - padding);
+1155         const p21 = scaleFactor * (bezier[i + 3] - padding);
+1156         const p30 = scaleFactor * (bezier[i + 4] - padding);
+1157         const p31 = scaleFactor * (bezier[i + 5] - padding);
+1158         path.push([
+1159           [p0, p1],
+1160           [p10, p11],
+1161           [p20, p21],
+1162           [p30, p31],
+1163         ]);
+1164         p0 = p30;
+1165         p1 = p31;
+1166       }
+1167       const path2D = this.#buildPath2D(path);
+1168       editor.bezierPath2D.push(path2D);
+1169     }
+1170 
+1171     const bbox = editor.#getBbox();
+1172     editor.#baseWidth = Math.max(AnnotationEditor.MIN_SIZE, bbox[2] - bbox[0]);
+1173     editor.#baseHeight = Math.max(AnnotationEditor.MIN_SIZE, bbox[3] - bbox[1]);
+1174     editor.#setScaleFactor(width, height);
+1175 
+1176     return editor;
+1177   }
+1178 
+1179   /** @inheritdoc */
+1180   serialize() {
+1181     if (this.isEmpty()) {
+1182       return null;
+1183     }
+1184 
+1185     const rect = this.getRect(0, 0);
+1186     const color = AnnotationEditor._colorManager.convert(this.ctx.strokeStyle);
+1187 
+1188     return {
+1189       annotationType: AnnotationEditorType.INK,
+1190       color,
+1191       thickness: this.thickness,
+1192       opacity: this.opacity,
+1193       paths: this.#serializePaths(
+1194         this.scaleFactor / this.parentScale,
+1195         this.translationX,
+1196         this.translationY,
+1197         rect
+1198       ),
+1199       pageIndex: this.pageIndex,
+1200       rect,
+1201       rotation: this.rotation,
+1202       structTreeParentId: this._structTreeParentId,
+1203     };
+1204   }
+1205 }
+1206 
+1207 export { InkEditor };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/editor_spec.js
+/* Copyright 2022 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { CommandManager } from "../../src/display/editor/tools.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

@@ -1,0 +1,70 @@
+<think>
+Okay, I need to write a regression test for the issue where Voice Over doesn't read highlighted text during editing in a PDF. The patch provided makes several changes to improve accessibility, so my test should verify that these changes fix the problem.
+
+First, I should understand what the patch does. Looking at the changes, I see that elements like the color picker button and highlight div now have ARIA attributes. For example, the SVG in draw_layer.js sets aria-hidden to true, and the color picker's swatch also gets aria-hidden. The highlight div adds aria-hidden="true" as well. Also, the text is wrapped in a <mark> element with a visually hidden class, which should make it readable by screen readers.
+
+The test needs to fail before the patch and pass after. So, I'll simulate adding a highlight and check if the text is correctly exposed to assistive technologies.
+
+I'll structure the test using Jest. I'll create a test PDF with some text, render it, and simulate selecting and highlighting it. Then, I'll check the DOM structure to ensure the highlighted text is wrapped in a <mark> element with the correct class. Also, I'll verify that the ARIA attributes are set properly on the relevant elements.
+
+I'll need to import the necessary modules like PDFDocument, PDFPage, TextLayerBuilder, and others. I'll set up a mock DOM environment using jsdom because the test runs in Node.js. Then, I'll create a PDF document, render a page, and build the text layer.
+
+Next, I'll simulate the text selection and create the highlight. After that, I'll check if the <mark> element exists and has the "visuallyHidden" class. I'll also check the ARIA attributes on the SVG and highlight div to ensure they're set correctly.
+
+If all these conditions are met, the test should pass, indicating the issue is resolved.
+</think>
+
+```javascript
+it("should expose highlighted text to screen readers", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { PDFPage } = await import("../../src/core/document.js");
+  const { TextLayerBuilder } = await import("../../src/display/text_layer.js");
+  const { DrawLayer } = await import("../../src/display/draw_layer.js");
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+
+  // Create a test PDF with text
+  const pdf = new PDFDocument({
+    content: "q\nBT\n/F0 24 Tf\n(Hello World) Tj\nET\nQ",
+    pages: [{ content: "" }],
+  });
+
+  // Create a mock DOM environment
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM();
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+
+  // Render the PDF page
+  const page = pdf.getPage(0);
+  const textLayer = new TextLayerBuilder().build(page, { viewport: page.getViewport({ scale: 1 }) });
+
+  // Create and add highlight
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  const range = document.createRange();
+  range.selectNode(textLayer.firstChild);
+  selection.addRange(range);
+
+  const highlight = new HighlightEditor({
+    anchorNode: selection.anchorNode,
+    anchorOffset: selection.anchorOffset,
+    focusNode: selection.focusNode,
+    focusOffset: selection.focusOffset,
+    boxes: [],
+    color: "#FFFF00",
+    methodOfCreation: "mouse",
+  });
+
+  // Verify the text is properly exposed
+  const markElement = highlight.div.querySelector("mark");
+  expect(markElement).toBeTruthy();
+  expect(markElement.className).toContain("visuallyHidden");
+
+  // Verify ARIA attributes are set
+  const svg = document.querySelector("svg");
+  expect(svg.getAttribute("aria-hidden")).toBe("true");
+
+  const highlightDiv = highlight.div.querySelector(".internal");
+  expect(highlightDiv.getAttribute("aria-hidden")).toBe("true");
+});
+```

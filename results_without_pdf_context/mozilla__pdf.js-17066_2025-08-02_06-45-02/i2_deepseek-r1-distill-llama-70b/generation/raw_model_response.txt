@@ -1,0 +1,42 @@
+<think>
+Okay, I need to write a regression test for the issue where a read-only form field isn't rendered when AnnotationMode is set to ENABLED (1). The patch provided modifies the isRenderable condition in TextWidgetAnnotationElement, so my test should verify that this condition now correctly allows rendering in the specified scenario.
+
+First, I'll start by understanding the problem. The issue occurs when AnnotationMode is 1, which means renderForms is false. Before the patch, isRenderable was only true if renderForms was true or if the field had a value but no appearance. This caused read-only fields without an appearance to not render. The patch adds a condition to check if the field has its own canvas, which should make isRenderable true even when renderForms is false.
+
+So, the test should simulate this scenario. I'll need to create a test PDF with a read-only text field and no appearance. Then, I'll load it with AnnotationMode set to 1 and check if the field is rendered.
+
+I'll use the test utilities provided by pdf.js. I'll import the necessary modules like PDFDocument, getDocument, and createIdFactory from the correct paths. Then, I'll set up the PDF data, create the document, and render the page.
+
+I'll set the AnnotationMode to 1 using the second parameter of getDocument. After rendering, I'll check the text layer for the expected text. If the text is present, the test passes.
+
+I need to ensure that the test fails before the patch and passes after. So, I'll structure the test to fetch the PDF, render it, and then check the text layer's text content.
+
+I should also handle any potential errors, like if the PDF isn't loaded correctly, by using try-catch and expecting certain errors if they occur.
+
+Putting it all together, the test will load the PDF, render the page, and assert that the text is present in the text layer, confirming that the read-only field is rendered correctly when AnnotationMode is set to ENABLED.
+</think>
+
+```javascript
+it("should render read-only text widget annotations when forms are disabled", async () => {
+  const { PDFDocument, getDocument, createIdFactory } = await import("../../src/core/core_utils.js");
+  const idFactory = createIdFactory();
+  const pdfData = await fetch("../../web/test_simple-form-readonly.pdf").then(res => res.arrayBuffer());
+  const pdf = await PDFDocument.load({
+    data: pdfData,
+    // Set AnnotationMode to 1 (ENABLED) to trigger the issue
+    annotationMode: 1,
+    idFactory,
+  });
+  const page = await pdf.getPage(1);
+  const textLayer = await page.getTextContent();
+  const textItems = await textLayer.items;
+  
+  // The expected text from the read-only form field
+  const expectedText = "Foo";
+  
+  // The actual text rendered in the text layer
+  const actualText = textItems.map(item => item.str).join("");
+  
+  expect(actualText).toContain(expectedText);
+});
+```

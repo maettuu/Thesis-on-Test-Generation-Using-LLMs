@@ -1,0 +1,46 @@
+it("should release image data after cleanup to prevent memory ballooning", async () => {
+  const { PDFWorker } = await import("../../src/display/api.js");
+  const { LoopbackPort } = await import("../../src/display/api.js");
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  const { PDFDocumentLoadingTask } = await import("../../src/display/api.js");
+  const { GlobalImageCache } = await import("../../src/core/image_utils.js");
+  const { heapdump } = await import("heapdump");
+  const { objectSize } = await import("../../src/shared/util.js");
+
+  // Setup fake worker
+  const port = new LoopbackPort();
+  const worker = new PDFWorker({ port });
+
+  // Load test PDF
+  const pdfPath = require.resolve(`${TEST_PDFS_PATH}/tricky.pdf`);
+  const loadingTask = await PDFDocumentLoadingTask.fromFetch(pdfPath);
+  const doc = await loadingTask.promise;
+
+  // Get first page
+  const page = await doc.getPage(1);
+
+  // Render the page
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const context = canvas.getContext("2d");
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport,
+  });
+
+  // Ensure rendering is complete
+  await renderTask.promise;
+
+  // Force cleanup
+  await page.cleanup();
+
+  // Measure memory usage
+  const heapSnapshot = await heapdump.snapshot();
+  const imageSize = objectSize(heapSnapshot);
+
+  // Verify memory is released
+  expect(imageSize).toBeLessThan(10 * 1024 * 1024); // 10MB threshold
+});

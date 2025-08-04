@@ -1,0 +1,89 @@
+<think>
+Okay, I need to write a regression test for the issue where the style of the line and resizers around a selected editor was changed. The patch provided modifies the AnnotationEditor class and some of its subclasses. 
+
+First, I should understand what the patch does. It looks like the patch introduces a static property _borderLineWidth in AnnotationEditor, which is initialized in the static initialize method. This method checks if _borderLineWidth is -1 and then sets it based on a CSS variable. 
+
+The patch also adds a method #getBaseTranslation which calculates some translation based on the border line width and the parent dimensions. This method is used in fixAndSetPosition to adjust the position of the editor. 
+
+So, the test needs to verify that the border line width is correctly set and used to adjust the position. 
+
+I'll start by importing the necessary modules. Since the test is in Node.js, I'll use dynamic imports. I'll need the AnnotationEditor from editor.js and the PDFDocument from core/document.js.
+
+Next, I'll create a sample PDF document. For testing, I can create a simple PDF with one page. I'll use the PDFDocument class from core/document.js. 
+
+Then, I'll initialize the AnnotationEditor by calling its static initialize method. Since the initialize method uses getComputedStyle, which is part of the DOM, I might need to mock this in a Node.js environment. But since the test is in Node, perhaps I can set the CSS variables manually or find another way.
+
+Wait, in the patch, the initialize method uses getComputedStyle on document.documentElement. In Node.js, document isn't available, so I might need to mock this. Alternatively, I can set the static _borderLineWidth directly to avoid relying on the DOM. 
+
+But for the test to accurately reflect the behavior, I should simulate the CSS variable. Maybe I can set AnnotationEditor._borderLineWidth to a known value before the test runs.
+
+So, I'll set AnnotationEditor._borderLineWidth to 2px, for example. Then, I'll create an instance of AnnotationEditor, set its parent dimensions, and call fixAndSetPosition.
+
+After that, I'll check if the div's style properties for left and top are correctly calculated based on the border line width. The expected values should be 2% of the parent dimensions. 
+
+Wait, in the code, the translation is x = _borderLineWidth / parentWidth, which is then used to adjust the position. So, if the parent is 100x100, then x and y would be 0.02 each. Depending on rotation, the adjustment is added or subtracted.
+
+But in the test, I can set the parent dimensions to 100, so the translation would be 2/100 = 0.02, which is 2%. So, the left and top positions should be 2% more or less than the original position.
+
+But in the test, I'm not setting the rotation, so it's defaulting to 0. So, the #getBaseTranslation would return [-x, -y], which is [-0.02, -0.02]. 
+
+Wait, in the code, when rotation is 0, the default case returns [-x, -y]. So, when added to x and y, which are 0.5 (50% of 100), the new position would be 0.5 - 0.02 = 0.48, so 48% for left and top.
+
+So, the expected left and top would be 48%. 
+
+I'll set the parent dimensions to 100,100, and the initial x and y to 0.5. Then, after calling fixAndSetPosition, the left and top should be 48% each.
+
+So, in the test, I'll create the editor, set its parentDimensions to [100,100], x and y to 0.5, and rotation to 0. Then, call fixAndSetPosition. After that, check if the div's left and top are '48.00%' each.
+
+I should also ensure that the initialize method is called, which sets the _borderLineWidth. Since in the test environment, the CSS method might not be available, I'll set it manually to 2.
+
+Putting it all together, the test will:
+
+1. Import the necessary modules.
+2. Create a PDF document and a page.
+3. Set the _borderLineWidth to 2.
+4. Create an AnnotationEditor instance.
+5. Set parent dimensions, x, y, and rotation.
+6. Call fixAndSetPosition.
+7. Check the style properties.
+
+I need to make sure that the test fails before the patch because without the patch, the _borderLineWidth isn't set, and the positions aren't adjusted. So, the test expects the left and top to be 48%, which would only happen after the patch is applied.
+
+So, the test should correctly capture the change introduced by the patch.
+</think>
+
+```javascript
+it("should adjust editor position based on border line width", async () => {
+  const { AnnotationEditor } = await import("../../src/display/editor/editor.js");
+  const { PDFDocument } = await import("../../src/core/document.js");
+
+  // Create a test PDF document
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+
+  // Initialize the editor with a mock l10n
+  await AnnotationEditor.initialize({});
+
+  // Set the border line width for testing
+  AnnotationEditor._borderLineWidth = 2;
+
+  // Create an editor instance
+  const editor = new AnnotationEditor(page);
+
+  // Set parent dimensions and initial position
+  editor.parentDimensions = [100, 100];
+  editor.x = 0.5;
+  editor.y = 0.5;
+  editor.rotation = 0;
+
+  // Call the method to fix and set the position
+  editor.fixAndSetPosition();
+
+  // Verify the expected position adjustment
+  const expectedLeft = "48.00%";
+  const expectedTop = "48.00%";
+  
+  expect(editor.div.style.left).toBe(expectedLeft);
+  expect(editor.div.style.top).toBe(expectedTop);
+});
+```

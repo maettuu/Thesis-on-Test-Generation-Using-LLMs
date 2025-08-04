@@ -1,0 +1,65 @@
+<think>
+Okay, I need to write a regression test for the issue where OpenJPEG warnings don't respect the PDF.js verbosity levels. The patch modifies the jpx.js file to pass the warn function from util.js to the OpenJPEG module. 
+
+First, I should understand what the patch does. Before the patch, any warnings from OpenJPEG were logged directly using console.warn. After the patch, the OpenJPEG module is initialized with the warn function from PDF.js's util.js. This means that OpenJPEG will now use PDF.js's warning mechanism, which respects the verbosity level set by the user.
+
+So, the test needs to verify that when the verbosity is set to a level that suppresses warnings (like 0), no warning is logged. Conversely, when the verbosity is higher, warnings should be visible.
+
+I'll structure the test as follows:
+1. Import the necessary modules: util.js for setVerbosityLevel and the warn function, and jpx.js for JpxImage.
+2. Set up a spy or mock for the warn function to track if it's called.
+3. Set the verbosity level to 0 (suppress warnings) and trigger an OpenJPEG warning.
+4. Check that no warning was logged.
+5. Reset the verbosity to the default and test again to ensure warnings appear when they should.
+
+I'll use Jest for testing, so I'll mock the console.warn to see if it's called. But since the warn function is now from util.js, I'll need to spy on that instead.
+
+Wait, in the patch, OpenJPEG is initialized with { warn }, which is the warn function from util.js. So, in the test, when OpenJPEG logs a warning, it should call util.warn, which in turn uses console.warn based on the verbosity level.
+
+So, I'll set up a mock for util.warn to track calls. Then, I'll set the verbosity level to 0 and trigger a warning. If the warning is suppressed, util.warn shouldn't be called.
+
+I'll create a test image data that causes OpenJPEG to emit a warning. For example, a small JPX image that, when decoded, triggers a warning.
+
+In the test, I'll:
+- Import util and jpx.js.
+- Mock util.warn.
+- Set verbosity to 0.
+- Call JpxImage.decode with the test data.
+- Check that util.warn wasn't called.
+- Then, set verbosity back to 1 and check that util.warn is called.
+
+I need to ensure that the test data is such that OpenJPEG emits a warning. Maybe a truncated or corrupted image that causes a non-fatal warning.
+
+I'll structure the test with async/await since the decode function is likely asynchronous.
+
+So, putting it all together, the test will import the necessary modules, mock the warn function, adjust verbosity levels, and assert based on whether the warn function was called.
+</think>
+
+```javascript
+it("should respect verbosity level for OpenJPEG warnings", async () => {
+  const { warn: utilWarn, setVerbosityLevel } = await import("../../src/shared/util.js");
+  const { JpxImage } = await import("../../src/core/jpx.js");
+  
+  const mockWarn = jest.fn();
+  const originalWarn = console.warn;
+  console.warn = mockWarn;
+  
+  // Set verbosity to 0 to suppress warnings
+  setVerbosityLevel(0);
+  
+  const testData = new Uint8Array([0x00, 0x00, 0x00, 0x00]); // Data that triggers a warning
+  
+  // Should not trigger a warning due to suppressed verbosity
+  await JpxImage.decode(testData);
+  expect(mockWarn).not.toHaveBeenCalled();
+  
+  // Reset to default verbosity
+  setVerbosityLevel(1);
+  
+  // Should trigger a warning now
+  await JpxImage.decode(testData);
+  expect(mockWarn).toHaveBeenCalled();
+  
+  console.warn = originalWarn;
+});
+```

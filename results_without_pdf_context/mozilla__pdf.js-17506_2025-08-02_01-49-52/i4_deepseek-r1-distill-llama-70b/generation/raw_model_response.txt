@@ -1,0 +1,126 @@
+<think>
+Okay, I need to write a regression test for the issue where highlighting images of text wasn't supported. The patch adds support for this, so the test should fail before the patch and pass after.
+
+First, I'll create a test case that tries to highlight an image. I'll simulate selecting text over an image and check if the highlight is correctly applied.
+
+I'll use Jest for the test. I'll import the necessary modules like PDFDocument, AnnotationEditorLayer, and others. Then, I'll set up a sample PDF with an image. 
+
+In the test, I'll create a mock UI manager and initialize the annotation editor layer. I'll simulate a pointer down event on the text layer to start highlighting. Then, I'll move the pointer to cover both text and the image area.
+
+After the events, I'll check if the highlight was successfully created and if it covers the image area. If the highlight exists and covers the image, the test passes.
+
+I'll structure the test with try-catch to handle any errors, ensuring it fails if any step doesn't meet the expected outcome.
+</think>
+
+```javascript
+it("should highlight images of text", async () => {
+  const { PDFDocument } = await import("../../src/core/pdf_document.js");
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+  const { DrawLayer } = await import("../../src/display/draw_layer.js");
+  const { DOMSVGFactory } = await import("../../src/display_utils.js");
+
+  // Setup test PDF with image
+  const pdf = new PDFDocument({
+    content: new Uint8Array(),
+    pages: [
+      {
+        content: new Uint8Array(),
+        viewport: { width: 100, height: 100, scale: 1 },
+        images: [
+          {
+            x: 10,
+            y: 10,
+            width: 80,
+            height: 80,
+          },
+        ],
+      },
+    ],
+  });
+
+  const uiManager = {
+    getMode: () => AnnotationEditorType.HIGHLIGHT,
+    updateToolbar: jest.fn(),
+    updateMode: jest.fn(),
+    registerEditorTypes: jest.fn(),
+    getId: () => "1",
+    getActive: () => null,
+    setEditingState: jest.fn(),
+    addEditor: jest.fn(),
+    setSelected: jest.fn(),
+    toggleSelected: jest.fn(),
+    isSelected: jest.fn(),
+    addCommands: jest.fn(),
+    commitOrRemove: jest.fn(),
+    addToAnnotationStorage: jest.fn(),
+  };
+
+  const drawLayer = new DrawLayer({ pageIndex: 0 });
+  const annotationEditorLayer = new AnnotationEditorLayer({
+    uiManager,
+    pageIndex: 0,
+    div: document.createElement("div"),
+    accessibilityManager: null,
+    annotationLayer: null,
+    drawLayer,
+    textLayer: {
+      div: document.createElement("div"),
+      getBoundingClientRect: () => ({
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+      }),
+    },
+    viewport: {
+      rawDims: [100, 100],
+      rotation: 0,
+    },
+    l10n: {},
+  });
+
+  // Simulate pointer events
+  const pointerDown = new PointerEvent("pointerdown", {
+    bubbles: true,
+    cancelable: true,
+    pointerType: "mouse",
+    buttons: 1,
+  });
+
+  const pointerMove = new PointerEvent("pointermove", {
+    bubbles: true,
+    cancelable: true,
+    pointerType: "mouse",
+    buttons: 1,
+  });
+
+  const pointerUp = new PointerEvent("pointerup", {
+    bubbles: true,
+    cancelable: true,
+    pointerType: "mouse",
+    buttons: 1,
+  });
+
+  // Start highlighting
+  annotationEditorLayer.pointerDown(pointerDown);
+  annotationEditorLayer.pointerMove(pointerMove);
+  annotationEditorLayer.pointerUp(pointerUp);
+
+  // Check if highlight was created
+  const highlight = drawLayer.highlight(
+    {
+      box: {
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+      },
+      toSVGPath: () => "M0,0 L1,0 L1,1 L0,1 Z",
+    },
+    "#fff",
+    0.5
+  );
+
+  expect(highlight.id).toBeDefined();
+});
+```

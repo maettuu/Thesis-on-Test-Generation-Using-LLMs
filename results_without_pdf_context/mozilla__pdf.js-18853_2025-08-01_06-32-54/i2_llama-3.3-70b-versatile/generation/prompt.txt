@@ -1,0 +1,736 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Extra line breaks are missing when PDF is loaded
+Sample PDF file to reproduce this issue:
+[sample.pdf](https://github.com/mozilla/pdf.js/files/15180747/sample.pdf)
+
+It seems that the issue https://github.com/mozilla/pdf.js/issues/17492 was not fully fixed.
+It's the same steps to reproduce.
+1. Load this PDF file at https://mozilla.github.io/pdf.js/web/viewer.html
+Actual result:
+There is no missing blank line between rows 1 and 2, 3 and 4.
+![image](https://github.com/mozilla/pdf.js/assets/2846956/4bef68fb-ee7b-4084-a161-ea3b0a91536f)
+
+Expected result:
+The extra line breaks are available if you open this file in Foxit PDF viewer or Google Chrome.
+![image](https://github.com/mozilla/pdf.js/assets/2846956/23780db8-79d0-4afa-96f1-4ff882d44877)
+
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/annotation.js b/src/core/annotation.js
+--- a/src/core/annotation.js
++++ b/src/core/annotation.js
+@@ -2299,7 +2299,7 @@ class WidgetAnnotation extends Annotation {
+     }
+ 
+     assert(typeof value === "string", "Expected `value` to be a string.");
+-    value = value.trim();
++    value = value.trimEnd();
+ 
+     if (this.data.combo) {
+       // The value can be one of the exportValue or any other values.
+@@ -2934,6 +2934,28 @@ class TextWidgetAnnotation extends WidgetAnnotation {
+     return chunks;
+   }
+ 
++  async extractTextContent(evaluator, task, viewBox) {
++    await super.extractTextContent(evaluator, task, viewBox);
++    const text = this.data.textContent;
++    if (!text) {
++      return;
++    }
++
++    // The text extractor doesn't handle empty lines correctly, so if the
++    // content we get is more or less (modulo whitespaces) the same as the
++    // field value we just ignore it.
++    const allText = text.join("\n");
++    if (allText === this.data.fieldValue) {
++      return;
++    }
++    const regex = allText.replaceAll(/([.*+?^${}()|[\]\\])|(\s+)/g, (_m, p1) =>
++      p1 ? `\\${p1}` : "\\s+"
++    );
++    if (new RegExp(`^\\s*${regex}\\s*$`).test(this.data.fieldValue)) {
++      this.data.textContent = this.data.fieldValue.split("\n");
++    }
++  }
++
+   getFieldObject() {
+     return {
+       id: this.data.id,
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.25.2
+- @babel/preset-env: ^7.25.4
+- @babel/runtime: ^7.25.6
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001662
+- canvas: ^2.11.2
+- core-js: ^3.38.1
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.1
+- eslint-plugin-import: ^2.30.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.1.0
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^55.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.3.0
+- jsdoc: ^4.0.3
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.4
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.47
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.0
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.0
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.9.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.2
+- vinyl: ^3.0.0
+- webpack: ^5.94.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/annotation.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationActionEventType,
+18   AnnotationBorderStyleType,
+19   AnnotationEditorType,
+20   AnnotationFieldFlag,
+21   AnnotationFlag,
+22   AnnotationReplyType,
+23   AnnotationType,
+24   assert,
+25   BASELINE_FACTOR,
+26   FeatureTest,
+27   getModificationDate,
+28   IDENTITY_MATRIX,
+29   info,
+30   isArrayEqual,
+31   LINE_DESCENT_FACTOR,
+32   LINE_FACTOR,
+33   OPS,
+34   RenderingIntentFlag,
+35   shadow,
+36   stringToPDFString,
+37   unreachable,
+38   Util,
+39   warn,
+40 } from "../shared/util.js";
+41 import {
+42   collectActions,
+43   escapeString,
+44   getInheritableProperty,
+45   getRotationMatrix,
+46   isNumberArray,
+47   lookupMatrix,
+48   lookupNormalRect,
+49   lookupRect,
+50   numberToString,
+51   stringToAsciiOrUTF16BE,
+52   stringToUTF16String,
+53 } from "./core_utils.js";
+54 import {
+55   createDefaultAppearance,
+56   FakeUnicodeFont,
+57   getPdfColor,
+58   parseAppearanceStream,
+59   parseDefaultAppearance,
+60 } from "./default_appearance.js";
+61 import { Dict, isName, isRefsEqual, Name, Ref, RefSet } from "./primitives.js";
+62 import { Stream, StringStream } from "./stream.js";
+63 import { BaseStream } from "./base_stream.js";
+64 import { bidi } from "./bidi.js";
+65 import { Catalog } from "./catalog.js";
+66 import { ColorSpace } from "./colorspace.js";
+67 import { FileSpec } from "./file_spec.js";
+68 import { JpegStream } from "./jpeg_stream.js";
+69 import { ObjectLoader } from "./object_loader.js";
+70 import { OperatorList } from "./operator_list.js";
+71 import { writeObject } from "./writer.js";
+72 import { XFAFactory } from "./xfa/factory.js";
+73 
+1819 class WidgetAnnotation extends Annotation {
+1820   constructor(params) {
+1821     super(params);
+1822 
+1823     const { dict, xref, annotationGlobals } = params;
+1824     const data = this.data;
+1825     this._needAppearances = params.needAppearances;
+1826 
+1827     data.annotationType = AnnotationType.WIDGET;
+1828     if (data.fieldName === undefined) {
+1829       data.fieldName = this._constructFieldName(dict);
+1830     }
+1831 
+1832     if (data.actions === undefined) {
+1833       data.actions = collectActions(xref, dict, AnnotationActionEventType);
+1834     }
+1835 
+1836     let fieldValue = getInheritableProperty({
+1837       dict,
+1838       key: "V",
+1839       getArray: true,
+1840     });
+1841     data.fieldValue = this._decodeFormValue(fieldValue);
+1842 
+1843     const defaultFieldValue = getInheritableProperty({
+1844       dict,
+1845       key: "DV",
+1846       getArray: true,
+1847     });
+1848     data.defaultFieldValue = this._decodeFormValue(defaultFieldValue);
+1849 
+1850     if (fieldValue === undefined && annotationGlobals.xfaDatasets) {
+1851       // Try to figure out if we have something in the xfa dataset.
+1852       const path = this._title.str;
+1853       if (path) {
+1854         this._hasValueFromXFA = true;
+1855         data.fieldValue = fieldValue =
+1856           annotationGlobals.xfaDatasets.getValue(path);
+1857       }
+1858     }
+1859 
+1860     // When no "V" entry exists, let the fieldValue fallback to the "DV" entry
+1861     // (fixes issue13823.pdf).
+1862     if (fieldValue === undefined && data.defaultFieldValue !== null) {
+1863       data.fieldValue = data.defaultFieldValue;
+1864     }
+1865 
+1866     data.alternativeText = stringToPDFString(dict.get("TU") || "");
+1867 
+1868     this.setDefaultAppearance(params);
+1869 
+1870     data.hasAppearance ||=
+1871       this._needAppearances &&
+1872       data.fieldValue !== undefined &&
+1873       data.fieldValue !== null;
+1874 
+1875     const fieldType = getInheritableProperty({ dict, key: "FT" });
+1876     data.fieldType = fieldType instanceof Name ? fieldType.name : null;
+1877 
+1878     const localResources = getInheritableProperty({ dict, key: "DR" });
+1879     const acroFormResources = annotationGlobals.acroForm.get("DR");
+1880     const appearanceResources = this.appearance?.dict.get("Resources");
+1881 
+1882     this._fieldResources = {
+1883       localResources,
+1884       acroFormResources,
+1885       appearanceResources,
+1886       mergedResources: Dict.merge({
+1887         xref,
+1888         dictArray: [localResources, appearanceResources, acroFormResources],
+1889         mergeSubDicts: true,
+1890       }),
+1891     };
+1892 
+1893     data.fieldFlags = getInheritableProperty({ dict, key: "Ff" });
+1894     if (!Number.isInteger(data.fieldFlags) || data.fieldFlags < 0) {
+1895       data.fieldFlags = 0;
+1896     }
+1897 
+1898     data.readOnly = this.hasFieldFlag(AnnotationFieldFlag.READONLY);
+1899     data.required = this.hasFieldFlag(AnnotationFieldFlag.REQUIRED);
+1900     data.hidden =
+1901       this._hasFlag(data.annotationFlags, AnnotationFlag.HIDDEN) ||
+1902       this._hasFlag(data.annotationFlags, AnnotationFlag.NOVIEW);
+1903   }
+1904 
+2263   async _getAppearance(evaluator, task, intent, annotationStorage) {
+2264     const isPassword = this.hasFieldFlag(AnnotationFieldFlag.PASSWORD);
+2265     if (isPassword) {
+2266       return null;
+2267     }
+2268     const storageEntry = annotationStorage?.get(this.data.id);
+2269     let value, rotation;
+2270     if (storageEntry) {
+2271       value = storageEntry.formattedValue || storageEntry.value;
+2272       rotation = storageEntry.rotation;
+2273     }
+2274 
+2275     if (
+2276       rotation === undefined &&
+2277       value === undefined &&
+2278       !this._needAppearances
+2279     ) {
+2280       if (!this._hasValueFromXFA || this.appearance) {
+2281         // The annotation hasn't been rendered so use the appearance.
+2282         return null;
+2283       }
+2284     }
+2285 
+2286     // Empty or it has a trailing whitespace.
+2287     const colors = this.getBorderAndBackgroundAppearances(annotationStorage);
+2288 
+2289     if (value === undefined) {
+2290       // The annotation has its value in XFA datasets but not in the V field.
+2291       value = this.data.fieldValue;
+2292       if (!value) {
+2293         return `/Tx BMC q ${colors}Q EMC`;
+2294       }
+2295     }
+2296 
+2297     if (Array.isArray(value) && value.length === 1) {
+2298       value = value[0];
+2299     }
+2300 
+2301     assert(typeof value === "string", "Expected `value` to be a string.");
+2302     value = value.trim();
+2303 
+2304     if (this.data.combo) {
+2305       // The value can be one of the exportValue or any other values.
+2306       const option = this.data.options.find(
+2307         ({ exportValue }) => value === exportValue
+2308       );
+2309       value = option?.displayValue || value;
+2310     }
+2311 
+2312     if (value === "") {
+2313       // the field is empty: nothing to render
+2314       return `/Tx BMC q ${colors}Q EMC`;
+2315     }
+2316 
+2317     if (rotation === undefined) {
+2318       rotation = this.rotation;
+2319     }
+2320 
+2321     let lineCount = -1;
+2322     let lines;
+2323 
+2324     // We could have a text containing for example some sequences of chars and
+2325     // their diacritics (e.g. "é".normalize("NFKD") shows 1 char when it's 2).
+2326     // Positioning diacritics is really something we don't want to do here.
+2327     // So if a font has a glyph for a acute accent and one for "e" then we won't
+2328     // get any encoding issues but we'll render "e" and then "´".
+2329     // It's why we normalize the string. We use NFC to preserve the initial
+2330     // string, (e.g. "²".normalize("NFC") === "²"
+2331     // but "²".normalize("NFKC") === "2").
+2332     //
+2333     // TODO: it isn't a perfect solution, some chars like "ẹ́" will be
+2334     // decomposed into two chars ("ẹ" and "´"), so we should detect such
+2335     // situations and then use either FakeUnicodeFont or set the
+2336     // /NeedAppearances flag.
+2337     if (this.data.multiLine) {
+2338       lines = value.split(/\r\n?|\n/).map(line => line.normalize("NFC"));
+2339       lineCount = lines.length;
+2340     } else {
+2341       lines = [value.replace(/\r\n?|\n/, "").normalize("NFC")];
+2342     }
+2343 
+2344     const defaultPadding = 1;
+2345     const defaultHPadding = 2;
+2346     let totalHeight = this.data.rect[3] - this.data.rect[1];
+2347     let totalWidth = this.data.rect[2] - this.data.rect[0];
+2348 
+2349     if (rotation === 90 || rotation === 270) {
+2350       [totalWidth, totalHeight] = [totalHeight, totalWidth];
+2351     }
+2352 
+2353     if (!this._defaultAppearance) {
+2354       // The DA is required and must be a string.
+2355       // If there is no font named Helvetica in the resource dictionary,
+2356       // the evaluator will fall back to a default font.
+2357       // Doing so prevents exceptions and allows saving/printing
+2358       // the file as expected.
+2359       this.data.defaultAppearanceData = parseDefaultAppearance(
+2360         (this._defaultAppearance = "/Helvetica 0 Tf 0 g")
+2361       );
+2362     }
+2363 
+2364     let font = await WidgetAnnotation._getFontData(
+2365       evaluator,
+2366       task,
+2367       this.data.defaultAppearanceData,
+2368       this._fieldResources.mergedResources
+2369     );
+2370 
+2371     let defaultAppearance, fontSize, lineHeight;
+2372     const encodedLines = [];
+2373     let encodingError = false;
+2374     for (const line of lines) {
+2375       const encodedString = font.encodeString(line);
+2376       if (encodedString.length > 1) {
+2377         encodingError = true;
+2378       }
+2379       encodedLines.push(encodedString.join(""));
+2380     }
+2381 
+2382     if (encodingError && intent & RenderingIntentFlag.SAVE) {
+2383       // We don't have a way to render the field, so we just rely on the
+2384       // /NeedAppearances trick to let the different sofware correctly render
+2385       // this pdf.
+2386       return { needAppearances: true };
+2387     }
+2388 
+2389     // We check that the font is able to encode the string.
+2390     if (encodingError && this._isOffscreenCanvasSupported) {
+2391       // If it can't then we fallback on fake unicode font (mapped to sans-serif
+2392       // for the rendering).
+2393       // It means that a printed form can be rendered differently (it depends on
+2394       // the sans-serif font) but at least we've something to render.
+2395       // In an ideal world the associated font should correctly handle the
+2396       // possible chars but a user can add a smiley or whatever.
+2397       // We could try to embed a font but it means that we must have access
+2398       // to the raw font file.
+2399       const fontFamily = this.data.comb ? "monospace" : "sans-serif";
+2400       const fakeUnicodeFont = new FakeUnicodeFont(evaluator.xref, fontFamily);
+2401       const resources = fakeUnicodeFont.createFontResources(lines.join(""));
+2402       const newFont = resources.getRaw("Font");
+2403 
+2404       if (this._fieldResources.mergedResources.has("Font")) {
+2405         const oldFont = this._fieldResources.mergedResources.get("Font");
+2406         for (const key of newFont.getKeys()) {
+2407           oldFont.set(key, newFont.getRaw(key));
+2408         }
+2409       } else {
+2410         this._fieldResources.mergedResources.set("Font", newFont);
+2411       }
+2412 
+2413       const fontName = fakeUnicodeFont.fontName.name;
+2414       font = await WidgetAnnotation._getFontData(
+2415         evaluator,
+2416         task,
+2417         { fontName, fontSize: 0 },
+2418         resources
+2419       );
+2420 
+2421       for (let i = 0, ii = encodedLines.length; i < ii; i++) {
+2422         encodedLines[i] = stringToUTF16String(lines[i]);
+2423       }
+2424 
+2425       const savedDefaultAppearance = Object.assign(
+2426         Object.create(null),
+2427         this.data.defaultAppearanceData
+2428       );
+2429       this.data.defaultAppearanceData.fontSize = 0;
+2430       this.data.defaultAppearanceData.fontName = fontName;
+2431 
+2432       [defaultAppearance, fontSize, lineHeight] = this._computeFontSize(
+2433         totalHeight - 2 * defaultPadding,
+2434         totalWidth - 2 * defaultHPadding,
+2435         value,
+2436         font,
+2437         lineCount
+2438       );
+2439 
+2440       this.data.defaultAppearanceData = savedDefaultAppearance;
+2441     } else {
+2442       if (!this._isOffscreenCanvasSupported) {
+2443         warn(
+2444           "_getAppearance: OffscreenCanvas is not supported, annotation may not render correctly."
+2445         );
+2446       }
+2447 
+2448       [defaultAppearance, fontSize, lineHeight] = this._computeFontSize(
+2449         totalHeight - 2 * defaultPadding,
+2450         totalWidth - 2 * defaultHPadding,
+2451         value,
+2452         font,
+2453         lineCount
+2454       );
+2455     }
+2456 
+2457     let descent = font.descent;
+2458     if (isNaN(descent)) {
+2459       descent = BASELINE_FACTOR * lineHeight;
+2460     } else {
+2461       descent = Math.max(
+2462         BASELINE_FACTOR * lineHeight,
+2463         Math.abs(descent) * fontSize
+2464       );
+2465     }
+2466 
+2467     // Take into account the space we have to compute the default vertical
+2468     // padding.
+2469     const defaultVPadding = Math.min(
+2470       Math.floor((totalHeight - fontSize) / 2),
+2471       defaultPadding
+2472     );
+2473     const alignment = this.data.textAlignment;
+2474 
+2475     if (this.data.multiLine) {
+2476       return this._getMultilineAppearance(
+2477         defaultAppearance,
+2478         encodedLines,
+2479         font,
+2480         fontSize,
+2481         totalWidth,
+2482         totalHeight,
+2483         alignment,
+2484         defaultHPadding,
+2485         defaultVPadding,
+2486         descent,
+2487         lineHeight,
+2488         annotationStorage
+2489       );
+2490     }
+2491 
+2492     if (this.data.comb) {
+2493       return this._getCombAppearance(
+2494         defaultAppearance,
+2495         font,
+2496         encodedLines[0],
+2497         fontSize,
+2498         totalWidth,
+2499         totalHeight,
+2500         defaultHPadding,
+2501         defaultVPadding,
+2502         descent,
+2503         lineHeight,
+2504         annotationStorage
+2505       );
+2506     }
+2507 
+2508     const bottomPadding = defaultVPadding + descent;
+2509     if (alignment === 0 || alignment > 2) {
+2510       // Left alignment: nothing to do
+2511       return (
+2512         `/Tx BMC q ${colors}BT ` +
+2513         defaultAppearance +
+2514         ` 1 0 0 1 ${numberToString(defaultHPadding)} ${numberToString(
+2515           bottomPadding
+2516         )} Tm (${escapeString(encodedLines[0])}) Tj` +
+2517         " ET Q EMC"
+2518       );
+2519     }
+2520 
+2521     const prevInfo = { shift: 0 };
+2522     const renderedText = this._renderText(
+2523       encodedLines[0],
+2524       font,
+2525       fontSize,
+2526       totalWidth,
+2527       alignment,
+2528       prevInfo,
+2529       defaultHPadding,
+2530       bottomPadding
+2531     );
+2532     return (
+2533       `/Tx BMC q ${colors}BT ` +
+2534       defaultAppearance +
+2535       ` 1 0 0 1 0 0 Tm ${renderedText}` +
+2536       " ET Q EMC"
+2537     );
+2538   }
+2539 
+2735 }
+2736 
+2737 class TextWidgetAnnotation extends WidgetAnnotation {
+2738   constructor(params) {
+2739     super(params);
+2740 
+2741     const { dict } = params;
+2742 
+2743     if (dict.has("PMD")) {
+2744       // It's used to display a barcode but it isn't specified so we just hide
+2745       // it to avoid any confusion.
+2746       this.flags |= AnnotationFlag.HIDDEN;
+2747       this.data.hidden = true;
+2748       warn("Barcodes are not supported");
+2749     }
+2750 
+2751     this.data.hasOwnCanvas = this.data.readOnly && !this.data.noHTML;
+2752     this._hasText = true;
+2753 
+2754     // The field value is always a string.
+2755     if (typeof this.data.fieldValue !== "string") {
+2756       this.data.fieldValue = "";
+2757     }
+2758 
+2759     // Determine the alignment of text in the field.
+2760     let alignment = getInheritableProperty({ dict, key: "Q" });
+2761     if (!Number.isInteger(alignment) || alignment < 0 || alignment > 2) {
+2762       alignment = null;
+2763     }
+2764     this.data.textAlignment = alignment;
+2765 
+2766     // Determine the maximum length of text in the field.
+2767     let maximumLength = getInheritableProperty({ dict, key: "MaxLen" });
+2768     if (!Number.isInteger(maximumLength) || maximumLength < 0) {
+2769       maximumLength = 0;
+2770     }
+2771     this.data.maxLen = maximumLength;
+2772 
+2773     // Process field flags for the display layer.
+2774     this.data.multiLine = this.hasFieldFlag(AnnotationFieldFlag.MULTILINE);
+2775     this.data.comb =
+2776       this.hasFieldFlag(AnnotationFieldFlag.COMB) &&
+2777       !this.hasFieldFlag(AnnotationFieldFlag.MULTILINE) &&
+2778       !this.hasFieldFlag(AnnotationFieldFlag.PASSWORD) &&
+2779       !this.hasFieldFlag(AnnotationFieldFlag.FILESELECT) &&
+2780       this.data.maxLen !== 0;
+2781     this.data.doNotScroll = this.hasFieldFlag(AnnotationFieldFlag.DONOTSCROLL);
+2782   }
+2783 
+2958 }
+2959 
+5069 
+</code>
+
+PR summary:
+<pr_summary>
+Keep the empty lines in the text fields
+It fixes #18036.
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

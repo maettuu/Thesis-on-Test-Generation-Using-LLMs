@@ -1,0 +1,104 @@
+<think>
+Okay, so I need to write a regression test for this issue where a warning appears in the console when printing a PDF with an added annotation. The warning is "Warning: Unknown field name, falling back to empty field name." 
+
+First, I should understand what's causing this warning. From the issue description, it seems that the problem was introduced by a specific patch. The patch modified the AnnotationFactory in annotation.js, changing how annotations are collected, especially when printing. The key change is that before, annotations were collected only for the document, but now they're collected when a pageIndex is present in the parameters. This likely causes some field names to be missing or unknown during printing, leading to the warning.
+
+So, the test should simulate the scenario where a user adds an annotation and then prints the PDF. The goal is to ensure that after the patch, this warning no longer appears.
+
+I'll start by setting up the test environment. I'll need to import the necessary modules, like PDFDocument, Annotation, and maybe some test utilities. Since the test runs in Node.js, I'll use dynamic imports as specified.
+
+Next, I'll create a sample PDF document. I can create a new PDFDocument and add a page to it. Then, I'll create an annotation, perhaps a text annotation, and add it to the page. 
+
+After setting up the document and annotation, I'll simulate the printing process. This might involve rendering the PDF or using the print function, but since we're testing for the warning, I might need to check the console output or see if the annotation is correctly handled without triggering the warning.
+
+Wait, but how do I check for the warning? Since it's a console warning, perhaps I can mock the console.warn function and check if it's called during the test. Alternatively, I can check if the annotation is correctly processed without the warning.
+
+But in the context of pdf.js tests, maybe there's a way to capture warnings or errors. Alternatively, I can just test that after applying the patch, the warning doesn't occur when performing the steps.
+
+So, the test steps would be:
+
+1. Create a PDF document with a page.
+2. Add an annotation to the page.
+3. Attempt to print the document or trigger the code path that causes the warning.
+4. Check that the warning is not logged.
+
+But how do I trigger the print functionality in the test? Maybe I can use the print function from the PDF viewer, but I'm not sure. Alternatively, I can directly test the annotation creation and collection process.
+
+Wait, looking at the patch, the issue arises when collectFields is true. So, perhaps the test should create an annotation and then attempt to collect fields, which would trigger the warning if the field name is unknown.
+
+So, the test could involve creating an annotation with a specific field and then checking if the warning is generated. After the patch, the warning should not appear.
+
+I think the test should focus on the AnnotationFactory and whether it correctly handles the field names when collectFields is true. So, I'll set up the test to create an annotation and then check if the warning is thrown.
+
+In the test, I'll import the necessary modules, create a PDF document, add a page, create an annotation, and then try to process it. I'll mock the console.warn function to see if it's called with the expected warning message.
+
+So, putting it all together, the test will:
+
+- Import PDFDocument and Annotation from the correct paths.
+- Create a new PDF document and add a page.
+- Create an annotation (maybe a text annotation) and add it to the page.
+- Use the AnnotationFactory with collectFields set to true to process the annotations.
+- Check if console.warn was called with the warning message.
+
+Wait, but in the patch, the collectFields parameter is now passed to the AnnotationFactory. So, in the test, I need to create an instance of AnnotationFactory with collectFields: true and see if processing the annotations throws the warning.
+
+Alternatively, perhaps the test should create an annotation and then attempt to print, which internally uses the AnnotationFactory with collectFields: true.
+
+Hmm, maybe I should structure the test to simulate the printing process, which would involve creating the annotations and then triggering the code that collects them for printing. If the warning is not present after the patch, the test should pass.
+
+So, the test will:
+
+1. Create a PDF document with a page.
+2. Add an annotation to the page.
+3. Create a mock function for console.warn.
+4. Use the AnnotationFactory with collectFields: true to process the annotations.
+5. Check if the mock function was called with the warning message.
+
+If the patch is correct, the warning should not be logged, so the test should assert that console.warn was not called.
+
+Wait, but in the before scenario, the warning was present. So, the test should fail before the patch and pass after. So, the test is written to expect that the warning is not present after the patch.
+
+Therefore, the test will mock console.warn and expect that it's not called during the processing of the annotation.
+
+Putting it all together, the test code would look something like:
+
+Import the necessary modules.
+Create a PDF document and add a page.
+Create an annotation and add it to the page.
+Mock console.warn.
+Process the annotations with collectFields: true.
+Assert that console.warn was not called with the specific warning message.
+
+I think that's a solid approach. Now, I'll write the code accordingly, making sure to use dynamic imports and only the allowed modules.
+</think>
+
+```javascript
+it("should not warn about unknown field names when printing with annotations", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Annotation } = await import("../../src/core/annotation.js");
+
+  const pdf = new PDFDocument();
+  const page = pdf.addPage();
+  const annotation = new Annotation({
+    type: "Text",
+    rect: [0, 0, 100, 100],
+    contents: "Test annotation",
+  });
+  page.annotations.push(annotation);
+
+  const originalWarn = console.warn;
+  console.warn = jest.fn();
+
+  const annotationFactory = new (await import("../../src/core/annotation.js")).AnnotationFactory({
+    pdf,
+    idFactory: await import("../../src/core/util.js").Util.createIdFactory(),
+    collectFields: true,
+  });
+
+  await annotationFactory.processAnnotations();
+
+  expect(console.warn).not.toHaveBeenCalledWith("Warning: Unknown field name, falling back to empty field name.");
+
+  console.warn = originalWarn;
+});
+```

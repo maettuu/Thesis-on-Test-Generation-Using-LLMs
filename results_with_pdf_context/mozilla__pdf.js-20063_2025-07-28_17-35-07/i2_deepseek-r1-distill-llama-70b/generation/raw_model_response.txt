@@ -1,0 +1,65 @@
+<think>
+Okay, I need to write a regression test for the bug where the PolygonAnnotation's fill isn't rendered in PDF.js. The test should fail before the patch and pass after. 
+
+First, I'll use the provided PDF file, issue20062.pdf, which has a polygon with both stroke and fill. I'll need to open this PDF using PDF.js and check if the fill is rendered correctly.
+
+I'll start by importing the necessary modules. Since the test runs in Node.js, I'll use dynamic imports for getDocument and buildGetDocumentParams. 
+
+Next, I'll load the document and get the first page. Once the page is loaded, I'll create a canvas element to draw the page. 
+
+Now, I need to extract the polygon annotation from the page. I'll find the annotations and check each one to see if it's a PolygonAnnotation. Once found, I'll get its appearance and check if the fill is present.
+
+I'll set up an event listener for when the page is rendered to the canvas. After rendering, I'll use the canvas context to get the pixel data. I'll check a specific point (e.g., the center) to see if the fill color is present. 
+
+I'll compare the actual pixel values to the expected fill color. If they match, the test passes; otherwise, it fails.
+
+I need to ensure the test is self-contained and doesn't rely on external dependencies beyond what's provided. Also, the test should be concise and directly test the fill rendering issue.
+
+Finally, I'll structure the test as an async function using Jest's it syntax, making sure it returns only the JavaScript code without any extra comments.
+</think>
+
+```javascript
+it("should render polygon annotation with fill color", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue20062.pdf'));
+  
+  const doc = await loadingTask.promise;
+  const page = await doc.getPage(1);
+  
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  
+  let annotation;
+  
+  page.on('annotationloaded', (annotationArgs) => {
+    if (annotationArgs.annotation instanceof PolygonAnnotation) {
+      annotation = annotationArgs.annotation;
+    }
+  });
+  
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport: page.getViewport({ scale: 1 })
+  });
+  
+  const expectedFillColor = [0, 255, 0]; // Green fill color
+  
+  const fillResolve = new Promise(resolve => {
+    renderTask.on('finish', () => {
+      const pixelData = context.getImageData(
+        canvas.width/2,
+        canvas.height/2,
+        1,
+        1
+      ).data;
+      
+      resolve(pixelData);
+    });
+  });
+  
+  const actualPixelData = await fillResolve;
+  
+  expect(actualPixelData).toEqual(expectedFillColor.concat([255]));
+});
+```

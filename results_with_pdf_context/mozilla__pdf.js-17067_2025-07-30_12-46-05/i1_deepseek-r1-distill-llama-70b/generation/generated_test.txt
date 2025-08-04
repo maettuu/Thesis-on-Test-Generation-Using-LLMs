@@ -1,0 +1,42 @@
+it("should correctly update minmax for transformed rectangles", async () => {
+  const { getDocument, buildGetDocumentParams } = await import("../../src/display/api.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue17065.pdf'));
+  const doc = await loadingTask.promise;
+  const page = await doc.getPage(1);
+  const canvas = {
+    getContext: () => ({
+      createPattern: jest.fn(),
+      fillRect: jest.fn(),
+      measureText: () => ({ width: 0 }),
+      save: jest.fn(),
+      restore: jest.fn(),
+      translate: jest.fn(),
+      scale: jest.fn(),
+      rotate: jest.fn(),
+      transform: jest.fn(),
+      clip: jest.fn(),
+      resetTransform: jest.fn(),
+    })
+  };
+  const renderTask = page.render({
+    canvasContext: canvas.getContext(),
+    viewport: page.getViewport({ scale: 1 }),
+  });
+  await renderTask.promise;
+  const extraState = new CanvasExtraState(100, 100);
+  const rect = [0, 0, 100, 100];
+  const transform = [1, 0.5, 0, 1, 0, 0]; // Skew transform
+  extraState.minX = Infinity;
+  extraState.minY = Infinity;
+  extraState.maxX = -Infinity;
+  extraState.maxY = -Infinity;
+  extraState.updateRectMinMax(transform, rect);
+  const p1 = Util.applyTransform(rect, transform);
+  const p2 = Util.applyTransform([rect[2], rect[1]], transform);
+  const p3 = Util.applyTransform([rect[0], rect[3]], transform);
+  const p4 = Util.applyTransform([rect[2], rect[1]], transform);
+  expect(extraState.minX).toBe(Math.min(p1[0], p2[0], p3[0], p4[0]));
+  expect(extraState.minY).toBe(Math.min(p1[1], p2[1], p3[1], p4[1]));
+  expect(extraState.maxX).toBe(Math.max(p1[0], p2[0], p3[0], p4[0]));
+  expect(extraState.maxY).toBe(Math.max(p1[1], p2[1], p3[1], p4[1]));
+});

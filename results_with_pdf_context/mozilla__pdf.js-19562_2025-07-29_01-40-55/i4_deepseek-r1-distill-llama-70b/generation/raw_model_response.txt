@@ -1,0 +1,52 @@
+<think>
+Okay, I need to write a regression test for the PDF.js project. The issue is that some Russian characters aren't rendering correctly, and the problem was fixed with a patch in standard_fonts.js. My task is to create a test that fails before the patch and passes after it's applied.
+
+First, I'll look at the patch provided. It adds several entries to the getGlyphMapForStandardFonts function. These entries map specific CID values to GID values, which probably fix the rendering of certain glyphs, including the problematic Russian characters.
+
+The test should verify that after applying the patch, the glyphs are correctly rendered. So, I'll need to check if the glyphs for the affected Russian characters are present and correctly mapped.
+
+I'll start by importing the necessary modules. Since the test runs in Node.js, I'll use dynamic imports for getDocument from the display API and buildGetDocumentParams from test_utils.js. Also, I'll need the getGlyphMapForStandardFonts function from standard_fonts.js.
+
+Next, I'll load the PDF document using getDocument with the provided test file. Then, I'll get the first page and its operator list to access the text content.
+
+I'll extract the text from the page and check if it contains the expected Russian characters. The expected text should include the correctly rendered glyphs, so I'll define an expected string with those characters.
+
+Before the patch, the text might be incorrect or contain placeholders. After the patch, the text should match the expected string.
+
+I'll use Jest's it function to write the test. Inside the test, I'll load the PDF, extract the text, and compare it to the expected value using expect().toBe().
+
+I need to ensure that the test is self-contained and doesn't rely on any external dependencies beyond what's provided. Also, the test should be concise and directly target the issue without unnecessary steps.
+
+So, putting it all together, the test will load the PDF, extract the text, and verify that the Russian characters are correctly rendered, ensuring the patch works as intended.
+</think>
+
+```javascript
+it("should correctly render Russian characters in PDFs", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue19550.pdf'));
+  const { getGlyphMapForStandardFonts } = await import('../../src/core/standard_fonts.js');
+  
+  const expectedText = "Русский текст";
+  const expectedGlyphs = new Set([570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, 595, 596, 597, 598, 599, 600]);
+  
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const ops = await page.getOperatorList();
+  const text = await page.getTextContent();
+  
+  const glyphMap = getGlyphMapForStandardFonts();
+  const actualGlyphs = new Set();
+  
+  for (const op of ops) {
+    if (op.op === 'Tj') {
+      const textString = op.args[0].toString();
+      const codePoints = Array.from(textString, (c) => c.codePointAt(0));
+      actualGlyphs.add(glyphMap[codePoints[0]] || 0);
+    }
+  }
+  
+  expect(text.items[0].str).toBe(expectedText);
+  expect(actualGlyphs).toEqual(expectedGlyphs);
+});
+```

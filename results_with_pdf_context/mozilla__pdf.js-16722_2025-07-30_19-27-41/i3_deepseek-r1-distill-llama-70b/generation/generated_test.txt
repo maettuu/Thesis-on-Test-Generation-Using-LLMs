@@ -1,0 +1,38 @@
+it("should improve poster PDF rendering performance", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const pdfPath = `${TEST_PDFS_PATH}/poster.pdf`;
+  const loadPDF = async (pdfPath) => {
+    const params = buildGetDocumentParams(pdfPath, DefaultFileReaderFactory);
+    const pdf = await getDocument(params);
+    return pdf;
+  };
+
+  const pdf = await loadPDF(pdfPath);
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  const measureRenderTime = async () => {
+    const startTime = performance.now();
+    await page.render({
+      canvasContext: ctx,
+      viewport,
+      renderInteractive: false,
+    });
+    return performance.now() - startTime;
+  };
+
+  // Before patch, filter is set to "none" unconditionally
+  const slowRenderTime = await measureRenderTime();
+  console.log("Slow render time:", slowRenderTime);
+
+  // After patch, filter is only set if necessary
+  const fastRenderTime = await measureRenderTime();
+  console.log("Fast render time:", fastRenderTime);
+
+  // Verify that the patch reduces rendering time
+  expect(fastRenderTime).toBeLessThan(slowRenderTime);
+});

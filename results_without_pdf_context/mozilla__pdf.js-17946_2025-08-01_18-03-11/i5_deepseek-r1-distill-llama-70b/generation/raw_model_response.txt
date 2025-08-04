@@ -1,0 +1,54 @@
+<think>
+Okay, I need to write a test for the issue where large images in PDFs aren't rendering in PDF.js but do in other viewers like Atril. The user provided a patch, and I need to ensure the test fails before the patch and passes after.
+
+First, I should understand the problem. The user mentioned that when opening a specific PDF, the scanned image isn't rendered. The console logs show warnings about unsupported JPX options and decoding errors. The patch seems to replace the JPX decoding with OpenJPEG, which is an external library.
+
+So, the test should check if the image is correctly decoded after applying the patch. I'll need to create a test that reads the example PDF, attempts to decode the image, and verifies that it's rendered properly.
+
+I'll structure the test using Jest. The test will import the necessary modules, including the PDF.js and OpenJPEG libraries. Then, it will fetch the example PDF file. Using PDF.js, it will load the PDF, get the first page, and render it. After rendering, it will check if the image was successfully decoded by verifying the rendered data.
+
+Before the patch, the test should fail because the image isn't rendered. After the patch, the image should render, so the test should pass. I'll set up the test to compare the rendered data against an expected value, which I can determine by running the test after applying the patch.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll dynamically import the necessary modules to avoid any issues with Node.js compatibility. The test will use async/await for loading the PDF and handling the rendering process.
+
+I should also handle any potential errors, such as the PDF failing to load or the image not being decoded. If any of these steps fail, the test should throw an error.
+
+Finally, I'll write the test block, ensuring it's concise and to the point, focusing solely on verifying the image rendering after the patch.
+</think>
+
+```javascript
+it("should render large scanned images in PDFs", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { OpenJPEG } = await import("../../external/openjpeg/openjpeg.js");
+  
+  const examplePdf = await fetch("https://github.com/mozilla/pdf.js/files/13391396/example.pdf");
+  const pdfData = await examplePdf.arrayBuffer();
+  
+  const pdf = await PDFDocument.load(
+    new Uint8Array(pdfData),
+    {
+      onProgress: (progress) => {
+        if (progress === 1) {
+          throw new Error("PDF failed to load");
+        }
+      },
+    }
+  );
+  
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const renderTask = page.render({
+    viewport,
+    canvasContext: { willReadFrequently: true },
+    flags: new Set(["APPEARANCE"]),
+  });
+  
+  const result = await renderTask.promise;
+  
+  if (!result || !result.resolved) {
+    throw new Error("Image rendering failed");
+  }
+  
+  expect(result).toBeTruthy();
+});
+```

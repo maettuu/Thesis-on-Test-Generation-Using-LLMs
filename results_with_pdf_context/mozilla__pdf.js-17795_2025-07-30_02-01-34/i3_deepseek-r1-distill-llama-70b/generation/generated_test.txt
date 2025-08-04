@@ -1,0 +1,28 @@
+it("should correctly render inlined images without closing EI", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue17794.pdf'));
+  const { pdfDocument } = await loadingTask;
+  const page = await pdfDocument.getPage(1);
+  const operatorList = new OperatorList();
+  const imageRenderCount = { count: 0 };
+
+  // Create a sink to track image rendering operations
+  const sink = {
+    enqueue: (chunk, size) => {
+      if (chunk.items && chunk.items[0]?.fn === OPS.paintInlineImageXObject) {
+        imageRenderCount.count++;
+      }
+    },
+  };
+
+  // Render the page and collect operatorList
+  await page.render({
+    sink,
+    operatorList,
+    viewport: page.getViewport({ scale: 1 }),
+  });
+
+  // The PDF should contain two inlined images
+  expect(imageRenderCount.count).toBe(2);
+});

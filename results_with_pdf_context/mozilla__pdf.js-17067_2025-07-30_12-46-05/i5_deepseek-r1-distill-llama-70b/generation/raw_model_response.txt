@@ -1,0 +1,59 @@
+<think>
+Okay, I need to write a regression test for the issue where applying a transform breaks the pattern in PDF.js. The user provided a patch that modifies the updateRectMinMax function in canvas.js. My test should fail before the patch and pass after.
+
+First, I'll start by understanding the problem. The issue is that when a skew and rotation transform is applied, the pattern doesn't appear correctly. The patch changes how the min and max coordinates are calculated by considering all four corners of the rectangle, not just two. This ensures the bounding box is correctly computed even after transformations.
+
+I'll use the provided PDF file, issue17065.pdf, for testing. The test should render the PDF and check if the patterns are displayed correctly. Since it's a visual issue, I'll need to compare the rendered canvas to an expected state.
+
+I'll set up the test using Jest. I'll import the necessary modules like getDocument from api.js and buildGetDocumentParams from test_utils.js. Then, I'll load the PDF document and get the first page.
+
+Next, I'll create a canvas element to render the page. I'll set the scale to 1 and render the page into the canvas. After rendering, I'll extract the pixel data from the canvas.
+
+The expected behavior is that the patterns (rectangles with gradients) should be visible. I'll define the expected colors for the areas that should be colored. For example, I'll check if the top left rectangle has the correct red, blue, and green pixels.
+
+I'll write the test to check each expected color at specific coordinates. If any of these checks fail, the test will fail, indicating the issue isn't resolved. After applying the patch, the test should pass because the patterns will render correctly.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll structure the test with async/await for loading the PDF and rendering the page. The test will return a promise that resolves when all checks are done.
+
+Finally, I'll write the test code, ensuring it's concise and only includes the necessary steps. I'll use dynamic imports to maintain compatibility with Node.js and avoid adding new dependencies.
+</think>
+
+```javascript
+it("should render patterns correctly after transform", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  
+  const loadingTask = getDocument(buildGetDocumentParams('issue17065.pdf'));
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const scale = 1;
+  const viewport = page.getViewport({ scale });
+  
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  
+  await page.render({
+    canvasContext: context,
+    viewport,
+    scale,
+  });
+  
+  const expectedColors = [
+    { x: 100, y: 100, r: 255, g: 0, b: 0 }, // Red part
+    { x: 200, y: 200, r: 0, g: 0, b: 255 }, // Blue part
+    { x: 300, y: 300, r: 0, g: 255, b: 0 }, // Green part
+    { x: 400, y: 400, r: 128, g: 0, b: 128 } // Purple part
+  ];
+  
+  const pixelData = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  
+  expectedColors.forEach(({ x, y, r, g, b }) => {
+    const index = (y * canvas.width + x) * 4;
+    expect(pixelData[index + 0]).toBeCloseTo(r, -1);
+    expect(pixelData[index + 1]).toBeCloseTo(g, -1);
+    expect(pixelData[index + 2]).toBeCloseTo(b, -1);
+  });
+});
+```

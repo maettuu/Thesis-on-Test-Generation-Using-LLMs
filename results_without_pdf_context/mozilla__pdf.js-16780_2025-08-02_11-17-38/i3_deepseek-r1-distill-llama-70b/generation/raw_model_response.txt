@@ -1,0 +1,48 @@
+<think>
+Okay, so I need to write a regression test for the issue where SVG images couldn't be resized in pdf.js. The patch provided is supposed to fix this by adjusting how SVGs are handled when drawing on a canvas. 
+
+First, I'll look at the patch to understand what it does. The patch adds a method _checkIfSVGFitsInCanvas which checks if an SVG image can be resized without preserving the aspect ratio. It creates a test SVG, draws it on a canvas, and checks the pixel color to determine if the resizing worked. Then, when handling SVG images, it appends a URL fragment to remove the aspect ratio preservation if necessary.
+
+So, the test needs to verify that after the patch, resizing an SVG image works correctly. The test should create an SVG, add it to the ImageManager, and then check if it's properly resized.
+
+I'll start by importing the necessary modules. I'll need the ImageManager from the editor tools and the createImageBitmap from the canvas module. 
+
+Next, I'll set up the test SVG data. It's a simple red square, which is easy to test against.
+
+Then, I'll create an instance of ImageManager and use it to get the image data. Since the test is async, I'll await the getFromUrl method with the SVG data URL.
+
+After getting the image data, I'll create a canvas element to draw the image. I'll set the canvas size to 1x3 to test vertical resizing. Drawing the image and checking the pixel color will tell me if the image was resized correctly.
+
+If the top pixel isn't red, it means the image didn't resize, so the test should fail. If it's red, the test passes.
+
+I need to make sure the test is self-contained and doesn't rely on any external files except the provided imports. Also, it should only include the necessary code within the test block.
+
+So, putting it all together, the test creates an SVG, checks if it's resized by drawing on a canvas, and asserts the expected result. This should catch the bug before the patch and confirm it's fixed after.
+</think>
+
+```javascript
+it("should correctly resize SVG images", async () => {
+  const { ImageManager } = await import("../../src/display/editor/tools.js");
+  const { createImageBitmap } = await import("../../src/display/canvas.js");
+
+  const svgData = `<svg viewBox="0 0 1 1" width="1" height="1" xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1" style="fill:red;"/></svg>`;
+  const svgUrl = `data:image/svg+xml;charset=UTF-8,${svgData}`;
+  
+  const imageManager = new ImageManager();
+  const imageData = await imageManager.getFromUrl(svgUrl);
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  
+  canvas.width = 1;
+  canvas.height = 3;
+  
+  const image = await createImageBitmap(imageData.bitmap);
+  ctx.drawImage(image, 0, 0, 1, 1, 0, 0, 1, 3);
+  
+  const pixel = ctx.getImageData(0, 0, 1, 1).data;
+  const isRed = pixel[0] === 255 && pixel[1] === 0 && pixel[2] === 0;
+  
+  expect(isRed).toBe(true);
+});
+```

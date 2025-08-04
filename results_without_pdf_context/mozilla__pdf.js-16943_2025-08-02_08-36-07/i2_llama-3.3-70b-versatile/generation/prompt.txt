@@ -1,0 +1,659 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Change the style of the line and the resizers around a selected editor
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/editor.js b/src/display/editor/editor.js
+--- a/src/display/editor/editor.js
++++ b/src/display/editor/editor.js
+@@ -58,6 +58,8 @@ class AnnotationEditor {
+ 
+   #zIndex = AnnotationEditor._zIndex++;
+ 
++  static _borderLineWidth = -1;
++
+   static _colorManager = new ColorManager();
+ 
+   static _zIndex = 1;
+@@ -124,7 +126,14 @@ class AnnotationEditor {
+    * Initialize the l10n stuff for this type of editor.
+    * @param {Object} _l10n
+    */
+-  static initialize(_l10n) {}
++  static initialize(_l10n) {
++    if (AnnotationEditor._borderLineWidth !== -1) {
++      return;
++    }
++    const style = getComputedStyle(document.documentElement);
++    AnnotationEditor._borderLineWidth =
++      parseFloat(style.getPropertyValue("--outline-width")) || 0;
++  }
+ 
+   /**
+    * Update the default parameters for this type of editor.
+@@ -365,11 +374,34 @@ class AnnotationEditor {
+ 
+     // The editor can be moved wherever the user wants, so we don't need to fix
+     // the position: it'll be done when the user will release the mouse button.
+-    this.div.style.left = `${(100 * this.x).toFixed(2)}%`;
+-    this.div.style.top = `${(100 * this.y).toFixed(2)}%`;
++
++    let { x, y } = this;
++    const [bx, by] = this.#getBaseTranslation();
++    x += bx;
++    y += by;
++
++    this.div.style.left = `${(100 * x).toFixed(2)}%`;
++    this.div.style.top = `${(100 * y).toFixed(2)}%`;
+     this.div.scrollIntoView({ block: "nearest" });
+   }
+ 
++  #getBaseTranslation() {
++    const [parentWidth, parentHeight] = this.parentDimensions;
++    const { _borderLineWidth } = AnnotationEditor;
++    const x = _borderLineWidth / parentWidth;
++    const y = _borderLineWidth / parentHeight;
++    switch (this.rotation) {
++      case 90:
++        return [-x, y];
++      case 180:
++        return [x, y];
++      case 270:
++        return [x, -y];
++      default:
++        return [-x, -y];
++    }
++  }
++
+   fixAndSetPosition() {
+     const [pageWidth, pageHeight] = this.pageDimensions;
+     let { x, y, width, height } = this;
+@@ -400,6 +432,10 @@ class AnnotationEditor {
+     this.x = x /= pageWidth;
+     this.y = y /= pageHeight;
+ 
++    const [bx, by] = this.#getBaseTranslation();
++    x += bx;
++    y += by;
++
+     const { style } = this.div;
+     style.left = `${(100 * x).toFixed(2)}%`;
+     style.top = `${(100 * y).toFixed(2)}%`;
+
+diff --git a/src/display/editor/freetext.js b/src/display/editor/freetext.js
+--- a/src/display/editor/freetext.js
++++ b/src/display/editor/freetext.js
+@@ -145,6 +145,7 @@ class FreeTextEditor extends AnnotationEditor {
+ 
+   /** @inheritdoc */
+   static initialize(l10n) {
++    super.initialize(l10n);
+     this._l10nPromise = new Map(
+       ["free_text2_default_content", "editor_free_text2_aria_label"].map(
+         str => [str, l10n.get(str)]
+
+diff --git a/src/display/editor/ink.js b/src/display/editor/ink.js
+--- a/src/display/editor/ink.js
++++ b/src/display/editor/ink.js
+@@ -84,6 +84,7 @@ class InkEditor extends AnnotationEditor {
+ 
+   /** @inheritdoc */
+   static initialize(l10n) {
++    super.initialize(l10n);
+     this._l10nPromise = new Map(
+       ["editor_ink_canvas_aria_label", "editor_ink2_aria_label"].map(str => [
+         str,
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.17
+- @babel/plugin-transform-modules-commonjs: ^7.22.15
+- @babel/preset-env: ^7.22.15
+- @babel/runtime: ^7.22.15
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.15
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001532
+- canvas: ^2.11.2
+- core-js: ^3.32.2
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.49.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.28.1
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.2.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.1
+- globals: ^13.21.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.29
+- postcss-dir-pseudo-class: ^8.0.0
+- postcss-nesting: ^12.0.1
+- prettier: ^3.0.3
+- puppeteer: ^21.1.1
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.3
+- stylelint-prettier: ^4.0.2
+- terser: ^5.19.4
+- through2: ^4.0.2
+- tsc-alias: ^1.8.7
+- ttest: ^4.0.0
+- typescript: ^5.2.2
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/editor.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 // eslint-disable-next-line max-len
+18 // eslint-disable-next-line max-len
+20 
+21 import { bindEvents, ColorManager } from "./tools.js";
+22 import { FeatureTest, shadow, unreachable } from "../../shared/util.js";
+23 
+33 /**
+34  * Base class for editors.
+35  */
+36 class AnnotationEditor {
+37   #keepAspectRatio = false;
+38 
+39   #resizersDiv = null;
+40 
+41   #boundFocusin = this.focusin.bind(this);
+42 
+43   #boundFocusout = this.focusout.bind(this);
+44 
+45   #hasBeenClicked = false;
+46 
+47   #isEditing = false;
+48 
+49   #isInEditMode = false;
+50 
+51   _initialOptions = Object.create(null);
+52 
+53   _uiManager = null;
+54 
+55   _focusEventsAllowed = true;
+56 
+57   #isDraggable = false;
+58 
+59   #zIndex = AnnotationEditor._zIndex++;
+60 
+61   static _colorManager = new ColorManager();
+62 
+63   static _zIndex = 1;
+64 
+65   /**
+66    * @param {AnnotationEditorParameters} parameters
+67    */
+68   constructor(parameters) {
+69     if (this.constructor === AnnotationEditor) {
+70       unreachable("Cannot initialize AnnotationEditor.");
+71     }
+72 
+73     this.parent = parameters.parent;
+74     this.id = parameters.id;
+75     this.width = this.height = null;
+76     this.pageIndex = parameters.parent.pageIndex;
+77     this.name = parameters.name;
+78     this.div = null;
+79     this._uiManager = parameters.uiManager;
+80     this.annotationElementId = null;
+81     this._willKeepAspectRatio = false;
+82     this._initialOptions.isCentered = parameters.isCentered;
+83     this._structTreeParentId = null;
+84 
+85     const {
+86       rotation,
+87       rawDims: { pageWidth, pageHeight, pageX, pageY },
+88     } = this.parent.viewport;
+89 
+90     this.rotation = rotation;
+91     this.pageRotation =
+92       (360 + rotation - this._uiManager.viewParameters.rotation) % 360;
+93     this.pageDimensions = [pageWidth, pageHeight];
+94     this.pageTranslation = [pageX, pageY];
+95 
+96     const [width, height] = this.parentDimensions;
+97     this.x = parameters.x / width;
+98     this.y = parameters.y / height;
+99 
+100     this.isAttachedToDOM = false;
+101     this.deleted = false;
+102   }
+103 
+123   /**
+124    * Initialize the l10n stuff for this type of editor.
+125    * @param {Object} _l10n
+126    */
+127   static initialize(_l10n) {}
+128 
+346   drag(tx, ty) {
+347     const [parentWidth, parentHeight] = this.parentDimensions;
+348     this.x += tx / parentWidth;
+349     this.y += ty / parentHeight;
+350     if (this.parent && (this.x < 0 || this.x > 1 || this.y < 0 || this.y > 1)) {
+351       // It's possible to not have a parent: for example, when the user is
+352       // dragging all the selected editors but this one on a page which has been
+353       // destroyed.
+354       // It's why we need to check for it. In such a situation, it isn't really
+355       // a problem to not find a new parent: it's something which is related to
+356       // what the user is seeing, hence it depends on how pages are layed out.
+357 
+358       // The element will be outside of its parent so change the parent.
+359       const { x, y } = this.div.getBoundingClientRect();
+360       if (this.parent.findNewParent(this, x, y)) {
+361         this.x -= Math.floor(this.x);
+362         this.y -= Math.floor(this.y);
+363       }
+364     }
+365 
+366     // The editor can be moved wherever the user wants, so we don't need to fix
+367     // the position: it'll be done when the user will release the mouse button.
+368     this.div.style.left = `${(100 * this.x).toFixed(2)}%`;
+369     this.div.style.top = `${(100 * this.y).toFixed(2)}%`;
+370     this.div.scrollIntoView({ block: "nearest" });
+371   }
+372 
+373   fixAndSetPosition() {
+374     const [pageWidth, pageHeight] = this.pageDimensions;
+375     let { x, y, width, height } = this;
+376     width *= pageWidth;
+377     height *= pageHeight;
+378     x *= pageWidth;
+379     y *= pageHeight;
+380 
+381     switch (this.rotation) {
+382       case 0:
+383         x = Math.max(0, Math.min(pageWidth - width, x));
+384         y = Math.max(0, Math.min(pageHeight - height, y));
+385         break;
+386       case 90:
+387         x = Math.max(0, Math.min(pageWidth - height, x));
+388         y = Math.min(pageHeight, Math.max(width, y));
+389         break;
+390       case 180:
+391         x = Math.min(pageWidth, Math.max(width, x));
+392         y = Math.min(pageHeight, Math.max(height, y));
+393         break;
+394       case 270:
+395         x = Math.min(pageWidth, Math.max(height, x));
+396         y = Math.max(0, Math.min(pageHeight - width, y));
+397         break;
+398     }
+399 
+400     this.x = x /= pageWidth;
+401     this.y = y /= pageHeight;
+402 
+403     const { style } = this.div;
+404     style.left = `${(100 * x).toFixed(2)}%`;
+405     style.top = `${(100 * y).toFixed(2)}%`;
+406 
+407     this.moveInDOM();
+408   }
+409 
+1172 }
+1173 
+1174 // This class is used to fake an editor which has been deleted.
+1190 
+File:
+src/display/editor/freetext.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 // eslint-disable-next-line max-len
+18 
+19 import {
+20   AnnotationEditorParamsType,
+21   AnnotationEditorType,
+22   assert,
+23   LINE_FACTOR,
+24   shadow,
+25   Util,
+26 } from "../../shared/util.js";
+27 import {
+28   AnnotationEditorUIManager,
+29   bindEvents,
+30   KeyboardManager,
+31 } from "./tools.js";
+32 import { AnnotationEditor } from "./editor.js";
+33 import { FreeTextAnnotationElement } from "../annotation_layer.js";
+34 
+35 /**
+36  * Basic text editor in order to create a FreeTex annotation.
+37  */
+38 class FreeTextEditor extends AnnotationEditor {
+39   #boundEditorDivBlur = this.editorDivBlur.bind(this);
+40 
+41   #boundEditorDivFocus = this.editorDivFocus.bind(this);
+42 
+43   #boundEditorDivInput = this.editorDivInput.bind(this);
+44 
+45   #boundEditorDivKeydown = this.editorDivKeydown.bind(this);
+46 
+47   #color;
+48 
+49   #content = "";
+50 
+51   #editorDivId = `${this.id}-editor`;
+52 
+53   #fontSize;
+54 
+55   #initialData = null;
+56 
+57   static _freeTextDefaultContent = "";
+58 
+59   static _l10nPromise;
+60 
+61   static _internalPadding = 0;
+62 
+63   static _defaultColor = null;
+64 
+65   static _defaultFontSize = 10;
+66 
+135   static _type = "freetext";
+136 
+137   constructor(params) {
+138     super({ ...params, name: "freeTextEditor" });
+139     this.#color =
+140       params.color ||
+141       FreeTextEditor._defaultColor ||
+142       AnnotationEditor._defaultLineColor;
+143     this.#fontSize = params.fontSize || FreeTextEditor._defaultFontSize;
+144   }
+145 
+146   /** @inheritdoc */
+147   static initialize(l10n) {
+148     this._l10nPromise = new Map(
+149       ["free_text2_default_content", "editor_free_text2_aria_label"].map(
+150         str => [str, l10n.get(str)]
+151       )
+152     );
+153 
+154     const style = getComputedStyle(document.documentElement);
+155 
+156     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+157       const lineHeight = parseFloat(
+158         style.getPropertyValue("--freetext-line-height")
+159       );
+160       assert(
+161         lineHeight === LINE_FACTOR,
+162         "Update the CSS variable to agree with the constant."
+163       );
+164     }
+165 
+166     this._internalPadding = parseFloat(
+167       style.getPropertyValue("--freetext-padding")
+168     );
+169   }
+170 
+786 }
+787 
+File:
+src/display/editor/ink.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorParamsType,
+18   AnnotationEditorType,
+19   Util,
+20 } from "../../shared/util.js";
+21 import { AnnotationEditor } from "./editor.js";
+22 import { InkAnnotationElement } from "../annotation_layer.js";
+23 import { opacityToHex } from "./tools.js";
+24 
+25 /**
+26  * Basic draw editor in order to generate an Ink annotation.
+27  */
+28 class InkEditor extends AnnotationEditor {
+29   #baseHeight = 0;
+30 
+31   #baseWidth = 0;
+32 
+33   #boundCanvasContextMenu = this.canvasContextMenu.bind(this);
+34 
+35   #boundCanvasPointermove = this.canvasPointermove.bind(this);
+36 
+37   #boundCanvasPointerleave = this.canvasPointerleave.bind(this);
+38 
+39   #boundCanvasPointerup = this.canvasPointerup.bind(this);
+40 
+41   #boundCanvasPointerdown = this.canvasPointerdown.bind(this);
+42 
+43   #currentPath2D = new Path2D();
+44 
+45   #disableEditing = false;
+46 
+47   #hasSomethingToDraw = false;
+48 
+49   #isCanvasInitialized = false;
+50 
+51   #observer = null;
+52 
+53   #realWidth = 0;
+54 
+55   #realHeight = 0;
+56 
+57   #requestFrameCallback = null;
+58 
+59   static _defaultColor = null;
+60 
+61   static _defaultOpacity = 1;
+62 
+63   static _defaultThickness = 1;
+64 
+65   static _l10nPromise;
+66 
+67   static _type = "ink";
+68 
+69   constructor(params) {
+70     super({ ...params, name: "inkEditor" });
+71     this.color = params.color || null;
+72     this.thickness = params.thickness || null;
+73     this.opacity = params.opacity || null;
+74     this.paths = [];
+75     this.bezierPath2D = [];
+76     this.allRawPaths = [];
+77     this.currentPath = [];
+78     this.scaleFactor = 1;
+79     this.translationX = this.translationY = 0;
+80     this.x = 0;
+81     this.y = 0;
+82     this._willKeepAspectRatio = true;
+83   }
+84 
+85   /** @inheritdoc */
+86   static initialize(l10n) {
+87     this._l10nPromise = new Map(
+88       ["editor_ink_canvas_aria_label", "editor_ink2_aria_label"].map(str => [
+89         str,
+90         l10n.get(str),
+91       ])
+92     );
+93   }
+94 
+1205 }
+1206 
+</code>
+
+PR summary:
+<pr_summary>
+[Editor] Change the style of the bounding box and the resizers (bug 1852897)
+
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

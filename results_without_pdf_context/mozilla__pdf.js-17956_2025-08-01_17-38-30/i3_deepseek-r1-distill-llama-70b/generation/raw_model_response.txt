@@ -1,0 +1,40 @@
+<think>
+Okay, I need to create a regression test for the issue where the JPX fuzzer was spamming the output with "OpenJPEG: Unknown format" logs. The patch provided modifies the decode function in jpx.js to throw a JpxError with the message from the OpenJPEG module instead of a generic string.
+
+First, I should understand what the patch does. Before the patch, when decode failed, it threw a generic "JPX decode failed" error. Now, it throws the error message from the OpenJPEG module, which might include specific error messages like "Unknown format".
+
+The goal of the test is to ensure that when the OpenJPEG library returns an error, the JpxImage.decode method correctly throws a JpxError with that specific message. This way, the fuzzer won't spam the console with the same generic message anymore.
+
+I'll look at the existing test file, test/unit/cff_parser_spec.js, but it doesn't seem related to JPX or OpenJPEG. So I'll need to create a new test block, probably in a different test file, but since the user specified to write exactly one it block, I'll assume it's added where appropriate.
+
+I need to import JpxImage from the correct path. The imports section shows that jpx.js is available at '../../src/core/jpx.js'. So I'll import JpxImage from there.
+
+The test should mock or provide invalid data to trigger the OpenJPEG error. Using a small invalid buffer should do. I'll create a buffer that's too small, say 5 bytes, which should cause the decode to fail.
+
+I'll wrap the decode call in a try-catch block. Before the patch, the error message was generic, but after the patch, it should match the specific message from OpenJPEG, like "Unknown format".
+
+In the test, I'll check that the error is an instance of JpxError and that the message includes the expected string. This ensures that the patch correctly propagates the specific error message.
+
+So, the test will initialize the data, attempt to decode it, catch the error, and assert the message. This should fail before the patch (if the message doesn't match) and pass after the patch (if it does).
+
+I also need to make sure the test is self-contained and doesn't rely on any external state beyond the imports. Using async/await isn't necessary here since the decode function is synchronous, but the test framework might require it. I'll structure the test accordingly.
+
+Finally, I'll write the test block with the necessary imports and assertions, ensuring it's concise and only tests the specific behavior change.
+</think>
+
+```javascript
+it("should throw specific JpxError with OpenJPEG error message", async () => {
+  const { JpxImage } = await import("../../src/core/jpx.js");
+  const data = new Uint8Array(5); // Small buffer to trigger OpenJPEG error
+
+  let error;
+  try {
+    JpxImage.decode(data, false);
+  } catch (e) {
+    error = e;
+  }
+
+  expect(error).toBeInstanceOf(JpxError);
+  expect(error.message).toContain("Unknown format");
+});
+```

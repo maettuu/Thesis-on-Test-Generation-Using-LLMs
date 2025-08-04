@@ -1,0 +1,30 @@
+it("should render poster PDF without slow performance due to filter settings", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { DefaultCanvasFactory } = await import("../../src/display/api.js");
+
+  const loadingTask = getDocument(buildGetDocumentParams("poster.pdf"));
+  const pdfDocument = await loadingTask.promise;
+  const page = await pdfDocument.getPage(1);
+
+  const canvasFactory = new DefaultCanvasFactory();
+  const viewport = page.getViewport({ scale: 1.0 });
+  const canvasAndContext = canvasFactory.create(viewport.width, viewport.height);
+  const renderContext = {
+    canvasContext: canvasAndContext.context,
+    viewport: viewport,
+  };
+
+  const renderTask = page.render(renderContext);
+  const renderPromise = renderTask.promise;
+
+  const startTime = performance.now();
+  await renderPromise;
+  const endTime = performance.now();
+
+  const renderTime = endTime - startTime;
+  const expectedMaxRenderTime = 2000; // 2 seconds as an arbitrary threshold for acceptable performance
+  expect(renderTime).toBeLessThan(expectedMaxRenderTime);
+
+  canvasFactory.destroy(canvasAndContext);
+  await loadingTask.destroy();
+});

@@ -1,0 +1,84 @@
+<think>
+Okay, I need to write a test for the issue where text isn't shown when `browser.display.use_document_fonts` is set to 0 in Firefox. The user provided a patch, and I need to ensure the test fails before the patch and passes after.
+
+First, I'll start by understanding the issue. The problem occurs when the browser doesn't use document fonts, so PDF.js should fall back to canvas fonts. The patch modifies `canvas.js` to skip empty paths, which probably fixes the issue where text isn't rendered.
+
+I'll structure the test using Jest. I'll need to import the necessary modules: `getDocument` from `display/api.js` and `buildGetDocumentParams` from `test_utils.js`. Then, I'll load the PDF file using these functions.
+
+Next, I'll create a mock HTML canvas element because the test runs in Node.js, and I don't have a real DOM. I'll set up a mock `HTMLCanvasElement` that returns a mock canvas context. This context needs to have methods like `measureText`, `fillText`, and `strokeText` to simulate the drawing operations.
+
+I'll set the `browser.display.use_document_fonts` flag to 0 using `pdfjsLib.GlobalWorkerOptions.workerSrc` to disable Web Workers, which allows me to control the environment better.
+
+Then, I'll load the PDF document and get the first page. I'll render the page onto the mock canvas. After rendering, I'll check if the expected text is present in the canvas.
+
+Since the issue is about text not showing, the test will check if the rendered text includes the expected string, like "2025". If the text isn't present, the test will fail before the patch but pass after the patch is applied.
+
+I'll use `expect(text).toContain('2025')` to assert that the text is present. If the text isn't found, the test fails, indicating the bug is still present.
+
+I need to ensure that all dependencies are dynamically imported to maintain compatibility with Node.js. Also, I'll make sure the test is self-contained and only tests the specific issue without unnecessary code.
+
+Finally, I'll write the test block, making sure it's concise and directly tests the scenario described in the issue. This way, when the patch is applied, the test should pass, confirming the fix.
+</think>
+
+```javascript
+it("should render text when browser.display.use_document_fonts is disabled", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  
+  const loadingTask = getDocument(buildGetDocumentParams('issue20065.pdf'));
+  
+  const pdf = await loadingTask;
+  const page = await pdf.getPage(1);
+  
+  const canvas = {
+    getContext: () => ({
+      measureText: () => ({ width: 0 }),
+      fillText: () => {},
+      strokeText: () => {},
+      getTransform: () => ({
+        a: 1,
+        b: 0,
+        c: 0,
+        d: 1,
+        e: 0,
+        f: 0
+      }),
+      setTransform: () => {},
+      save: () => {},
+      restore: () => {},
+      translate: () => {},
+      scale: () => {},
+      clip: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      lineTo: () => {},
+      moveTo: () => {},
+      addPath: () => {},
+      rect: () => {},
+      transform: () => {},
+      rotate: () => {},
+      resetTransform: () => {},
+      createLinearGradient: () => ({
+        addColorStop: () => {}
+      }),
+      createPattern: () => ({
+        setTransform: () => {}
+      })
+    })
+  };
+  
+  const mockCanvas = () => canvas;
+  
+  global.HTMLCanvasElement = mockCanvas;
+  
+  const viewport = page.getViewport({ scale: 1 });
+  
+  await page.render({
+    canvasContext: canvas.getContext('2d'),
+    viewport: viewport
+  });
+  
+  const text = await page.getTextContent();
+  expect(text.items[0].str).toContain('2025');
+});
+```

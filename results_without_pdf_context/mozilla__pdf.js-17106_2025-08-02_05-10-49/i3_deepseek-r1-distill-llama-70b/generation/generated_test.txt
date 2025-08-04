@@ -1,0 +1,54 @@
+it("should prevent memory ballooning when scrolling through PDF", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const pdfBuffer = await (await import("fs/promises")).readFile(`${TEST_PDFS_PATH}/large.pdf`);
+
+  async function getMemoryUsage() {
+    return process.memoryUsage().rss() / 1024 / 1024; // Convert to MB
+  }
+
+  const loadingTask = getDocument({
+    data: pdfBuffer,
+    cMapUrl: CMAP_URL,
+  });
+
+  let pdfDoc;
+  let page;
+
+  beforeEach(async () => {
+    pdfDoc = await loadingTask.promise;
+    page = await pdfDoc.getPage(1);
+  });
+
+  afterEach(async () => {
+    if (page) {
+      await page.cleanup();
+      page = null;
+    }
+    if (pdfDoc) {
+      await pdfDoc.cleanup();
+      pdfDoc = null;
+    }
+  });
+
+  const renderPage = async () => {
+    const viewport = page.getViewport({ scale: 1 });
+    const renderTask = page.render({
+      canvasContext: new (await import("canvas")).Canvas(1, 1).getContext("2d"),
+      viewport,
+    });
+    await renderTask.promise;
+    await page.cleanup();
+  };
+
+  const initialMemory = await getMemoryUsage();
+  const maxMemory = initialMemory * 1.2; // 20% increase tolerance
+
+  for (let i = 0; i < 10; i++) {
+    const memoryBefore = await getMemoryUsage();
+    await renderPage();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const memoryAfter = await getMemoryUsage();
+    expect(memoryAfter).toBeLessThan(maxMemory);
+  }
+});

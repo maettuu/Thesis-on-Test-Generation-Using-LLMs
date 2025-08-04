@@ -1,0 +1,36 @@
+it("should process multiple messages without blocking the renderer", async () => {
+  const port = new LoopbackPort();
+  const messageHandler = new MessageHandler("test-source", "test-target", port);
+
+  const messages = [
+    { action: "GetOperatorList", data: {}, sourceName: "test-target" },
+    { action: "GetOperatorList", data: {}, sourceName: "test-target" },
+    { action: "GetOperatorList", data: {}, sourceName: "test-target" },
+  ];
+
+  // Mock the action handler to simulate a long-running operation
+  messageHandler.actionHandler["GetOperatorList"] = async (data) => {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    return {};
+  };
+
+  // Send all messages
+  messages.forEach(message => {
+    port.postMessage(message);
+  });
+
+  // Wait for all messages to be processed
+  await new Promise(resolve => {
+    let processedCount = 0;
+    const checkInterval = setInterval(() => {
+      if (messageHandler.#queue.length === 0 && !messageHandler.#executorRunning) {
+        clearInterval(checkInterval);
+        resolve();
+      }
+    }, 10);
+  });
+
+  // Verify that all messages were processed without error
+  expect(messageHandler.#queue.length).toBe(0);
+  expect(messageHandler.#cancelledStreamIds.size).toBe(0);
+});

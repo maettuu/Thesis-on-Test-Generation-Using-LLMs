@@ -1,0 +1,54 @@
+<think>
+Okay, I need to write a regression test for the issue where rendering a PDF with a lot of pages is slow. The patch provided modifies the MessageHandler class to introduce queuing and postponing of message execution. 
+
+First, I should understand what the patch does. It adds properties like #queue, #cancelledStreamIds, #executorRunning, and #isPostponed. The _onComObjOnMessage method now pushes messages into the queue instead of processing them immediately. The #postponeExecution and #executor methods handle processing the queue, ensuring that messages are processed in a way that prevents the main thread from being blocked, especially for actions like GetOperatorList, which might be computationally heavy.
+
+The test should verify that after the patch, the message handling doesn't cause the renderer to hang or slow down when there are multiple pages. So, the test should simulate sending multiple messages and check if they are processed correctly without blocking.
+
+I'll structure the test using Mocha's it block. Since the existing test file already imports the necessary modules, I can use them. I'll create a MessageHandler instance with a LoopbackPort to simulate the communication. 
+
+I'll set up a scenario where multiple messages are sent. The key is to check if the messages are processed correctly, especially focusing on the GetOperatorList action, which was causing issues. I'll use a promise to wait for all messages to be processed and ensure that no errors occur during this process.
+
+I'll also need to mock the action handler for GetOperatorList to simulate a delay, making the test more realistic. By using async/await and promises, I can ensure that the test waits for all operations to complete before checking the results.
+
+Finally, the test will assert that all messages are processed correctly, and no exceptions are thrown, indicating that the patch successfully addresses the slow rendering issue.
+</think>
+
+```javascript
+it("should process multiple messages without blocking the renderer", async () => {
+  const port = new LoopbackPort();
+  const messageHandler = new MessageHandler("test-source", "test-target", port);
+  
+  const messages = [
+    { action: "GetOperatorList", data: {}, sourceName: "test-target" },
+    { action: "GetOperatorList", data: {}, sourceName: "test-target" },
+    { action: "GetOperatorList", data: {}, sourceName: "test-target" },
+  ];
+
+  // Mock the action handler to simulate a long-running operation
+  messageHandler.actionHandler["GetOperatorList"] = async (data) => {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    return {};
+  };
+
+  // Send all messages
+  messages.forEach(message => {
+    port.postMessage(message);
+  });
+
+  // Wait for all messages to be processed
+  await new Promise(resolve => {
+    let processedCount = 0;
+    const checkInterval = setInterval(() => {
+      if (messageHandler.#queue.length === 0 && !messageHandler.#executorRunning) {
+        clearInterval(checkInterval);
+        resolve();
+      }
+    }, 10);
+  });
+
+  // Verify that all messages were processed without error
+  expect(messageHandler.#queue.length).toBe(0);
+  expect(messageHandler.#cancelledStreamIds.size).toBe(0);
+});
+```

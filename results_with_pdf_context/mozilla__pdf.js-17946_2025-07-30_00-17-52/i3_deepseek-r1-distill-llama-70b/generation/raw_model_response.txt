@@ -1,0 +1,44 @@
+<think>
+Okay, I need to write a test that verifies the fix for the issue where large images in PDFs aren't rendered by PDF.js. The user provided a patch, so I should create a test that fails before the patch and passes after.
+
+First, I'll look at the existing test file, test/unit/annotation_spec.js. It has imports for various modules, which I can reuse. I need to add a new test block that checks if the large image is rendered correctly.
+
+I'll start by importing the necessary modules. The test_utils.js file has functions to get the document, so I'll use that. I'll also need to import getDocument from the display API.
+
+Next, I'll set up the test. I'll create a loading task using getDocument with the test PDF. I'll set up an AdobeReader as the renderer because it's known to render the image correctly, which will help verify if PDF.js is doing it right.
+
+I'll create a PDFViewer and render the first page. Then, I'll get the canvas element and draw the page onto it. After rendering, I'll convert the canvas to an image data URL and check if it's rendered properly.
+
+The key part is checking the pixel data. Before the patch, the image might be blank or incorrect, so I'll compare the actual pixel data against an expected snapshot. Since the expected data is just a placeholder, in a real scenario, I'd capture the correct data after the patch and update the test.
+
+I'll wrap this in a try-catch block to handle any errors during rendering. The test will assert that the actual data matches the expected, which should pass after the patch is applied.
+
+I need to make sure the test is self-contained and uses only the provided imports. I'll structure the test with async/await for proper promise handling and ensure it's concise and to the point.
+</think>
+
+```javascript
+it("should render large images in PDFs correctly", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  
+  const loadingTask = getDocument(buildGetDocumentParams('issue17289.pdf'));
+  const { pdfDocument } = await loadingTask;
+  const pdfViewer = new (await import('../../src/display/pdf_viewer.js')).PDFViewer({
+    container: document.createElement('div'),
+    renderInteractive: false,
+  });
+  
+  await pdfViewer.setDocument(pdfDocument);
+  const page = await pdfViewer.setCurrentPage(1);
+  const canvas = document.createElement('canvas');
+  await page.render({
+    canvasContext: canvas.getContext('2d'),
+    viewport: page.getViewport(1),
+  });
+  
+  const expectedImageData = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='; // Replace with correct expected data
+  const actualImageData = canvas.toDataURL();
+  
+  assert.strictEqual(actualImageData, expectedImageData);
+});
+```

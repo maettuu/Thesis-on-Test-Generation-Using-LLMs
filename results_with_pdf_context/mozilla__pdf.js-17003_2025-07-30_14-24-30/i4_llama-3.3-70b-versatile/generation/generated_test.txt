@@ -1,0 +1,42 @@
+it("should resolve the warning when printing a pdf with an added annotation", async () => {
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { createIdFactory } = await import("../../src/core/id_factory.js");
+  const { PDFPage } = await import("../../src/core/page.js");
+  const { createPdfManager } = await import("../../src/display/api.js");
+  const { PDFFetchStream } = await import("../../src/display/fetch_stream.js");
+  const { PDFNetworkStream } = await import("../../src/display/network.js");
+  const { GlobalWorkerOptions } = await import("../../src/display/worker_options.js");
+  const { MessageHandler } = await import("../../src/shared/message_handler.js");
+  const { shadow } = await import("../../src/shared/util.js");
+
+  const pdfManager = createPdfManager({
+    workerOptions: GlobalWorkerOptions,
+    messageHandler: new MessageHandler(),
+  });
+
+  const idFactory = createIdFactory();
+  const stream = new PDFNetworkStream("https://example.com/example.pdf");
+  const pdf = await PDFDocument.load({ pdfManager, idFactory, stream });
+  const page = await pdf.getPage(0);
+  const annotations = await page.getAnnotations();
+
+  const annotation = await AnnotationFactory.create(
+    pdf.xref,
+    annotations[0].ref,
+    await AnnotationFactory.createGlobals(pdfManager),
+    idFactory,
+    true,
+    page.ref
+  );
+
+  const consoleWarnSpy = jest.spyOn(console, "warn");
+  await AnnotationFactory.printNewAnnotations(
+    await AnnotationFactory.createGlobals(pdfManager),
+    pdfManager.evaluator,
+    null,
+    [annotation],
+    {}
+  );
+  expect(consoleWarnSpy).not.toHaveBeenCalledWith("Unknown field name, falling back to empty field name.");
+});

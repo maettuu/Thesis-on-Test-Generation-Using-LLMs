@@ -1,0 +1,51 @@
+it("should display top and bottom images in pdf file", async () => {
+  const { PartialEvaluator, OperatorList, OPS, Dict, Name, Stream, StringStream } = await import("../../src/core/evaluator.js");
+  const { XRefMock } = await import("./test_utils.js");
+
+  const xref = new XRefMock();
+  const handler = {
+    sendWithPromise: async () => {},
+  };
+  const pageIndex = 0;
+  const idFactory = await import("../../src/core/evaluator.js").then(({ createIdFactory }) => createIdFactory());
+  const fontCache = new Map();
+  const builtInCMapCache = new Map();
+  const standardFontDataCache = new Map();
+  const globalImageCache = new Map();
+  const systemFontCache = new Map();
+  const options = {};
+
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler,
+    pageIndex,
+    idFactory,
+    fontCache,
+    builtInCMapCache,
+    standardFontDataCache,
+    globalImageCache,
+    systemFontCache,
+    options,
+  });
+
+  const resources = new Dict();
+  const image = new Stream(new StringStream("image data"));
+  image.dict = new Dict();
+  image.dict.set("Subtype", new Name("Image"));
+  image.dict.set("W", 100);
+  image.dict.set("H", 100);
+  image.dict.set("SMask", new Name("SMask"));
+
+  const operatorList = new OperatorList();
+  await evaluator.buildPaintImageXObject({
+    resources,
+    image,
+    operatorList,
+    cacheKey: "image",
+    localImageCache: new Map(),
+    localColorSpaceCache: new Map(),
+  });
+
+  const hasSaveAndRestore = operatorList.fnArray.includes(OPS.save) && operatorList.fnArray.includes(OPS.restore);
+  expect(hasSaveAndRestore).toBe(true);
+});

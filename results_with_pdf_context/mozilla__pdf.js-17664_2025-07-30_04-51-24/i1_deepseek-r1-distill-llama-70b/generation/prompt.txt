@@ -1,0 +1,742 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Free Highlighting in PDF will lag behind the mouse cursor
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/outliner.js b/src/display/editor/outliner.js
+--- a/src/display/editor/outliner.js
++++ b/src/display/editor/outliner.js
+@@ -363,6 +363,10 @@ class FreeOutliner {
+   //  - compute the control points of the quadratic Bézier curve.
+   #last = new Float64Array(18);
+ 
++  #lastX;
++
++  #lastY;
++
+   #min;
+ 
+   #min_dist;
+@@ -402,7 +406,22 @@ class FreeOutliner {
+     return isNaN(this.#last[8]);
+   }
+ 
++  #getLastCoords() {
++    const lastTop = this.#last.subarray(4, 6);
++    const lastBottom = this.#last.subarray(16, 18);
++    const [x, y, width, height] = this.#box;
++
++    return [
++      (this.#lastX + (lastTop[0] - lastBottom[0]) / 2 - x) / width,
++      (this.#lastY + (lastTop[1] - lastBottom[1]) / 2 - y) / height,
++      (this.#lastX + (lastBottom[0] - lastTop[0]) / 2 - x) / width,
++      (this.#lastY + (lastBottom[1] - lastTop[1]) / 2 - y) / height,
++    ];
++  }
++
+   add({ x, y }) {
++    this.#lastX = x;
++    this.#lastY = y;
+     const [layerX, layerY, layerWidth, layerHeight] = this.#box;
+     let [x1, y1, x2, y2] = this.#last.subarray(8, 12);
+     const diffX = x - x2;
+@@ -528,12 +547,14 @@ class FreeOutliner {
+     const lastTop = this.#last.subarray(4, 6);
+     const lastBottom = this.#last.subarray(16, 18);
+     const [x, y, width, height] = this.#box;
++    const [lastTopX, lastTopY, lastBottomX, lastBottomY] =
++      this.#getLastCoords();
+ 
+     if (isNaN(this.#last[6]) && !this.isEmpty()) {
+       // We've only two points.
+       return `M${(this.#last[2] - x) / width} ${
+         (this.#last[3] - y) / height
+-      } L${(this.#last[4] - x) / width} ${(this.#last[5] - y) / height} L${
++      } L${(this.#last[4] - x) / width} ${(this.#last[5] - y) / height} L${lastTopX} ${lastTopY} L${lastBottomX} ${lastBottomY} L${
+         (this.#last[16] - x) / width
+       } ${(this.#last[17] - y) / height} L${(this.#last[14] - x) / width} ${
+         (this.#last[15] - y) / height
+@@ -553,8 +574,9 @@ class FreeOutliner {
+         );
+       }
+     }
++
+     buffer.push(
+-      `L${(lastTop[0] - x) / width} ${(lastTop[1] - y) / height} L${
++      `L${(lastTop[0] - x) / width} ${(lastTop[1] - y) / height} L${lastTopX} ${lastTopY} L${lastBottomX} ${lastBottomY} L${
+         (lastBottom[0] - x) / width
+       } ${(lastBottom[1] - y) / height}`
+     );
+@@ -582,15 +604,19 @@ class FreeOutliner {
+     const lastBottom = last.subarray(16, 18);
+     const [layerX, layerY, layerWidth, layerHeight] = this.#box;
+ 
+-    const points = new Float64Array(this.#points?.length ?? 0);
+-    for (let i = 0, ii = points.length; i < ii; i += 2) {
++    const points = new Float64Array((this.#points?.length ?? 0) + 2);
++    for (let i = 0, ii = points.length - 2; i < ii; i += 2) {
+       points[i] = (this.#points[i] - layerX) / layerWidth;
+       points[i + 1] = (this.#points[i + 1] - layerY) / layerHeight;
+     }
++    points[points.length - 2] = (this.#lastX - layerX) / layerWidth;
++    points[points.length - 1] = (this.#lastY - layerY) / layerHeight;
++    const [lastTopX, lastTopY, lastBottomX, lastBottomY] =
++      this.#getLastCoords();
+ 
+     if (isNaN(last[6]) && !this.isEmpty()) {
+       // We've only two points.
+-      const outline = new Float64Array(24);
++      const outline = new Float64Array(36);
+       outline.set(
+         [
+           NaN,
+@@ -609,6 +635,18 @@ class FreeOutliner {
+           NaN,
+           NaN,
+           NaN,
++          lastTopX,
++          lastTopY,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
++          lastBottomX,
++          lastBottomY,
++          NaN,
++          NaN,
++          NaN,
++          NaN,
+           (last[16] - layerX) / layerWidth,
+           (last[17] - layerY) / layerHeight,
+           NaN,
+@@ -631,7 +669,7 @@ class FreeOutliner {
+     }
+ 
+     const outline = new Float64Array(
+-      this.#top.length + 12 + this.#bottom.length
++      this.#top.length + 24 + this.#bottom.length
+     );
+     let N = top.length;
+     for (let i = 0; i < N; i += 2) {
+@@ -642,6 +680,7 @@ class FreeOutliner {
+       outline[i] = top[i];
+       outline[i + 1] = top[i + 1];
+     }
++
+     outline.set(
+       [
+         NaN,
+@@ -654,12 +693,24 @@ class FreeOutliner {
+         NaN,
+         NaN,
+         NaN,
++        lastTopX,
++        lastTopY,
++        NaN,
++        NaN,
++        NaN,
++        NaN,
++        lastBottomX,
++        lastBottomY,
++        NaN,
++        NaN,
++        NaN,
++        NaN,
+         (lastBottom[0] - layerX) / layerWidth,
+         (lastBottom[1] - layerY) / layerHeight,
+       ],
+       N
+     );
+-    N += 12;
++    N += 24;
+ 
+     for (let i = bottom.length - 6; i >= 6; i -= 6) {
+       for (let j = 0; j < 6; j += 2) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.9
+- @babel/preset-env: ^7.23.9
+- @babel/runtime: ^7.23.9
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @jazzer.js/core: ^2.1.0
+- autoprefixer: ^10.4.17
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001585
+- canvas: ^2.11.2
+- core-js: ^3.35.1
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^51.0.1
+- globals: ^14.0.0
+- gulp: ^4.0.2
+- gulp-cli: ^2.3.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.35
+- postcss-dark-theme-class: ^1.1.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.2.5
+- puppeteer: ^22.0.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.2.1
+- stylelint-prettier: ^5.0.0
+- terser: ^5.27.0
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.90.1
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/outliner.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { Util } from "../../shared/util.js";
+17 
+346 class FreeOutliner {
+347   #box;
+348 
+349   #bottom = [];
+350 
+351   #innerMargin;
+352 
+353   #isLTR;
+354 
+355   #top = [];
+356 
+357   // The first 6 elements are the last 3 points of the top part of the outline.
+358   // The next 6 elements are the last 3 points of the line.
+359   // The next 6 elements are the last 3 points of the bottom part of the
+360   // outline.
+361   // We track the last 3 points in order to be able to:
+362   //  - compute the normal of the line,
+363   //  - compute the control points of the quadratic Bézier curve.
+364   #last = new Float64Array(18);
+365 
+366   #min;
+367 
+368   #min_dist;
+369 
+370   #scaleFactor;
+371 
+372   #thickness;
+373 
+374   #points = [];
+375 
+376   static #MIN_DIST = 8;
+377 
+378   static #MIN_DIFF = 2;
+379 
+380   static #MIN = FreeOutliner.#MIN_DIST + FreeOutliner.#MIN_DIFF;
+381 
+382   constructor({ x, y }, box, scaleFactor, thickness, isLTR, innerMargin = 0) {
+383     this.#box = box;
+384     this.#thickness = thickness * scaleFactor;
+385     this.#isLTR = isLTR;
+386     this.#last.set([NaN, NaN, NaN, NaN, x, y], 6);
+387     this.#innerMargin = innerMargin;
+388     this.#min_dist = FreeOutliner.#MIN_DIST * scaleFactor;
+389     this.#min = FreeOutliner.#MIN * scaleFactor;
+390     this.#scaleFactor = scaleFactor;
+391     this.#points.push(x, y);
+392   }
+393 
+405   add({ x, y }) {
+406     const [layerX, layerY, layerWidth, layerHeight] = this.#box;
+407     let [x1, y1, x2, y2] = this.#last.subarray(8, 12);
+408     const diffX = x - x2;
+409     const diffY = y - y2;
+410     const d = Math.hypot(diffX, diffY);
+411     if (d < this.#min) {
+412       // The idea is to avoid garbage points around the last point.
+413       // When the points are too close, it just leads to bad normal vectors and
+414       // control points.
+415       return false;
+416     }
+417     const diffD = d - this.#min_dist;
+418     const K = diffD / d;
+419     const shiftX = K * diffX;
+420     const shiftY = K * diffY;
+421 
+422     // We update the last 3 points of the line.
+423     let x0 = x1;
+424     let y0 = y1;
+425     x1 = x2;
+426     y1 = y2;
+427     x2 += shiftX;
+428     y2 += shiftY;
+429 
+430     // We keep track of the points in order to be able to compute the focus
+431     // outline.
+432     this.#points?.push(x, y);
+433 
+434     // Create the normal unit vector.
+435     // |(shiftX, shiftY)| = |K| * |(diffX, diffY)| = |K| * d = diffD.
+436     const nX = -shiftY / diffD;
+437     const nY = shiftX / diffD;
+438     const thX = nX * this.#thickness;
+439     const thY = nY * this.#thickness;
+440     this.#last.set(this.#last.subarray(2, 8), 0);
+441     this.#last.set([x2 + thX, y2 + thY], 4);
+442     this.#last.set(this.#last.subarray(14, 18), 12);
+443     this.#last.set([x2 - thX, y2 - thY], 16);
+444 
+445     if (isNaN(this.#last[6])) {
+446       if (this.#top.length === 0) {
+447         this.#last.set([x1 + thX, y1 + thY], 2);
+448         this.#top.push(
+449           NaN,
+450           NaN,
+451           NaN,
+452           NaN,
+453           (x1 + thX - layerX) / layerWidth,
+454           (y1 + thY - layerY) / layerHeight
+455         );
+456         this.#last.set([x1 - thX, y1 - thY], 14);
+457         this.#bottom.push(
+458           NaN,
+459           NaN,
+460           NaN,
+461           NaN,
+462           (x1 - thX - layerX) / layerWidth,
+463           (y1 - thY - layerY) / layerHeight
+464         );
+465       }
+466       this.#last.set([x0, y0, x1, y1, x2, y2], 6);
+467       return !this.isEmpty();
+468     }
+469 
+470     this.#last.set([x0, y0, x1, y1, x2, y2], 6);
+471 
+472     const angle = Math.abs(
+473       Math.atan2(y0 - y1, x0 - x1) - Math.atan2(shiftY, shiftX)
+474     );
+475     if (angle < Math.PI / 2) {
+476       // In order to avoid some possible artifacts, we're going to use the a
+477       // straight line instead of a quadratic Bézier curve.
+478       [x1, y1, x2, y2] = this.#last.subarray(2, 6);
+479       this.#top.push(
+480         NaN,
+481         NaN,
+482         NaN,
+483         NaN,
+484         ((x1 + x2) / 2 - layerX) / layerWidth,
+485         ((y1 + y2) / 2 - layerY) / layerHeight
+486       );
+487       [x1, y1, x0, y0] = this.#last.subarray(14, 18);
+488       this.#bottom.push(
+489         NaN,
+490         NaN,
+491         NaN,
+492         NaN,
+493         ((x0 + x1) / 2 - layerX) / layerWidth,
+494         ((y0 + y1) / 2 - layerY) / layerHeight
+495       );
+496       return true;
+497     }
+498 
+499     // Control points and the final point for the quadratic Bézier curve.
+500     [x0, y0, x1, y1, x2, y2] = this.#last.subarray(0, 6);
+501     this.#top.push(
+502       ((x0 + 5 * x1) / 6 - layerX) / layerWidth,
+503       ((y0 + 5 * y1) / 6 - layerY) / layerHeight,
+504       ((5 * x1 + x2) / 6 - layerX) / layerWidth,
+505       ((5 * y1 + y2) / 6 - layerY) / layerHeight,
+506       ((x1 + x2) / 2 - layerX) / layerWidth,
+507       ((y1 + y2) / 2 - layerY) / layerHeight
+508     );
+509     [x2, y2, x1, y1, x0, y0] = this.#last.subarray(12, 18);
+510     this.#bottom.push(
+511       ((x0 + 5 * x1) / 6 - layerX) / layerWidth,
+512       ((y0 + 5 * y1) / 6 - layerY) / layerHeight,
+513       ((5 * x1 + x2) / 6 - layerX) / layerWidth,
+514       ((5 * y1 + y2) / 6 - layerY) / layerHeight,
+515       ((x1 + x2) / 2 - layerX) / layerWidth,
+516       ((y1 + y2) / 2 - layerY) / layerHeight
+517     );
+518     return true;
+519   }
+520 
+521   toSVGPath() {
+522     if (this.isEmpty()) {
+523       // We've only one point.
+524       return "";
+525     }
+526     const top = this.#top;
+527     const bottom = this.#bottom;
+528     const lastTop = this.#last.subarray(4, 6);
+529     const lastBottom = this.#last.subarray(16, 18);
+530     const [x, y, width, height] = this.#box;
+531 
+532     if (isNaN(this.#last[6]) && !this.isEmpty()) {
+533       // We've only two points.
+534       return `M${(this.#last[2] - x) / width} ${
+535         (this.#last[3] - y) / height
+536       } L${(this.#last[4] - x) / width} ${(this.#last[5] - y) / height} L${
+537         (this.#last[16] - x) / width
+538       } ${(this.#last[17] - y) / height} L${(this.#last[14] - x) / width} ${
+539         (this.#last[15] - y) / height
+540       } Z`;
+541     }
+542 
+543     const buffer = [];
+544     buffer.push(`M${top[4]} ${top[5]}`);
+545     for (let i = 6; i < top.length; i += 6) {
+546       if (isNaN(top[i])) {
+547         buffer.push(`L${top[i + 4]} ${top[i + 5]}`);
+548       } else {
+549         buffer.push(
+550           `C${top[i]} ${top[i + 1]} ${top[i + 2]} ${top[i + 3]} ${top[i + 4]} ${
+551             top[i + 5]
+552           }`
+553         );
+554       }
+555     }
+556     buffer.push(
+557       `L${(lastTop[0] - x) / width} ${(lastTop[1] - y) / height} L${
+558         (lastBottom[0] - x) / width
+559       } ${(lastBottom[1] - y) / height}`
+560     );
+561     for (let i = bottom.length - 6; i >= 6; i -= 6) {
+562       if (isNaN(bottom[i])) {
+563         buffer.push(`L${bottom[i + 4]} ${bottom[i + 5]}`);
+564       } else {
+565         buffer.push(
+566           `C${bottom[i]} ${bottom[i + 1]} ${bottom[i + 2]} ${bottom[i + 3]} ${
+567             bottom[i + 4]
+568           } ${bottom[i + 5]}`
+569         );
+570       }
+571     }
+572     buffer.push(`L${bottom[4]} ${bottom[5]} Z`);
+573 
+574     return buffer.join(" ");
+575   }
+576 
+577   getOutlines() {
+578     const top = this.#top;
+579     const bottom = this.#bottom;
+580     const last = this.#last;
+581     const lastTop = last.subarray(4, 6);
+582     const lastBottom = last.subarray(16, 18);
+583     const [layerX, layerY, layerWidth, layerHeight] = this.#box;
+584 
+585     const points = new Float64Array(this.#points?.length ?? 0);
+586     for (let i = 0, ii = points.length; i < ii; i += 2) {
+587       points[i] = (this.#points[i] - layerX) / layerWidth;
+588       points[i + 1] = (this.#points[i + 1] - layerY) / layerHeight;
+589     }
+590 
+591     if (isNaN(last[6]) && !this.isEmpty()) {
+592       // We've only two points.
+593       const outline = new Float64Array(24);
+594       outline.set(
+595         [
+596           NaN,
+597           NaN,
+598           NaN,
+599           NaN,
+600           (last[2] - layerX) / layerWidth,
+601           (last[3] - layerY) / layerHeight,
+602           NaN,
+603           NaN,
+604           NaN,
+605           NaN,
+606           (last[4] - layerX) / layerWidth,
+607           (last[5] - layerY) / layerHeight,
+608           NaN,
+609           NaN,
+610           NaN,
+611           NaN,
+612           (last[16] - layerX) / layerWidth,
+613           (last[17] - layerY) / layerHeight,
+614           NaN,
+615           NaN,
+616           NaN,
+617           NaN,
+618           (last[14] - layerX) / layerWidth,
+619           (last[15] - layerY) / layerHeight,
+620         ],
+621         0
+622       );
+623       return new FreeHighlightOutline(
+624         outline,
+625         points,
+626         this.#box,
+627         this.#scaleFactor,
+628         this.#innerMargin,
+629         this.#isLTR
+630       );
+631     }
+632 
+633     const outline = new Float64Array(
+634       this.#top.length + 12 + this.#bottom.length
+635     );
+636     let N = top.length;
+637     for (let i = 0; i < N; i += 2) {
+638       if (isNaN(top[i])) {
+639         outline[i] = outline[i + 1] = NaN;
+640         continue;
+641       }
+642       outline[i] = top[i];
+643       outline[i + 1] = top[i + 1];
+644     }
+645     outline.set(
+646       [
+647         NaN,
+648         NaN,
+649         NaN,
+650         NaN,
+651         (lastTop[0] - layerX) / layerWidth,
+652         (lastTop[1] - layerY) / layerHeight,
+653         NaN,
+654         NaN,
+655         NaN,
+656         NaN,
+657         (lastBottom[0] - layerX) / layerWidth,
+658         (lastBottom[1] - layerY) / layerHeight,
+659       ],
+660       N
+661     );
+662     N += 12;
+663 
+664     for (let i = bottom.length - 6; i >= 6; i -= 6) {
+665       for (let j = 0; j < 6; j += 2) {
+666         if (isNaN(bottom[i + j])) {
+667           outline[N] = outline[N + 1] = NaN;
+668           N += 2;
+669           continue;
+670         }
+671         outline[N] = bottom[i + j];
+672         outline[N + 1] = bottom[i + j + 1];
+673         N += 2;
+674       }
+675     }
+676     outline.set([NaN, NaN, NaN, NaN, bottom[4], bottom[5]], N);
+677     return new FreeHighlightOutline(
+678       outline,
+679       points,
+680       this.#box,
+681       this.#scaleFactor,
+682       this.#innerMargin,
+683       this.#isLTR
+684     );
+685   }
+686 }
+687 
+875 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/annotation_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  Annotation,
+  AnnotationBorderStyle,
+  AnnotationFactory,
+  getQuadPoints,
+  MarkupAnnotation,
+} from "../../src/core/annotation.js";
+import {
+  AnnotationBorderStyleType,
+  AnnotationEditorType,
+  AnnotationFieldFlag,
+  AnnotationFlag,
+  AnnotationType,
+  OPS,
+  RenderingIntentFlag,
+  stringToBytes,
+  stringToUTF8String,
+} from "../../src/shared/util.js";
+import {
+  CMAP_URL,
+  createIdFactory,
+  STANDARD_FONT_DATA_URL,
+  XRefMock,
+} from "./test_utils.js";
+import {
+  DefaultCMapReaderFactory,
+  DefaultStandardFontDataFactory,
+} from "../../src/display/api.js";
+import { Dict, Name, Ref, RefSetCache } from "../../src/core/primitives.js";
+import { Lexer, Parser } from "../../src/core/parser.js";
+import { FlateStream } from "../../src/core/flate_stream.js";
+import { PartialEvaluator } from "../../src/core/evaluator.js";
+import { StringStream } from "../../src/core/stream.js";
+import { WorkerTask } from "../../src/core/worker.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

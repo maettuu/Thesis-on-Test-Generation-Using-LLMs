@@ -1,0 +1,76 @@
+it("should expose highlighted text to screen readers", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { Util } = await import("../../src/shared/util.js");
+
+  const pdfData = new TextEncoder().encode(
+    "%PDF-1.3\n" +
+    "1 0 obj\n" +
+    "<</Type /Catalog /Pages 2 0 R>>\n" +
+    "2 0 obj\n" +
+    "<</Type /Pages /Kids [3 0 R] /Count 1 /Resources 4 0 R>>\n" +
+    "3 0 obj\n" +
+    "<</Type /Page /Parent 2 0 R /Resources 4 0 R /Contents 5 0 R>>\n" +
+    "4 0 obj\n" +
+    "<</ProcSet [/PDF /Text]>>\n" +
+    "5 0 obj\n" +
+    "<</Length 6 0 R>>\n" +
+    "6 0 obj\n" +
+    new TextEncoder().encode("BT\n/F1 24 Tf\n120 600 Td\n(Hello World!) Tj\nET\n") +
+    "\n";
+
+  const pdfBlob = new Blob([pdfData], { type: "application/pdf" });
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+
+  const pdf = await getDocument({
+    data: pdfBlob,
+    url: pdfUrl,
+    CMapLoader: null,
+  });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+
+  const editorUI = new AnnotationEditorUIManager(
+    container,
+    null,
+    null,
+    null,
+    pdf,
+    null,
+    null,
+    null
+  );
+
+  const annotationLayer = new AnnotationLayer();
+  container.appendChild(annotationLayer.render());
+
+  const page = pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+
+  const textLayer = document.createElement("div");
+  textLayer.className = "textLayer";
+  textLayer.style.width = `${viewport.width}px`;
+  textLayer.style.height = `${viewport.height}px`;
+  container.appendChild(textLayer);
+
+  await pdf.load();
+
+  // Simulate text selection
+  const selection = window.getSelection();
+  const range = document.createRange();
+  const textNode = document.createTextNode("Hello World!");
+  textLayer.appendChild(textNode);
+  range.selectNodeContents(textNode);
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  editorUI.highlightSelection("main_toolbar");
+
+  // Check that the highlighted text is exposed in the DOM
+  const highlightDiv = textLayer.querySelector("mark.visuallyHidden");
+  expect(highlightDiv).toBeTruthy();
+
+  const expectedText = "Hello World!";
+  expect(highlightDiv?.textContent).toBe(expectedText);
+});

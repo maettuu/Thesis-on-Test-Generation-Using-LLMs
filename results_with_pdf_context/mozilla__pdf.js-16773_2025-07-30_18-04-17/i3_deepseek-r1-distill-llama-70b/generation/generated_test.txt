@@ -1,0 +1,87 @@
+import { StampEditor } from "../../display/editor/stamp.js";
+import { AnnotationEditorType } from "../../shared/util.js";
+import { AnnotationStorage } from "../../display/annotation_storage.js";
+
+describe("StampEditor image type validation", () => {
+  it("should only accept supported image types", async () => {
+    // Mock the UI manager and imageManager
+    const uiManager = {
+      imageManager: {
+        getFromFile: jest.fn(),
+        isValidId: jest.fn(),
+      },
+    };
+
+    // Create editor instance
+    const editor = new StampEditor({
+      name: "testEditor",
+      pageIndex: 0,
+      uiManager: uiManager,
+    });
+
+    // Mock supported and unsupported file types
+    const supportedTypes = [
+      "image/apng",
+      "image/avif",
+      "image/bmp",
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/svg+xml",
+      "image/webp",
+      "image/x-icon",
+    ];
+
+    const unsupportedTypes = [
+      "image/tiff",
+      "image/bpg",
+      "image/ico", // Note: image/x-icon is supported but image/ico is not
+    ];
+
+    // Test supported types
+    for (const type of supportedTypes) {
+      const file = new File([""], "test." + type.split("/")[1], {
+        type: type,
+      });
+
+      const input = document.createElement("input");
+      input.files = [file];
+      const event = new Event("change");
+
+      // Mock successful image load
+      uiManager.imageManager.getFromFile.mockResolvedValueOnce({
+        bitmap: new Image(),
+        id: "test-id",
+        isSvg: type === "image/svg+xml",
+      });
+
+      // Trigger change event
+      input.dispatchEvent(event);
+      await editor.#bitmapPromise;
+
+      expect(uiManager.imageManager.getFromFile).toHaveBeenCalled();
+      expect(editor.#bitmap).toBeTruthy();
+    }
+
+    // Test unsupported types
+    for (const type of unsupportedTypes) {
+      const file = new File([""], "test." + type.split("/")[1], {
+        type: type,
+      });
+
+      const input = document.createElement("input");
+      input.files = [file];
+      const event = new Event("change");
+
+      // Mock failed image load
+      uiManager.imageManager.getFromFile.mockResolvedValueOnce(null);
+
+      // Trigger change event
+      input.dispatchEvent(event);
+      await editor.#bitmapPromise;
+
+      expect(uiManager.imageManager.getFromFile).toHaveBeenCalled();
+      expect(editor.#bitmap).toBeNull();
+    }
+  });
+});

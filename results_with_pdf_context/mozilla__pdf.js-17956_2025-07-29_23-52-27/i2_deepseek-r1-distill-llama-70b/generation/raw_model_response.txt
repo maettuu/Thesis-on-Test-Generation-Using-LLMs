@@ -1,0 +1,43 @@
+<think>
+Okay, I need to write a regression test for the issue where the JPX fuzzer was spamming the output with "OpenJPEG: Unknown format" logs. The patch provided changes how errors are handled in the JpxImage.decode method. 
+
+First, I should understand what the patch does. Before the patch, when decode failed, it threw a generic JpxError with the message "JPX decode failed". Now, it checks if imageData is a string, which likely contains the error message from OpenJPEG, and throws JpxError with that string. So, the test needs to verify that the error message now includes the specific OpenJPEG error, not the generic one.
+
+I'll create a test case that provides invalid JPX data to trigger the error. I'll mock the OpenJPEG module so that when decode is called, it returns a string error. Then, I'll call JpxImage.decode and check the error message.
+
+I need to import the necessary modules: JpxImage from jpx.js and OpenJPEG from openjpeg.js. Since the test runs in Node.js, I'll use dynamic imports with require.
+
+I'll set up a mock for OpenJPEG. When decode is called with ignoreColorSpace as false (the default), it should return the error string. Then, I'll call JpxImage.decode with some invalid data. Since the data is invalid, it should throw an error. I'll catch this error and check if its message starts with "OpenJPEG".
+
+After the patch, the error message should be the one from OpenJPEG, so the test should pass. Before the patch, the message was generic, so the test would have failed, ensuring it's a proper regression test.
+
+I'll structure the test using Jest's it function, making it async because I'm using await for imports. The test will initialize the mock, call decode, and assert the error message.
+
+I should make sure the test is self-contained and doesn't rely on external files except for the necessary imports. Also, I'll avoid adding any comments or explanations in the code, just the test block.
+
+Finally, I'll write the code, ensuring that all variables are correctly initialized and the try-catch block properly checks the error message.
+</think>
+
+```javascript
+it("should throw JpxError with OpenJPEG error message", async () => {
+  const { JpxImage } = await import("../../src/core/jpx.js");
+  const { OpenJPEG } = await import("../../external/openjpeg/openjpeg.js");
+
+  // Mock the OpenJPEG module to return an error string
+  const mockOpenJPEG = {
+    decode: jest.fn((data, ignoreColorSpace) => {
+      return "OpenJPEG: Unknown format";
+    })
+  };
+
+  // Set the mock as the OpenJPEG module
+  JpxImage.#module = mockOpenJPEG;
+
+  // Use invalid data to trigger the error
+  const invalidData = new Uint8Array([0x00, 0x00, 0x00, 0x00]);
+
+  // Test that the error is correctly thrown and includes OpenJPEG message
+  const error = await JpxImage.decode(invalidData, false).catch(err => err);
+  expect(error.message).toBe("OpenJPEG: Unknown format");
+});
+```

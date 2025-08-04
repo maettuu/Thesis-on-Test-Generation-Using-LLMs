@@ -1,0 +1,62 @@
+<think>
+Okay, I need to write a regression test for the bug where font fallback doesn't work on the Node.js/legacy build. The user provided a patch that adds a mapping for "HelveticaLTStd-Bold" to "Helvetica-Bold" in standard_fonts.js. 
+
+First, I should understand the problem. The bug causes warnings when rendering a PDF with HelveticaLTStd fonts because the fallback isn't happening. The patch should fix this by mapping the missing font to an available one.
+
+Looking at the test file, it's test/unit/api_spec.js. I can add a new test case here. I need to import the necessary modules. Since the test runs in Node.js, I'll use the provided imports and maybe fetch from the test_utils.
+
+I'll set up a test server to serve the PDF. Then, I'll use getDocument to load the PDF and render the first page. I'll check for any warnings or errors during rendering. If the fallback works, there should be no warnings about unresolved HelveticaLTStd paths.
+
+I'll structure the test with async/await. I'll create a TestPdfsServer to host the PDF. Then, I'll get the document and render the page, capturing any warnings. After rendering, I'll check if any warnings match the expected regex. If no warnings are found, the test passes.
+
+I need to make sure the test is self-contained and doesn't rely on external dependencies beyond what's provided. I'll use the existing imports and setup functions where possible.
+
+So, the test will:
+
+1. Start a test server.
+2. Fetch the PDF from the server.
+3. Render the first page.
+4. Check for any warnings related to HelveticaLTStd.
+5. Assert that no such warnings occurred.
+
+This should ensure that after the patch, the font fallback works, and the test passes.
+</think>
+
+```javascript
+it("should render PDF with HelveticaLTStd fonts using fallback", async () => {
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const server = new TestPdfsServer();
+  const pdfPath = `${TEST_PDFS_PATH}/Tax3921.pdf`;
+  
+  try {
+    const { pdfDocument } = await getDocument({
+      url: server.urlForPDF(pdfPath),
+      transport: new PDFDataRangeTransport(),
+    });
+    
+    const firstPage = await pdfDocument.getPage(1);
+    const viewport = firstPage.getViewport({ scale: 1 });
+    const renderTask = firstPage.render({
+      viewport,
+      canvasContext: null,
+      renderInteractive: false,
+      useTextLayer: false,
+    });
+    
+    const warnings = [];
+    renderTask.on("warning", (evt) => {
+      warnings.push(evt.detail);
+    });
+    
+    await renderTask.promise;
+    
+    const expectedWarning = "Error: Requesting object that isn't resolved yet HelveticaLTStd_path";
+    assert.strictEqual(
+      warnings.some((warning) => warning.includes(expectedWarning)),
+      false
+    );
+  } finally {
+    await server.stop();
+  }
+});
+```

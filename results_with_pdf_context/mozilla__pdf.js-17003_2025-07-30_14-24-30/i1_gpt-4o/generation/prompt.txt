@@ -1,0 +1,631 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Warning in the console when printing a pdf with an added annotation
+Configuration:
+- Web browser and its version: Firefox nightly 
+- Operating system and its version: Windows 11
+
+Steps to reproduce the problem:
+1. Open a pdf
+2. Draw something on it
+3. Print
+
+What went wrong? (add screenshot)
+In the console:
+`Warning: Unknown field name, falling back to empty field name.`
+
+I think it's a regression from:
+https://github.com/mozilla/pdf.js/pull/16920/files#diff-a7e409abd3d3209d32d3adc8457c5e23feb4c06113a2e065b0c6a9322a3a3369R662
+
+before we were here only when collecting the annotations for the document and now we do it when there's a pageIndex in the params.
+And we build some annotations when printing a document with new annotations so it's very likely the root cause.
+
+@Snuffleupagus, would you mind to have a look ?
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/annotation.js b/src/core/annotation.js
+--- a/src/core/annotation.js
++++ b/src/core/annotation.js
+@@ -127,6 +127,7 @@ class AnnotationFactory {
+       ref,
+       annotationGlobals,
+       idFactory,
++      collectFields,
+       pageIndex,
+       pageRef,
+     ]);
+@@ -140,6 +141,7 @@ class AnnotationFactory {
+     ref,
+     annotationGlobals,
+     idFactory,
++    collectFields = false,
+     pageIndex = null,
+     pageRef = null
+   ) {
+@@ -164,8 +166,9 @@ class AnnotationFactory {
+       subtype,
+       id,
+       annotationGlobals,
++      collectFields,
+       needAppearances:
+-        pageIndex === null && acroForm.get("NeedAppearances") === true,
++        !collectFields && acroForm.get("NeedAppearances") === true,
+       pageIndex,
+       evaluatorOptions: pdfManager.evaluatorOptions,
+       pageRef,
+@@ -244,7 +247,7 @@ class AnnotationFactory {
+         return new FileAttachmentAnnotation(parameters);
+ 
+       default:
+-        if (pageIndex === null) {
++        if (!collectFields) {
+           if (!subtype) {
+             warn("Annotation is missing the required /Subtype.");
+           } else {
+@@ -647,7 +650,7 @@ class Annotation {
+       noHTML: isLocked && isContentLocked,
+     };
+ 
+-    if (params.pageIndex !== null) {
++    if (params.collectFields) {
+       // Fields can act as container for other fields and have
+       // some actions even if no Annotation inherit from them.
+       // Those fields can be referenced by CO (calculation order).
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.17
+- @babel/plugin-transform-modules-commonjs: ^7.22.15
+- @babel/preset-env: ^7.22.15
+- @babel/runtime: ^7.22.15
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.15
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001532
+- canvas: ^2.11.2
+- core-js: ^3.32.2
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.49.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.28.1
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.2.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.1
+- globals: ^13.21.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.29
+- postcss-dir-pseudo-class: ^8.0.0
+- postcss-nesting: ^12.0.1
+- prettier: ^3.0.3
+- puppeteer: ^21.2.1
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.3
+- stylelint-prettier: ^4.0.2
+- terser: ^5.19.4
+- through2: ^4.0.2
+- tsc-alias: ^1.8.7
+- ttest: ^4.0.0
+- typescript: ^5.2.2
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/annotation.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationActionEventType,
+18   AnnotationBorderStyleType,
+19   AnnotationEditorType,
+20   AnnotationFieldFlag,
+21   AnnotationFlag,
+22   AnnotationReplyType,
+23   AnnotationType,
+24   assert,
+25   BASELINE_FACTOR,
+26   FeatureTest,
+27   getModificationDate,
+28   IDENTITY_MATRIX,
+29   info,
+30   LINE_DESCENT_FACTOR,
+31   LINE_FACTOR,
+32   OPS,
+33   RenderingIntentFlag,
+34   shadow,
+35   stringToPDFString,
+36   unreachable,
+37   Util,
+38   warn,
+39 } from "../shared/util.js";
+40 import {
+41   collectActions,
+42   escapeString,
+43   getInheritableProperty,
+44   getRotationMatrix,
+45   isAscii,
+46   numberToString,
+47   stringToUTF16String,
+48 } from "./core_utils.js";
+49 import {
+50   createDefaultAppearance,
+51   FakeUnicodeFont,
+52   getPdfColor,
+53   parseAppearanceStream,
+54   parseDefaultAppearance,
+55 } from "./default_appearance.js";
+56 import { Dict, isName, isRefsEqual, Name, Ref, RefSet } from "./primitives.js";
+57 import { Stream, StringStream } from "./stream.js";
+58 import { BaseStream } from "./base_stream.js";
+59 import { bidi } from "./bidi.js";
+60 import { Catalog } from "./catalog.js";
+61 import { ColorSpace } from "./colorspace.js";
+62 import { FileSpec } from "./file_spec.js";
+63 import { JpegStream } from "./jpeg_stream.js";
+64 import { ObjectLoader } from "./object_loader.js";
+65 import { OperatorList } from "./operator_list.js";
+66 import { writeObject } from "./writer.js";
+67 import { XFAFactory } from "./xfa/factory.js";
+68 
+69 class AnnotationFactory {
+98 
+99   /**
+100    * Create an `Annotation` object of the correct type for the given reference
+101    * to an annotation dictionary. This yields a promise that is resolved when
+102    * the `Annotation` object is constructed.
+103    *
+104    * @param {XRef} xref
+105    * @param {Object} ref
+106    * @params {Object} annotationGlobals
+107    * @param {Object} idFactory
+108    * @param {boolean} [collectFields]
+109    * @param {Object} [pageRef]
+110    * @returns {Promise} A promise that is resolved with an {Annotation}
+111    *   instance.
+112    */
+113   static async create(
+114     xref,
+115     ref,
+116     annotationGlobals,
+117     idFactory,
+118     collectFields,
+119     pageRef
+120   ) {
+121     const pageIndex = collectFields
+122       ? await this._getPageIndex(xref, ref, annotationGlobals.pdfManager)
+123       : null;
+124 
+125     return annotationGlobals.pdfManager.ensure(this, "_create", [
+126       xref,
+127       ref,
+128       annotationGlobals,
+129       idFactory,
+130       pageIndex,
+131       pageRef,
+132     ]);
+133   }
+134 
+135   /**
+136    * @private
+137    */
+138   static _create(
+139     xref,
+140     ref,
+141     annotationGlobals,
+142     idFactory,
+143     pageIndex = null,
+144     pageRef = null
+145   ) {
+146     const dict = xref.fetchIfRef(ref);
+147     if (!(dict instanceof Dict)) {
+148       return undefined;
+149     }
+150 
+151     const { acroForm, pdfManager } = annotationGlobals;
+152     const id =
+153       ref instanceof Ref ? ref.toString() : `annot_${idFactory.createObjId()}`;
+154 
+155     // Determine the annotation's subtype.
+156     let subtype = dict.get("Subtype");
+157     subtype = subtype instanceof Name ? subtype.name : null;
+158 
+159     // Return the right annotation object based on the subtype and field type.
+160     const parameters = {
+161       xref,
+162       ref,
+163       dict,
+164       subtype,
+165       id,
+166       annotationGlobals,
+167       needAppearances:
+168         pageIndex === null && acroForm.get("NeedAppearances") === true,
+169       pageIndex,
+170       evaluatorOptions: pdfManager.evaluatorOptions,
+171       pageRef,
+172     };
+173 
+174     switch (subtype) {
+175       case "Link":
+176         return new LinkAnnotation(parameters);
+177 
+178       case "Text":
+179         return new TextAnnotation(parameters);
+180 
+181       case "Widget":
+182         let fieldType = getInheritableProperty({ dict, key: "FT" });
+183         fieldType = fieldType instanceof Name ? fieldType.name : null;
+184 
+185         switch (fieldType) {
+186           case "Tx":
+187             return new TextWidgetAnnotation(parameters);
+188           case "Btn":
+189             return new ButtonWidgetAnnotation(parameters);
+190           case "Ch":
+191             return new ChoiceWidgetAnnotation(parameters);
+192           case "Sig":
+193             return new SignatureWidgetAnnotation(parameters);
+194         }
+195         warn(
+196           `Unimplemented widget field type "${fieldType}", ` +
+197             "falling back to base field type."
+198         );
+199         return new WidgetAnnotation(parameters);
+200 
+201       case "Popup":
+202         return new PopupAnnotation(parameters);
+203 
+204       case "FreeText":
+205         return new FreeTextAnnotation(parameters);
+206 
+207       case "Line":
+208         return new LineAnnotation(parameters);
+209 
+210       case "Square":
+211         return new SquareAnnotation(parameters);
+212 
+213       case "Circle":
+214         return new CircleAnnotation(parameters);
+215 
+216       case "PolyLine":
+217         return new PolylineAnnotation(parameters);
+218 
+219       case "Polygon":
+220         return new PolygonAnnotation(parameters);
+221 
+222       case "Caret":
+223         return new CaretAnnotation(parameters);
+224 
+225       case "Ink":
+226         return new InkAnnotation(parameters);
+227 
+228       case "Highlight":
+229         return new HighlightAnnotation(parameters);
+230 
+231       case "Underline":
+232         return new UnderlineAnnotation(parameters);
+233 
+234       case "Squiggly":
+235         return new SquigglyAnnotation(parameters);
+236 
+237       case "StrikeOut":
+238         return new StrikeOutAnnotation(parameters);
+239 
+240       case "Stamp":
+241         return new StampAnnotation(parameters);
+242 
+243       case "FileAttachment":
+244         return new FileAttachmentAnnotation(parameters);
+245 
+246       default:
+247         if (pageIndex === null) {
+248           if (!subtype) {
+249             warn("Annotation is missing the required /Subtype.");
+250           } else {
+251             warn(
+252               `Unimplemented annotation type "${subtype}", ` +
+253                 "falling back to base annotation."
+254             );
+255           }
+256         }
+257         return new Annotation(parameters);
+258     }
+259   }
+260 
+471 }
+472 
+590 class Annotation {
+591   constructor(params) {
+592     const { dict, xref, annotationGlobals } = params;
+593 
+594     this.setTitle(dict.get("T"));
+595     this.setContents(dict.get("Contents"));
+596     this.setModificationDate(dict.get("M"));
+597     this.setFlags(dict.get("F"));
+598     this.setRectangle(dict.getArray("Rect"));
+599     this.setColor(dict.getArray("C"));
+600     this.setBorderStyle(dict);
+601     this.setAppearance(dict);
+602     this.setOptionalContent(dict);
+603 
+604     const MK = dict.get("MK");
+605     this.setBorderAndBackgroundColors(MK);
+606     this.setRotation(MK, dict);
+607     this.ref = params.ref instanceof Ref ? params.ref : null;
+608 
+609     this._streams = [];
+610     if (this.appearance) {
+611       this._streams.push(this.appearance);
+612     }
+613 
+614     // The annotation cannot be changed (neither its position/visibility nor its
+615     // contents), hence we can just display its appearance and don't generate
+616     // a HTML element for it.
+617     const isLocked = !!(this.flags & AnnotationFlag.LOCKED);
+618     const isContentLocked = !!(this.flags & AnnotationFlag.LOCKEDCONTENTS);
+619 
+620     if (annotationGlobals.structTreeRoot) {
+621       let structParent = dict.get("StructParent");
+622       structParent =
+623         Number.isInteger(structParent) && structParent >= 0 ? structParent : -1;
+624 
+625       annotationGlobals.structTreeRoot.addAnnotationIdToPage(
+626         params.pageRef,
+627         structParent
+628       );
+629     }
+630 
+631     // Expose public properties using a data object.
+632     this.data = {
+633       annotationFlags: this.flags,
+634       borderStyle: this.borderStyle,
+635       color: this.color,
+636       backgroundColor: this.backgroundColor,
+637       borderColor: this.borderColor,
+638       rotation: this.rotation,
+639       contentsObj: this._contents,
+640       hasAppearance: !!this.appearance,
+641       id: params.id,
+642       modificationDate: this.modificationDate,
+643       rect: this.rectangle,
+644       subtype: params.subtype,
+645       hasOwnCanvas: false,
+646       noRotate: !!(this.flags & AnnotationFlag.NOROTATE),
+647       noHTML: isLocked && isContentLocked,
+648     };
+649 
+650     if (params.pageIndex !== null) {
+651       // Fields can act as container for other fields and have
+652       // some actions even if no Annotation inherit from them.
+653       // Those fields can be referenced by CO (calculation order).
+654       const kids = dict.get("Kids");
+655       if (Array.isArray(kids)) {
+656         const kidIds = [];
+657         for (const kid of kids) {
+658           if (kid instanceof Ref) {
+659             kidIds.push(kid.toString());
+660           }
+661         }
+662         if (kidIds.length !== 0) {
+663           this.data.kidIds = kidIds;
+664         }
+665       }
+666 
+667       this.data.actions = collectActions(xref, dict, AnnotationActionEventType);
+668       this.data.fieldName = this._constructFieldName(dict);
+669       this.data.pageIndex = params.pageIndex;
+670     }
+671 
+672     this._isOffscreenCanvasSupported =
+673       params.evaluatorOptions.isOffscreenCanvasSupported;
+674     this._fallbackFontDict = null;
+675     this._needAppearances = false;
+676   }
+677 
+1305 }
+1306 
+4693 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/annotation_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  Annotation,
+  AnnotationBorderStyle,
+  AnnotationFactory,
+  getQuadPoints,
+  MarkupAnnotation,
+} from "../../src/core/annotation.js";
+import {
+  AnnotationBorderStyleType,
+  AnnotationEditorType,
+  AnnotationFieldFlag,
+  AnnotationFlag,
+  AnnotationType,
+  OPS,
+  RenderingIntentFlag,
+  stringToBytes,
+  stringToUTF8String,
+} from "../../src/shared/util.js";
+import {
+  CMAP_URL,
+  createIdFactory,
+  STANDARD_FONT_DATA_URL,
+  XRefMock,
+} from "./test_utils.js";
+import {
+  DefaultCMapReaderFactory,
+  DefaultStandardFontDataFactory,
+} from "../../src/display/api.js";
+import { Dict, Name, Ref, RefSetCache } from "../../src/core/primitives.js";
+import { Lexer, Parser } from "../../src/core/parser.js";
+import { PartialEvaluator } from "../../src/core/evaluator.js";
+import { StringStream } from "../../src/core/stream.js";
+import { WorkerTask } from "../../src/core/worker.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

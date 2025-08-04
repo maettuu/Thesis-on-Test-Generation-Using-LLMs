@@ -1,0 +1,59 @@
+<think>
+Okay, I need to write a regression test for the bug where a TypeError occurs when using annotations on a PDF in Safari on iOS. The error is "TypeError: null is not an object (evaluating 'this.#touchMoveAC.abort')" and it happens when trying to draw or annotate after certain actions like zooming.
+
+First, I should understand what the patch does. The patch is in two files: tools.js and touch_manager.js. In tools.js, when the mode is updated, it commits or removes the current drawing session. In touch_manager.js, it checks if #touchMoveAC exists before calling abort on it.
+
+So the bug occurs because #touchMoveAC is null when the code tries to call abort on it. The patch adds a null check to prevent this.
+
+To write a test that fails before the patch and passes after, I need to simulate the scenario where #touchMoveAC is null. The test should trigger the touch events that lead to the error.
+
+I'll use Jest and Puppeteer for this. I'll set up a PDF viewer, enable annotations, and perform touch actions like zooming and drawing. Then, I'll check if the error is thrown.
+
+Before the patch, the test should fail because the error is thrown. After the patch, the error shouldn't occur, so the test should pass.
+
+I'll structure the test to navigate to a PDF, switch to annotation mode, and perform touch events. I'll use a blank PDF for simplicity. The test will check the browser console for the specific error message.
+
+I need to import the necessary modules like pdfjsLib and puppeteer. I'll set up the PDF document, enable text selection, and handle touch events. After the patch, the test should no longer find the error in the console.
+
+So, the test will look something like this: navigate to the PDF, enable annotations, perform zoom and touch actions, and check for the error. If the error isn't present after the patch, the test passes.
+</think>
+
+```javascript
+it("should not throw when aborting null touchMoveAC", async () => {
+  const { PDFDocument, PDFViewer } = await import("../../web/pdf_viewer.js");
+  const { TouchManager } = await import("../../src/display/touch_manager.js");
+  
+  const container = document.createElement("div");
+  const viewer = new PDFViewer({
+    container,
+    defaultZoom: "page-width",
+  });
+  
+  await viewer.setDocument(new PDFDocument({ url: "/blank.pdf" }));
+  const touchManager = new TouchManager({
+    container,
+    isPinchingDisabled: false,
+    isPinchingStopped: () => false,
+    onPinchStart: () => {},
+    onPinching: () => {},
+    onPinchEnd: () => {},
+    signal: new AbortController().signal,
+  });
+  
+  const error = await new Promise(resolve => {
+    const originalConsoleError = console.error;
+    console.error = (...args) => {
+      if (args[0].includes("null is not an object (evaluating 'this.#touchMoveAC.abort')")) {
+        resolve(args[0]);
+      }
+    };
+    
+    touchManager.#touchMoveAC = null;
+    touchManager.#onTouchEnd({ touches: [] });
+    
+    console.error = originalConsoleError;
+  });
+  
+  expect(error).not.toMatch("null is not an object");
+});
+```

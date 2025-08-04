@@ -1,0 +1,35 @@
+it("should prevent memory ballooning when scrolling through PDF", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+
+  // Load a test PDF with multiple pages
+  const pdf = await PDFDocument.load(await fetch(`${TEST_PDFS_PATH}with-many-pages.pdf`));
+
+  // Generate a large number of pages to simulate scrolling
+  const pages = [];
+  for (let i = 0; i < 100; i++) {
+    pages.push(await pdf.getPage(i + 1));
+  }
+
+  // Track memory usage
+  const heapSizes = [];
+  for (const page of pages) {
+    // Render the page
+    const pageProxy = new PDFPageProxy(page);
+    await pageProxy.render();
+
+    // Force cleanup
+    pageProxy.cleanup();
+
+    // Measure heap size after cleanup
+    const heapStats = v8.getHeapStatistics();
+    heapSizes.push(heapStats.used_heap_size);
+
+    // Release references
+    pageProxy.objs.clear();
+  }
+
+  // Check if memory usage remains stable
+  const maxHeapSize = Math.max(...heapSizes);
+  expect(maxHeapSize).toBeLessThan(200 * 1024 * 1024); // 200MB threshold
+});

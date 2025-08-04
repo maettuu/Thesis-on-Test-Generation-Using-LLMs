@@ -1,0 +1,74 @@
+<think>
+Okay, I need to write a test that checks if the patch resolves the issue where Japanese vertical punctuation appears incorrect in Firefox when opening a PDF. 
+
+First, I should understand the problem. The issue is that certain punctuation marks, like the Japanese comma and period, are displayed incorrectly when the PDF is opened in Firefox. This is likely due to how the font's vertical presentation forms are handled.
+
+Looking at the patch provided, I see that it adds a function `getVerticalPresentationForm` which maps certain Unicode characters to their vertical counterparts. This function is then used in `fonts.js` to adjust the font characters when the font is vertical.
+
+So, the test needs to verify that after applying the patch, the correct vertical forms are used. 
+
+I'll create a test PDF that includes Japanese punctuation. Then, I'll use pdf.js to render the text and check if the expected characters are present. 
+
+In the test, I'll load the PDF, extract the text, and compare it to the expected output. Before the patch, the text might be incorrect, but after the patch, it should be correct.
+
+I need to make sure the test is self-contained. I'll generate a sample PDF content with the necessary characters. Then, I'll use the `PDFDocument` and `TextLayer` from pdf.js to load and parse the PDF. 
+
+I'll structure the test with `it` from Jest, using async/await for the asynchronous operations. I'll import the necessary modules dynamically to avoid issues with Node.js paths.
+
+I should also handle any potential errors and ensure the test fails if the text doesn't match the expected output.
+
+Finally, I'll write the code, making sure it's concise and only tests the specific issue addressed by the patch.
+</think>
+
+```javascript
+it("should correctly display vertical Japanese punctuation", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { TextLayer } = await import("../../src/display/text_layer.js");
+  
+  // Create a sample PDF with vertical Japanese punctuation
+  const pdfContent = `
+    %PDF-1.3
+    1 0 obj
+    <</Type /Catalog /Pages 2 0 R>>
+    endobj
+    2 0 obj
+    <</Type /Pages /Kids [3 0 R] /Count 1>>
+    endobj
+    3 0 obj
+    <</Type /Page /Parent 2 0 R /Resources 4 0 R /Contents 5 0 R>>
+    endobj
+    4 0 obj
+    <</Font <</F1 6 0 R>>>
+    endobj
+    5 0 obj
+    <</Length 7 0 R>>
+    stream
+    BT
+    /F1 24 Tf
+    (\\u3001\\u3002) Tj
+    ET
+    endstream
+    endobj
+    6 0 obj
+    <</Type /Font /Subtype /Type1 /Name /F1 /BaseFont /Mincho>>
+    endobj
+    7 0 obj
+    40
+    endobj
+  `;
+  
+  const pdfDoc = await PDFDocument.load(pdfContent, { cMapCache: new Map() });
+  const page = await pdfDoc.getPage(1);
+  const textLayer = new TextLayer({
+    textLayerFactory: { createTextLayer: () => ({ textContent: [] }) },
+    container: { scrollIntoView: () => {} }
+  });
+  const textContent = await page.getTextContent();
+  await textLayer.renderLayer(page, textContent);
+  
+  const expectedText = "\u3001\u3002";
+  const actualText = textContent.items.map(item => item.str).join("");
+  
+  expect(actualText).toBe(expectedText);
+});
+```

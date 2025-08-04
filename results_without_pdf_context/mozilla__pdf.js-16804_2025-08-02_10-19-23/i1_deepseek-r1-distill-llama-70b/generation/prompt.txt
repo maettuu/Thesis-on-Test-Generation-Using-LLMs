@@ -1,0 +1,503 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+How do I remove embedded images
+Attach (recommended) or Link to PDF file here:
+
+[TS354 Week 2 slides.pdf](https://github.com/mozilla/pdf.js/files/12287878/TS354.Week.2.slides.pdf)
+
+Configuration:
+- Web browser and its version: Chrome 115.0.5790.171
+- Operating system and its version: Windows 11 home 22H2
+- PDF.js version: 3.9.49
+- Is a browser extension: yes
+
+Steps to reproduce the problem:
+1. Open pdf
+2. Go to page 2
+
+What is the expected behavior? (add screenshot)
+Not see the pin
+
+What went wrong? (add screenshot)
+I'd just like to just see the image underneath the black pin
+
+![image](https://github.com/mozilla/pdf.js/assets/141709691/fa12745d-3280-4f98-83d6-372b9fe18a2c)
+
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/annotation.js b/src/core/annotation.js
+--- a/src/core/annotation.js
++++ b/src/core/annotation.js
+@@ -4652,6 +4652,12 @@ class FileAttachmentAnnotation extends MarkupAnnotation {
+     const name = dict.get("Name");
+     this.data.name =
+       name instanceof Name ? stringToPDFString(name.name) : "PushPin";
++
++    const fillAlpha = dict.get("ca");
++    this.data.fillAlpha =
++      typeof fillAlpha === "number" && fillAlpha >= 0 && fillAlpha <= 1
++        ? fillAlpha
++        : null;
+   }
+ }
+
+diff --git a/src/display/annotation_layer.js b/src/display/annotation_layer.js
+--- a/src/display/annotation_layer.js
++++ b/src/display/annotation_layer.js
+@@ -2798,8 +2798,9 @@ class FileAttachmentAnnotationElement extends AnnotationElement {
+   render() {
+     this.container.classList.add("fileAttachmentAnnotation");
+ 
++    const { data } = this;
+     let trigger;
+-    if (this.data.hasAppearance) {
++    if (data.hasAppearance || data.fillAlpha === 0) {
+       trigger = document.createElement("div");
+     } else {
+       // Unfortunately it seems that it's not clearly specified exactly what
+@@ -2809,18 +2810,26 @@ class FileAttachmentAnnotationElement extends AnnotationElement {
+       //   Additional names may be supported as well. Default value: PushPin.
+       trigger = document.createElement("img");
+       trigger.src = `${this.imageResourcesPath}annotation-${
+-        /paperclip/i.test(this.data.name) ? "paperclip" : "pushpin"
++        /paperclip/i.test(data.name) ? "paperclip" : "pushpin"
+       }.svg`;
++
++      if (data.fillAlpha && data.fillAlpha < 1) {
++        trigger.style = `filter: opacity(${Math.round(
++          data.fillAlpha * 100
++        )}%);`;
++
++        if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
++          this.container.classList.add("hasFillAlpha");
++        }
++      }
+     }
+     trigger.classList.add("popupTriggerArea");
+     trigger.addEventListener("dblclick", this._download.bind(this));
+     this.#trigger = trigger;
+ 
+     if (
+-      !this.data.popupRef &&
+-      (this.data.titleObj?.str ||
+-        this.data.contentsObj?.str ||
+-        this.data.richText)
++      !data.popupRef &&
++      (data.titleObj?.str || data.contentsObj?.str || data.richText)
+     ) {
+       this._createPopup();
+     }
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.9
+- @babel/plugin-transform-modules-commonjs: ^7.22.5
+- @babel/preset-env: ^7.22.9
+- @babel/runtime: ^7.22.6
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.14
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001519
+- canvas: ^2.11.2
+- core-js: ^3.32.0
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.46.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.28.0
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.1
+- globals: ^13.20.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.27
+- postcss-dir-pseudo-class: ^8.0.0
+- prettier: ^3.0.1
+- puppeteer: ^21.0.1
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.2
+- stylelint-prettier: ^4.0.2
+- terser: ^5.19.2
+- through2: ^4.0.2
+- ttest: ^4.0.0
+- typescript: ^5.1.6
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/annotation.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationActionEventType,
+18   AnnotationBorderStyleType,
+19   AnnotationEditorType,
+20   AnnotationFieldFlag,
+21   AnnotationFlag,
+22   AnnotationReplyType,
+23   AnnotationType,
+24   assert,
+25   BASELINE_FACTOR,
+26   FeatureTest,
+27   getModificationDate,
+28   IDENTITY_MATRIX,
+29   LINE_DESCENT_FACTOR,
+30   LINE_FACTOR,
+31   OPS,
+32   RenderingIntentFlag,
+33   shadow,
+34   stringToPDFString,
+35   unreachable,
+36   Util,
+37   warn,
+38 } from "../shared/util.js";
+39 import {
+40   collectActions,
+41   escapeString,
+42   getInheritableProperty,
+43   getRotationMatrix,
+44   isAscii,
+45   numberToString,
+46   stringToUTF16String,
+47 } from "./core_utils.js";
+48 import {
+49   createDefaultAppearance,
+50   FakeUnicodeFont,
+51   getPdfColor,
+52   parseAppearanceStream,
+53   parseDefaultAppearance,
+54 } from "./default_appearance.js";
+55 import { Dict, isName, Name, Ref, RefSet } from "./primitives.js";
+56 import { Stream, StringStream } from "./stream.js";
+57 import { writeDict, writeObject } from "./writer.js";
+58 import { BaseStream } from "./base_stream.js";
+59 import { bidi } from "./bidi.js";
+60 import { Catalog } from "./catalog.js";
+61 import { ColorSpace } from "./colorspace.js";
+62 import { FileSpec } from "./file_spec.js";
+63 import { JpegStream } from "./jpeg_stream.js";
+64 import { ObjectLoader } from "./object_loader.js";
+65 import { OperatorList } from "./operator_list.js";
+66 import { XFAFactory } from "./xfa/factory.js";
+67 
+4641 class FileAttachmentAnnotation extends MarkupAnnotation {
+4642   constructor(params) {
+4643     super(params);
+4644 
+4645     const { dict, xref } = params;
+4646     const file = new FileSpec(dict.get("FS"), xref);
+4647 
+4648     this.data.annotationType = AnnotationType.FILEATTACHMENT;
+4649     this.data.hasOwnCanvas = this.data.noRotate;
+4650     this.data.file = file.serializable;
+4651 
+4652     const name = dict.get("Name");
+4653     this.data.name =
+4654       name instanceof Name ? stringToPDFString(name.name) : "PushPin";
+4655   }
+4656 }
+4657 
+File:
+src/display/annotation_layer.js
+1 /* Copyright 2014 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+21 import {
+22   AnnotationBorderStyleType,
+23   AnnotationEditorType,
+24   AnnotationType,
+25   FeatureTest,
+26   LINE_FACTOR,
+27   shadow,
+28   unreachable,
+29   Util,
+30   warn,
+31 } from "../shared/util.js";
+32 import {
+33   AnnotationPrefix,
+34   DOMSVGFactory,
+35   getFilenameFromUrl,
+36   PDFDateString,
+37   setLayerDimensions,
+38 } from "./display_utils.js";
+39 import { AnnotationStorage } from "./annotation_storage.js";
+40 import { ColorConverters } from "../shared/scripting_utils.js";
+41 import { NullL10n } from "display-l10n_utils";
+42 import { XfaLayer } from "./xfa_layer.js";
+43 
+44 const DEFAULT_TAB_INDEX = 1000;
+45 const DEFAULT_FONT_SIZE = 9;
+46 const GetElementsByNameSet = new WeakSet();
+47 
+2781 class FileAttachmentAnnotationElement extends AnnotationElement {
+2782   #trigger = null;
+2783 
+2784   constructor(parameters) {
+2785     super(parameters, { isRenderable: true });
+2786 
+2787     const { filename, content } = this.data.file;
+2788     this.filename = getFilenameFromUrl(filename, /* onlyStripPath = */ true);
+2789     this.content = content;
+2790 
+2791     this.linkService.eventBus?.dispatch("fileattachmentannotation", {
+2792       source: this,
+2793       filename,
+2794       content,
+2795     });
+2796   }
+2797 
+2798   render() {
+2799     this.container.classList.add("fileAttachmentAnnotation");
+2800 
+2801     let trigger;
+2802     if (this.data.hasAppearance) {
+2803       trigger = document.createElement("div");
+2804     } else {
+2805       // Unfortunately it seems that it's not clearly specified exactly what
+2806       // names are actually valid, since Table 184 contains:
+2807       //   Conforming readers shall provide predefined icon appearances for at
+2808       //   least the following standard names: GraphPushPin, PaperclipTag.
+2809       //   Additional names may be supported as well. Default value: PushPin.
+2810       trigger = document.createElement("img");
+2811       trigger.src = `${this.imageResourcesPath}annotation-${
+2812         /paperclip/i.test(this.data.name) ? "paperclip" : "pushpin"
+2813       }.svg`;
+2814     }
+2815     trigger.classList.add("popupTriggerArea");
+2816     trigger.addEventListener("dblclick", this._download.bind(this));
+2817     this.#trigger = trigger;
+2818 
+2819     if (
+2820       !this.data.popupRef &&
+2821       (this.data.titleObj?.str ||
+2822         this.data.contentsObj?.str ||
+2823         this.data.richText)
+2824     ) {
+2825       this._createPopup();
+2826     }
+2827 
+2828     this.container.append(trigger);
+2829     return this.container;
+2830   }
+2831 
+2853 }
+2854 
+3057 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/annotation_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  Annotation,
+  AnnotationBorderStyle,
+  AnnotationFactory,
+  getQuadPoints,
+  MarkupAnnotation,
+} from "../../src/core/annotation.js";
+import {
+  AnnotationBorderStyleType,
+  AnnotationEditorType,
+  AnnotationFieldFlag,
+  AnnotationFlag,
+  AnnotationType,
+  OPS,
+  RenderingIntentFlag,
+  stringToBytes,
+  stringToUTF8String,
+} from "../../src/shared/util.js";
+import {
+  CMAP_URL,
+  createIdFactory,
+  STANDARD_FONT_DATA_URL,
+  XRefMock,
+} from "./test_utils.js";
+import {
+  DefaultCMapReaderFactory,
+  DefaultStandardFontDataFactory,
+} from "../../src/display/api.js";
+import { Dict, Name, Ref, RefSetCache } from "../../src/core/primitives.js";
+import { Lexer, Parser } from "../../src/core/parser.js";
+import { PartialEvaluator } from "../../src/core/evaluator.js";
+import { StringStream } from "../../src/core/stream.js";
+import { WorkerTask } from "../../src/core/worker.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

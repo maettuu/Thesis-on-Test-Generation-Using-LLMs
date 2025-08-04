@@ -1,0 +1,39 @@
+it("should render all inlined images", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+
+  const loadingTask = getDocument(buildGetDocumentParams('issue17794.pdf'));
+  const { pdfDocument } = await loadingTask;
+  const pdfPage = await pdfDocument.getPage(1);
+
+  const checkImagesRendered = (operatorList) => {
+    let imageCount = 0;
+    const operators = operatorList.getOperators();
+    for (const op of operators) {
+      if (op.name === OPS.paintInlineImageXObject) {
+        imageCount++;
+      }
+    }
+    return imageCount;
+  };
+
+  const evaluatorOptions = {
+    ignoreErrors: false,
+    isFirefox: true,
+    isMac: true,
+  };
+
+  const operatorList = new (await import('../../src/core/evaluator.js')).PartialEvaluator/pdfOperatorList;
+  const evaluator = new (await import('../../src/core/evaluator.js')).PartialEvaluator({
+    ...evaluatorOptions,
+    xref: pdfDocument.xref,
+    pdfDocument: pdfDocument,
+  });
+
+  await evaluator.evaluate(pdfPage);
+
+  const expectedImageCount = 2;
+  const actualImageCount = checkImagesRendered(operatorList);
+
+  expect(actualImageCount).toBe(expectedImageCount);
+});

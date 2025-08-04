@@ -1,0 +1,43 @@
+it("should allow Voice Over to read highlighted text during editing", async () => {
+  const { PDFDocument, PDFWorker } = await import("../../src/display/api.js");
+  const { DOMSVGFactory } = await import("../../src/display/display_utils.js");
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { renderTextLayer } = await import("../../src/display/text_layer.js");
+
+  // Setup Puppeteer and get accessibility tree
+  const { _accessibility } = await import("puppeteer/frames");
+  const browser = await require("puppeteer").launch();
+  const page = await browser.newPage();
+  await page.setContent(`
+    <html>
+      <body>
+        <div class="textLayer" style="width: 400px; height: 300px;">
+          <p id="text">Sample text for highlighting</p>
+        </div>
+      </body>
+    </html>
+  `);
+
+  // Create highlight editor
+  const textLayer = page.querySelector(".textLayer");
+  const highlightEditor = new HighlightEditor({
+    anchorNode: textLayer.querySelector("#text").firstChild,
+    anchorOffset: 0,
+    focusNode: textLayer.querySelector("#text").firstChild,
+    focusOffset: 10,
+    boxes: [{ x: 0, y: 0, width: 100, height: 20 }]
+  });
+
+  // Apply highlight
+  highlightEditor.render();
+  page.addScriptTag({ content: highlightEditor.render().outerHTML });
+
+  // Get accessibility tree
+  const accessibilityTree = await _accessibility.getAccessibilityTree(page);
+  const highlightedText = accessibilityTree.find(
+    node => node.role === "mark" && node.name === "Sample text for highlighting"
+  );
+
+  expect(highlightedText).toBeTruthy();
+});

@@ -1,0 +1,49 @@
+it("should render comment and sticky note annotations", async () => {
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Ref } = await import("../../src/core/primitives.js");
+  const { XRefMock } = await import("./test_utils.js");
+
+  const pdfManager = {
+    ensureCatalog: async () => ({}),
+    ensureDoc: async () => ({}),
+    getPage: async () => ({
+      annotations: [new Ref(1, 0)],
+    }),
+  };
+
+  const xref = new XRefMock([
+    {
+      ref: new Ref(1, 0),
+      data: {
+        get: (key) => {
+          if (key === "Subtype") return { name: "Text" };
+          if (key === "Rect") return [0, 0, 10, 10];
+          if (key === "Contents") return "Test comment";
+          if (key === "T") return "Author";
+          return null;
+        },
+      },
+    },
+  ]);
+
+  const annotationGlobals = await AnnotationFactory.createGlobals(pdfManager);
+  const annotation = await AnnotationFactory.create(
+    xref,
+    new Ref(1, 0),
+    annotationGlobals,
+    { createObjId: () => 1 },
+    false,
+    null
+  );
+
+  const expected = {
+    annotationType: 1,
+    contentsObj: { str: "Test comment", dir: "ltr" },
+    titleObj: { str: "Author", dir: "ltr" },
+  };
+
+  expect(annotation.data.annotationType).toEqual(expected.annotationType);
+  expect(annotation.data.contentsObj).toEqual(expected.contentsObj);
+  expect(annotation.data.titleObj).toEqual(expected.titleObj);
+});

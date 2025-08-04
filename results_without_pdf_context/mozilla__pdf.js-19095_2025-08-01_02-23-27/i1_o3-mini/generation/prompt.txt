@@ -1,0 +1,980 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Unable to decode image: InvalidStateError
+**Attach (recommended) or Link to PDF file here:**
+[org_AVA89V01U0$ (Black).pdf](https://github.com/mozilla/pdf.js/files/13180762/org_AVA89V01U0.Black.pdf)
+
+**Configuration:**
+- Web browser and its version: Chrome Version 118.0.5993.89 (Official Build) (64-bit)
+- Firefox Version 119.0 (64-bit)
+- Edge Version 118.0.2088.69 (Official build) (64-bit)
+- Operating system and its version: Windows 11 Enterprise Version 10.0.22621 Build 22621
+- PDF.js version: 4.0.132 [34781121c] (test viewer)
+- Is a browser extension: No
+
+**Steps to reproduce the problem:**
+1. Open the file in Acrobat. Main area is blacked out but you can see the edges of a CAD drawing along the borders that includes various characters.
+2. Open the file in PDF.js. Only the black rectangle in the center and the blue box in the upper right corner are rendered.
+
+**What is the expected behavior? (add screenshot)**
+This is the upper left corner at 200% zoom in Acrobat:
+![image](https://github.com/mozilla/pdf.js/assets/70534142/729c7d8c-890f-459a-84a0-fba1febc2fa0)
+
+**What went wrong? (add screenshot)**
+The console on Chrome:
+PDF a8c52134c310cca513061a5a2ce6ca91 [1.3 - / -] (PDF.js: 4.0.132 [34781121c])
+util.js:367 Warning: Unable to decode image "img_p0_1": "InvalidStateError: The source image could not be decoded.".
+util.js:367 Warning: Dependent image isn't ready yet
+
+The console on Firefox:
+PDF a8c52134c310cca513061a5a2ce6ca91 [1.3 - / -] (PDF.js: 4.0.132 [34781121c]) [app.js:1561:12](webpack://pdf.js/web/app.js)
+Warning: Unable to decode image "img_p0_1": "InvalidStateError: An attempt was made to use an object that is not, or is no longer, usable". [pdf.worker.mjs:339:13](https://mozilla.github.io/pdf.js/build/pdf.worker.mjs)
+Warning: Dependent image isn't ready yet 3 [util.js:367:12](webpack://pdf.js/src/shared/util.js)
+
+The console on Edge:
+PDF a8c52134c310cca513061a5a2ce6ca91 [1.3 - / -] (PDF.js: 4.0.132 [34781121c])
+util.js:367 Warning: Unable to decode image "img_p0_1": "InvalidStateError: The source image could not be decoded.".
+2util.js:367 Warning: Dependent image isn't ready yet
+util.js:367 Warning: Dependent image isn't ready yet
+
+This is the upper left corner at 200% zoom in Chrome:
+![image](https://github.com/mozilla/pdf.js/assets/70534142/f120f196-a634-4e58-8f3e-a937ef04d89a)
+
+**Link to a viewer (if hosted on a site other than mozilla.github.io/pdf.js or as Firefox/Chrome extension):**
+https://mozilla.github.io/pdf.js/web/viewer.html
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/core_utils.js b/src/core/core_utils.js
+--- a/src/core/core_utils.js
++++ b/src/core/core_utils.js
+@@ -27,6 +27,8 @@ import { Dict, isName, Ref, RefSet } from "./primitives.js";
+ import { BaseStream } from "./base_stream.js";
+ 
+ const PDF_VERSION_REGEXP = /^[1-9]\.\d$/;
++const MAX_INT_32 = 2 ** 31 - 1;
++const MIN_INT_32 = -(2 ** 31);
+ 
+ function getLookupTableFactory(initializer) {
+   let lookup;
+@@ -713,6 +715,8 @@ export {
+   lookupMatrix,
+   lookupNormalRect,
+   lookupRect,
++  MAX_INT_32,
++  MIN_INT_32,
+   MissingDataException,
+   numberToString,
+   ParserEOFException,
+
+diff --git a/src/core/image_resizer.js b/src/core/image_resizer.js
+--- a/src/core/image_resizer.js
++++ b/src/core/image_resizer.js
+@@ -14,6 +14,8 @@
+  */
+ 
+ import { FeatureTest, ImageKind, shadow, warn } from "../shared/util.js";
++import { convertToRGBA } from "../shared/image_utils.js";
++import { MAX_INT_32 } from "./core_utils.js";
+ 
+ const MIN_IMAGE_DIM = 2048;
+ 
+@@ -172,6 +174,18 @@ class ImageResizer {
+   }
+ 
+   async _createImage() {
++    const { _imgData: imgData } = this;
++    const { width, height } = imgData;
++
++    if (width * height * 4 > MAX_INT_32) {
++      // The resulting RGBA image is too large.
++      // We just rescale the data.
++      const result = this.#rescaleImageData();
++      if (result) {
++        return result;
++      }
++    }
++
+     const data = this._encodeBMP();
+     let decoder, imagePromise;
+ 
+@@ -206,8 +220,6 @@ class ImageResizer {
+     }
+ 
+     const { MAX_AREA, MAX_DIM } = ImageResizer;
+-    const { _imgData: imgData } = this;
+-    const { width, height } = imgData;
+     const minFactor = Math.max(
+       width / MAX_DIM,
+       height / MAX_DIM,
+@@ -268,6 +280,91 @@ class ImageResizer {
+     return imgData;
+   }
+ 
++  #rescaleImageData() {
++    const { _imgData: imgData } = this;
++    const { data, width, height, kind } = imgData;
++    const rgbaSize = width * height * 4;
++    // K is such as width * height * 4 / 2 ** K <= 2 ** 31 - 1
++    const K = Math.ceil(Math.log2(rgbaSize / MAX_INT_32));
++    const newWidth = width >> K;
++    const newHeight = height >> K;
++    let rgbaData;
++    let maxHeight = height;
++
++    // We try to allocate the buffer with the maximum size but it can fail.
++    try {
++      rgbaData = new Uint8Array(rgbaSize);
++    } catch {
++      // n is such as 2 ** n - 1 > width * height * 4
++      let n = Math.floor(Math.log2(rgbaSize + 1));
++
++      while (true) {
++        try {
++          rgbaData = new Uint8Array(2 ** n - 1);
++          break;
++        } catch {
++          n -= 1;
++        }
++      }
++
++      maxHeight = Math.floor((2 ** n - 1) / (width * 4));
++      const newSize = width * maxHeight * 4;
++      if (newSize < rgbaData.length) {
++        rgbaData = new Uint8Array(newSize);
++      }
++    }
++
++    const src32 = new Uint32Array(rgbaData.buffer);
++    const dest32 = new Uint32Array(newWidth * newHeight);
++
++    let srcPos = 0;
++    let newIndex = 0;
++    const step = Math.ceil(height / maxHeight);
++    const remainder = height % maxHeight === 0 ? height : height % maxHeight;
++    for (let k = 0; k < step; k++) {
++      const h = k < step - 1 ? maxHeight : remainder;
++      ({ srcPos } = convertToRGBA({
++        kind,
++        src: data,
++        dest: src32,
++        width,
++        height: h,
++        inverseDecode: this._isMask,
++        srcPos,
++      }));
++
++      for (let i = 0, ii = h >> K; i < ii; i++) {
++        const buf = src32.subarray((i << K) * width);
++        for (let j = 0; j < newWidth; j++) {
++          dest32[newIndex++] = buf[j << K];
++        }
++      }
++    }
++
++    if (ImageResizer.needsToBeResized(newWidth, newHeight)) {
++      imgData.data = dest32;
++      imgData.width = newWidth;
++      imgData.height = newHeight;
++      imgData.kind = ImageKind.RGBA_32BPP;
++
++      return null;
++    }
++
++    const canvas = new OffscreenCanvas(newWidth, newHeight);
++    const ctx = canvas.getContext("2d", { willReadFrequently: true });
++    ctx.putImageData(
++      new ImageData(new Uint8ClampedArray(dest32.buffer), newWidth, newHeight),
++      0,
++      0
++    );
++    imgData.data = null;
++    imgData.bitmap = canvas.transferToImageBitmap();
++    imgData.width = newWidth;
++    imgData.height = newHeight;
++
++    return imgData;
++  }
++
+   _encodeBMP() {
+     const { width, height, kind } = this._imgData;
+     let data = this._imgData.data;
+
+diff --git a/src/core/jbig2.js b/src/core/jbig2.js
+--- a/src/core/jbig2.js
++++ b/src/core/jbig2.js
+@@ -14,7 +14,14 @@
+  */
+ 
+ import { BaseException, shadow } from "../shared/util.js";
+-import { log2, readInt8, readUint16, readUint32 } from "./core_utils.js";
++import {
++  log2,
++  MAX_INT_32,
++  MIN_INT_32,
++  readInt8,
++  readUint16,
++  readUint32,
++} from "./core_utils.js";
+ import { ArithmeticDecoder } from "./arithmetic_decoder.js";
+ import { CCITTFaxDecoder } from "./ccitt.js";
+ 
+@@ -52,9 +59,6 @@ class DecodingContext {
+   }
+ }
+ 
+-const MAX_INT_32 = 2 ** 31 - 1;
+-const MIN_INT_32 = -(2 ** 31);
+-
+ // Annex A. Arithmetic Integer Decoding Procedure
+ // A.2 Procedure for decoding values
+ function decodeInteger(contextCache, procedure, decoder) {
+
+diff --git a/src/shared/image_utils.js b/src/shared/image_utils.js
+--- a/src/shared/image_utils.js
++++ b/src/shared/image_utils.js
+@@ -77,7 +77,8 @@ function convertRGBToRGBA({
+   height,
+ }) {
+   let i = 0;
+-  const len32 = src.length >> 2;
++  const len = width * height * 3;
++  const len32 = len >> 2;
+   const src32 = new Uint32Array(src.buffer, srcPos, len32);
+ 
+   if (FeatureTest.isLittleEndian) {
+@@ -94,7 +95,7 @@ function convertRGBToRGBA({
+       dest[destPos + 3] = (s3 >>> 8) | 0xff000000;
+     }
+ 
+-    for (let j = i * 4, jj = src.length; j < jj; j += 3) {
++    for (let j = i * 4, jj = srcPos + len; j < jj; j += 3) {
+       dest[destPos++] =
+         src[j] | (src[j + 1] << 8) | (src[j + 2] << 16) | 0xff000000;
+     }
+@@ -110,13 +111,13 @@ function convertRGBToRGBA({
+       dest[destPos + 3] = (s3 << 8) | 0xff;
+     }
+ 
+-    for (let j = i * 4, jj = src.length; j < jj; j += 3) {
++    for (let j = i * 4, jj = srcPos + len; j < jj; j += 3) {
+       dest[destPos++] =
+         (src[j] << 24) | (src[j + 1] << 16) | (src[j + 2] << 8) | 0xff;
+     }
+   }
+ 
+-  return { srcPos, destPos };
++  return { srcPos: srcPos + len, destPos };
+ }
+ 
+ function grayToRGBA(src, dest) {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.0
+- @babel/preset-env: ^7.26.0
+- @babel/runtime: ^7.26.0
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.62
+- @types/node: ^22.9.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001680
+- core-js: ^3.39.0
+- eslint: ^9.15.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^3.9.1
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-unicorn: ^56.0.0
+- globals: ^15.12.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.4.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.4.49
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.10.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.3
+- vinyl: ^3.0.0
+- webpack: ^5.96.1
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: fetchData
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/core_utils.js
+1 /* Copyright 2019 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorPrefix,
+18   assert,
+19   BaseException,
+20   hexNumbers,
+21   objectSize,
+22   stringToPDFString,
+23   Util,
+24   warn,
+25 } from "../shared/util.js";
+26 import { Dict, isName, Ref, RefSet } from "./primitives.js";
+27 import { BaseStream } from "./base_stream.js";
+28 
+29 const PDF_VERSION_REGEXP = /^[1-9]\.\d$/;
+30 
+179 // prettier-ignore
+180 const ROMAN_NUMBER_MAP = [
+181   "", "C", "CC", "CCC", "CD", "D", "DC", "DCC", "DCCC", "CM",
+182   "", "X", "XX", "XXX", "XL", "L", "LX", "LXX", "LXXX", "XC",
+183   "", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"
+184 ];
+185 
+207 // Calculate the base 2 logarithm of the number `x`. This differs from the
+208 // native function in the sense that it returns the ceiling value and that it
+209 // returns 0 instead of `Infinity`/`NaN` for `x` values smaller than/equal to 0.
+213 
+232 // Checks if ch is one of the following characters: SPACE, TAB, CR or LF.
+236 
+276 // Returns the matrix, or the fallback value if it's invalid.
+280 
+281 // Returns the rectangle, or the fallback value if it's invalid.
+285 
+286 // Returns the normalized rectangle, or the fallback value if it's invalid.
+290 
+351 // Replace "(", ")", "\n", "\r" and "\" by "\(", "\)", "\\n", "\\r" and "\\"
+352 // in order to write it in a PDF file.
+363 
+451 const XMLEntities = {
+452   /* < */ 0x3c: "&lt;",
+453   /* > */ 0x3e: "&gt;",
+454   /* & */ 0x26: "&amp;",
+455   /* " */ 0x22: "&quot;",
+456   /* ' */ 0x27: "&apos;",
+457 };
+458 
+694 
+File:
+src/core/image_resizer.js
+1 /* Copyright 2023 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { FeatureTest, ImageKind, shadow, warn } from "../shared/util.js";
+17 
+18 const MIN_IMAGE_DIM = 2048;
+19 
+20 // In Chrome, there aren't max dimensions but only a max area. So an image with
+21 // a very large dimensions is acceptable but it probably doesn't hurt to reduce
+22 // it when considering that it will finally rendered on a small canvas.
+23 const MAX_IMAGE_DIM = 65537;
+24 const MAX_ERROR = 128;
+25 
+26 // Large images are encoded in using the BMP format (it's a way faster than
+27 // encoding in PNG because there are no checksums to compute).
+28 // Unfortunately, createImageBitmap will create a task in the main thread in
+29 // order to build the bitmap, hence the main thread is blocked during the
+30 // decoding which can be a bit long (see bug 1817244).
+31 // When bug 1759728 is fixed we can remove the BMP workaround and at least it
+32 // should be a way faster to create the bitmap.
+33 
+34 class ImageResizer {
+35   static #goodSquareLength = MIN_IMAGE_DIM;
+36 
+37   static #isImageDecoderSupported = FeatureTest.isImageDecoderSupported;
+38 
+39   constructor(imgData, isMask) {
+40     this._imgData = imgData;
+41     this._isMask = isMask;
+42   }
+43 
+174   async _createImage() {
+175     const data = this._encodeBMP();
+176     let decoder, imagePromise;
+177 
+178     if (await ImageResizer.canUseImageDecoder) {
+179       decoder = new ImageDecoder({
+180         data,
+181         type: "image/bmp",
+182         preferAnimation: false,
+183         transfer: [data.buffer],
+184       });
+185       imagePromise = decoder
+186         .decode()
+187         .catch(reason => {
+188           warn(`BMP image decoding failed: ${reason}`);
+189           // It's a bit unfortunate to create the BMP twice but we shouldn't be
+190           // here in the first place.
+191           return createImageBitmap(
+192             new Blob([this._encodeBMP().buffer], {
+193               type: "image/bmp",
+194             })
+195           );
+196         })
+197         .finally(() => {
+198           decoder.close();
+199         });
+200     } else {
+201       imagePromise = createImageBitmap(
+202         new Blob([data.buffer], {
+203           type: "image/bmp",
+204         })
+205       );
+206     }
+207 
+208     const { MAX_AREA, MAX_DIM } = ImageResizer;
+209     const { _imgData: imgData } = this;
+210     const { width, height } = imgData;
+211     const minFactor = Math.max(
+212       width / MAX_DIM,
+213       height / MAX_DIM,
+214       Math.sqrt((width * height) / MAX_AREA)
+215     );
+216 
+217     const firstFactor = Math.max(minFactor, 2);
+218 
+219     // Add 1 to the ratio and round it with 1 digit.
+220     // We add 1.25 in order to have a final image under the limits
+221     // (and not just at the limits) to reduce memory use.
+222     const factor = Math.round(10 * (minFactor + 1.25)) / 10 / firstFactor;
+223 
+224     const N = Math.floor(Math.log2(factor));
+225     const steps = new Array(N + 2).fill(2);
+226     steps[0] = firstFactor;
+227     steps.splice(-1, 1, factor / (1 << N));
+228 
+229     let newWidth = width;
+230     let newHeight = height;
+231     const result = await imagePromise;
+232     let bitmap = result.image || result;
+233 
+234     for (const step of steps) {
+235       const prevWidth = newWidth;
+236       const prevHeight = newHeight;
+237 
+238       // See bug 1820511 (Windows specific bug).
+239       // TODO: once the above bug is fixed we could revert to:
+240       // newWidth = Math.floor(newWidth / 2);
+241       newWidth = Math.floor(newWidth / step) - 1;
+242       newHeight = Math.floor(newHeight / step) - 1;
+243 
+244       const canvas = new OffscreenCanvas(newWidth, newHeight);
+245       const ctx = canvas.getContext("2d");
+246       ctx.drawImage(
+247         bitmap,
+248         0,
+249         0,
+250         prevWidth,
+251         prevHeight,
+252         0,
+253         0,
+254         newWidth,
+255         newHeight
+256       );
+257 
+258       // Release the resources associated with the bitmap.
+259       bitmap.close();
+260       bitmap = canvas.transferToImageBitmap();
+261     }
+262 
+263     imgData.data = null;
+264     imgData.bitmap = bitmap;
+265     imgData.width = newWidth;
+266     imgData.height = newHeight;
+267 
+268     return imgData;
+269   }
+270 
+438 }
+439 
+File:
+src/core/jbig2.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { BaseException, shadow } from "../shared/util.js";
+17 import { log2, readInt8, readUint16, readUint32 } from "./core_utils.js";
+18 import { ArithmeticDecoder } from "./arithmetic_decoder.js";
+19 import { CCITTFaxDecoder } from "./ccitt.js";
+20 
+27 // Utility data structures
+36 
+55 const MAX_INT_32 = 2 ** 31 - 1;
+56 const MIN_INT_32 = -(2 ** 31);
+57 
+58 // Annex A. Arithmetic Integer Decoding Procedure
+59 // A.2 Procedure for decoding values
+101 
+102 // A.3 The IAID decoding procedure
+116 
+117 // 7.3 Segment types
+118 const SegmentTypes = [
+119   "SymbolDictionary",
+120   null,
+121   null,
+122   null,
+123   "IntermediateTextRegion",
+124   null,
+125   "ImmediateTextRegion",
+126   "ImmediateLosslessTextRegion",
+127   null,
+128   null,
+129   null,
+130   null,
+131   null,
+132   null,
+133   null,
+134   null,
+135   "PatternDictionary",
+136   null,
+137   null,
+138   null,
+139   "IntermediateHalftoneRegion",
+140   null,
+141   "ImmediateHalftoneRegion",
+142   "ImmediateLosslessHalftoneRegion",
+143   null,
+144   null,
+145   null,
+146   null,
+147   null,
+148   null,
+149   null,
+150   null,
+151   null,
+152   null,
+153   null,
+154   null,
+155   "IntermediateGenericRegion",
+156   null,
+157   "ImmediateGenericRegion",
+158   "ImmediateLosslessGenericRegion",
+159   "IntermediateGenericRefinementRegion",
+160   null,
+161   "ImmediateGenericRefinementRegion",
+162   "ImmediateLosslessGenericRefinementRegion",
+163   null,
+164   null,
+165   null,
+166   null,
+167   "PageInformation",
+168   "EndOfPage",
+169   "EndOfStripe",
+170   "EndOfFile",
+171   "Profiles",
+172   "Tables",
+173   null,
+174   null,
+175   null,
+176   null,
+177   null,
+178   null,
+179   null,
+180   null,
+181   "Extension",
+182 ];
+183 
+184 const CodingTemplates = [
+185   [
+186     { x: -1, y: -2 },
+187     { x: 0, y: -2 },
+188     { x: 1, y: -2 },
+189     { x: -2, y: -1 },
+190     { x: -1, y: -1 },
+191     { x: 0, y: -1 },
+192     { x: 1, y: -1 },
+193     { x: 2, y: -1 },
+194     { x: -4, y: 0 },
+195     { x: -3, y: 0 },
+196     { x: -2, y: 0 },
+197     { x: -1, y: 0 },
+198   ],
+199   [
+200     { x: -1, y: -2 },
+201     { x: 0, y: -2 },
+202     { x: 1, y: -2 },
+203     { x: 2, y: -2 },
+204     { x: -2, y: -1 },
+205     { x: -1, y: -1 },
+206     { x: 0, y: -1 },
+207     { x: 1, y: -1 },
+208     { x: 2, y: -1 },
+209     { x: -3, y: 0 },
+210     { x: -2, y: 0 },
+211     { x: -1, y: 0 },
+212   ],
+213   [
+214     { x: -1, y: -2 },
+215     { x: 0, y: -2 },
+216     { x: 1, y: -2 },
+217     { x: -2, y: -1 },
+218     { x: -1, y: -1 },
+219     { x: 0, y: -1 },
+220     { x: 1, y: -1 },
+221     { x: -2, y: 0 },
+222     { x: -1, y: 0 },
+223   ],
+224   [
+225     { x: -3, y: -1 },
+226     { x: -2, y: -1 },
+227     { x: -1, y: -1 },
+228     { x: 0, y: -1 },
+229     { x: 1, y: -1 },
+230     { x: -4, y: 0 },
+231     { x: -3, y: 0 },
+232     { x: -2, y: 0 },
+233     { x: -1, y: 0 },
+234   ],
+235 ];
+236 
+237 const RefinementTemplates = [
+238   {
+239     coding: [
+240       { x: 0, y: -1 },
+241       { x: 1, y: -1 },
+242       { x: -1, y: 0 },
+243     ],
+244     reference: [
+245       { x: 0, y: -1 },
+246       { x: 1, y: -1 },
+247       { x: -1, y: 0 },
+248       { x: 0, y: 0 },
+249       { x: 1, y: 0 },
+250       { x: -1, y: 1 },
+251       { x: 0, y: 1 },
+252       { x: 1, y: 1 },
+253     ],
+254   },
+255   {
+256     coding: [
+257       { x: -1, y: -1 },
+258       { x: 0, y: -1 },
+259       { x: 1, y: -1 },
+260       { x: -1, y: 0 },
+261     ],
+262     reference: [
+263       { x: 0, y: -1 },
+264       { x: -1, y: 0 },
+265       { x: 0, y: 0 },
+266       { x: 1, y: 0 },
+267       { x: 0, y: 1 },
+268       { x: 1, y: 1 },
+269     ],
+270   },
+271 ];
+272 
+273 // See 6.2.5.7 Decoding the bitmap.
+274 const ReusedContexts = [
+275   0x9b25, // 10011 0110010 0101
+276   0x0795, // 0011 110010 101
+277   0x00e5, // 001 11001 01
+278   0x0195, // 011001 0101
+279 ];
+280 
+281 const RefinementReusedContexts = [
+282   0x0020, // '000' + '0' (coding) + '00010000' + '0' (reference)
+283   0x0008, // '0000' + '001000'
+284 ];
+285 
+329 // 6.2 Generic Region Decoding Procedure
+491 
+492 // 6.3.2 Generic Refinement Region Decoding Procedure
+576 
+577 // 6.5.5 Decoding the symbol dictionary
+772 
+1284 // 7.4.1 Region segment information field
+1294 const RegionSegmentInformationFieldLength = 17;
+1295 
+1991 const standardTablesCache = {};
+1992 
+2595 
+File:
+src/shared/image_utils.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { FeatureTest, ImageKind } from "./util.js";
+17 
+71 function convertRGBToRGBA({
+72   src,
+73   srcPos = 0,
+74   dest,
+75   destPos = 0,
+76   width,
+77   height,
+78 }) {
+79   let i = 0;
+80   const len32 = src.length >> 2;
+81   const src32 = new Uint32Array(src.buffer, srcPos, len32);
+82 
+83   if (FeatureTest.isLittleEndian) {
+84     // It's a way faster to do the shuffle manually instead of working
+85     // component by component with some Uint8 arrays.
+86     for (; i < len32 - 2; i += 3, destPos += 4) {
+87       const s1 = src32[i]; // R2B1G1R1
+88       const s2 = src32[i + 1]; // G3R3B2G2
+89       const s3 = src32[i + 2]; // B4G4R4B3
+90 
+91       dest[destPos] = s1 | 0xff000000;
+92       dest[destPos + 1] = (s1 >>> 24) | (s2 << 8) | 0xff000000;
+93       dest[destPos + 2] = (s2 >>> 16) | (s3 << 16) | 0xff000000;
+94       dest[destPos + 3] = (s3 >>> 8) | 0xff000000;
+95     }
+96 
+97     for (let j = i * 4, jj = src.length; j < jj; j += 3) {
+98       dest[destPos++] =
+99         src[j] | (src[j + 1] << 8) | (src[j + 2] << 16) | 0xff000000;
+100     }
+101   } else {
+102     for (; i < len32 - 2; i += 3, destPos += 4) {
+103       const s1 = src32[i]; // R1G1B1R2
+104       const s2 = src32[i + 1]; // G2B2R3G3
+105       const s3 = src32[i + 2]; // B3R4G4B4
+106 
+107       dest[destPos] = s1 | 0xff;
+108       dest[destPos + 1] = (s1 << 24) | (s2 >>> 8) | 0xff;
+109       dest[destPos + 2] = (s2 << 16) | (s3 >>> 16) | 0xff;
+110       dest[destPos + 3] = (s3 << 8) | 0xff;
+111     }
+112 
+113     for (let j = i * 4, jj = src.length; j < jj; j += 3) {
+114       dest[destPos++] =
+115         (src[j] << 24) | (src[j + 1] << 16) | (src[j + 2] << 8) | 0xff;
+116     }
+117   }
+118 
+119   return { srcPos, destPos };
+120 }
+121 
+133 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/core_utils_spec.js
+/* Copyright 2019 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  arrayBuffersToBytes,
+  encodeToXmlString,
+  escapePDFName,
+  escapeString,
+  getInheritableProperty,
+  getSizeInBytes,
+  isAscii,
+  isWhiteSpace,
+  log2,
+  numberToString,
+  parseXFAPath,
+  recoverJsURL,
+  stringToUTF16HexString,
+  stringToUTF16String,
+  toRomanNumerals,
+  validateCSSFont,
+} from "../../src/core/core_utils.js";
+import { Dict, Ref } from "../../src/core/primitives.js";
+import { XRefMock } from "./test_utils.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

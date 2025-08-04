@@ -1,0 +1,62 @@
+<think>
+Okay, I need to write a regression test for the issue where rendering a PDF with a lot of pages is slow. The patch provided modifies the MessageHandler class to introduce queueing and postponing of tasks, which should improve performance by prioritizing message processing.
+
+First, I should understand what the patch does. It adds properties like #queue, #cancelledStreamIds, #executorRunning, and #isPostponed to the MessageHandler. The _onComObjOnMessage method now queues incoming messages and uses an executor to process them. The executor runs in a way that postpones execution if needed, which might help with performance when there are many messages.
+
+The test should verify that after the patch, the rendering is faster. But how to measure that? Maybe by checking if multiple messages are processed correctly without delaying each other too much.
+
+Looking at the test file, it already imports MessageHandler and some exceptions. I can use LoopbackPort to simulate the communication between the main thread and the worker.
+
+I'll set up a test where I send multiple messages and check if they are processed in a timely manner. I'll create a LoopbackPort and a MessageHandler instance. Then, I'll send several messages and measure the time it takes for all of them to be processed.
+
+I'll use promises to track when each message is handled. Each message will resolve its promise when it's processed. I'll send, say, 50 messages and wait for all to complete. Then, I'll check if the total time taken is within an acceptable threshold, like 100ms.
+
+This test should fail before the patch because without the queueing, processing each message might take longer, especially with many pages. After the patch, the queueing should make processing more efficient, so the test should pass.
+
+I need to structure the test correctly. I'll create a loop to send each message, track the start time, and use Promise.all to wait for all completions. Then, I'll calculate the time taken and assert it's under the threshold.
+
+I should also handle any potential errors and ensure the test cleans up properly, like destroying the MessageHandler after the test.
+
+So, putting it all together, the test will simulate a scenario with many messages, measure the processing time, and assert that it's within the expected range after the patch is applied.
+</think>
+
+```javascript
+it("should improve performance with many pages by queueing messages", async () => {
+  const { LoopbackPort } = await import("../../src/display/api.js");
+  const port = new LoopbackPort();
+  const messageHandler = new MessageHandler("main", "worker", port);
+  
+  const numMessages = 50;
+  const messages = Array.from({ length: numMessages }, (_, i) => ({
+    action: "testAction",
+    data: `testData${i}`,
+  }));
+  
+  const promises = [];
+  const results = [];
+  
+  messages.forEach((message, index) => {
+    const promise = new Promise((resolve) => {
+      messageHandler.on("testAction", () => {
+        results[index] = true;
+        resolve();
+      });
+    });
+    promises.push(promise);
+    port.postMessage({
+      sourceName: "worker",
+      targetName: "main",
+      action: "testAction",
+      data: message.data,
+    });
+  });
+  
+  const startTime = Date.now();
+  await Promise.all(promises);
+  const totalTime = Date.now() - startTime;
+  
+  expect(totalTime).toBeLessThan(100);
+  
+  messageHandler.destroy();
+});
+```

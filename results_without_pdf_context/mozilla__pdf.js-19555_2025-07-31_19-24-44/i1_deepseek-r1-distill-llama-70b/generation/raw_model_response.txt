@@ -1,0 +1,47 @@
+<think>
+Okay, I need to write a regression test for the issue where PDFs using a rare RC4 encryption scheme with R=4, V=4, and key lengths less than 128 bits weren't opening properly in Firefox's PDF viewer. The patch provided is supposed to fix this by extending the key to 16 bytes if it's shorter.
+
+First, I should understand what the patch does. It looks like in the CipherTransformFactory, when the algorithm is 4 (RC4) and the encryption key is less than 16 bytes, it's being extended to 16 bytes by appending zero bytes. So the test needs to verify that with such a key, the decryption works correctly.
+
+I need to create a test that uses a sample PDF with a 40-bit key (5 bytes) and another with a 48-bit key (6 bytes). The test should check if these files can be decrypted properly after the patch.
+
+Looking at the test file, I can see that it imports the necessary modules, including CipherTransformFactory. I can use the existing imports but might need to create some helper functions or variables.
+
+I'll structure the test as follows:
+1. Create a test dictionary that mimics the encryption dictionary of the problematic PDFs. It should have V=4, R=4, and a short key length.
+2. Set up a CipherTransformFactory instance with this dictionary and a sample file ID. Since the password is empty, I'll pass an empty string.
+3. Check if the encryption key is correctly extended to 16 bytes. For a 5-byte key, it should become 16 bytes with the rest as zeros.
+4. Verify that the decryption works by checking if the encryption key's length is 16 bytes.
+
+I should use async/await since the test might involve promises. I'll also need to handle any exceptions that might be thrown if the decryption fails.
+
+Wait, how do I get the encryption key after it's been set? Since the patch modifies the encryptionKey property, I can access it directly after initializing the CipherTransformFactory.
+
+So, the test will:
+- Create a mock dictionary with the necessary entries (V=4, R=4, Length=40).
+- Initialize CipherTransformFactory with this dictionary and an empty password.
+- Check if encryptionKey's length is 16 bytes.
+
+I think that's sufficient because the patch ensures that any key shorter than 16 bytes is extended. If the test passes, it means the key was correctly extended, which would allow the PDF to be decrypted properly.
+
+I should also make sure that the test doesn't rely on external files, so using an in-memory dictionary and file ID is better.
+
+Putting it all together, the test will create the necessary setup, initialize the CipherTransformFactory, and assert that the encryption key is 16 bytes long.
+</think>
+
+```javascript
+it("should correctly extend short RC4 keys to 16 bytes", async () => {
+  const dict = new Dict({
+    Filter: new Name("Standard"),
+    V: 4,
+    R: 4,
+    Length: 40,
+  });
+  const fileId = "test.pdf";
+  const password = "";
+  
+  const factory = new CipherTransformFactory(dict, fileId, password);
+  
+  expect(factory.encryptionKey.length).toBe(16);
+});
+```

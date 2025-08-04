@@ -1,0 +1,47 @@
+#test/unit/stamp_spec.js
+import { StampEditor } from "../../display/editor/stamp.js";
+import { AnnotationEditorType } from "../../shared/util.js";
+import { PixelsPerInch } from "../display_utils.js";
+
+describe("StampEditor image type validation", () => {
+  it("should only allow supported image types", async () => {
+    const supportedTypes = [
+      "apng",
+      "avif",
+      "bmp",
+      "gif",
+      "jpeg",
+      "png",
+      "svg+xml",
+      "webp",
+      "x-icon",
+    ];
+
+    const input = document.createElement("input");
+    input.type = "file";
+    const file = new File([""], "test.tiff", { type: "image/tiff" });
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    input.files = dataTransfer.files;
+
+    const editor = new StampEditor({});
+
+    const originalAccept = input.accept;
+    input.accept = StampEditor.supportedTypes;
+
+    const changeEvent = new Event("change");
+    input.dispatchEvent(changeEvent);
+
+    const bitmapPromise = editor.#bitmapPromise;
+    await bitmapPromise;
+
+    const expectedError = new Error("Unsupported image type");
+    try {
+      await bitmapPromise;
+    } catch (error) {
+      expect(error.message).not.toEqual(expectedError.message);
+    }
+
+    input.accept = originalAccept;
+  });
+});

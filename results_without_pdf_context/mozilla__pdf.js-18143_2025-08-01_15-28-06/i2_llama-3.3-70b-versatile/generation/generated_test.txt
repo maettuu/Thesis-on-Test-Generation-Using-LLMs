@@ -1,0 +1,60 @@
+it("should recognize a page dictionary with Contents no Type or Kids as a valid page", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Dict, Ref } = await import("../../src/core/primitives.js");
+  const { StringStream } = await import("../../src/core/stream.js");
+
+  class MapWithHasPut extends Map {
+    put(key, value) {
+      this.set(key, value);
+    }
+  }
+
+  // Create a page dictionary with "Contents" but without "Type" or "Kids".
+  const pageDict = new Dict();
+  pageDict.set("Contents", "dummy content");
+
+  // Prepare a fake reference corresponding to object number 1 and generation 0.
+  const fakeRef = Ref.get(1, 0);
+
+  // Create a fake XRef with a fetchAsync method that returns our pageDict for fakeRef.
+  const xref = {
+    fetchAsync: async function (ref) {
+      if (ref.num === fakeRef.num && ref.gen === fakeRef.gen) {
+        return pageDict;
+      }
+      throw new Error("Unexpected reference.");
+    },
+  };
+
+  // Create a minimal linearization object.
+  const linearization = {
+    pageFirst: 0,
+    objectNumberFirst: 1,
+  };
+
+  // Minimal catalog with required cache methods.
+  const catalog = {
+    pageKidsCountCache: new MapWithHasPut(),
+    pageIndexCache: new MapWithHasPut(),
+    getPageDict: () => {
+      throw new Error("getPageDict should not be called in this test");
+    },
+  };
+
+  // Create a dummy stream.
+  const stream = new StringStream("dummy");
+
+  // Instantiate PDFDocument with a dummy pdfManager.
+  const pdfDoc = new PDFDocument({ docId: 123 }, stream);
+  pdfDoc.linearization = linearization;
+  pdfDoc.catalog = catalog;
+  pdfDoc.xref = xref;
+
+  const [resultDict, resultRef] = await pdfDoc._getLinearizationPage(0);
+  if (resultDict !== pageDict) {
+    throw new Error("The page dictionary was not correctly recognized.");
+  }
+  if (resultRef.num !== fakeRef.num || resultRef.gen !== fakeRef.gen) {
+    throw new Error("The page reference returned is incorrect.");
+  }
+});

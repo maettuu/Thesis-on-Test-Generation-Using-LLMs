@@ -1,0 +1,88 @@
+<think>
+Okay, I need to write a regression test for the issue where text isn't shown because the browser.display.use_document_fonts setting is disabled. The patch provided is supposed to fix this by using canvas context text primitives when the font file is missing. 
+
+First, I should understand the problem. When use_document_fonts is set to 0, Firefox doesn't use the document's fonts, so PDF.js can't render the text properly. The patch modifies the canvas.js file to handle cases where the font is missing by using fillText and strokeText instead of trying to generate paths, which isn't possible without the font.
+
+So, the test needs to simulate this scenario. I'll create a test that sets the font.disableFontFace flag and checks if the text is rendered correctly. 
+
+I'll start by importing the necessary modules. Since the test is in Node.js, I'll need to use dynamic imports for PDF.js modules. I'll import PDFDocument and get the test PDF from the TEST_PDFS_PATH. 
+
+Next, I'll set up a mock canvas context because we can't use a real canvas in Node.js. I'll create a Canvas class that mocks the necessary methods like fillText, strokeText, and others. 
+
+Then, I'll load the PDF document and get the first page. I'll set the font.disableFontFace to true to simulate the missing font scenario. 
+
+I'll render the page using the mock canvas context and check if the text "山" is present in the canvas actions. If the patch works, the text should be rendered using fillText or strokeText, so I'll look for those method calls in the canvas actions.
+
+I need to make sure that the test fails before the patch and passes after. The test should be self-contained and only use the provided imports without adding new dependencies.
+
+Putting it all together, the test will load the PDF, apply the settings, render the page, and check for the expected text in the canvas actions. This should validate that the patch correctly handles the missing font case.
+</think>
+
+```javascript
+it("should render text with missing fonts using canvas text primitives", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { getTestPDFPath } = await import("../../src/display/test_utils.js");
+  
+  // Mock canvas context for testing
+  class Canvas {
+    constructor() {
+      this.actions = [];
+    }
+    getContext() {
+      return this;
+    }
+    measureText() {
+      return { width: 0 };
+    }
+    fillText(text, x, y) {
+      this.actions.push({ type: 'fillText', text, x, y });
+    }
+    strokeText(text, x, y) {
+      this.actions.push({ type: 'strokeText', text, x, y });
+    }
+    getTransform() {
+      return new DOMMatrix();
+    }
+    setTransform(...args) {}
+    clip() {}
+    save() {}
+    restore() {}
+    scale() {}
+    translate() {}
+  }
+
+  const pdfPath = getTestPDFPath("form.pdf");
+  const pdf = await PDFDocument.load(pdfPath);
+  const page = await pdf.getPage(1);
+  
+  // Set up graphics context with font.disableFontFace = true
+  const ctx = new Canvas();
+  const graphics = new CanvasGraphics(
+    ctx,
+    {},
+    {},
+    {},
+    {},
+    { optionalContentConfig: null },
+    new Map(),
+    null
+  );
+  
+  graphics.current.font.disableFontFace = true;
+  
+  // Render page and check if text is rendered with canvas text primitives
+  await page.render({
+    graphics,
+    viewport: page.getViewport({ scale: 1 }),
+    useTextLayer: false,
+  });
+  
+  const expectedText = "山"; // Example text from the PDF
+  const actualActions = ctx.actions;
+  
+  expect(actualActions.some(action => 
+    (action.type === 'fillText' || action.type === 'strokeText') && 
+    action.text.includes(expectedText)
+  )).toBe(true);
+});
+```

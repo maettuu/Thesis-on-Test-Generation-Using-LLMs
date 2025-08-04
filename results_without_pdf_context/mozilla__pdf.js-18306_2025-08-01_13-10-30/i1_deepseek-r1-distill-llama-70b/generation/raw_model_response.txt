@@ -1,0 +1,56 @@
+<think>
+Okay, I need to write a regression test for the issue where PDFs with non-integer DW values aren't rendered correctly. The patch changes how defaultWidth is calculated in evaluator.js. 
+
+First, I'll look at the code before the patch. In the extractWidths function, defaultWidth is set using Number.isInteger(dw) ? dw : 1000. So if DW isn't an integer, it defaults to 1000. 
+
+After the patch, it uses typeof dw === "number" ? Math.ceil(dw) : 1000. So now, any number, integer or not, will be ceiled. 
+
+The test should fail before the patch and pass after. So I need to create a test case where DW is a non-integer, like 500.5. 
+
+I'll create a mock PDF with a font dictionary that has DW set to 500.5. Then, I'll use PartialEvaluator to process it. 
+
+I'll check if defaultWidth is correctly set to 501 after the patch. Before the patch, it would have been 1000, causing the test to fail. 
+
+I'll structure the test using Jest. I'll import necessary modules, set up the mock XRef, create the font dictionary, and then call extractWidths. Finally, I'll assert that defaultWidth is 501.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll write the test as an it block in the test file.
+</think>
+
+```javascript
+it("should correctly handle non-integer DW in font descriptor", async () => {
+  const { Dict, Name, PartialEvaluator, XRefMock } = await import("./test_utils.js");
+  
+  const xref = new XRefMock();
+  const fontDict = Dict.from({
+    Type: Name.get("Font"),
+    Subtype: Name.get("Type1"),
+    BaseFont: Name.get("Helvetica"),
+    DW: 500.5
+  });
+  
+  xref.put(1, fontDict);
+  
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: {},
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: {},
+    builtInCMapCache: {},
+    standardFontDataCache: {},
+    globalImageCache: {},
+    systemFontCache: {},
+    options: {}
+  });
+  
+  const properties = {
+    composite: true,
+    vertical: false,
+    firstChar: 0
+  };
+  
+  evaluator.extractWidths(fontDict, {}, properties);
+  
+  expect(properties.defaultWidth).toBe(501);
+});
+```

@@ -1,0 +1,1741 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: Don't stop rendering on faulty Resources entry of a form XObject
+### Is the feature relevant to the Firefox PDF Viewer?
+
+Yes
+
+### Feature description
+
+[This PDF](https://github.com/user-attachments/files/19863018/example-flattened.pdf) draws 2 form XObjects on page one. The first one (I1) has an empty content stream and its Resource entry is faulty as it references another form XObject instead of a resource dictionary. 
+
+The second form XObject (I2) is a simply flattened form field and correct.
+
+The faulty resource dictionary of the first form XObject (I1) seems to prevent I2 to be rendered at all in PDF.js.
+
+I stumbled over this behavior in the wild and for sure the PDF itself is faulty and that's why I didn't labeled this as a bug in PDF.js.
+
+
+
+### Other PDF viewers
+
+All other common PDF viewers render the second form field without any problem.
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/evaluator.js b/src/core/evaluator.js
+--- a/src/core/evaluator.js
++++ b/src/core/evaluator.js
+@@ -465,7 +465,7 @@ class PartialEvaluator {
+     localColorSpaceCache,
+     seenRefs
+   ) {
+-    const dict = xobj.dict;
++    const { dict } = xobj;
+     const matrix = lookupMatrix(dict.getArray("Matrix"), null);
+     const bbox = lookupNormalRect(dict.getArray("BBox"), null);
+ 
+@@ -521,10 +521,12 @@ class PartialEvaluator {
+     const args = [f32matrix, f32bbox];
+     operatorList.addOp(OPS.paintFormXObjectBegin, args);
+ 
++    const localResources = dict.get("Resources");
++
+     await this.getOperatorList({
+       stream: xobj,
+       task,
+-      resources: dict.get("Resources") || resources,
++      resources: localResources instanceof Dict ? localResources : resources,
+       operatorList,
+       initialState,
+       prevRefs: seenRefs,
+@@ -3298,14 +3300,15 @@ class PartialEvaluator {
+                 if (!(xobj instanceof BaseStream)) {
+                   throw new FormatError("XObject should be a stream");
+                 }
++                const { dict } = xobj;
+ 
+-                const type = xobj.dict.get("Subtype");
++                const type = dict.get("Subtype");
+                 if (!(type instanceof Name)) {
+                   throw new FormatError("XObject should have a Name subtype");
+                 }
+ 
+                 if (type.name !== "Form") {
+-                  emptyXObjectCache.set(name, xobj.dict.objId, true);
++                  emptyXObjectCache.set(name, dict.objId, true);
+ 
+                   resolveXObject();
+                   return;
+@@ -3319,11 +3322,13 @@ class PartialEvaluator {
+                 const currentState = stateManager.state.clone();
+                 const xObjStateManager = new StateManager(currentState);
+ 
+-                const matrix = lookupMatrix(xobj.dict.getArray("Matrix"), null);
++                const matrix = lookupMatrix(dict.getArray("Matrix"), null);
+                 if (matrix) {
+                   xObjStateManager.transform(matrix);
+                 }
+ 
++                const localResources = dict.get("Resources");
++
+                 // Enqueue the `textContent` chunk before parsing the /Form
+                 // XObject.
+                 enqueueChunk();
+@@ -3348,7 +3353,10 @@ class PartialEvaluator {
+                   .getTextContent({
+                     stream: xobj,
+                     task,
+-                    resources: xobj.dict.get("Resources") || resources,
++                    resources:
++                      localResources instanceof Dict
++                        ? localResources
++                        : resources,
+                     stateManager: xObjStateManager,
+                     includeMarkedContent,
+                     sink: sinkWrapper,
+@@ -3362,7 +3370,7 @@ class PartialEvaluator {
+                   })
+                   .then(function () {
+                     if (!sinkWrapper.enqueueInvoked) {
+-                      emptyXObjectCache.set(name, xobj.dict.objId, true);
++                      emptyXObjectCache.set(name, dict.objId, true);
+                     }
+                     resolveXObject();
+                   }, rejectXObject);
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.10
+- @babel/preset-env: ^7.26.9
+- @babel/runtime: ^7.27.0
+- @fluent/bundle: ^0.19.1
+- @fluent/dom: ^0.10.1
+- @metalsmith/layouts: ^3.0.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.69
+- @types/node: ^22.14.1
+- autoprefixer: ^10.4.21
+- babel-loader: ^10.0.0
+- caniuse-lite: ^1.0.30001713
+- core-js: ^3.41.0
+- eslint: ^9.24.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.11.0
+- eslint-plugin-prettier: ^5.2.6
+- eslint-plugin-unicorn: ^58.0.0
+- globals: ^16.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.6.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.3
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.5.3
+- puppeteer: ^24.6.1
+- stylelint: ^16.18.0
+- stylelint-prettier: ^5.0.3
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.14
+- tsc-alias: ^1.8.15
+- ttest: ^4.0.0
+- typescript: ^5.8.3
+- vinyl: ^3.0.0
+- webpack: ^5.99.5
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20.16.0
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/calculate_md5.js`: calculateMD5
+- `../../src/core/calculate_sha256.js`: calculateSHA256
+- `../../src/core/calculate_sha_other.js`: calculateSHA384, calculateSHA512
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/colorspace_utils.js`: ColorSpaceUtils
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalColorSpaceCache, GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, isValidExplicitDest, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, DrawOPS, FeatureTest, FormatError, ImageKind, InvalidPDFException, MathClamp, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/evaluator.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AbortException,
+18   assert,
+19   DrawOPS,
+20   FONT_IDENTITY_MATRIX,
+21   FormatError,
+22   info,
+23   isArrayEqual,
+24   normalizeUnicode,
+25   OPS,
+26   shadow,
+27   stringToPDFString,
+28   TextRenderingMode,
+29   Util,
+30   warn,
+31 } from "../shared/util.js";
+32 import { CMapFactory, IdentityCMap } from "./cmap.js";
+33 import { Cmd, Dict, EOF, isName, Name, Ref, RefSet } from "./primitives.js";
+34 import { compileType3Glyph, FontFlags } from "./fonts_utils.js";
+35 import { ErrorFont, Font } from "./fonts.js";
+36 import {
+37   fetchBinaryData,
+38   IDENTITY_MATRIX,
+39   isNumberArray,
+40   lookupMatrix,
+41   lookupNormalRect,
+42 } from "./core_utils.js";
+43 import {
+44   getEncoding,
+45   MacRomanEncoding,
+46   StandardEncoding,
+47   SymbolSetEncoding,
+48   WinAnsiEncoding,
+49   ZapfDingbatsEncoding,
+50 } from "./encodings.js";
+51 import {
+52   getFontNameToFileMap,
+53   getSerifFonts,
+54   getStandardFontName,
+55   getStdFontMap,
+56   getSymbolsFonts,
+57   isKnownFontName,
+58 } from "./standard_fonts.js";
+59 import { getTilingPatternIR, Pattern } from "./pattern.js";
+60 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
+61 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
+62 import { isPDFFunction, PDFFunctionFactory } from "./function.js";
+63 import { Lexer, Parser } from "./parser.js";
+64 import {
+65   LocalColorSpaceCache,
+66   LocalGStateCache,
+67   LocalImageCache,
+68   LocalTilingPatternCache,
+69   RegionalImageCache,
+70 } from "./image_utils.js";
+71 import { BaseStream } from "./base_stream.js";
+72 import { bidi } from "./bidi.js";
+73 import { ColorSpace } from "./colorspace.js";
+74 import { ColorSpaceUtils } from "./colorspace_utils.js";
+75 import { getFontSubstitution } from "./font_substitutions.js";
+76 import { getGlyphsUnicode } from "./glyphlist.js";
+77 import { getMetrics } from "./metrics.js";
+78 import { getUnicodeForGlyph } from "./unicode.js";
+79 import { MurmurHash3_64 } from "../shared/murmurhash3.js";
+80 import { OperatorList } from "./operator_list.js";
+81 import { PDFImage } from "./image.js";
+82 import { Stream } from "./stream.js";
+83 
+84 const DefaultPartialEvaluatorOptions = Object.freeze({
+85   maxImageSize: -1,
+86   disableFontFace: false,
+87   ignoreErrors: false,
+88   isEvalSupported: true,
+89   isOffscreenCanvasSupported: false,
+90   isImageDecoderSupported: false,
+91   canvasMaxAreaInBytes: -1,
+92   fontExtraProperties: false,
+93   useSystemFonts: true,
+94   useWasm: true,
+95   useWorkerFetch: true,
+96   cMapUrl: null,
+97   iccUrl: null,
+98   standardFontDataUrl: null,
+99   wasmUrl: null,
+100 });
+101 
+102 const PatternType = {
+103   TILING: 1,
+104   SHADING: 2,
+105 };
+106 
+107 // Optionally avoid sending individual, or very few, text chunks to reduce
+108 // `postMessage` overhead with ReadableStream (see issue 13962).
+109 //
+110 // PLEASE NOTE: This value should *not* be too large (it's used as a lower limit
+111 // in `enqueueChunk`), since that would cause streaming of textContent to become
+112 // essentially useless in practice by sending all (or most) chunks at once.
+113 // Also, a too large value would (indirectly) affect the main-thread `textLayer`
+114 // building negatively by forcing all textContent to be handled at once, which
+115 // could easily end up hurting *overall* performance (e.g. rendering as well).
+116 const TEXT_CHUNK_BATCH_SIZE = 10;
+117 
+118 const deferred = Promise.resolve();
+119 
+120 // Convert PDF blend mode names to HTML5 blend mode names.
+181 
+196 // Trying to minimize Date.now() usage and check every 100 time.
+219 
+220 class PartialEvaluator {
+221   constructor({
+222     xref,
+223     handler,
+224     pageIndex,
+225     idFactory,
+226     fontCache,
+227     builtInCMapCache,
+228     standardFontDataCache,
+229     globalColorSpaceCache,
+230     globalImageCache,
+231     systemFontCache,
+232     options = null,
+233   }) {
+234     this.xref = xref;
+235     this.handler = handler;
+236     this.pageIndex = pageIndex;
+237     this.idFactory = idFactory;
+238     this.fontCache = fontCache;
+239     this.builtInCMapCache = builtInCMapCache;
+240     this.standardFontDataCache = standardFontDataCache;
+241     this.globalColorSpaceCache = globalColorSpaceCache;
+242     this.globalImageCache = globalImageCache;
+243     this.systemFontCache = systemFontCache;
+244     this.options = options || DefaultPartialEvaluatorOptions;
+245     this.type3FontRefs = null;
+246 
+247     this._regionalImageCache = new RegionalImageCache();
+248     this._fetchBuiltInCMapBound = this.fetchBuiltInCMap.bind(this);
+249   }
+250 
+458   async buildFormXObject(
+459     resources,
+460     xobj,
+461     smask,
+462     operatorList,
+463     task,
+464     initialState,
+465     localColorSpaceCache,
+466     seenRefs
+467   ) {
+468     const dict = xobj.dict;
+469     const matrix = lookupMatrix(dict.getArray("Matrix"), null);
+470     const bbox = lookupNormalRect(dict.getArray("BBox"), null);
+471 
+472     let optionalContent, groupOptions;
+473     if (dict.has("OC")) {
+474       optionalContent = await this.parseMarkedContentProps(
+475         dict.get("OC"),
+476         resources
+477       );
+478     }
+479     if (optionalContent !== undefined) {
+480       operatorList.addOp(OPS.beginMarkedContentProps, ["OC", optionalContent]);
+481     }
+482     const group = dict.get("Group");
+483     if (group) {
+484       groupOptions = {
+485         matrix,
+486         bbox,
+487         smask,
+488         isolated: false,
+489         knockout: false,
+490       };
+491 
+492       const groupSubtype = group.get("S");
+493       let colorSpace = null;
+494       if (isName(groupSubtype, "Transparency")) {
+495         groupOptions.isolated = group.get("I") || false;
+496         groupOptions.knockout = group.get("K") || false;
+497         if (group.has("CS")) {
+498           const cs = this._getColorSpace(
+499             group.getRaw("CS"),
+500             resources,
+501             localColorSpaceCache
+502           );
+503           colorSpace =
+504             cs instanceof ColorSpace ? cs : await this._handleColorSpace(cs);
+505         }
+506       }
+507 
+508       if (smask?.backdrop) {
+509         colorSpace ||= ColorSpaceUtils.rgb;
+510         smask.backdrop = colorSpace.getRgb(smask.backdrop, 0);
+511       }
+512 
+513       operatorList.addOp(OPS.beginGroup, [groupOptions]);
+514     }
+515 
+516     // If it's a group, a new canvas will be created that is the size of the
+517     // bounding box and translated to the correct position so we don't need to
+518     // apply the bounding box to it.
+519     const f32matrix = matrix && new Float32Array(matrix);
+520     const f32bbox = (!group && bbox && new Float32Array(bbox)) || null;
+521     const args = [f32matrix, f32bbox];
+522     operatorList.addOp(OPS.paintFormXObjectBegin, args);
+523 
+524     await this.getOperatorList({
+525       stream: xobj,
+526       task,
+527       resources: dict.get("Resources") || resources,
+528       operatorList,
+529       initialState,
+530       prevRefs: seenRefs,
+531     });
+532     operatorList.addOp(OPS.paintFormXObjectEnd, []);
+533 
+534     if (group) {
+535       operatorList.addOp(OPS.endGroup, [groupOptions]);
+536     }
+537 
+538     if (optionalContent !== undefined) {
+539       operatorList.addOp(OPS.endMarkedContent, []);
+540     }
+541   }
+542 
+2349   getTextContent({
+2350     stream,
+2351     task,
+2352     resources,
+2353     stateManager = null,
+2354     includeMarkedContent = false,
+2355     sink,
+2356     seenStyles = new Set(),
+2357     viewBox,
+2358     lang = null,
+2359     markedContentData = null,
+2360     disableNormalization = false,
+2361     keepWhiteSpace = false,
+2362     prevRefs = null,
+2363   }) {
+2364     const objId = stream.dict?.objId;
+2365     const seenRefs = new RefSet(prevRefs);
+2366 
+2367     if (objId) {
+2368       if (prevRefs?.has(objId)) {
+2369         throw new Error(
+2370           `getTextContent - ignoring circular reference: ${objId}`
+2371         );
+2372       }
+2373       seenRefs.put(objId);
+2374     }
+2375     // Ensure that `resources`/`stateManager` is correctly initialized,
+2376     // even if the provided parameter is e.g. `null`.
+2377     resources ||= Dict.empty;
+2378     stateManager ||= new StateManager(new TextState());
+2379 
+2380     if (includeMarkedContent) {
+2381       markedContentData ||= { level: 0 };
+2382     }
+2383 
+2384     const textContent = {
+2385       items: [],
+2386       styles: Object.create(null),
+2387       lang,
+2388     };
+2389     const textContentItem = {
+2390       initialized: false,
+2391       str: [],
+2392       totalWidth: 0,
+2393       totalHeight: 0,
+2394       width: 0,
+2395       height: 0,
+2396       vertical: false,
+2397       prevTransform: null,
+2398       textAdvanceScale: 0,
+2399       spaceInFlowMin: 0,
+2400       spaceInFlowMax: 0,
+2401       trackingSpaceMin: Infinity,
+2402       negativeSpaceMax: -Infinity,
+2403       notASpace: -Infinity,
+2404       transform: null,
+2405       fontName: null,
+2406       hasEOL: false,
+2407     };
+2408 
+2409     // Use a circular buffer (length === 2) to save the last chars in the
+2410     // text stream.
+2411     // This implementation of the circular buffer is using a fixed array
+2412     // and the position of the next element:
+2413     // function addElement(x) {
+2414     //   buffer[pos] = x;
+2415     //   pos = (pos + 1) % buffer.length;
+2416     // }
+2417     // It's a way faster than:
+2418     // function addElement(x) {
+2419     //   buffer.push(x);
+2420     //   buffer.shift();
+2421     // }
+2422     //
+2423     // It's useful to know when we need to add a whitespace in the
+2424     // text chunk.
+2425     const twoLastChars = [" ", " "];
+2426     let twoLastCharsPos = 0;
+2427 
+2428     /**
+2429      * Save the last char.
+2430      * @param {string} char
+2431      * @returns {boolean} true when the two last chars before adding the new one
+2432      * are a non-whitespace followed by a whitespace.
+2433      */
+2434     function saveLastChar(char) {
+2435       const nextPos = (twoLastCharsPos + 1) % 2;
+2436       const ret =
+2437         twoLastChars[twoLastCharsPos] !== " " && twoLastChars[nextPos] === " ";
+2438       twoLastChars[twoLastCharsPos] = char;
+2439       twoLastCharsPos = nextPos;
+2440 
+2441       return !keepWhiteSpace && ret;
+2442     }
+2443 
+2444     function shouldAddWhitepsace() {
+2445       return (
+2446         !keepWhiteSpace &&
+2447         twoLastChars[twoLastCharsPos] !== " " &&
+2448         twoLastChars[(twoLastCharsPos + 1) % 2] === " "
+2449       );
+2450     }
+2451 
+2452     function resetLastChars() {
+2453       twoLastChars[0] = twoLastChars[1] = " ";
+2454       twoLastCharsPos = 0;
+2455     }
+2456 
+2457     // Used in addFakeSpaces.
+2458 
+2459     // A white <= fontSize * TRACKING_SPACE_FACTOR is a tracking space
+2460     // so it doesn't count as a space.
+2461     const TRACKING_SPACE_FACTOR = 0.102;
+2462 
+2463     // When a white <= fontSize * NOT_A_SPACE_FACTOR, there is no space
+2464     // even if one is present in the text stream.
+2465     const NOT_A_SPACE_FACTOR = 0.03;
+2466 
+2467     // A negative white < fontSize * NEGATIVE_SPACE_FACTOR induces
+2468     // a break (a new chunk of text is created).
+2469     // It doesn't change anything when the text is copied but
+2470     // it improves potential mismatch between text layer and canvas.
+2471     const NEGATIVE_SPACE_FACTOR = -0.2;
+2472 
+2473     // A white with a width in [fontSize * MIN_FACTOR; fontSize * MAX_FACTOR]
+2474     // is a space which will be inserted in the current flow of words.
+2475     // If the width is outside of this range then the flow is broken
+2476     // (which means a new span in the text layer).
+2477     // It's useful to adjust the best as possible the span in the layer
+2478     // to what is displayed in the canvas.
+2479     const SPACE_IN_FLOW_MIN_FACTOR = 0.102;
+2480     const SPACE_IN_FLOW_MAX_FACTOR = 0.6;
+2481 
+2482     // If a char is too high/too low compared to the previous we just create
+2483     // a new chunk.
+2484     // If the advance isn't in the +/-VERTICAL_SHIFT_RATIO * height range then
+2485     // a new chunk is created.
+2486     const VERTICAL_SHIFT_RATIO = 0.25;
+2487 
+2488     const self = this;
+2489     const xref = this.xref;
+2490     const showSpacedTextBuffer = [];
+2491 
+2492     // The xobj is parsed iff it's needed, e.g. if there is a `DO` cmd.
+2493     let xobjs = null;
+2494     const emptyXObjectCache = new LocalImageCache();
+2495     const emptyGStateCache = new LocalGStateCache();
+2496 
+2497     const preprocessor = new EvaluatorPreprocessor(stream, xref, stateManager);
+2498 
+2499     let textState;
+2500 
+2501     function pushWhitespace({
+2502       width = 0,
+2503       height = 0,
+2504       transform = textContentItem.prevTransform,
+2505       fontName = textContentItem.fontName,
+2506     }) {
+2507       textContent.items.push({
+2508         str: " ",
+2509         dir: "ltr",
+2510         width,
+2511         height,
+2512         transform,
+2513         fontName,
+2514         hasEOL: false,
+2515       });
+2516     }
+2517 
+2518     function getCurrentTextTransform() {
+2519       // 9.4.4 Text Space Details
+2520       const font = textState.font;
+2521       const tsm = [
+2522         textState.fontSize * textState.textHScale,
+2523         0,
+2524         0,
+2525         textState.fontSize,
+2526         0,
+2527         textState.textRise,
+2528       ];
+2529 
+2530       if (
+2531         font.isType3Font &&
+2532         (textState.fontSize <= 1 || font.isCharBBox) &&
+2533         !isArrayEqual(textState.fontMatrix, FONT_IDENTITY_MATRIX)
+2534       ) {
+2535         const glyphHeight = font.bbox[3] - font.bbox[1];
+2536         if (glyphHeight > 0) {
+2537           tsm[3] *= glyphHeight * textState.fontMatrix[3];
+2538         }
+2539       }
+2540 
+2541       return Util.transform(
+2542         textState.ctm,
+2543         Util.transform(textState.textMatrix, tsm)
+2544       );
+2545     }
+2546 
+2547     function ensureTextContentItem() {
+2548       if (textContentItem.initialized) {
+2549         return textContentItem;
+2550       }
+2551       const { font, loadedName } = textState;
+2552       if (!seenStyles.has(loadedName)) {
+2553         seenStyles.add(loadedName);
+2554         textContent.styles[loadedName] = {
+2555           fontFamily: font.fallbackName,
+2556           ascent: font.ascent,
+2557           descent: font.descent,
+2558           vertical: font.vertical,
+2559         };
+2560         if (self.options.fontExtraProperties && font.systemFontInfo) {
+2561           const style = textContent.styles[loadedName];
+2562           style.fontSubstitution = font.systemFontInfo.css;
+2563           style.fontSubstitutionLoadedName = font.systemFontInfo.loadedName;
+2564         }
+2565       }
+2566       textContentItem.fontName = loadedName;
+2567 
+2568       const trm = (textContentItem.transform = getCurrentTextTransform());
+2569       if (!font.vertical) {
+2570         textContentItem.width = textContentItem.totalWidth = 0;
+2571         textContentItem.height = textContentItem.totalHeight = Math.hypot(
+2572           trm[2],
+2573           trm[3]
+2574         );
+2575         textContentItem.vertical = false;
+2576       } else {
+2577         textContentItem.width = textContentItem.totalWidth = Math.hypot(
+2578           trm[0],
+2579           trm[1]
+2580         );
+2581         textContentItem.height = textContentItem.totalHeight = 0;
+2582         textContentItem.vertical = true;
+2583       }
+2584 
+2585       const scaleLineX = Math.hypot(
+2586         textState.textLineMatrix[0],
+2587         textState.textLineMatrix[1]
+2588       );
+2589       const scaleCtmX = Math.hypot(textState.ctm[0], textState.ctm[1]);
+2590       textContentItem.textAdvanceScale = scaleCtmX * scaleLineX;
+2591 
+2592       const { fontSize } = textState;
+2593       textContentItem.trackingSpaceMin = fontSize * TRACKING_SPACE_FACTOR;
+2594       textContentItem.notASpace = fontSize * NOT_A_SPACE_FACTOR;
+2595       textContentItem.negativeSpaceMax = fontSize * NEGATIVE_SPACE_FACTOR;
+2596       textContentItem.spaceInFlowMin = fontSize * SPACE_IN_FLOW_MIN_FACTOR;
+2597       textContentItem.spaceInFlowMax = fontSize * SPACE_IN_FLOW_MAX_FACTOR;
+2598       textContentItem.hasEOL = false;
+2599 
+2600       textContentItem.initialized = true;
+2601       return textContentItem;
+2602     }
+2603 
+2604     function updateAdvanceScale() {
+2605       if (!textContentItem.initialized) {
+2606         return;
+2607       }
+2608 
+2609       const scaleLineX = Math.hypot(
+2610         textState.textLineMatrix[0],
+2611         textState.textLineMatrix[1]
+2612       );
+2613       const scaleCtmX = Math.hypot(textState.ctm[0], textState.ctm[1]);
+2614       const scaleFactor = scaleCtmX * scaleLineX;
+2615       if (scaleFactor === textContentItem.textAdvanceScale) {
+2616         return;
+2617       }
+2618 
+2619       if (!textContentItem.vertical) {
+2620         textContentItem.totalWidth +=
+2621           textContentItem.width * textContentItem.textAdvanceScale;
+2622         textContentItem.width = 0;
+2623       } else {
+2624         textContentItem.totalHeight +=
+2625           textContentItem.height * textContentItem.textAdvanceScale;
+2626         textContentItem.height = 0;
+2627       }
+2628 
+2629       textContentItem.textAdvanceScale = scaleFactor;
+2630     }
+2631 
+2632     function runBidiTransform(textChunk) {
+2633       let text = textChunk.str.join("");
+2634       if (!disableNormalization) {
+2635         text = normalizeUnicode(text);
+2636       }
+2637       const bidiResult = bidi(text, -1, textChunk.vertical);
+2638       return {
+2639         str: bidiResult.str,
+2640         dir: bidiResult.dir,
+2641         width: Math.abs(textChunk.totalWidth),
+2642         height: Math.abs(textChunk.totalHeight),
+2643         transform: textChunk.transform,
+2644         fontName: textChunk.fontName,
+2645         hasEOL: textChunk.hasEOL,
+2646       };
+2647     }
+2648 
+2649     async function handleSetFont(fontName, fontRef) {
+2650       const translated = await self.loadFont(
+2651         fontName,
+2652         fontRef,
+2653         resources,
+2654         task
+2655       );
+2656 
+2657       textState.loadedName = translated.loadedName;
+2658       textState.font = translated.font;
+2659       textState.fontMatrix = translated.font.fontMatrix || FONT_IDENTITY_MATRIX;
+2660     }
+2661 
+2662     function applyInverseRotation(x, y, matrix) {
+2663       const scale = Math.hypot(matrix[0], matrix[1]);
+2664       return [
+2665         (matrix[0] * x + matrix[1] * y) / scale,
+2666         (matrix[2] * x + matrix[3] * y) / scale,
+2667       ];
+2668     }
+2669 
+2670     function compareWithLastPosition(glyphWidth) {
+2671       const currentTransform = getCurrentTextTransform();
+2672       let posX = currentTransform[4];
+2673       let posY = currentTransform[5];
+2674 
+2675       // Check if the glyph is in the viewbox.
+2676       if (textState.font?.vertical) {
+2677         if (
+2678           posX < viewBox[0] ||
+2679           posX > viewBox[2] ||
+2680           posY + glyphWidth < viewBox[1] ||
+2681           posY > viewBox[3]
+2682         ) {
+2683           return false;
+2684         }
+2685       } else if (
+2686         posX + glyphWidth < viewBox[0] ||
+2687         posX > viewBox[2] ||
+2688         posY < viewBox[1] ||
+2689         posY > viewBox[3]
+2690       ) {
+2691         return false;
+2692       }
+2693 
+2694       if (!textState.font || !textContentItem.prevTransform) {
+2695         return true;
+2696       }
+2697 
+2698       let lastPosX = textContentItem.prevTransform[4];
+2699       let lastPosY = textContentItem.prevTransform[5];
+2700 
+2701       if (lastPosX === posX && lastPosY === posY) {
+2702         return true;
+2703       }
+2704 
+2705       let rotate = -1;
+2706       // Take into account the rotation is the current transform.
+2707       if (
+2708         currentTransform[0] &&
+2709         currentTransform[1] === 0 &&
+2710         currentTransform[2] === 0
+2711       ) {
+2712         rotate = currentTransform[0] > 0 ? 0 : 180;
+2713       } else if (
+2714         currentTransform[1] &&
+2715         currentTransform[0] === 0 &&
+2716         currentTransform[3] === 0
+2717       ) {
+2718         rotate = currentTransform[1] > 0 ? 90 : 270;
+2719       }
+2720 
+2721       switch (rotate) {
+2722         case 0:
+2723           break;
+2724         case 90:
+2725           [posX, posY] = [posY, posX];
+2726           [lastPosX, lastPosY] = [lastPosY, lastPosX];
+2727           break;
+2728         case 180:
+2729           [posX, posY, lastPosX, lastPosY] = [
+2730             -posX,
+2731             -posY,
+2732             -lastPosX,
+2733             -lastPosY,
+2734           ];
+2735           break;
+2736         case 270:
+2737           [posX, posY] = [-posY, -posX];
+2738           [lastPosX, lastPosY] = [-lastPosY, -lastPosX];
+2739           break;
+2740         default:
+2741           // This is not a 0, 90, 180, 270 rotation so:
+2742           //  - remove the scale factor from the matrix to get a rotation matrix
+2743           //  - apply the inverse (which is the transposed) to the positions
+2744           // and we can then compare positions of the glyphes to detect
+2745           // a whitespace.
+2746           [posX, posY] = applyInverseRotation(posX, posY, currentTransform);
+2747           [lastPosX, lastPosY] = applyInverseRotation(
+2748             lastPosX,
+2749             lastPosY,
+2750             textContentItem.prevTransform
+2751           );
+2752       }
+2753 
+2754       if (textState.font.vertical) {
+2755         const advanceY = (lastPosY - posY) / textContentItem.textAdvanceScale;
+2756         const advanceX = posX - lastPosX;
+2757 
+2758         // When the total height of the current chunk is negative
+2759         // then we're writing from bottom to top.
+2760         const textOrientation = Math.sign(textContentItem.height);
+2761         if (advanceY < textOrientation * textContentItem.negativeSpaceMax) {
+2762           if (
+2763             Math.abs(advanceX) >
+2764             0.5 * textContentItem.width /* not the same column */
+2765           ) {
+2766             appendEOL();
+2767             return true;
+2768           }
+2769 
+2770           resetLastChars();
+2771           flushTextContentItem();
+2772           return true;
+2773         }
+2774 
+2775         if (Math.abs(advanceX) > textContentItem.width) {
+2776           appendEOL();
+2777           return true;
+2778         }
+2779 
+2780         if (advanceY <= textOrientation * textContentItem.notASpace) {
+2781           // The real spacing between 2 consecutive chars is thin enough to be
+2782           // considered a non-space.
+2783           resetLastChars();
+2784         }
+2785 
+2786         if (advanceY <= textOrientation * textContentItem.trackingSpaceMin) {
+2787           if (shouldAddWhitepsace()) {
+2788             // The space is very thin, hence it deserves to have its own span in
+2789             // order to avoid too much shift between the canvas and the text
+2790             // layer.
+2791             resetLastChars();
+2792             flushTextContentItem();
+2793             pushWhitespace({ height: Math.abs(advanceY) });
+2794           } else {
+2795             textContentItem.height += advanceY;
+2796           }
+2797         } else if (
+2798           !addFakeSpaces(
+2799             advanceY,
+2800             textContentItem.prevTransform,
+2801             textOrientation
+2802           )
+2803         ) {
+2804           if (textContentItem.str.length === 0) {
+2805             resetLastChars();
+2806             pushWhitespace({ height: Math.abs(advanceY) });
+2807           } else {
+2808             textContentItem.height += advanceY;
+2809           }
+2810         }
+2811 
+2812         if (Math.abs(advanceX) > textContentItem.width * VERTICAL_SHIFT_RATIO) {
+2813           flushTextContentItem();
+2814         }
+2815 
+2816         return true;
+2817       }
+2818 
+2819       const advanceX = (posX - lastPosX) / textContentItem.textAdvanceScale;
+2820       const advanceY = posY - lastPosY;
+2821 
+2822       // When the total width of the current chunk is negative
+2823       // then we're writing from right to left.
+2824       const textOrientation = Math.sign(textContentItem.width);
+2825       if (advanceX < textOrientation * textContentItem.negativeSpaceMax) {
+2826         if (
+2827           Math.abs(advanceY) >
+2828           0.5 * textContentItem.height /* not the same line */
+2829         ) {
+2830           appendEOL();
+2831           return true;
+2832         }
+2833 
+2834         // We're moving back so in case the last char was a whitespace
+2835         // we cancel it: it doesn't make sense to insert it.
+2836         resetLastChars();
+2837         flushTextContentItem();
+2838         return true;
+2839       }
+2840 
+2841       if (Math.abs(advanceY) > textContentItem.height) {
+2842         appendEOL();
+2843         return true;
+2844       }
+2845 
+2846       if (advanceX <= textOrientation * textContentItem.notASpace) {
+2847         // The real spacing between 2 consecutive chars is thin enough to be
+2848         // considered a non-space.
+2849         resetLastChars();
+2850       }
+2851 
+2852       if (advanceX <= textOrientation * textContentItem.trackingSpaceMin) {
+2853         if (shouldAddWhitepsace()) {
+2854           // The space is very thin, hence it deserves to have its own span in
+2855           // order to avoid too much shift between the canvas and the text
+2856           // layer.
+2857           resetLastChars();
+2858           flushTextContentItem();
+2859           pushWhitespace({ width: Math.abs(advanceX) });
+2860         } else {
+2861           textContentItem.width += advanceX;
+2862         }
+2863       } else if (
+2864         !addFakeSpaces(advanceX, textContentItem.prevTransform, textOrientation)
+2865       ) {
+2866         if (textContentItem.str.length === 0) {
+2867           resetLastChars();
+2868           pushWhitespace({ width: Math.abs(advanceX) });
+2869         } else {
+2870           textContentItem.width += advanceX;
+2871         }
+2872       }
+2873 
+2874       if (Math.abs(advanceY) > textContentItem.height * VERTICAL_SHIFT_RATIO) {
+2875         flushTextContentItem();
+2876       }
+2877 
+2878       return true;
+2879     }
+2880 
+2881     function buildTextContentItem({ chars, extraSpacing }) {
+2882       const font = textState.font;
+2883       if (!chars) {
+2884         // Just move according to the space we have.
+2885         const charSpacing = textState.charSpacing + extraSpacing;
+2886         if (charSpacing) {
+2887           if (!font.vertical) {
+2888             textState.translateTextMatrix(
+2889               charSpacing * textState.textHScale,
+2890               0
+2891             );
+2892           } else {
+2893             textState.translateTextMatrix(0, -charSpacing);
+2894           }
+2895         }
+2896 
+2897         if (keepWhiteSpace) {
+2898           compareWithLastPosition(0);
+2899         }
+2900 
+2901         return;
+2902       }
+2903 
+2904       const glyphs = font.charsToGlyphs(chars);
+2905       const scale = textState.fontMatrix[0] * textState.fontSize;
+2906 
+2907       for (let i = 0, ii = glyphs.length; i < ii; i++) {
+2908         const glyph = glyphs[i];
+2909         const { category } = glyph;
+2910 
+2911         if (category.isInvisibleFormatMark) {
+2912           continue;
+2913         }
+2914         let charSpacing =
+2915           textState.charSpacing + (i + 1 === ii ? extraSpacing : 0);
+2916 
+2917         let glyphWidth = glyph.width;
+2918         if (font.vertical) {
+2919           glyphWidth = glyph.vmetric ? glyph.vmetric[0] : -glyphWidth;
+2920         }
+2921         let scaledDim = glyphWidth * scale;
+2922 
+2923         if (!keepWhiteSpace && category.isWhitespace) {
+2924           // Don't push a " " in the textContentItem
+2925           // (except when it's between two non-spaces chars),
+2926           // it will be done (if required) in next call to
+2927           // compareWithLastPosition.
+2928           // This way we can merge real spaces and spaces due to cursor moves.
+2929           if (!font.vertical) {
+2930             charSpacing += scaledDim + textState.wordSpacing;
+2931             textState.translateTextMatrix(
+2932               charSpacing * textState.textHScale,
+2933               0
+2934             );
+2935           } else {
+2936             charSpacing += -scaledDim + textState.wordSpacing;
+2937             textState.translateTextMatrix(0, -charSpacing);
+2938           }
+2939           saveLastChar(" ");
+2940           continue;
+2941         }
+2942 
+2943         if (
+2944           !category.isZeroWidthDiacritic &&
+2945           !compareWithLastPosition(scaledDim)
+2946         ) {
+2947           // The glyph is not in page so just skip it but move the cursor.
+2948           if (!font.vertical) {
+2949             textState.translateTextMatrix(scaledDim * textState.textHScale, 0);
+2950           } else {
+2951             textState.translateTextMatrix(0, scaledDim);
+2952           }
+2953           continue;
+2954         }
+2955 
+2956         // Must be called after compareWithLastPosition because
+2957         // the textContentItem could have been flushed.
+2958         const textChunk = ensureTextContentItem();
+2959         if (category.isZeroWidthDiacritic) {
+2960           scaledDim = 0;
+2961         }
+2962 
+2963         if (!font.vertical) {
+2964           scaledDim *= textState.textHScale;
+2965           textState.translateTextMatrix(scaledDim, 0);
+2966           textChunk.width += scaledDim;
+2967         } else {
+2968           textState.translateTextMatrix(0, scaledDim);
+2969           scaledDim = Math.abs(scaledDim);
+2970           textChunk.height += scaledDim;
+2971         }
+2972 
+2973         if (scaledDim) {
+2974           // Save the position of the last visible character.
+2975           textChunk.prevTransform = getCurrentTextTransform();
+2976         }
+2977 
+2978         const glyphUnicode = glyph.unicode;
+2979         if (saveLastChar(glyphUnicode)) {
+2980           // The two last chars are a non-whitespace followed by a whitespace
+2981           // and then this non-whitespace, so we insert a whitespace here.
+2982           // Replaces all whitespaces with standard spaces (0x20), to avoid
+2983           // alignment issues between the textLayer and the canvas if the text
+2984           // contains e.g. tabs (fixes issue6612.pdf).
+2985           textChunk.str.push(" ");
+2986         }
+2987         textChunk.str.push(glyphUnicode);
+2988 
+2989         if (charSpacing) {
+2990           if (!font.vertical) {
+2991             textState.translateTextMatrix(
+2992               charSpacing * textState.textHScale,
+2993               0
+2994             );
+2995           } else {
+2996             textState.translateTextMatrix(0, -charSpacing);
+2997           }
+2998         }
+2999       }
+3000     }
+3001 
+3002     function appendEOL() {
+3003       resetLastChars();
+3004       if (textContentItem.initialized) {
+3005         textContentItem.hasEOL = true;
+3006         flushTextContentItem();
+3007       } else {
+3008         textContent.items.push({
+3009           str: "",
+3010           dir: "ltr",
+3011           width: 0,
+3012           height: 0,
+3013           transform: getCurrentTextTransform(),
+3014           fontName: textState.loadedName,
+3015           hasEOL: true,
+3016         });
+3017       }
+3018     }
+3019 
+3020     function addFakeSpaces(width, transf, textOrientation) {
+3021       if (
+3022         textOrientation * textContentItem.spaceInFlowMin <= width &&
+3023         width <= textOrientation * textContentItem.spaceInFlowMax
+3024       ) {
+3025         if (textContentItem.initialized) {
+3026           resetLastChars();
+3027           textContentItem.str.push(" ");
+3028         }
+3029         return false;
+3030       }
+3031 
+3032       const fontName = textContentItem.fontName;
+3033 
+3034       let height = 0;
+3035       if (textContentItem.vertical) {
+3036         height = width;
+3037         width = 0;
+3038       }
+3039 
+3040       flushTextContentItem();
+3041       resetLastChars();
+3042       pushWhitespace({
+3043         width: Math.abs(width),
+3044         height: Math.abs(height),
+3045         transform: transf || getCurrentTextTransform(),
+3046         fontName,
+3047       });
+3048 
+3049       return true;
+3050     }
+3051 
+3052     function flushTextContentItem() {
+3053       if (!textContentItem.initialized || !textContentItem.str) {
+3054         return;
+3055       }
+3056 
+3057       // Do final text scaling.
+3058       if (!textContentItem.vertical) {
+3059         textContentItem.totalWidth +=
+3060           textContentItem.width * textContentItem.textAdvanceScale;
+3061       } else {
+3062         textContentItem.totalHeight +=
+3063           textContentItem.height * textContentItem.textAdvanceScale;
+3064       }
+3065 
+3066       textContent.items.push(runBidiTransform(textContentItem));
+3067       textContentItem.initialized = false;
+3068       textContentItem.str.length = 0;
+3069     }
+3070 
+3071     function enqueueChunk(batch = false) {
+3072       const length = textContent.items.length;
+3073       if (length === 0) {
+3074         return;
+3075       }
+3076       if (batch && length < TEXT_CHUNK_BATCH_SIZE) {
+3077         return;
+3078       }
+3079       sink.enqueue(textContent, length);
+3080       textContent.items = [];
+3081       textContent.styles = Object.create(null);
+3082     }
+3083 
+3084     const timeSlotManager = new TimeSlotManager();
+3085 
+3086     return new Promise(function promiseBody(resolve, reject) {
+3087       const next = function (promise) {
+3088         enqueueChunk(/* batch = */ true);
+3089         Promise.all([promise, sink.ready]).then(function () {
+3090           try {
+3091             promiseBody(resolve, reject);
+3092           } catch (ex) {
+3093             reject(ex);
+3094           }
+3095         }, reject);
+3096       };
+3097       task.ensureNotTerminated();
+3098       timeSlotManager.reset();
+3099 
+3100       const operation = {};
+3101       let stop,
+3102         name,
+3103         isValidName,
+3104         args = [];
+3105       while (!(stop = timeSlotManager.check())) {
+3106         // The arguments parsed by read() are not used beyond this loop, so
+3107         // we can reuse the same array on every iteration, thus avoiding
+3108         // unnecessary allocations.
+3109         args.length = 0;
+3110         operation.args = args;
+3111         if (!preprocessor.read(operation)) {
+3112           break;
+3113         }
+3114 
+3115         const previousState = textState;
+3116         textState = stateManager.state;
+3117         const fn = operation.fn;
+3118         args = operation.args;
+3119 
+3120         switch (fn | 0) {
+3121           case OPS.setFont:
+3122             // Optimization to ignore multiple identical Tf commands.
+3123             const fontNameArg = args[0].name,
+3124               fontSizeArg = args[1];
+3125             if (
+3126               textState.font &&
+3127               fontNameArg === textState.fontName &&
+3128               fontSizeArg === textState.fontSize
+3129             ) {
+3130               break;
+3131             }
+3132 
+3133             flushTextContentItem();
+3134             textState.fontName = fontNameArg;
+3135             textState.fontSize = fontSizeArg;
+3136             next(handleSetFont(fontNameArg, null));
+3137             return;
+3138           case OPS.setTextRise:
+3139             textState.textRise = args[0];
+3140             break;
+3141           case OPS.setHScale:
+3142             textState.textHScale = args[0] / 100;
+3143             break;
+3144           case OPS.setLeading:
+3145             textState.leading = args[0];
+3146             break;
+3147           case OPS.moveText:
+3148             textState.translateTextLineMatrix(args[0], args[1]);
+3149             textState.textMatrix = textState.textLineMatrix.slice();
+3150             break;
+3151           case OPS.setLeadingMoveText:
+3152             textState.leading = -args[1];
+3153             textState.translateTextLineMatrix(args[0], args[1]);
+3154             textState.textMatrix = textState.textLineMatrix.slice();
+3155             break;
+3156           case OPS.nextLine:
+3157             textState.carriageReturn();
+3158             break;
+3159           case OPS.setTextMatrix:
+3160             textState.setTextMatrix(
+3161               args[0],
+3162               args[1],
+3163               args[2],
+3164               args[3],
+3165               args[4],
+3166               args[5]
+3167             );
+3168             textState.setTextLineMatrix(
+3169               args[0],
+3170               args[1],
+3171               args[2],
+3172               args[3],
+3173               args[4],
+3174               args[5]
+3175             );
+3176             updateAdvanceScale();
+3177             break;
+3178           case OPS.setCharSpacing:
+3179             textState.charSpacing = args[0];
+3180             break;
+3181           case OPS.setWordSpacing:
+3182             textState.wordSpacing = args[0];
+3183             break;
+3184           case OPS.beginText:
+3185             textState.textMatrix = IDENTITY_MATRIX.slice();
+3186             textState.textLineMatrix = IDENTITY_MATRIX.slice();
+3187             break;
+3188           case OPS.showSpacedText:
+3189             if (!stateManager.state.font) {
+3190               self.ensureStateFont(stateManager.state);
+3191               continue;
+3192             }
+3193 
+3194             const spaceFactor =
+3195               ((textState.font.vertical ? 1 : -1) * textState.fontSize) / 1000;
+3196             const elements = args[0];
+3197             for (let i = 0, ii = elements.length; i < ii; i++) {
+3198               const item = elements[i];
+3199               if (typeof item === "string") {
+3200                 showSpacedTextBuffer.push(item);
+3201               } else if (typeof item === "number" && item !== 0) {
+3202                 // PDF Specification 5.3.2 states:
+3203                 // The number is expressed in thousandths of a unit of text
+3204                 // space.
+3205                 // This amount is subtracted from the current horizontal or
+3206                 // vertical coordinate, depending on the writing mode.
+3207                 // In the default coordinate system, a positive adjustment
+3208                 // has the effect of moving the next glyph painted either to
+3209                 // the left or down by the given amount.
+3210                 const str = showSpacedTextBuffer.join("");
+3211                 showSpacedTextBuffer.length = 0;
+3212                 buildTextContentItem({
+3213                   chars: str,
+3214                   extraSpacing: item * spaceFactor,
+3215                 });
+3216               }
+3217             }
+3218 
+3219             if (showSpacedTextBuffer.length > 0) {
+3220               const str = showSpacedTextBuffer.join("");
+3221               showSpacedTextBuffer.length = 0;
+3222               buildTextContentItem({
+3223                 chars: str,
+3224                 extraSpacing: 0,
+3225               });
+3226             }
+3227             break;
+3228           case OPS.showText:
+3229             if (!stateManager.state.font) {
+3230               self.ensureStateFont(stateManager.state);
+3231               continue;
+3232             }
+3233             buildTextContentItem({
+3234               chars: args[0],
+3235               extraSpacing: 0,
+3236             });
+3237             break;
+3238           case OPS.nextLineShowText:
+3239             if (!stateManager.state.font) {
+3240               self.ensureStateFont(stateManager.state);
+3241               continue;
+3242             }
+3243             textState.carriageReturn();
+3244             buildTextContentItem({
+3245               chars: args[0],
+3246               extraSpacing: 0,
+3247             });
+3248             break;
+3249           case OPS.nextLineSetSpacingShowText:
+3250             if (!stateManager.state.font) {
+3251               self.ensureStateFont(stateManager.state);
+3252               continue;
+3253             }
+3254             textState.wordSpacing = args[0];
+3255             textState.charSpacing = args[1];
+3256             textState.carriageReturn();
+3257             buildTextContentItem({
+3258               chars: args[2],
+3259               extraSpacing: 0,
+3260             });
+3261             break;
+3262           case OPS.paintXObject:
+3263             flushTextContentItem();
+3264             xobjs ??= resources.get("XObject") || Dict.empty;
+3265 
+3266             isValidName = args[0] instanceof Name;
+3267             name = args[0].name;
+3268 
+3269             if (isValidName && emptyXObjectCache.getByName(name)) {
+3270               break;
+3271             }
+3272 
+3273             next(
+3274               new Promise(function (resolveXObject, rejectXObject) {
+3275                 if (!isValidName) {
+3276                   throw new FormatError("XObject must be referred to by name.");
+3277                 }
+3278 
+3279                 let xobj = xobjs.getRaw(name);
+3280                 if (xobj instanceof Ref) {
+3281                   if (emptyXObjectCache.getByRef(xobj)) {
+3282                     resolveXObject();
+3283                     return;
+3284                   }
+3285 
+3286                   const globalImage = self.globalImageCache.getData(
+3287                     xobj,
+3288                     self.pageIndex
+3289                   );
+3290                   if (globalImage) {
+3291                     resolveXObject();
+3292                     return;
+3293                   }
+3294 
+3295                   xobj = xref.fetch(xobj);
+3296                 }
+3297 
+3298                 if (!(xobj instanceof BaseStream)) {
+3299                   throw new FormatError("XObject should be a stream");
+3300                 }
+3301 
+3302                 const type = xobj.dict.get("Subtype");
+3303                 if (!(type instanceof Name)) {
+3304                   throw new FormatError("XObject should have a Name subtype");
+3305                 }
+3306 
+3307                 if (type.name !== "Form") {
+3308                   emptyXObjectCache.set(name, xobj.dict.objId, true);
+3309 
+3310                   resolveXObject();
+3311                   return;
+3312                 }
+3313 
+3314                 // Use a new `StateManager` to prevent incorrect positioning
+3315                 // of textItems *after* the Form XObject, since errors in the
+3316                 // data can otherwise prevent `restore` operators from
+3317                 // executing.
+3318                 // NOTE: Only an issue when `options.ignoreErrors === true`.
+3319                 const currentState = stateManager.state.clone();
+3320                 const xObjStateManager = new StateManager(currentState);
+3321 
+3322                 const matrix = lookupMatrix(xobj.dict.getArray("Matrix"), null);
+3323                 if (matrix) {
+3324                   xObjStateManager.transform(matrix);
+3325                 }
+3326 
+3327                 // Enqueue the `textContent` chunk before parsing the /Form
+3328                 // XObject.
+3329                 enqueueChunk();
+3330                 const sinkWrapper = {
+3331                   enqueueInvoked: false,
+3332 
+3333                   enqueue(chunk, size) {
+3334                     this.enqueueInvoked = true;
+3335                     sink.enqueue(chunk, size);
+3336                   },
+3337 
+3338                   get desiredSize() {
+3339                     return sink.desiredSize;
+3340                   },
+3341 
+3342                   get ready() {
+3343                     return sink.ready;
+3344                   },
+3345                 };
+3346 
+3347                 self
+3348                   .getTextContent({
+3349                     stream: xobj,
+3350                     task,
+3351                     resources: xobj.dict.get("Resources") || resources,
+3352                     stateManager: xObjStateManager,
+3353                     includeMarkedContent,
+3354                     sink: sinkWrapper,
+3355                     seenStyles,
+3356                     viewBox,
+3357                     lang,
+3358                     markedContentData,
+3359                     disableNormalization,
+3360                     keepWhiteSpace,
+3361                     prevRefs: seenRefs,
+3362                   })
+3363                   .then(function () {
+3364                     if (!sinkWrapper.enqueueInvoked) {
+3365                       emptyXObjectCache.set(name, xobj.dict.objId, true);
+3366                     }
+3367                     resolveXObject();
+3368                   }, rejectXObject);
+3369               }).catch(function (reason) {
+3370                 if (reason instanceof AbortException) {
+3371                   return;
+3372                 }
+3373                 if (self.options.ignoreErrors) {
+3374                   // Error(s) in the XObject -- allow text-extraction to
+3375                   // continue.
+3376                   warn(`getTextContent - ignoring XObject: "${reason}".`);
+3377                   return;
+3378                 }
+3379                 throw reason;
+3380               })
+3381             );
+3382             return;
+3383           case OPS.setGState:
+3384             isValidName = args[0] instanceof Name;
+3385             name = args[0].name;
+3386 
+3387             if (isValidName && emptyGStateCache.getByName(name)) {
+3388               break;
+3389             }
+3390 
+3391             next(
+3392               new Promise(function (resolveGState, rejectGState) {
+3393                 if (!isValidName) {
+3394                   throw new FormatError("GState must be referred to by name.");
+3395                 }
+3396 
+3397                 const extGState = resources.get("ExtGState");
+3398                 if (!(extGState instanceof Dict)) {
+3399                   throw new FormatError("ExtGState should be a dictionary.");
+3400                 }
+3401 
+3402                 const gState = extGState.get(name);
+3403                 // TODO: Attempt to lookup cached GStates by reference as well,
+3404                 //       if and only if there are PDF documents where doing so
+3405                 //       would significantly improve performance.
+3406                 if (!(gState instanceof Dict)) {
+3407                   throw new FormatError("GState should be a dictionary.");
+3408                 }
+3409 
+3410                 const gStateFont = gState.get("Font");
+3411                 if (!gStateFont) {
+3412                   emptyGStateCache.set(name, gState.objId, true);
+3413 
+3414                   resolveGState();
+3415                   return;
+3416                 }
+3417                 flushTextContentItem();
+3418 
+3419                 textState.fontName = null;
+3420                 textState.fontSize = gStateFont[1];
+3421                 handleSetFont(null, gStateFont[0]).then(
+3422                   resolveGState,
+3423                   rejectGState
+3424                 );
+3425               }).catch(function (reason) {
+3426                 if (reason instanceof AbortException) {
+3427                   return;
+3428                 }
+3429                 if (self.options.ignoreErrors) {
+3430                   // Error(s) in the ExtGState -- allow text-extraction to
+3431                   // continue.
+3432                   warn(`getTextContent - ignoring ExtGState: "${reason}".`);
+3433                   return;
+3434                 }
+3435                 throw reason;
+3436               })
+3437             );
+3438             return;
+3439           case OPS.beginMarkedContent:
+3440             flushTextContentItem();
+3441             if (includeMarkedContent) {
+3442               markedContentData.level++;
+3443 
+3444               textContent.items.push({
+3445                 type: "beginMarkedContent",
+3446                 tag: args[0] instanceof Name ? args[0].name : null,
+3447               });
+3448             }
+3449             break;
+3450           case OPS.beginMarkedContentProps:
+3451             flushTextContentItem();
+3452             if (includeMarkedContent) {
+3453               markedContentData.level++;
+3454 
+3455               let mcid = null;
+3456               if (args[1] instanceof Dict) {
+3457                 mcid = args[1].get("MCID");
+3458               }
+3459               textContent.items.push({
+3460                 type: "beginMarkedContentProps",
+3461                 id: Number.isInteger(mcid)
+3462                   ? `${self.idFactory.getPageObjId()}_mc${mcid}`
+3463                   : null,
+3464                 tag: args[0] instanceof Name ? args[0].name : null,
+3465               });
+3466             }
+3467             break;
+3468           case OPS.endMarkedContent:
+3469             flushTextContentItem();
+3470             if (includeMarkedContent) {
+3471               if (markedContentData.level === 0) {
+3472                 // Handle unbalanced beginMarkedContent/endMarkedContent
+3473                 // operators (fixes issue15629.pdf).
+3474                 break;
+3475               }
+3476               markedContentData.level--;
+3477 
+3478               textContent.items.push({
+3479                 type: "endMarkedContent",
+3480               });
+3481             }
+3482             break;
+3483           case OPS.restore:
+3484             if (
+3485               previousState &&
+3486               (previousState.font !== textState.font ||
+3487                 previousState.fontSize !== textState.fontSize ||
+3488                 previousState.fontName !== textState.fontName)
+3489             ) {
+3490               flushTextContentItem();
+3491             }
+3492             break;
+3493         } // switch
+3494         if (textContent.items.length >= sink.desiredSize) {
+3495           // Wait for ready, if we reach highWaterMark.
+3496           stop = true;
+3497           break;
+3498         }
+3499       } // while
+3500       if (stop) {
+3501         next(deferred);
+3502         return;
+3503       }
+3504       flushTextContentItem();
+3505       enqueueChunk();
+3506       resolve();
+3507     }).catch(reason => {
+3508       if (reason instanceof AbortException) {
+3509         return;
+3510       }
+3511       if (this.options.ignoreErrors) {
+3512         // Error(s) in the TextContent -- allow text-extraction to continue.
+3513         warn(
+3514           `getTextContent - ignoring errors during "${task.name}" ` +
+3515             `task: "${reason}".`
+3516         );
+3517 
+3518         flushTextContentItem();
+3519         enqueueChunk();
+3520         return;
+3521       }
+3522       throw reason;
+3523     });
+3524   }
+3525 
+4630 }
+4631 
+5275 
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/evaluator_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { createIdFactory, XRefMock } from "./test_utils.js";
+import { Dict, Name } from "../../src/core/primitives.js";
+import { FormatError, OPS } from "../../src/shared/util.js";
+import { Stream, StringStream } from "../../src/core/stream.js";
+import { OperatorList } from "../../src/core/operator_list.js";
+import { PartialEvaluator } from "../../src/core/evaluator.js";
+import { WorkerTask } from "../../src/core/worker.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

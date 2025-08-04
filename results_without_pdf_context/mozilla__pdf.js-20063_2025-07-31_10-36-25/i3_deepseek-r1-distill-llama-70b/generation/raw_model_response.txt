@@ -1,0 +1,71 @@
+<think>
+Okay, I need to create a test for the regression issue where the PolygonAnnotation fill isn't rendered in PDF.js but works in Acrobat and Edge. The patch provided modifies the annotation.js file, so I should write a test that fails before the patch and passes after.
+
+First, I'll look at the existing test file. It imports several modules, including Annotation, MarkupAnnotation, and others. I can reuse these imports.
+
+The test should create a PDF with a polygon annotation that has both fill and stroke. Then, it should check if the fill is rendered correctly.
+
+I'll set up a mock XRef using XRefMock. Then, I'll create a sample annotation dictionary with the necessary properties, including the fill color and stroke color.
+
+I'll create an instance of PolygonAnnotation using AnnotationFactory.create. Then, I'll call getOperatorList to render the annotation.
+
+After rendering, I'll check the generated operator list for the 'f' command, which indicates a fill. The presence of this command means the fill was rendered.
+
+Before the patch, the test should fail because the fill isn't rendered. After the patch, it should pass because the fill is correctly included.
+
+I'll structure the test using async/await and Jest's it function. I'll import the necessary modules and set up the mock data. Then, I'll perform the checks and expect the 'f' operator to be present.
+
+I need to ensure the test is self-contained and only tests the specific regression. I'll use the provided imports and avoid adding new dependencies.
+
+Finally, I'll write the test code, making sure it's concise and directly addresses the issue.
+</think>
+
+```javascript
+it("should render filled polygon annotations correctly", async () => {
+  const xref = new XRefMock();
+  const pdfManager = {
+    ensureCatalog: async () => ({}),
+    getPage: async () => ({}),
+    ensureDoc: async () => ({ numPages: 1 }),
+  };
+
+  const annotationDict = new Dict();
+  annotationDict.set("Subtype", new Name("Polygon"));
+  annotationDict.set("Rect", [0, 0, 100, 100]);
+  annotationDict.set("Vertices", new Float32Array([0, 0, 100, 0, 100, 100, 0, 100]));
+  annotationDict.set("IC", new Name("yellow"));
+  annotationDict.set("C", new Name("black"));
+  annotationDict.set("CA", 1);
+
+  const params = {
+    xref,
+    ref: new Ref(1),
+    annotationGlobals: {
+      pdfManager,
+      acroForm: new Dict(),
+      structTreeRoot: new Dict(),
+      baseUrl: new Dict(),
+      attachments: new Dict(),
+      globalColorSpaceCache: new Dict(),
+    },
+    evaluatorOptions: {},
+  };
+
+  const annotation = await AnnotationFactory.create(params);
+
+  const operatorList = await annotation.getOperatorList(
+    new PartialEvaluator(),
+    new WorkerTask(),
+    RenderingIntentFlag.DISPLAY,
+    null,
+    null
+  );
+
+  const expectedFillOperator = "f";
+  const actualOperators = operatorList.opList.ops
+    .map(op => op.cmd)
+    .join("");
+
+  expect(actualOperators).toContain(expectedFillOperator);
+});
+```

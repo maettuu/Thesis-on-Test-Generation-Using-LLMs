@@ -1,0 +1,103 @@
+<think>
+Okay, I need to write a test for the regression issue where adding a `<base href>` tag breaks transparency filters in Firefox. The patch provided modifies the `DOMFilterFactory` class in `display_utils.js` to correctly handle URLs when a `<base>` element is present.
+
+First, I should understand what the patch does. It adds a `#baseUrl` property and a `#createUrl` method. This method checks if the URL should be relative or absolute based on the presence of a `<base>` tag. It ensures that the SVG filters are correctly referenced.
+
+The test needs to verify that the transparency filters work correctly when a `<base href>` is set. I'll need to simulate this scenario in the test.
+
+I'll start by setting up a simple HTML structure with a `<base>` tag. Then, I'll create a PDF page and render it using the `DOMCanvasFactory`. After rendering, I'll check the generated SVG filters to see if their URLs are correctly formatted with the base URL.
+
+I'll use `fetchData` to get the test PDF and create a `PDFDocument` instance. I'll render the first page and then check the SVG elements in the DOM for the filter URLs. I'll look for the `url()` values in the SVG filters to ensure they include the correct base URL.
+
+The test should fail before the patch because the URLs would be incorrect, and pass after the patch because the URLs will include the base href.
+
+I'll structure the test using Jasmine's `it` function, making sure to import necessary modules and set up the environment correctly, including mocking `isNodeJS` to avoid issues in a Node.js context.
+
+I'll also need to handle any necessary cleanup, like removing the `<base>` tag after the test to prevent side effects.
+
+So, the test will create a `<base>` tag, render the PDF, and check the filter URLs. If the URLs are correct, the test passes; otherwise, it fails.
+</think>
+
+it("should handle transparency filters with base href", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { fetchData } = await import("../../src/display/display_utils.js");
+
+  // Setup test HTML structure
+  const baseTag = document.createElement("base");
+  baseTag.href = ".";
+  document.head.appendChild(baseTag);
+
+  try {
+    // Fetch test PDF
+    const testPdf = await fetchData("test.pdf");
+    const pdf = await PDFDocument.load(testPdf);
+
+    // Get first page
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewPort({ scale: 1 });
+
+    // Create canvas factory and render page
+    const canvasFactory = new DOMCanvasFactory();
+    const renderTask = page.render({
+      canvasFactory: canvasFactory,
+      viewport: viewport,
+      renderInteractive: false,
+    });
+
+    await renderTask.promise;
+
+    // Verify filter URLs include base href
+    const svgFilters = document.querySelectorAll("filter");
+    const filterUrls = Array.from(svgFilters).map(filter => {
+      const urlAttr = filter.getAttribute("id");
+      return `url(.#${urlAttr})`;
+    });
+
+    expect(filterUrls.length).toBeGreaterThan(0);
+  } finally {
+    document.head.removeChild(baseTag);
+  }
+});
+
+```javascript
+it("should handle transparency filters with base href", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { fetchData } = await import("../../src/display/display_utils.js");
+
+  // Setup test HTML structure
+  const baseTag = document.createElement("base");
+  baseTag.href = ".";
+  document.head.appendChild(baseTag);
+
+  try {
+    // Fetch test PDF
+    const testPdf = await fetchData("test.pdf");
+    const pdf = await PDFDocument.load(testPdf);
+
+    // Get first page
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewPort({ scale: 1 });
+
+    // Create canvas factory and render page
+    const canvasFactory = new DOMCanvasFactory();
+    const renderTask = page.render({
+      canvasFactory: canvasFactory,
+      viewport: viewport,
+      renderInteractive: false,
+    });
+
+    await renderTask.promise;
+
+    // Verify filter URLs include base href
+    const svgFilters = document.querySelectorAll("filter");
+    const filterUrls = Array.from(svgFilters).map(filter => {
+      const urlAttr = filter.getAttribute("id");
+      return `url(.#${urlAttr})`;
+    });
+
+    expect(filterUrls.length).toBeGreaterThan(0);
+  } finally {
+    document.head.removeChild(baseTag);
+  }
+});
+```

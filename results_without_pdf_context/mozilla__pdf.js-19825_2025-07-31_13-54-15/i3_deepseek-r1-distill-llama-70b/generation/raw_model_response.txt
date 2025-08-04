@@ -1,0 +1,52 @@
+<think>
+Okay, I need to write a regression test for the given patch. Let me start by understanding the issue and the patch.
+
+The issue is a regression in the PDF rendering, specifically related to the `pdfpaint` module. The bug affects multiple PDFs across different platforms. The patch modifies several files, including `font_renderer.js`, `operator_list.js`, and `util.js`. It seems the changes are related to how transformations are applied to paths and points.
+
+Looking at the patch, I see that in `font_renderer.js`, the `add` method in the `Commands` class was modified. Instead of manually applying the transformation, it now uses `Util.applyTransform`. Similarly, in `operator_list.js`, the `addState` function was updated to use `Util.applyTransform` with the current transform. In `util.js`, the `applyTransform` and `applyTransformToBezier` functions were updated to accept an optional position parameter, allowing them to modify the array in place.
+
+The problem before the patch was that when applying transformations, especially to Bezier curves, the code wasn't correctly handling the transformation matrices, leading to incorrect rendering. The patch fixes this by ensuring that the transformation is applied correctly by using the utility functions which can handle the current transform and modify the points in place.
+
+To test this, I need to create a scenario where a path is transformed and then check if the rendered output is correct. I'll create a simple path with lines and curves, apply a transformation, and then compare the expected and actual results.
+
+I'll start by importing the necessary modules. Since the test is in `test/unit/util_spec.js`, I can reuse the existing imports and add any new ones if needed. However, in this case, I need to import `Util` from `../../src/shared/util.js` and `Commands` from `../../src/core/font_renderer.js`.
+
+Next, I'll set up a test case. I'll create a `Commands` instance and define a simple path with a move to (0,0), a line to (100,100), and a Bezier curve. Then, I'll apply a transformation matrix, for example, a scaling by 2x.
+
+After applying the transformation, I'll extract the actual commands and compare them to the expected values. The expected values should reflect the points after the transformation has been applied correctly.
+
+I'll use Jest's `expect` to check if the actual commands match the expected ones. Specifically, I'll check the points in the "M", "L", and "C" commands to ensure they've been scaled correctly.
+
+This test should fail before the patch because the transformation wasn't applied correctly, and after the patch, it should pass as the transformations are now handled properly.
+</think>
+
+```javascript
+it("should correctly apply transformation to paths and bezier curves", async () => {
+  const { Util } = await import("../../src/shared/util.js");
+  const { Commands } = await import("../../src/core/font_renderer.js");
+
+  const cmds = new Commands();
+  const transform = [2, 0, 0, 2, 0, 0]; // 2x scale
+
+  // Define a simple path: M 0 0 L 100 100 C 200 200 300 300 400 400
+  cmds.add("M", [0, 0]);
+  cmds.add("L", [100, 100]);
+  cmds.add("C", [200, 200, 300, 300, 400, 400]);
+
+  // Apply transformation
+  cmds.transform(transform);
+
+  // Get the actual commands
+  const actual = cmds.getSVG();
+
+  // Expected commands after transformation (points scaled by 2x)
+  const expected = [
+    "M 0 0",
+    "L 200 200",
+    "C 400 400 600 600 800 800",
+    "Z"
+  ].join("");
+
+  expect(actual).toBe(expected);
+});
+```

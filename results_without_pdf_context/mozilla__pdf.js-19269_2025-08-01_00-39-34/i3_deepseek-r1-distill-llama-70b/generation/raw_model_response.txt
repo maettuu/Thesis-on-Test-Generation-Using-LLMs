@@ -1,0 +1,49 @@
+<think>
+Okay, I need to write a test that verifies the patch fixes the issue where the top and bottom images are not displayed in the PDF. The issue seems to be related to how images with masks or transparency are handled.
+
+Looking at the patch, it modifies the addImageOps function in operator_list.js. The function now accepts an additional hasMask parameter. When hasMask is true, it adds save and setGState operations before painting and then restores the state afterward. This probably handles the masking correctly.
+
+So, the test should check if the operator list correctly includes these operations when an image has a mask. I'll create a test case where an image has an SMask. 
+
+I'll set up a mock XRef and create a PartialEvaluator. Then, I'll simulate adding an image operation with a mask. After that, I'll check if the operator list includes the save, setGState, paintImageXObject, and restore operations in the correct order.
+
+I'll use Jest to write the test. I'll import the necessary modules, create a sample image with a mask, and then assert that the operator list has the expected operations.
+
+I need to ensure that the test fails before the patch and passes after. So, I'll structure the test to look for the presence of these operations in the correct sequence.
+</think>
+
+```javascript
+it("should correctly handle images with masks", async () => {
+  const xref = new XRefMock();
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: new WorkerTask(),
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options: DefaultPartialEvaluatorOptions,
+  });
+
+  const image = {
+    dict: new Dict({
+      Type: "XObject",
+      Subtype: "Image",
+      SMask: new Dict(),
+    }),
+    args: ["img1"],
+  };
+
+  const operatorList = new OperatorList();
+
+  addLocallyCachedImageOps(operatorList, image);
+
+  expect(operatorList.fnArray).toContain(OPS.save);
+  expect(operatorList.fnArray).toContain(OPS.setGState);
+  expect(operatorList.fnArray).toContain(OPS.paintImageXObject);
+  expect(operatorList.fnArray).toContain(OPS.restore);
+});
+```

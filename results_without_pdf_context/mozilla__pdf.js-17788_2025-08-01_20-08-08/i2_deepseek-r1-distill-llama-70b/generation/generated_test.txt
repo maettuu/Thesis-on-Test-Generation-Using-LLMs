@@ -1,0 +1,52 @@
+it("should expose highlighted text to screen readers", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { PDFPage } = await import("../../src/core/document.js");
+  const { TextLayerBuilder } = await import("../../src/display/text_layer.js");
+  const { DrawLayer } = await import("../../src/display/draw_layer.js");
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+
+  // Create a test PDF with text
+  const pdf = new PDFDocument({
+    content: "q\nBT\n/F0 24 Tf\n(Hello World) Tj\nET\nQ",
+    pages: [{ content: "" }],
+  });
+
+  // Create a mock DOM environment
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM();
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+
+  // Render the PDF page
+  const page = pdf.getPage(0);
+  const textLayer = new TextLayerBuilder().build(page, { viewport: page.getViewport({ scale: 1 }) });
+
+  // Create and add highlight
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  const range = document.createRange();
+  range.selectNode(textLayer.firstChild);
+  selection.addRange(range);
+
+  const highlight = new HighlightEditor({
+    anchorNode: selection.anchorNode,
+    anchorOffset: selection.anchorOffset,
+    focusNode: selection.focusNode,
+    focusOffset: selection.focusOffset,
+    boxes: [],
+    color: "#FFFF00",
+    methodOfCreation: "mouse",
+  });
+
+  // Verify the text is properly exposed
+  const markElement = highlight.div.querySelector("mark");
+  expect(markElement).toBeTruthy();
+  expect(markElement.className).toContain("visuallyHidden");
+
+  // Verify ARIA attributes are set
+  const svg = document.querySelector("svg");
+  expect(svg.getAttribute("aria-hidden")).toBe("true");
+
+  const highlightDiv = highlight.div.querySelector(".internal");
+  expect(highlightDiv.getAttribute("aria-hidden")).toBe("true");
+});

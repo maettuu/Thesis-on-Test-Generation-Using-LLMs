@@ -1,0 +1,34 @@
+it("should render large scanned images in PDFs", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { OpenJPEG } = await import("../../external/openjpeg/openjpeg.js");
+
+  const examplePdf = await fetch("https://github.com/mozilla/pdf.js/files/13391396/example.pdf");
+  const pdfData = await examplePdf.arrayBuffer();
+
+  const pdf = await PDFDocument.load(
+    new Uint8Array(pdfData),
+    {
+      onProgress: (progress) => {
+        if (progress === 1) {
+          throw new Error("PDF failed to load");
+        }
+      },
+    }
+  );
+
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const renderTask = page.render({
+    viewport,
+    canvasContext: { willReadFrequently: true },
+    flags: new Set(["APPEARANCE"]),
+  });
+
+  const result = await renderTask.promise;
+
+  if (!result || !result.resolved) {
+    throw new Error("Image rendering failed");
+  }
+
+  expect(result).toBeTruthy();
+});

@@ -1,0 +1,75 @@
+<think>
+Okay, I need to write a test that checks if the top and bottom images are displayed correctly in the PDF after the patch is applied. The issue before the patch was that these images weren't showing up, so the test should fail without the patch and pass with it.
+
+First, I'll use the test PDF provided. I'll create a test that loads this PDF and checks for the presence of the images. I'll use the PDFDocument and PDFPage classes from pdf.js to load the PDF and get the first page.
+
+Next, I'll render the page into a canvas. After rendering, I'll check the canvas for the presence of the top and bottom images. Since the images are black, I'll sample pixels from the top and bottom regions of the canvas to see if they're black.
+
+In the test, I'll use async/await to handle the asynchronous loading of the PDF. I'll import the necessary modules using the provided paths. I'll also use chai's expect for assertions.
+
+I need to make sure that the test accurately captures the state before and after the patch. Without the patch, the images shouldn't be present, so the test should fail. After applying the patch, the test should pass because the images are now displayed.
+
+I'll structure the test with try-catch blocks to handle any errors during loading or rendering. The assertions will check if the expected pixels are present in the canvas.
+
+Finally, I'll ensure the test is self-contained and doesn't rely on external dependencies beyond what's provided. This way, it can be run in a Node.js environment without issues.
+</think>
+
+```javascript
+const { expect } = require('chai');
+const { PDFDocument, PDFPage } = require('../../src/display/api.js');
+
+it("should display top and bottom images in pdf", async () => {
+  const pdfPath = "../../test/pdfs/issue-top-bottom-images.pdf";
+  const pdf = await PDFDocument.load(pdfPath);
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewPort({ scale: 1 });
+  
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  
+  await page.render({
+    canvasContext: context,
+    viewport,
+  });
+  
+  const imgData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const pixelData = imgData.data;
+  
+  // Check top image (black rectangle at the top)
+  const topStart = 0;
+  const topEnd = 100; // Adjust based on expected image height
+  let hasTopImage = false;
+  
+  for (let y = topStart; y < topEnd; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const idx = (y * canvas.width + x) * 4;
+      if (pixelData[idx] === 0) { // Check for black pixel
+        hasTopImage = true;
+        break;
+      }
+    }
+    if (hasTopImage) break;
+  }
+  
+  // Check bottom image (black rectangle at the bottom)
+  const bottomStart = canvas.height - 100; // Adjust based on expected image height
+  const bottomEnd = canvas.height;
+  let hasBottomImage = false;
+  
+  for (let y = bottomStart; y < bottomEnd; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const idx = (y * canvas.width + x) * 4;
+      if (pixelData[idx] === 0) { // Check for black pixel
+        hasBottomImage = true;
+        break;
+      }
+    }
+    if (hasBottomImage) break;
+  }
+  
+  expect(hasTopImage, "Top image is missing").to.be.true;
+  expect(hasBottomImage, "Bottom image is missing").to.be.true;
+});
+```

@@ -1,0 +1,33 @@
+```javascript
+it("should not store image data after cleanup", async () => {
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+  const { PDFObjects } = await import("../../src/core/primitives.js");
+
+  const pageProxy = new PDFPageProxy();
+  pageProxy.objs = new PDFObjects();
+  pageProxy._intentStates = new Map();
+
+  const imageData = { bitmap: { close: jest.fn() } };
+  const id = "testImageId";
+  const type = "Image";
+
+  pageProxy._intentStates.size = 0; // Simulate cleanup has run
+  pageProxy.objs.has = jest.fn().mockReturnValue(false);
+
+  const workerTransport = new WorkerTransport();
+  workerTransport.#pageCache.set(0, pageProxy);
+
+  workerTransport.messageHandler = {
+    on: jest.fn((event, callback) => {
+      if (event === "obj") {
+        callback([id, 0, type, imageData]);
+      }
+    }),
+  };
+
+  workerTransport.setupMessageHandler();
+
+  expect(imageData.bitmap.close).toHaveBeenCalled();
+  expect(pageProxy.objs.has(id)).toBe(false);
+});
+```

@@ -1,0 +1,922 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: JPX image rendering regression after PR 18204
+### Attach (recommended) or Link to PDF file
+
+https://sbc.org.pl/Content/403918/PDF/539_2671.pdf
+
+### Web browser and its version
+
+N/A
+
+### Operating system and its version
+
+N/A
+
+### PDF.js version
+
+Any version after https://github.com/mozilla/pdf.js/pull/18204
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+Load the linked PDF document in the viewer.
+
+### What is the expected behavior?
+
+That the image is correctly rendered.
+
+![good](https://github.com/user-attachments/assets/539f1ac6-a5a1-4a31-b059-f21bf2693a10)
+
+
+### What went wrong?
+
+The image doesn't render, with the following console output:
+```
+Warning: Unable to decode image "img_p0_2": "IndexSizeError: Index or size is negative or greater than the allowed amount". [pdf.worker.mjs:348:13](resource://pdf.js/build/pdf.worker.mjs)
+Warning: Dependent image isn't ready yet [pdf.mjs:391:13](resource://pdf.js/build/pdf.mjs)
+```
+
+![bad](https://github.com/user-attachments/assets/6909afea-11d6-44a0-8c48-f596295f60f8)
+
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+```
+196affd8e06148041b885ce63df260e4dab5f8e1 is the first bad commit
+commit 196affd8e06148041b885ce63df260e4dab5f8e1
+Author: Calixte Denizet <calixte.denizet@gmail.com>
+Date:   Mon Jun 3 16:09:26 2024 +0200
+
+    Fix decoding of JPX images having an alpha channel
+
+    When an image has a non-zero SMaskInData it means that the image
+    has an alpha channel.
+    With JPX images, the colorspace isn't required (by spec) so when we
+    don't have it, the JPX decoder will handle the conversion in RGBA
+    format.
+
+ external/openjpeg/openjpeg.js  |  2 +-
+ src/core/base_stream.js        |  4 +--
+ src/core/colorspace.js         | 22 ++++++++++++
+ src/core/decode_stream.js      | 12 +++----
+ src/core/flate_stream.js       |  2 +-
+ src/core/image.js              | 82 ++++++++++++++++++++++++++++++------------
+ src/core/jpx.js                |  5 +--
+ src/core/jpx_stream.js         |  8 ++---
+ test/pdfs/isssue18194.pdf.link |  1 +
+ test/pdfs/issue11306.pdf.link  |  1 +
+ test/pdfs/issue16782.pdf.link  |  1 +
+ test/test_manifest.json        | 25 +++++++++++++
+ 12 files changed, 126 insertions(+), 39 deletions(-)
+ create mode 100644 test/pdfs/isssue18194.pdf.link
+ create mode 100644 test/pdfs/issue11306.pdf.link
+ create mode 100644 test/pdfs/issue16782.pdf.link
+```
+
+*Please note:* The PDF document renders a bit slow, given the large images, however that's already tracked in #17427.
+
+/cc @calixteman 
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/colorspace.js b/src/core/colorspace.js
+--- a/src/core/colorspace.js
++++ b/src/core/colorspace.js
+@@ -15,6 +15,7 @@
+ 
+ import {
+   assert,
++  FeatureTest,
+   FormatError,
+   info,
+   shadow,
+@@ -60,6 +61,61 @@ function resizeRgbImage(src, dest, w1, h1, w2, h2, alpha01) {
+   }
+ }
+ 
++function resizeRgbaImage(src, dest, w1, h1, w2, h2, alpha01) {
++  const xRatio = w1 / w2;
++  const yRatio = h1 / h2;
++  let newIndex = 0;
++  const xScaled = new Uint16Array(w2);
++
++  if (alpha01 === 1) {
++    for (let i = 0; i < w2; i++) {
++      xScaled[i] = Math.floor(i * xRatio);
++    }
++    const src32 = new Uint32Array(src.buffer);
++    const dest32 = new Uint32Array(dest.buffer);
++    const rgbMask = FeatureTest.isLittleEndian ? 0x00ffffff : 0xffffff00;
++    for (let i = 0; i < h2; i++) {
++      const buf = src32.subarray(Math.floor(i * yRatio) * w1);
++      for (let j = 0; j < w2; j++) {
++        dest32[newIndex++] |= buf[xScaled[j]] & rgbMask;
++      }
++    }
++  } else {
++    const COMPONENTS = 4;
++    const w1Scanline = w1 * COMPONENTS;
++    for (let i = 0; i < w2; i++) {
++      xScaled[i] = Math.floor(i * xRatio) * COMPONENTS;
++    }
++    for (let i = 0; i < h2; i++) {
++      const buf = src.subarray(Math.floor(i * yRatio) * w1Scanline);
++      for (let j = 0; j < w2; j++) {
++        const oldIndex = xScaled[j];
++        dest[newIndex++] = buf[oldIndex];
++        dest[newIndex++] = buf[oldIndex + 1];
++        dest[newIndex++] = buf[oldIndex + 2];
++      }
++    }
++  }
++}
++
++function copyRgbaImage(src, dest, alpha01) {
++  if (alpha01 === 1) {
++    const src32 = new Uint32Array(src.buffer);
++    const dest32 = new Uint32Array(dest.buffer);
++    const rgbMask = FeatureTest.isLittleEndian ? 0x00ffffff : 0xffffff00;
++    for (let i = 0, ii = src32.length; i < ii; i++) {
++      dest32[i] |= src32[i] & rgbMask;
++    }
++  } else {
++    let j = 0;
++    for (let i = 0, ii = src.length; i < ii; i += 4) {
++      dest[j++] = src[i];
++      dest[j++] = src[i + 1];
++      dest[j++] = src[i + 2];
++    }
++  }
++}
++
+ class ColorSpace {
+   constructor(name, numComps) {
+     if (
+@@ -806,6 +862,38 @@ class DeviceRgbaCS extends ColorSpace {
+   isPassthrough(bits) {
+     return bits === 8;
+   }
++
++  fillRgb(
++    dest,
++    originalWidth,
++    originalHeight,
++    width,
++    height,
++    actualHeight,
++    bpc,
++    comps,
++    alpha01
++  ) {
++    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
++      assert(
++        dest instanceof Uint8ClampedArray,
++        'DeviceRgbaCS.fillRgb: Unsupported "dest" type.'
++      );
++    }
++    if (originalHeight !== height || originalWidth !== width) {
++      resizeRgbaImage(
++        comps,
++        dest,
++        originalWidth,
++        originalHeight,
++        width,
++        height,
++        alpha01
++      );
++    } else {
++      copyRgbaImage(comps, dest, alpha01);
++    }
++  }
+ }
+ 
+ /**
+
+diff --git a/src/core/image.js b/src/core/image.js
+--- a/src/core/image.js
++++ b/src/core/image.js
+@@ -705,7 +705,7 @@ class PDFImage {
+       isOffscreenCanvasSupported &&
+       ImageResizer.needsToBeResized(drawWidth, drawHeight);
+ 
+-    if (this.colorSpace.name === "DeviceRGBA") {
++    if (!this.smask && !this.mask && this.colorSpace.name === "DeviceRGBA") {
+       imgData.kind = ImageKind.RGBA_32BPP;
+       const imgArray = (imgData.data = await this.getImageBytes(
+         originalHeight * originalWidth * 4,
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.25.7
+- @babel/preset-env: ^7.25.7
+- @babel/runtime: ^7.25.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001667
+- canvas: ^2.11.2
+- core-js: ^3.38.1
+- eslint: ^8.57.1
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.2
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^56.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.3.1
+- jsdoc: ^4.0.3
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.4
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.47
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.0
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.0
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.9.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.2
+- vinyl: ^3.0.0
+- webpack: ^5.95.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/colorspace.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   FormatError,
+19   info,
+20   shadow,
+21   unreachable,
+22   warn,
+23 } from "../shared/util.js";
+24 import { Dict, Name, Ref } from "./primitives.js";
+25 import { BaseStream } from "./base_stream.js";
+26 import { MissingDataException } from "./core_utils.js";
+27 
+794 /**
+795  * The default color is `new Float32Array([0, 0, 0, 1])`.
+796  */
+797 class DeviceRgbaCS extends ColorSpace {
+798   constructor() {
+799     super("DeviceRGBA", 4);
+800   }
+801 
+809 }
+810 
+1459 
+File:
+src/core/image.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   FeatureTest,
+19   FormatError,
+20   ImageKind,
+21   warn,
+22 } from "../shared/util.js";
+23 import {
+24   convertBlackAndWhiteToRGBA,
+25   convertToRGBA,
+26 } from "../shared/image_utils.js";
+27 import { BaseStream } from "./base_stream.js";
+28 import { ColorSpace } from "./colorspace.js";
+29 import { DecodeStream } from "./decode_stream.js";
+30 import { ImageResizer } from "./image_resizer.js";
+31 import { JpegStream } from "./jpeg_stream.js";
+32 import { JpxImage } from "./jpx.js";
+33 import { Name } from "./primitives.js";
+34 
+93 class PDFImage {
+94   constructor({
+95     xref,
+96     res,
+97     image,
+98     isInline = false,
+99     smask = null,
+100     mask = null,
+101     isMask = false,
+102     pdfFunctionFactory,
+103     localColorSpaceCache,
+104   }) {
+105     this.image = image;
+106     const dict = image.dict;
+107 
+108     const filter = dict.get("F", "Filter");
+109     let filterName;
+110     if (filter instanceof Name) {
+111       filterName = filter.name;
+112     } else if (Array.isArray(filter)) {
+113       const filterZero = xref.fetchIfRef(filter[0]);
+114       if (filterZero instanceof Name) {
+115         filterName = filterZero.name;
+116       }
+117     }
+118     switch (filterName) {
+119       case "JPXDecode":
+120         ({
+121           width: image.width,
+122           height: image.height,
+123           componentsCount: image.numComps,
+124           bitsPerComponent: image.bitsPerComponent,
+125         } = JpxImage.parseImageProperties(image.stream));
+126         image.stream.reset();
+127         this.jpxDecoderOptions = {
+128           numComponents: 0,
+129           isIndexedColormap: false,
+130           smaskInData: dict.has("SMaskInData"),
+131         };
+132         break;
+133       case "JBIG2Decode":
+134         image.bitsPerComponent = 1;
+135         image.numComps = 1;
+136         break;
+137     }
+138 
+139     let width = dict.get("W", "Width");
+140     let height = dict.get("H", "Height");
+141 
+142     if (
+143       Number.isInteger(image.width) &&
+144       image.width > 0 &&
+145       Number.isInteger(image.height) &&
+146       image.height > 0 &&
+147       (image.width !== width || image.height !== height)
+148     ) {
+149       warn(
+150         "PDFImage - using the Width/Height of the image data, " +
+151           "rather than the image dictionary."
+152       );
+153       width = image.width;
+154       height = image.height;
+155     }
+156     if (width < 1 || height < 1) {
+157       throw new FormatError(
+158         `Invalid image width: ${width} or height: ${height}`
+159       );
+160     }
+161     this.width = width;
+162     this.height = height;
+163 
+164     this.interpolate = dict.get("I", "Interpolate");
+165     this.imageMask = dict.get("IM", "ImageMask") || false;
+166     this.matte = dict.get("Matte") || false;
+167 
+168     let bitsPerComponent = image.bitsPerComponent;
+169     if (!bitsPerComponent) {
+170       bitsPerComponent = dict.get("BPC", "BitsPerComponent");
+171       if (!bitsPerComponent) {
+172         if (this.imageMask) {
+173           bitsPerComponent = 1;
+174         } else {
+175           throw new FormatError(
+176             `Bits per component missing in image: ${this.imageMask}`
+177           );
+178         }
+179       }
+180     }
+181     this.bpc = bitsPerComponent;
+182 
+183     if (!this.imageMask) {
+184       let colorSpace = dict.getRaw("CS") || dict.getRaw("ColorSpace");
+185       const hasColorSpace = !!colorSpace;
+186       if (!hasColorSpace) {
+187         if (this.jpxDecoderOptions) {
+188           colorSpace = Name.get("DeviceRGBA");
+189         } else {
+190           switch (image.numComps) {
+191             case 1:
+192               colorSpace = Name.get("DeviceGray");
+193               break;
+194             case 3:
+195               colorSpace = Name.get("DeviceRGB");
+196               break;
+197             case 4:
+198               colorSpace = Name.get("DeviceCMYK");
+199               break;
+200             default:
+201               throw new Error(
+202                 `Images with ${image.numComps} color components not supported.`
+203               );
+204           }
+205         }
+206       } else if (this.jpxDecoderOptions?.smaskInData) {
+207         // If the jpx image has a color space then it mustn't be used in order
+208         // to be able to use the color space that comes from the pdf.
+209         colorSpace = Name.get("DeviceRGBA");
+210       }
+211 
+212       this.colorSpace = ColorSpace.parse({
+213         cs: colorSpace,
+214         xref,
+215         resources: isInline ? res : null,
+216         pdfFunctionFactory,
+217         localColorSpaceCache,
+218       });
+219       this.numComps = this.colorSpace.numComps;
+220 
+221       if (this.jpxDecoderOptions) {
+222         this.jpxDecoderOptions.numComponents = hasColorSpace ? this.numComp : 0;
+223         // If the jpx image has a color space then it musn't be used in order to
+224         // be able to use the color space that comes from the pdf.
+225         this.jpxDecoderOptions.isIndexedColormap =
+226           this.colorSpace.name === "Indexed";
+227       }
+228     }
+229 
+230     this.decode = dict.getArray("D", "Decode");
+231     this.needsDecode = false;
+232     if (
+233       this.decode &&
+234       ((this.colorSpace &&
+235         !this.colorSpace.isDefaultDecode(this.decode, bitsPerComponent)) ||
+236         (isMask &&
+237           !ColorSpace.isDefaultDecode(this.decode, /* numComps = */ 1)))
+238     ) {
+239       this.needsDecode = true;
+240       // Do some preprocessing to avoid more math.
+241       const max = (1 << bitsPerComponent) - 1;
+242       this.decodeCoefficients = [];
+243       this.decodeAddends = [];
+244       const isIndexed = this.colorSpace?.name === "Indexed";
+245       for (let i = 0, j = 0; i < this.decode.length; i += 2, ++j) {
+246         const dmin = this.decode[i];
+247         const dmax = this.decode[i + 1];
+248         this.decodeCoefficients[j] = isIndexed
+249           ? (dmax - dmin) / max
+250           : dmax - dmin;
+251         this.decodeAddends[j] = isIndexed ? dmin : max * dmin;
+252       }
+253     }
+254 
+255     if (smask) {
+256       this.smask = new PDFImage({
+257         xref,
+258         res,
+259         image: smask,
+260         isInline,
+261         pdfFunctionFactory,
+262         localColorSpaceCache,
+263       });
+264     } else if (mask) {
+265       if (mask instanceof BaseStream) {
+266         const maskDict = mask.dict,
+267           imageMask = maskDict.get("IM", "ImageMask");
+268         if (!imageMask) {
+269           warn("Ignoring /Mask in image without /ImageMask.");
+270         } else {
+271           this.mask = new PDFImage({
+272             xref,
+273             res,
+274             image: mask,
+275             isInline,
+276             isMask: true,
+277             pdfFunctionFactory,
+278             localColorSpaceCache,
+279           });
+280         }
+281       } else {
+282         // Color key mask (just an array).
+283         this.mask = mask;
+284       }
+285     }
+286   }
+287 
+685   async createImageData(forceRGBA = false, isOffscreenCanvasSupported = false) {
+686     const drawWidth = this.drawWidth;
+687     const drawHeight = this.drawHeight;
+688     const imgData = {
+689       width: drawWidth,
+690       height: drawHeight,
+691       interpolate: this.interpolate,
+692       kind: 0,
+693       data: null,
+694       // Other fields are filled in below.
+695     };
+696 
+697     const numComps = this.numComps;
+698     const originalWidth = this.width;
+699     const originalHeight = this.height;
+700     const bpc = this.bpc;
+701 
+702     // Rows start at byte boundary.
+703     const rowBytes = (originalWidth * numComps * bpc + 7) >> 3;
+704     const mustBeResized =
+705       isOffscreenCanvasSupported &&
+706       ImageResizer.needsToBeResized(drawWidth, drawHeight);
+707 
+708     if (this.colorSpace.name === "DeviceRGBA") {
+709       imgData.kind = ImageKind.RGBA_32BPP;
+710       const imgArray = (imgData.data = await this.getImageBytes(
+711         originalHeight * originalWidth * 4,
+712         {}
+713       ));
+714 
+715       if (isOffscreenCanvasSupported) {
+716         if (!mustBeResized) {
+717           return this.createBitmap(
+718             ImageKind.RGBA_32BPP,
+719             drawWidth,
+720             drawHeight,
+721             imgArray
+722           );
+723         }
+724         return ImageResizer.createImage(imgData, false);
+725       }
+726 
+727       return imgData;
+728     }
+729 
+730     if (!forceRGBA) {
+731       // If it is a 1-bit-per-pixel grayscale (i.e. black-and-white) image
+732       // without any complications, we pass a same-sized copy to the main
+733       // thread rather than expanding by 32x to RGBA form. This saves *lots*
+734       // of memory for many scanned documents. It's also much faster.
+735       //
+736       // Similarly, if it is a 24-bit-per pixel RGB image without any
+737       // complications, we avoid expanding by 1.333x to RGBA form.
+738       let kind;
+739       if (this.colorSpace.name === "DeviceGray" && bpc === 1) {
+740         kind = ImageKind.GRAYSCALE_1BPP;
+741       } else if (
+742         this.colorSpace.name === "DeviceRGB" &&
+743         bpc === 8 &&
+744         !this.needsDecode
+745       ) {
+746         kind = ImageKind.RGB_24BPP;
+747       }
+748       if (
+749         kind &&
+750         !this.smask &&
+751         !this.mask &&
+752         drawWidth === originalWidth &&
+753         drawHeight === originalHeight
+754       ) {
+755         const data = await this.getImageBytes(originalHeight * rowBytes, {});
+756         if (isOffscreenCanvasSupported) {
+757           if (mustBeResized) {
+758             return ImageResizer.createImage(
+759               {
+760                 data,
+761                 kind,
+762                 width: drawWidth,
+763                 height: drawHeight,
+764                 interpolate: this.interpolate,
+765               },
+766               this.needsDecode
+767             );
+768           }
+769           return this.createBitmap(kind, originalWidth, originalHeight, data);
+770         }
+771         imgData.kind = kind;
+772         imgData.data = data;
+773 
+774         if (this.needsDecode) {
+775           // Invert the buffer (which must be grayscale if we reached here).
+776           assert(
+777             kind === ImageKind.GRAYSCALE_1BPP,
+778             "PDFImage.createImageData: The image must be grayscale."
+779           );
+780           const buffer = imgData.data;
+781           for (let i = 0, ii = buffer.length; i < ii; i++) {
+782             buffer[i] ^= 0xff;
+783           }
+784         }
+785         return imgData;
+786       }
+787       if (
+788         this.image instanceof JpegStream &&
+789         !this.smask &&
+790         !this.mask &&
+791         !this.needsDecode
+792       ) {
+793         let imageLength = originalHeight * rowBytes;
+794         if (isOffscreenCanvasSupported && !mustBeResized) {
+795           let isHandled = false;
+796           switch (this.colorSpace.name) {
+797             case "DeviceGray":
+798               // Avoid truncating the image, since `JpegImage.getData`
+799               // will expand the image data when `forceRGB === true`.
+800               imageLength *= 4;
+801               isHandled = true;
+802               break;
+803             case "DeviceRGB":
+804               imageLength = (imageLength / 3) * 4;
+805               isHandled = true;
+806               break;
+807             case "DeviceCMYK":
+808               isHandled = true;
+809               break;
+810           }
+811 
+812           if (isHandled) {
+813             const rgba = await this.getImageBytes(imageLength, {
+814               drawWidth,
+815               drawHeight,
+816               forceRGBA: true,
+817             });
+818             return this.createBitmap(
+819               ImageKind.RGBA_32BPP,
+820               drawWidth,
+821               drawHeight,
+822               rgba
+823             );
+824           }
+825         } else {
+826           switch (this.colorSpace.name) {
+827             case "DeviceGray":
+828               imageLength *= 3;
+829             /* falls through */
+830             case "DeviceRGB":
+831             case "DeviceCMYK":
+832               imgData.kind = ImageKind.RGB_24BPP;
+833               imgData.data = await this.getImageBytes(imageLength, {
+834                 drawWidth,
+835                 drawHeight,
+836                 forceRGB: true,
+837               });
+838               if (mustBeResized) {
+839                 // The image is too big so we resize it.
+840                 return ImageResizer.createImage(imgData);
+841               }
+842               return imgData;
+843           }
+844         }
+845       }
+846     }
+847 
+848     const imgArray = await this.getImageBytes(originalHeight * rowBytes, {
+849       internal: true,
+850     });
+851     // imgArray can be incomplete (e.g. after CCITT fax encoding).
+852     const actualHeight =
+853       0 | (((imgArray.length / rowBytes) * drawHeight) / originalHeight);
+854 
+855     const comps = this.getComponents(imgArray);
+856 
+857     // If opacity data is present, use RGBA_32BPP form. Otherwise, use the
+858     // more compact RGB_24BPP form if allowable.
+859     let alpha01, maybeUndoPreblend;
+860 
+861     let canvas, ctx, canvasImgData, data;
+862     if (isOffscreenCanvasSupported && !mustBeResized) {
+863       canvas = new OffscreenCanvas(drawWidth, drawHeight);
+864       ctx = canvas.getContext("2d");
+865       canvasImgData = ctx.createImageData(drawWidth, drawHeight);
+866       data = canvasImgData.data;
+867     }
+868 
+869     imgData.kind = ImageKind.RGBA_32BPP;
+870 
+871     if (!forceRGBA && !this.smask && !this.mask) {
+872       if (!isOffscreenCanvasSupported || mustBeResized) {
+873         imgData.kind = ImageKind.RGB_24BPP;
+874         data = new Uint8ClampedArray(drawWidth * drawHeight * 3);
+875         alpha01 = 0;
+876       } else {
+877         const arr = new Uint32Array(data.buffer);
+878         arr.fill(FeatureTest.isLittleEndian ? 0xff000000 : 0x000000ff);
+879         alpha01 = 1;
+880       }
+881       maybeUndoPreblend = false;
+882     } else {
+883       if (!isOffscreenCanvasSupported || mustBeResized) {
+884         data = new Uint8ClampedArray(drawWidth * drawHeight * 4);
+885       }
+886 
+887       alpha01 = 1;
+888       maybeUndoPreblend = true;
+889 
+890       // Color key masking (opacity) must be performed before decoding.
+891       await this.fillOpacity(data, drawWidth, drawHeight, actualHeight, comps);
+892     }
+893 
+894     if (this.needsDecode) {
+895       this.decodeBuffer(comps);
+896     }
+897     this.colorSpace.fillRgb(
+898       data,
+899       originalWidth,
+900       originalHeight,
+901       drawWidth,
+902       drawHeight,
+903       actualHeight,
+904       bpc,
+905       comps,
+906       alpha01
+907     );
+908     if (maybeUndoPreblend) {
+909       this.undoPreblend(data, drawWidth, actualHeight);
+910     }
+911 
+912     if (isOffscreenCanvasSupported && !mustBeResized) {
+913       ctx.putImageData(canvasImgData, 0, 0);
+914       const bitmap = canvas.transferToImageBitmap();
+915 
+916       return {
+917         data: null,
+918         width: drawWidth,
+919         height: drawHeight,
+920         bitmap,
+921         interpolate: this.interpolate,
+922       };
+923     }
+924 
+925     imgData.data = data;
+926     if (mustBeResized) {
+927       return ImageResizer.createImage(imgData);
+928     }
+929     return imgData;
+930   }
+931 
+1050 }
+1051 
+</code>
+
+PR summary:
+<pr_summary>
+Some jpx images can have a mask
+It fixes #18896.
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

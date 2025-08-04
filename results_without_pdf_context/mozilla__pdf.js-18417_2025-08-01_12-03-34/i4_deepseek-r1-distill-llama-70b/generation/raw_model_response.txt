@@ -1,0 +1,69 @@
+<think>
+Okay, I need to write a regression test for the issue where adding a `<base href>` tag breaks transparency filters in Firefox. The test should fail before the patch and pass after applying it.
+
+First, I'll start by understanding the problem. The bug occurs when a `<base href>` is present, causing incorrect rendering of drop shadows in Firefox. The patch modifies the `DOMFilterFactory` class to correctly handle URLs when a `<base>` tag is present.
+
+I'll structure the test to simulate the scenario. The test will create a simple PDF with a transparent object and render it using `pdf.js` with and without the `<base>` tag. Then, it will compare the rendered pixels to an expected result.
+
+I'll use `pdfjs-lib` for PDF rendering and `jsdom` to create a mock HTML environment. The test will run in Node.js, so I'll set up a virtual DOM using `jsdom`.
+
+The steps are:
+
+1. Import necessary modules: `pdfjs-lib`, `jsdom`, and `fs` for loading the test PDF.
+2. Create a virtual DOM with `jsdom` and set the `<base href="." />` tag.
+3. Load the test PDF using `PDFDocumentLoader`.
+4. Render the first page and get the canvas.
+5. Check the alpha values of specific pixels to ensure transparency is rendered correctly.
+6. Compare the actual pixel values with the expected values.
+
+I'll write two cases: one without the `<base>` tag and one with it. The test will fail if the alpha values don't match, indicating the bug is present.
+
+Finally, I'll ensure the test is self-contained, uses dynamic imports for compatibility, and only returns the JavaScript code as required.
+</think>
+
+```javascript
+it("should render transparency filters correctly with <base href>", async () => {
+  const { PDFDocument } = await import("../../web/pdf_document.js");
+  const { PDFPage } = await import("../../web/pdf_page.js");
+  const { PDFViewer } = await import("../../web/pdf_viewer.js");
+  const { JSDOM } = await import("jsdom");
+  const { readFileSync } = require("fs");
+  const { join } = require("path");
+
+  const testPdf = readFileSync(join(__dirname, "test.pdf"));
+  const dom = new JSDOM();
+  const document = dom.window.document;
+
+  // Create base href element
+  const baseElement = document.createElement("base");
+  baseElement.setAttribute("href", ".");
+  document.head.appendChild(baseElement);
+
+  // Load and render PDF
+  const pdf = await PDFDocument.load({
+    data: testPdf.buffer,
+    loader: new PDFDocumentLoader({
+      verifyData: true,
+    }),
+  });
+  const page = await pdf.getPage(1);
+  const viewer = new PDFViewer({
+    container: document.body,
+    renderer: "canvas",
+    scale: 1,
+    rotate: 0,
+  });
+  viewer.setDocument(pdf);
+  await viewer.setPage(1);
+
+  const canvas = viewer.getCanvas();
+  const context = canvas.getContext("2d");
+  
+  // Get pixel data to check transparency
+  const imageData = context.getImageData(100, 100, 1, 1).data;
+  const expectedAlpha = 128;
+  const actualAlpha = imageData[3];
+
+  expect(actualAlpha).toBe(expectedAlpha);
+});
+```

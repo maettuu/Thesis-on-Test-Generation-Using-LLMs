@@ -1,0 +1,1791 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+PDF not displaying in viewer. 
+Attach (recommended) or Link to PDF file here:
+[Factuur_1105490.pdf](https://github.com/mozilla/pdf.js/files/15385405/Factuur_1105490.pdf)
+
+Configuration:
+
+- Web browser and its version:
+- Operating system and its version:
+- PDF.js version:
+- Is a browser extension:
+
+Steps to reproduce the problem:
+1. Open attached PDF in viewer
+2.
+
+What is the expected behavior? (add screenshot)
+
+What went wrong? (add screenshot)
+
+Screenshot from Chrome
+![image](https://github.com/mozilla/pdf.js/assets/141902311/ef9bef1f-6e4a-48a7-873c-b952ac35ef0b)
+
+Screenshot from Adobe
+![image](https://github.com/mozilla/pdf.js/assets/141902311/c4476d3d-cc2b-470c-a4f6-9563f750f465)
+
+Screenshot from https://mozilla.github.io/pdf.js/web/viewer.html 
+
+
+![image](https://github.com/mozilla/pdf.js/assets/141902311/e89c30cf-1a9f-4c3a-8b20-50952bbba610)
+
+
+
+Link to a viewer (if hosted on a site other than mozilla.github.io/pdf.js or as Firefox/Chrome extension):
+
+</issue>
+
+PDF File:
+<pdf>
+issue18122.pdf
+</pdf>
+
+Patch:
+<patch>
+diff --git a/src/core/parser.js b/src/core/parser.js
+--- a/src/core/parser.js
++++ b/src/core/parser.js
+@@ -609,12 +609,27 @@ class Parser {
+     return imageStream;
+   }
+ 
+-  _findStreamLength(startPos, signature) {
++  #findStreamLength(startPos) {
+     const { stream } = this.lexer;
+     stream.pos = startPos;
+ 
+     const SCAN_BLOCK_LENGTH = 2048;
+-    const signatureLength = signature.length;
++    const signatureLength = "endstream".length;
++
++    const END_SIGNATURE = new Uint8Array([0x65, 0x6e, 0x64]);
++    const endLength = END_SIGNATURE.length;
++
++    // Ideally we'd directly search for "endstream", however there are corrupt
++    // PDF documents where the command is incomplete; hence we search for:
++    //  1. The normal case.
++    //  2. The misspelled case (fixes issue18122.pdf).
++    //  3. The truncated case (fixes issue10004.pdf).
++    const PARTIAL_SIGNATURE = [
++      new Uint8Array([0x73, 0x74, 0x72, 0x65, 0x61, 0x6d]), // "stream"
++      new Uint8Array([0x73, 0x74, 0x65, 0x61, 0x6d]), // "steam",
++      new Uint8Array([0x73, 0x74, 0x72, 0x65, 0x61]), // "strea"
++    ];
++    const normalLength = signatureLength - endLength;
+ 
+     while (stream.pos < stream.end) {
+       const scanBytes = stream.peekBytes(SCAN_BLOCK_LENGTH);
+@@ -626,13 +641,43 @@ class Parser {
+       let pos = 0;
+       while (pos < scanLength) {
+         let j = 0;
+-        while (j < signatureLength && scanBytes[pos + j] === signature[j]) {
++        while (j < endLength && scanBytes[pos + j] === END_SIGNATURE[j]) {
+           j++;
+         }
+-        if (j >= signatureLength) {
+-          // `signature` found.
+-          stream.pos += pos;
+-          return stream.pos - startPos;
++        if (j >= endLength) {
++          // "end" found, find the complete command.
++          let found = false;
++          for (const part of PARTIAL_SIGNATURE) {
++            const partLen = part.length;
++            let k = 0;
++            while (k < partLen && scanBytes[pos + j + k] === part[k]) {
++              k++;
++            }
++            if (k >= normalLength) {
++              // Found "endstream" command.
++              found = true;
++              break;
++            }
++            if (k >= partLen) {
++              // Found "endsteam" or "endstea" command.
++              // Ensure that the byte immediately following the corrupt
++              // endstream command is a space, to prevent false positives.
++              const lastByte = scanBytes[pos + j + k];
++              if (isWhiteSpace(lastByte)) {
++                info(
++                  `Found "${bytesToString([...END_SIGNATURE, ...part])}" when ` +
++                    "searching for endstream command."
++                );
++                found = true;
++              }
++              break;
++            }
++          }
++
++          if (found) {
++            stream.pos += pos;
++            return stream.pos - startPos;
++          }
+         }
+         pos++;
+       }
+@@ -665,43 +710,9 @@ class Parser {
+       this.shift(); // 'stream'
+     } else {
+       // Bad stream length, scanning for endstream command.
+-      const ENDSTREAM_SIGNATURE = new Uint8Array([
+-        0x65, 0x6e, 0x64, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
+-      ]);
+-      let actualLength = this._findStreamLength(startPos, ENDSTREAM_SIGNATURE);
++      const actualLength = this.#findStreamLength(startPos);
+       if (actualLength < 0) {
+-        // Only allow limited truncation of the endstream signature,
+-        // to prevent false positives.
+-        const MAX_TRUNCATION = 1;
+-        // Check if the PDF generator included truncated endstream commands,
+-        // such as e.g. "endstrea" (fixes issue10004.pdf).
+-        for (let i = 1; i <= MAX_TRUNCATION; i++) {
+-          const end = ENDSTREAM_SIGNATURE.length - i;
+-          const TRUNCATED_SIGNATURE = ENDSTREAM_SIGNATURE.slice(0, end);
+-
+-          const maybeLength = this._findStreamLength(
+-            startPos,
+-            TRUNCATED_SIGNATURE
+-          );
+-          if (maybeLength >= 0) {
+-            // Ensure that the byte immediately following the truncated
+-            // endstream command is a space, to prevent false positives.
+-            const lastByte = stream.peekBytes(end + 1)[end];
+-            if (!isWhiteSpace(lastByte)) {
+-              break;
+-            }
+-            info(
+-              `Found "${bytesToString(TRUNCATED_SIGNATURE)}" when ` +
+-                "searching for endstream command."
+-            );
+-            actualLength = maybeLength;
+-            break;
+-          }
+-        }
+-
+-        if (actualLength < 0) {
+-          throw new FormatError("Missing endstream command.");
+-        }
++        throw new FormatError("Missing endstream command.");
+       }
+       length = actualLength;
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.24.5
+- @babel/preset-env: ^7.24.5
+- @babel/runtime: ^7.24.5
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @jazzer.js/core: ^2.1.0
+- autoprefixer: ^10.4.19
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001618
+- canvas: ^2.11.2
+- core-js: ^3.37.1
+- cross-env: ^7.0.3
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.1
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.7.3
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^53.0.0
+- globals: ^15.2.0
+- gulp: ^4.0.2
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.3
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- path2d: ^0.2.0
+- pngjs: ^7.0.0
+- postcss: ^8.4.38
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^7.0.0
+- postcss-nesting: ^12.1.4
+- prettier: ^3.2.5
+- puppeteer: ^22.8.1
+- streamqueue: ^1.1.2
+- stylelint: ^16.5.0
+- stylelint-prettier: ^5.0.0
+- terser-webpack-plugin: ^5.3.10
+- through2: ^4.0.2
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.4.5
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.91.0
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/parser.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   assert,
+18   bytesToString,
+19   FormatError,
+20   info,
+21   warn,
+22 } from "../shared/util.js";
+23 import { Cmd, Dict, EOF, isCmd, Name, Ref } from "./primitives.js";
+24 import {
+25   isWhiteSpace,
+26   MissingDataException,
+27   ParserEOFException,
+28 } from "./core_utils.js";
+29 import { NullStream, Stream } from "./stream.js";
+30 import { Ascii85Stream } from "./ascii_85_stream.js";
+31 import { AsciiHexStream } from "./ascii_hex_stream.js";
+32 import { CCITTFaxStream } from "./ccitt_stream.js";
+33 import { FlateStream } from "./flate_stream.js";
+34 import { Jbig2Stream } from "./jbig2_stream.js";
+35 import { JpegStream } from "./jpeg_stream.js";
+36 import { JpxStream } from "./jpx_stream.js";
+37 import { LZWStream } from "./lzw_stream.js";
+38 import { PredictorStream } from "./predictor_stream.js";
+39 import { RunLengthStream } from "./run_length_stream.js";
+40 
+41 const MAX_LENGTH_TO_CACHE = 1000;
+42 
+43 function getInlineImageCacheKey(bytes) {
+44   const strBuf = [],
+45     ii = bytes.length;
+46   let i = 0;
+47   while (i < ii - 1) {
+48     strBuf.push((bytes[i++] << 8) | bytes[i++]);
+49   }
+50   // Handle an odd number of elements.
+51   if (i < ii) {
+52     strBuf.push(bytes[i]);
+53   }
+54   // We purposely include the "raw" length in the cacheKey, to prevent any
+55   // possible issues with hash collisions in the inline image cache.
+56   // Here we also assume that `strBuf` is never larger than 8192 elements,
+57   // please refer to the `bytesToString` implementation.
+58   return ii + "_" + String.fromCharCode.apply(null, strBuf);
+59 }
+60 
+61 class Parser {
+62   constructor({ lexer, xref, allowStreams = false, recoveryMode = false }) {
+63     this.lexer = lexer;
+64     this.xref = xref;
+65     this.allowStreams = allowStreams;
+66     this.recoveryMode = recoveryMode;
+67 
+68     this.imageCache = Object.create(null);
+69     this._imageId = 0;
+70     this.refill();
+71   }
+72 
+73   refill() {
+74     this.buf1 = this.lexer.getObj();
+75     this.buf2 = this.lexer.getObj();
+76   }
+77 
+78   shift() {
+79     if (this.buf2 instanceof Cmd && this.buf2.cmd === "ID") {
+80       this.buf1 = this.buf2;
+81       this.buf2 = null;
+82     } else {
+83       this.buf1 = this.buf2;
+84       this.buf2 = this.lexer.getObj();
+85     }
+86   }
+87 
+88   tryShift() {
+89     try {
+90       this.shift();
+91       return true;
+92     } catch (e) {
+93       if (e instanceof MissingDataException) {
+94         throw e;
+95       }
+96       // Upon failure, the caller should reset this.lexer.pos to a known good
+97       // state and call this.shift() twice to reset the buffers.
+98       return false;
+99     }
+100   }
+101 
+102   getObj(cipherTransform = null) {
+103     const buf1 = this.buf1;
+104     this.shift();
+105 
+106     if (buf1 instanceof Cmd) {
+107       switch (buf1.cmd) {
+108         case "BI": // inline image
+109           return this.makeInlineImage(cipherTransform);
+110         case "[": // array
+111           const array = [];
+112           while (!isCmd(this.buf1, "]") && this.buf1 !== EOF) {
+113             array.push(this.getObj(cipherTransform));
+114           }
+115           if (this.buf1 === EOF) {
+116             if (this.recoveryMode) {
+117               return array;
+118             }
+119             throw new ParserEOFException("End of file inside array.");
+120           }
+121           this.shift();
+122           return array;
+123         case "<<": // dictionary or stream
+124           const dict = new Dict(this.xref);
+125           while (!isCmd(this.buf1, ">>") && this.buf1 !== EOF) {
+126             if (!(this.buf1 instanceof Name)) {
+127               info("Malformed dictionary: key must be a name object");
+128               this.shift();
+129               continue;
+130             }
+131 
+132             const key = this.buf1.name;
+133             this.shift();
+134             if (this.buf1 === EOF) {
+135               break;
+136             }
+137             dict.set(key, this.getObj(cipherTransform));
+138           }
+139           if (this.buf1 === EOF) {
+140             if (this.recoveryMode) {
+141               return dict;
+142             }
+143             throw new ParserEOFException("End of file inside dictionary.");
+144           }
+145 
+146           // Stream objects are not allowed inside content streams or
+147           // object streams.
+148           if (isCmd(this.buf2, "stream")) {
+149             return this.allowStreams
+150               ? this.makeStream(dict, cipherTransform)
+151               : dict;
+152           }
+153           this.shift();
+154           return dict;
+155         default: // simple object
+156           return buf1;
+157       }
+158     }
+159 
+160     if (Number.isInteger(buf1)) {
+161       // indirect reference or integer
+162       if (Number.isInteger(this.buf1) && isCmd(this.buf2, "R")) {
+163         const ref = Ref.get(buf1, this.buf1);
+164         this.shift();
+165         this.shift();
+166         return ref;
+167       }
+168       return buf1;
+169     }
+170 
+171     if (typeof buf1 === "string") {
+172       if (cipherTransform) {
+173         return cipherTransform.decryptString(buf1);
+174       }
+175       return buf1;
+176     }
+177 
+178     // simple object
+179     return buf1;
+180   }
+181 
+182   /**
+183    * Find the end of the stream by searching for the /EI\s/.
+184    * @returns {number} The inline stream length.
+185    */
+186   findDefaultInlineStreamEnd(stream) {
+187     const E = 0x45,
+188       I = 0x49,
+189       SPACE = 0x20,
+190       LF = 0xa,
+191       CR = 0xd,
+192       NUL = 0x0;
+193     const { knownCommands } = this.lexer,
+194       startPos = stream.pos,
+195       n = 15;
+196     let state = 0,
+197       ch,
+198       maybeEIPos;
+199     while ((ch = stream.getByte()) !== -1) {
+200       if (state === 0) {
+201         state = ch === E ? 1 : 0;
+202       } else if (state === 1) {
+203         state = ch === I ? 2 : 0;
+204       } else {
+205         if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+206           assert(state === 2, "findDefaultInlineStreamEnd - invalid state.");
+207         }
+208         if (ch === SPACE || ch === LF || ch === CR) {
+209           maybeEIPos = stream.pos;
+210           // Let's check that the next `n` bytes are ASCII... just to be sure.
+211           const followingBytes = stream.peekBytes(n);
+212 
+213           const ii = followingBytes.length;
+214           if (ii === 0) {
+215             break; // The end of the stream was reached, nothing to check.
+216           }
+217           for (let i = 0; i < ii; i++) {
+218             ch = followingBytes[i];
+219             if (ch === NUL && followingBytes[i + 1] !== NUL) {
+220               // NUL bytes are not supposed to occur *outside* of inline
+221               // images, but some PDF generators violate that assumption,
+222               // thus breaking the EI detection heuristics used below.
+223               //
+224               // However, we can't unconditionally treat NUL bytes as "ASCII",
+225               // since that *could* result in inline images being truncated.
+226               //
+227               // To attempt to address this, we'll still treat any *sequence*
+228               // of NUL bytes as non-ASCII, but for a *single* NUL byte we'll
+229               // continue checking the `followingBytes` (fixes issue8823.pdf).
+230               continue;
+231             }
+232             if (ch !== LF && ch !== CR && (ch < SPACE || ch > 0x7f)) {
+233               // Not a LF, CR, SPACE or any visible ASCII character, i.e.
+234               // it's binary stuff. Resetting the state.
+235               state = 0;
+236               break;
+237             }
+238           }
+239 
+240           if (state !== 2) {
+241             continue;
+242           }
+243           if (!knownCommands) {
+244             warn(
+245               "findDefaultInlineStreamEnd - `lexer.knownCommands` is undefined."
+246             );
+247             continue;
+248           }
+249           // Check that the "EI" sequence isn't part of the image data, since
+250           // that would cause the image to be truncated (fixes issue11124.pdf).
+251           const tmpLexer = new Lexer(
+252             new Stream(followingBytes.slice()),
+253             knownCommands
+254           );
+255           // Reduce the number of (potential) warning messages.
+256           tmpLexer._hexStringWarn = () => {};
+257           let numArgs = 0;
+258 
+259           while (true) {
+260             const nextObj = tmpLexer.getObj();
+261 
+262             if (nextObj === EOF) {
+263               state = 0; // No valid command found, resetting the state.
+264               break;
+265             }
+266             if (nextObj instanceof Cmd) {
+267               const knownCommand = knownCommands[nextObj.cmd];
+268               if (!knownCommand) {
+269                 // Not a valid command, i.e. the inline image data *itself*
+270                 // contains an "EI" sequence. Resetting the state.
+271                 state = 0;
+272                 break;
+273               } else if (
+274                 knownCommand.variableArgs
+275                   ? numArgs <= knownCommand.numArgs
+276                   : numArgs === knownCommand.numArgs
+277               ) {
+278                 break; // Valid command found.
+279               }
+280               numArgs = 0;
+281               continue;
+282             }
+283             numArgs++;
+284           }
+285 
+286           if (state === 2) {
+287             break; // Finished!
+288           }
+289         } else {
+290           state = 0;
+291         }
+292       }
+293     }
+294 
+295     if (ch === -1) {
+296       warn(
+297         "findDefaultInlineStreamEnd: " +
+298           "Reached the end of the stream without finding a valid EI marker"
+299       );
+300       if (maybeEIPos) {
+301         warn('... trying to recover by using the last "EI" occurrence.');
+302         stream.skip(-(stream.pos - maybeEIPos)); // Reset the stream position.
+303       }
+304     }
+305 
+306     let endOffset = 4;
+307     stream.skip(-endOffset); // Set the stream position to just before "EI".
+308     ch = stream.peekByte();
+309     stream.skip(endOffset); // ... and remember to reset the stream position.
+310 
+311     // Ensure that we don't accidentally truncate the inline image, when the
+312     // data is immediately followed by the "EI" marker (fixes issue10388.pdf).
+313     if (!isWhiteSpace(ch)) {
+314       endOffset--;
+315     }
+316     return stream.pos - endOffset - startPos;
+317   }
+318 
+319   /**
+320    * Find the EOI (end-of-image) marker 0xFFD9 of the stream.
+321    * @returns {number} The inline stream length.
+322    */
+323   findDCTDecodeInlineStreamEnd(stream) {
+324     const startPos = stream.pos;
+325     let foundEOI = false,
+326       b,
+327       markerLength;
+328     while ((b = stream.getByte()) !== -1) {
+329       if (b !== 0xff) {
+330         // Not a valid marker.
+331         continue;
+332       }
+333       switch (stream.getByte()) {
+334         case 0x00: // Byte stuffing.
+335           // 0xFF00 appears to be a very common byte sequence in JPEG images.
+336           break;
+337 
+338         case 0xff: // Fill byte.
+339           // Avoid skipping a valid marker, resetting the stream position.
+340           stream.skip(-1);
+341           break;
+342 
+343         case 0xd9: // EOI
+344           foundEOI = true;
+345           break;
+346 
+347         case 0xc0: // SOF0
+348         case 0xc1: // SOF1
+349         case 0xc2: // SOF2
+350         case 0xc3: // SOF3
+351         /* falls through */
+352         case 0xc5: // SOF5
+353         case 0xc6: // SOF6
+354         case 0xc7: // SOF7
+355         /* falls through */
+356         case 0xc9: // SOF9
+357         case 0xca: // SOF10
+358         case 0xcb: // SOF11
+359         /* falls through */
+360         case 0xcd: // SOF13
+361         case 0xce: // SOF14
+362         case 0xcf: // SOF15
+363         /* falls through */
+364         case 0xc4: // DHT
+365         case 0xcc: // DAC
+366         /* falls through */
+367         case 0xda: // SOS
+368         case 0xdb: // DQT
+369         case 0xdc: // DNL
+370         case 0xdd: // DRI
+371         case 0xde: // DHP
+372         case 0xdf: // EXP
+373         /* falls through */
+374         case 0xe0: // APP0
+375         case 0xe1: // APP1
+376         case 0xe2: // APP2
+377         case 0xe3: // APP3
+378         case 0xe4: // APP4
+379         case 0xe5: // APP5
+380         case 0xe6: // APP6
+381         case 0xe7: // APP7
+382         case 0xe8: // APP8
+383         case 0xe9: // APP9
+384         case 0xea: // APP10
+385         case 0xeb: // APP11
+386         case 0xec: // APP12
+387         case 0xed: // APP13
+388         case 0xee: // APP14
+389         case 0xef: // APP15
+390         /* falls through */
+391         case 0xfe: // COM
+392           // The marker should be followed by the length of the segment.
+393           markerLength = stream.getUint16();
+394           if (markerLength > 2) {
+395             // |markerLength| contains the byte length of the marker segment,
+396             // including its own length (2 bytes) and excluding the marker.
+397             stream.skip(markerLength - 2); // Jump to the next marker.
+398           } else {
+399             // The marker length is invalid, resetting the stream position.
+400             stream.skip(-2);
+401           }
+402           break;
+403       }
+404       if (foundEOI) {
+405         break;
+406       }
+407     }
+408     const length = stream.pos - startPos;
+409     if (b === -1) {
+410       warn(
+411         "Inline DCTDecode image stream: " +
+412           "EOI marker not found, searching for /EI/ instead."
+413       );
+414       stream.skip(-length); // Reset the stream position.
+415       return this.findDefaultInlineStreamEnd(stream);
+416     }
+417     this.inlineStreamSkipEI(stream);
+418     return length;
+419   }
+420 
+421   /**
+422    * Find the EOD (end-of-data) marker '~>' (i.e. TILDE + GT) of the stream.
+423    * @returns {number} The inline stream length.
+424    */
+425   findASCII85DecodeInlineStreamEnd(stream) {
+426     const TILDE = 0x7e,
+427       GT = 0x3e;
+428     const startPos = stream.pos;
+429     let ch;
+430     while ((ch = stream.getByte()) !== -1) {
+431       if (ch === TILDE) {
+432         const tildePos = stream.pos;
+433 
+434         ch = stream.peekByte();
+435         // Handle corrupt PDF documents which contains whitespace "inside" of
+436         // the EOD marker (fixes issue10614.pdf).
+437         while (isWhiteSpace(ch)) {
+438           stream.skip();
+439           ch = stream.peekByte();
+440         }
+441         if (ch === GT) {
+442           stream.skip();
+443           break;
+444         }
+445         // Handle corrupt PDF documents which contains truncated EOD markers,
+446         // where the '>' character is missing (fixes issue11385.pdf).
+447         if (stream.pos > tildePos) {
+448           const maybeEI = stream.peekBytes(2);
+449           if (maybeEI[0] === /* E = */ 0x45 && maybeEI[1] === /* I = */ 0x49) {
+450             break;
+451           }
+452         }
+453       }
+454     }
+455     const length = stream.pos - startPos;
+456     if (ch === -1) {
+457       warn(
+458         "Inline ASCII85Decode image stream: " +
+459           "EOD marker not found, searching for /EI/ instead."
+460       );
+461       stream.skip(-length); // Reset the stream position.
+462       return this.findDefaultInlineStreamEnd(stream);
+463     }
+464     this.inlineStreamSkipEI(stream);
+465     return length;
+466   }
+467 
+468   /**
+469    * Find the EOD (end-of-data) marker '>' (i.e. GT) of the stream.
+470    * @returns {number} The inline stream length.
+471    */
+472   findASCIIHexDecodeInlineStreamEnd(stream) {
+473     const GT = 0x3e;
+474     const startPos = stream.pos;
+475     let ch;
+476     while ((ch = stream.getByte()) !== -1) {
+477       if (ch === GT) {
+478         break;
+479       }
+480     }
+481     const length = stream.pos - startPos;
+482     if (ch === -1) {
+483       warn(
+484         "Inline ASCIIHexDecode image stream: " +
+485           "EOD marker not found, searching for /EI/ instead."
+486       );
+487       stream.skip(-length); // Reset the stream position.
+488       return this.findDefaultInlineStreamEnd(stream);
+489     }
+490     this.inlineStreamSkipEI(stream);
+491     return length;
+492   }
+493 
+494   /**
+495    * Skip over the /EI/ for streams where we search for an EOD marker.
+496    */
+497   inlineStreamSkipEI(stream) {
+498     const E = 0x45,
+499       I = 0x49;
+500     let state = 0,
+501       ch;
+502     while ((ch = stream.getByte()) !== -1) {
+503       if (state === 0) {
+504         state = ch === E ? 1 : 0;
+505       } else if (state === 1) {
+506         state = ch === I ? 2 : 0;
+507       } else if (state === 2) {
+508         break;
+509       }
+510     }
+511   }
+512 
+513   makeInlineImage(cipherTransform) {
+514     const lexer = this.lexer;
+515     const stream = lexer.stream;
+516 
+517     // Parse dictionary, but initialize it lazily to improve performance with
+518     // cached inline images (see issue 2618).
+519     const dictMap = Object.create(null);
+520     let dictLength;
+521     while (!isCmd(this.buf1, "ID") && this.buf1 !== EOF) {
+522       if (!(this.buf1 instanceof Name)) {
+523         throw new FormatError("Dictionary key must be a name object");
+524       }
+525       const key = this.buf1.name;
+526       this.shift();
+527       if (this.buf1 === EOF) {
+528         break;
+529       }
+530       dictMap[key] = this.getObj(cipherTransform);
+531     }
+532     if (lexer.beginInlineImagePos !== -1) {
+533       dictLength = stream.pos - lexer.beginInlineImagePos;
+534     }
+535 
+536     // Extract the name of the first (i.e. the current) image filter.
+537     const filter = this.xref.fetchIfRef(dictMap.F || dictMap.Filter);
+538     let filterName;
+539     if (filter instanceof Name) {
+540       filterName = filter.name;
+541     } else if (Array.isArray(filter)) {
+542       const filterZero = this.xref.fetchIfRef(filter[0]);
+543       if (filterZero instanceof Name) {
+544         filterName = filterZero.name;
+545       }
+546     }
+547 
+548     // Parse image stream.
+549     const startPos = stream.pos;
+550     let length;
+551     switch (filterName) {
+552       case "DCT":
+553       case "DCTDecode":
+554         length = this.findDCTDecodeInlineStreamEnd(stream);
+555         break;
+556       case "A85":
+557       case "ASCII85Decode":
+558         length = this.findASCII85DecodeInlineStreamEnd(stream);
+559         break;
+560       case "AHx":
+561       case "ASCIIHexDecode":
+562         length = this.findASCIIHexDecodeInlineStreamEnd(stream);
+563         break;
+564       default:
+565         length = this.findDefaultInlineStreamEnd(stream);
+566     }
+567 
+568     // Cache all images below the MAX_LENGTH_TO_CACHE threshold by their
+569     // stringified content, to prevent possible hash collisions.
+570     let cacheKey;
+571     if (length < MAX_LENGTH_TO_CACHE && dictLength > 0) {
+572       const initialStreamPos = stream.pos;
+573       // Set the stream position to the beginning of the dictionary data...
+574       stream.pos = lexer.beginInlineImagePos;
+575       // ... and fetch the bytes of the dictionary *and* the inline image.
+576       cacheKey = getInlineImageCacheKey(stream.getBytes(dictLength + length));
+577       // Finally, don't forget to reset the stream position.
+578       stream.pos = initialStreamPos;
+579 
+580       const cacheEntry = this.imageCache[cacheKey];
+581       if (cacheEntry !== undefined) {
+582         this.buf2 = Cmd.get("EI");
+583         this.shift();
+584 
+585         cacheEntry.reset();
+586         return cacheEntry;
+587       }
+588     }
+589 
+590     const dict = new Dict(this.xref);
+591     for (const key in dictMap) {
+592       dict.set(key, dictMap[key]);
+593     }
+594     let imageStream = stream.makeSubStream(startPos, length, dict);
+595     if (cipherTransform) {
+596       imageStream = cipherTransform.createStream(imageStream, length);
+597     }
+598 
+599     imageStream = this.filter(imageStream, dict, length);
+600     imageStream.dict = dict;
+601     if (cacheKey !== undefined) {
+602       imageStream.cacheKey = `inline_img_${++this._imageId}`;
+603       this.imageCache[cacheKey] = imageStream;
+604     }
+605 
+606     this.buf2 = Cmd.get("EI");
+607     this.shift();
+608 
+609     return imageStream;
+610   }
+611 
+612   _findStreamLength(startPos, signature) {
+613     const { stream } = this.lexer;
+614     stream.pos = startPos;
+615 
+616     const SCAN_BLOCK_LENGTH = 2048;
+617     const signatureLength = signature.length;
+618 
+619     while (stream.pos < stream.end) {
+620       const scanBytes = stream.peekBytes(SCAN_BLOCK_LENGTH);
+621       const scanLength = scanBytes.length - signatureLength;
+622 
+623       if (scanLength <= 0) {
+624         break;
+625       }
+626       let pos = 0;
+627       while (pos < scanLength) {
+628         let j = 0;
+629         while (j < signatureLength && scanBytes[pos + j] === signature[j]) {
+630           j++;
+631         }
+632         if (j >= signatureLength) {
+633           // `signature` found.
+634           stream.pos += pos;
+635           return stream.pos - startPos;
+636         }
+637         pos++;
+638       }
+639       stream.pos += scanLength;
+640     }
+641     return -1;
+642   }
+643 
+644   makeStream(dict, cipherTransform) {
+645     const lexer = this.lexer;
+646     let stream = lexer.stream;
+647 
+648     // Get the stream's start position.
+649     lexer.skipToNextLine();
+650     const startPos = stream.pos - 1;
+651 
+652     // Get the length.
+653     let length = dict.get("Length");
+654     if (!Number.isInteger(length)) {
+655       info(`Bad length "${length && length.toString()}" in stream.`);
+656       length = 0;
+657     }
+658 
+659     // Skip over the stream data.
+660     stream.pos = startPos + length;
+661     lexer.nextChar();
+662 
+663     // Shift '>>' and check whether the new object marks the end of the stream.
+664     if (this.tryShift() && isCmd(this.buf2, "endstream")) {
+665       this.shift(); // 'stream'
+666     } else {
+667       // Bad stream length, scanning for endstream command.
+668       const ENDSTREAM_SIGNATURE = new Uint8Array([
+669         0x65, 0x6e, 0x64, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
+670       ]);
+671       let actualLength = this._findStreamLength(startPos, ENDSTREAM_SIGNATURE);
+672       if (actualLength < 0) {
+673         // Only allow limited truncation of the endstream signature,
+674         // to prevent false positives.
+675         const MAX_TRUNCATION = 1;
+676         // Check if the PDF generator included truncated endstream commands,
+677         // such as e.g. "endstrea" (fixes issue10004.pdf).
+678         for (let i = 1; i <= MAX_TRUNCATION; i++) {
+679           const end = ENDSTREAM_SIGNATURE.length - i;
+680           const TRUNCATED_SIGNATURE = ENDSTREAM_SIGNATURE.slice(0, end);
+681 
+682           const maybeLength = this._findStreamLength(
+683             startPos,
+684             TRUNCATED_SIGNATURE
+685           );
+686           if (maybeLength >= 0) {
+687             // Ensure that the byte immediately following the truncated
+688             // endstream command is a space, to prevent false positives.
+689             const lastByte = stream.peekBytes(end + 1)[end];
+690             if (!isWhiteSpace(lastByte)) {
+691               break;
+692             }
+693             info(
+694               `Found "${bytesToString(TRUNCATED_SIGNATURE)}" when ` +
+695                 "searching for endstream command."
+696             );
+697             actualLength = maybeLength;
+698             break;
+699           }
+700         }
+701 
+702         if (actualLength < 0) {
+703           throw new FormatError("Missing endstream command.");
+704         }
+705       }
+706       length = actualLength;
+707 
+708       lexer.nextChar();
+709       this.shift();
+710       this.shift();
+711     }
+712     this.shift(); // 'endstream'
+713 
+714     stream = stream.makeSubStream(startPos, length, dict);
+715     if (cipherTransform) {
+716       stream = cipherTransform.createStream(stream, length);
+717     }
+718     stream = this.filter(stream, dict, length);
+719     stream.dict = dict;
+720     return stream;
+721   }
+722 
+723   filter(stream, dict, length) {
+724     let filter = dict.get("F", "Filter");
+725     let params = dict.get("DP", "DecodeParms");
+726 
+727     if (filter instanceof Name) {
+728       if (Array.isArray(params)) {
+729         warn("/DecodeParms should not be an Array, when /Filter is a Name.");
+730       }
+731       return this.makeFilter(stream, filter.name, length, params);
+732     }
+733 
+734     let maybeLength = length;
+735     if (Array.isArray(filter)) {
+736       const filterArray = filter;
+737       const paramsArray = params;
+738       for (let i = 0, ii = filterArray.length; i < ii; ++i) {
+739         filter = this.xref.fetchIfRef(filterArray[i]);
+740         if (!(filter instanceof Name)) {
+741           throw new FormatError(`Bad filter name "${filter}"`);
+742         }
+743 
+744         params = null;
+745         if (Array.isArray(paramsArray) && i in paramsArray) {
+746           params = this.xref.fetchIfRef(paramsArray[i]);
+747         }
+748         stream = this.makeFilter(stream, filter.name, maybeLength, params);
+749         // After the first stream the `length` variable is invalid.
+750         maybeLength = null;
+751       }
+752     }
+753     return stream;
+754   }
+755 
+756   makeFilter(stream, name, maybeLength, params) {
+757     // Since the 'Length' entry in the stream dictionary can be completely
+758     // wrong, e.g. zero for non-empty streams, only skip parsing the stream
+759     // when we can be absolutely certain that it actually is empty.
+760     if (maybeLength === 0) {
+761       warn(`Empty "${name}" stream.`);
+762       return new NullStream();
+763     }
+764 
+765     try {
+766       switch (name) {
+767         case "Fl":
+768         case "FlateDecode":
+769           if (params) {
+770             return new PredictorStream(
+771               new FlateStream(stream, maybeLength),
+772               maybeLength,
+773               params
+774             );
+775           }
+776           return new FlateStream(stream, maybeLength);
+777         case "LZW":
+778         case "LZWDecode":
+779           let earlyChange = 1;
+780           if (params) {
+781             if (params.has("EarlyChange")) {
+782               earlyChange = params.get("EarlyChange");
+783             }
+784             return new PredictorStream(
+785               new LZWStream(stream, maybeLength, earlyChange),
+786               maybeLength,
+787               params
+788             );
+789           }
+790           return new LZWStream(stream, maybeLength, earlyChange);
+791         case "DCT":
+792         case "DCTDecode":
+793           return new JpegStream(stream, maybeLength, params);
+794         case "JPX":
+795         case "JPXDecode":
+796           return new JpxStream(stream, maybeLength, params);
+797         case "A85":
+798         case "ASCII85Decode":
+799           return new Ascii85Stream(stream, maybeLength);
+800         case "AHx":
+801         case "ASCIIHexDecode":
+802           return new AsciiHexStream(stream, maybeLength);
+803         case "CCF":
+804         case "CCITTFaxDecode":
+805           return new CCITTFaxStream(stream, maybeLength, params);
+806         case "RL":
+807         case "RunLengthDecode":
+808           return new RunLengthStream(stream, maybeLength);
+809         case "JBIG2Decode":
+810           return new Jbig2Stream(stream, maybeLength, params);
+811       }
+812       warn(`Filter "${name}" is not supported.`);
+813       return stream;
+814     } catch (ex) {
+815       if (ex instanceof MissingDataException) {
+816         throw ex;
+817       }
+818       warn(`Invalid stream: "${ex}"`);
+819       return new NullStream();
+820     }
+821   }
+822 }
+823 
+824 // A '1' in this array means the character is white space. A '1' or
+825 // '2' means the character ends a name or command.
+826 // prettier-ignore
+827 const specialChars = [
+828   1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, // 0x
+829   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 1x
+830   1, 0, 0, 0, 0, 2, 0, 0, 2, 2, 0, 0, 0, 0, 0, 2, // 2x
+831   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, // 3x
+832   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 4x
+833   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, // 5x
+834   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 6x
+835   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, // 7x
+836   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 8x
+837   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 9x
+838   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // ax
+839   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // bx
+840   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // cx
+841   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // dx
+842   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // ex
+843   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0  // fx
+844 ];
+845 
+846 function toHexDigit(ch) {
+847   if (ch >= /* '0' = */ 0x30 && ch /* '9' = */ <= 0x39) {
+848     return ch & 0x0f;
+849   }
+850   if (
+851     (ch >= /* 'A' = */ 0x41 && ch <= /* 'F' = */ 0x46) ||
+852     (ch >= /* 'a' = */ 0x61 && ch <= /* 'f' = */ 0x66)
+853   ) {
+854     return (ch & 0x0f) + 9;
+855   }
+856   return -1;
+857 }
+858 
+859 class Lexer {
+860   constructor(stream, knownCommands = null) {
+861     this.stream = stream;
+862     this.nextChar();
+863 
+864     // While lexing, we build up many strings one char at a time. Using += for
+865     // this can result in lots of garbage strings. It's better to build an
+866     // array of single-char strings and then join() them together at the end.
+867     // And reusing a single array (i.e. |this.strBuf|) over and over for this
+868     // purpose uses less memory than using a new array for each string.
+869     this.strBuf = [];
+870 
+871     // The PDFs might have "glued" commands with other commands, operands or
+872     // literals, e.g. "q1". The knownCommands is a dictionary of the valid
+873     // commands and their prefixes. The prefixes are built the following way:
+874     // if there a command that is a prefix of the other valid command or
+875     // literal (e.g. 'f' and 'false') the following prefixes must be included,
+876     // 'fa', 'fal', 'fals'. The prefixes are not needed, if the command has no
+877     // other commands or literals as a prefix. The knowCommands is optional.
+878     this.knownCommands = knownCommands;
+879 
+880     this._hexStringNumWarn = 0;
+881     this.beginInlineImagePos = -1;
+882   }
+883 
+884   nextChar() {
+885     return (this.currentChar = this.stream.getByte());
+886   }
+887 
+888   peekChar() {
+889     return this.stream.peekByte();
+890   }
+891 
+892   getNumber() {
+893     let ch = this.currentChar;
+894     let eNotation = false;
+895     let divideBy = 0; // Different from 0 if it's a floating point value.
+896     let sign = 1;
+897 
+898     if (ch === /* '-' = */ 0x2d) {
+899       sign = -1;
+900       ch = this.nextChar();
+901 
+902       if (ch === /* '-' = */ 0x2d) {
+903         // Ignore double negative (this is consistent with Adobe Reader).
+904         ch = this.nextChar();
+905       }
+906     } else if (ch === /* '+' = */ 0x2b) {
+907       ch = this.nextChar();
+908     }
+909     if (ch === /* LF = */ 0x0a || ch === /* CR = */ 0x0d) {
+910       // Ignore line-breaks (this is consistent with Adobe Reader).
+911       do {
+912         ch = this.nextChar();
+913       } while (ch === 0x0a || ch === 0x0d);
+914     }
+915     if (ch === /* '.' = */ 0x2e) {
+916       divideBy = 10;
+917       ch = this.nextChar();
+918     }
+919     if (ch < /* '0' = */ 0x30 || ch > /* '9' = */ 0x39) {
+920       const msg = `Invalid number: ${String.fromCharCode(ch)} (charCode ${ch})`;
+921 
+922       if (isWhiteSpace(ch) || ch === /* EOF = */ -1) {
+923         // This is consistent with Adobe Reader (fixes issue9252.pdf,
+924         // issue15604.pdf, bug1753983.pdf).
+925         info(`Lexer.getNumber - "${msg}".`);
+926         return 0;
+927       }
+928       throw new FormatError(msg);
+929     }
+930 
+931     let baseValue = ch - 0x30; // '0'
+932     let powerValue = 0;
+933     let powerValueSign = 1;
+934 
+935     while ((ch = this.nextChar()) >= 0) {
+936       if (ch >= /* '0' = */ 0x30 && ch <= /* '9' = */ 0x39) {
+937         const currentDigit = ch - 0x30; // '0'
+938         if (eNotation) {
+939           // We are after an 'e' or 'E'.
+940           powerValue = powerValue * 10 + currentDigit;
+941         } else {
+942           if (divideBy !== 0) {
+943             // We are after a point.
+944             divideBy *= 10;
+945           }
+946           baseValue = baseValue * 10 + currentDigit;
+947         }
+948       } else if (ch === /* '.' = */ 0x2e) {
+949         if (divideBy === 0) {
+950           divideBy = 1;
+951         } else {
+952           // A number can have only one dot.
+953           break;
+954         }
+955       } else if (ch === /* '-' = */ 0x2d) {
+956         // Ignore minus signs in the middle of numbers to match
+957         // Adobe's behavior.
+958         warn("Badly formatted number: minus sign in the middle");
+959       } else if (ch === /* 'E' = */ 0x45 || ch === /* 'e' = */ 0x65) {
+960         // 'E' can be either a scientific notation or the beginning of a new
+961         // operator.
+962         ch = this.peekChar();
+963         if (ch === /* '+' = */ 0x2b || ch === /* '-' = */ 0x2d) {
+964           powerValueSign = ch === 0x2d ? -1 : 1;
+965           this.nextChar(); // Consume the sign character.
+966         } else if (ch < /* '0' = */ 0x30 || ch > /* '9' = */ 0x39) {
+967           // The 'E' must be the beginning of a new operator.
+968           break;
+969         }
+970         eNotation = true;
+971       } else {
+972         // The last character doesn't belong to us.
+973         break;
+974       }
+975     }
+976 
+977     if (divideBy !== 0) {
+978       baseValue /= divideBy;
+979     }
+980     if (eNotation) {
+981       baseValue *= 10 ** (powerValueSign * powerValue);
+982     }
+983     return sign * baseValue;
+984   }
+985 
+986   getString() {
+987     let numParen = 1;
+988     let done = false;
+989     const strBuf = this.strBuf;
+990     strBuf.length = 0;
+991 
+992     let ch = this.nextChar();
+993     while (true) {
+994       let charBuffered = false;
+995       switch (ch | 0) {
+996         case -1:
+997           warn("Unterminated string");
+998           done = true;
+999           break;
+1000         case 0x28: // '('
+1001           ++numParen;
+1002           strBuf.push("(");
+1003           break;
+1004         case 0x29: // ')'
+1005           if (--numParen === 0) {
+1006             this.nextChar(); // consume strings ')'
+1007             done = true;
+1008           } else {
+1009             strBuf.push(")");
+1010           }
+1011           break;
+1012         case 0x5c: // '\\'
+1013           ch = this.nextChar();
+1014           switch (ch) {
+1015             case -1:
+1016               warn("Unterminated string");
+1017               done = true;
+1018               break;
+1019             case 0x6e: // 'n'
+1020               strBuf.push("\n");
+1021               break;
+1022             case 0x72: // 'r'
+1023               strBuf.push("\r");
+1024               break;
+1025             case 0x74: // 't'
+1026               strBuf.push("\t");
+1027               break;
+1028             case 0x62: // 'b'
+1029               strBuf.push("\b");
+1030               break;
+1031             case 0x66: // 'f'
+1032               strBuf.push("\f");
+1033               break;
+1034             case 0x5c: // '\'
+1035             case 0x28: // '('
+1036             case 0x29: // ')'
+1037               strBuf.push(String.fromCharCode(ch));
+1038               break;
+1039             case 0x30: // '0'
+1040             case 0x31: // '1'
+1041             case 0x32: // '2'
+1042             case 0x33: // '3'
+1043             case 0x34: // '4'
+1044             case 0x35: // '5'
+1045             case 0x36: // '6'
+1046             case 0x37: // '7'
+1047               let x = ch & 0x0f;
+1048               ch = this.nextChar();
+1049               charBuffered = true;
+1050               if (ch >= /* '0' = */ 0x30 && ch <= /* '7' = */ 0x37) {
+1051                 x = (x << 3) + (ch & 0x0f);
+1052                 ch = this.nextChar();
+1053                 if (ch >= /* '0' = */ 0x30 && ch /* '7' = */ <= 0x37) {
+1054                   charBuffered = false;
+1055                   x = (x << 3) + (ch & 0x0f);
+1056                 }
+1057               }
+1058               strBuf.push(String.fromCharCode(x));
+1059               break;
+1060             case 0x0d: // CR
+1061               if (this.peekChar() === /* LF = */ 0x0a) {
+1062                 this.nextChar();
+1063               }
+1064               break;
+1065             case 0x0a: // LF
+1066               break;
+1067             default:
+1068               strBuf.push(String.fromCharCode(ch));
+1069               break;
+1070           }
+1071           break;
+1072         default:
+1073           strBuf.push(String.fromCharCode(ch));
+1074           break;
+1075       }
+1076       if (done) {
+1077         break;
+1078       }
+1079       if (!charBuffered) {
+1080         ch = this.nextChar();
+1081       }
+1082     }
+1083     return strBuf.join("");
+1084   }
+1085 
+1086   getName() {
+1087     let ch, previousCh;
+1088     const strBuf = this.strBuf;
+1089     strBuf.length = 0;
+1090 
+1091     while ((ch = this.nextChar()) >= 0 && !specialChars[ch]) {
+1092       if (ch === /* '#' = */ 0x23) {
+1093         ch = this.nextChar();
+1094         if (specialChars[ch]) {
+1095           warn(
+1096             "Lexer_getName: " +
+1097               "NUMBER SIGN (#) should be followed by a hexadecimal number."
+1098           );
+1099           strBuf.push("#");
+1100           break;
+1101         }
+1102         const x = toHexDigit(ch);
+1103         if (x !== -1) {
+1104           previousCh = ch;
+1105           ch = this.nextChar();
+1106           const x2 = toHexDigit(ch);
+1107           if (x2 === -1) {
+1108             warn(
+1109               `Lexer_getName: Illegal digit (${String.fromCharCode(ch)}) ` +
+1110                 "in hexadecimal number."
+1111             );
+1112             strBuf.push("#", String.fromCharCode(previousCh));
+1113             if (specialChars[ch]) {
+1114               break;
+1115             }
+1116             strBuf.push(String.fromCharCode(ch));
+1117             continue;
+1118           }
+1119           strBuf.push(String.fromCharCode((x << 4) | x2));
+1120         } else {
+1121           strBuf.push("#", String.fromCharCode(ch));
+1122         }
+1123       } else {
+1124         strBuf.push(String.fromCharCode(ch));
+1125       }
+1126     }
+1127     if (strBuf.length > 127) {
+1128       warn(`Name token is longer than allowed by the spec: ${strBuf.length}`);
+1129     }
+1130     return Name.get(strBuf.join(""));
+1131   }
+1132 
+1133   /**
+1134    * @private
+1135    */
+1136   _hexStringWarn(ch) {
+1137     const MAX_HEX_STRING_NUM_WARN = 5;
+1138 
+1139     if (this._hexStringNumWarn++ === MAX_HEX_STRING_NUM_WARN) {
+1140       warn("getHexString - ignoring additional invalid characters.");
+1141       return;
+1142     }
+1143     if (this._hexStringNumWarn > MAX_HEX_STRING_NUM_WARN) {
+1144       // Limit the number of warning messages printed for a `this.getHexString`
+1145       // invocation, since corrupt PDF documents may otherwise spam the console
+1146       // enough to affect general performance negatively.
+1147       return;
+1148     }
+1149     warn(`getHexString - ignoring invalid character: ${ch}`);
+1150   }
+1151 
+1152   getHexString() {
+1153     const strBuf = this.strBuf;
+1154     strBuf.length = 0;
+1155     let ch = this.currentChar;
+1156     let isFirstHex = true;
+1157     let firstDigit, secondDigit;
+1158     this._hexStringNumWarn = 0;
+1159 
+1160     while (true) {
+1161       if (ch < 0) {
+1162         warn("Unterminated hex string");
+1163         break;
+1164       } else if (ch === /* '>' = */ 0x3e) {
+1165         this.nextChar();
+1166         break;
+1167       } else if (specialChars[ch] === 1) {
+1168         ch = this.nextChar();
+1169         continue;
+1170       } else {
+1171         if (isFirstHex) {
+1172           firstDigit = toHexDigit(ch);
+1173           if (firstDigit === -1) {
+1174             this._hexStringWarn(ch);
+1175             ch = this.nextChar();
+1176             continue;
+1177           }
+1178         } else {
+1179           secondDigit = toHexDigit(ch);
+1180           if (secondDigit === -1) {
+1181             this._hexStringWarn(ch);
+1182             ch = this.nextChar();
+1183             continue;
+1184           }
+1185           strBuf.push(String.fromCharCode((firstDigit << 4) | secondDigit));
+1186         }
+1187         isFirstHex = !isFirstHex;
+1188         ch = this.nextChar();
+1189       }
+1190     }
+1191     return strBuf.join("");
+1192   }
+1193 
+1194   getObj() {
+1195     // Skip whitespace and comments.
+1196     let comment = false;
+1197     let ch = this.currentChar;
+1198     while (true) {
+1199       if (ch < 0) {
+1200         return EOF;
+1201       }
+1202       if (comment) {
+1203         if (ch === /* LF = */ 0x0a || ch === /* CR = */ 0x0d) {
+1204           comment = false;
+1205         }
+1206       } else if (ch === /* '%' = */ 0x25) {
+1207         comment = true;
+1208       } else if (specialChars[ch] !== 1) {
+1209         break;
+1210       }
+1211       ch = this.nextChar();
+1212     }
+1213 
+1214     // Start reading a token.
+1215     switch (ch | 0) {
+1216       case 0x30: // '0'
+1217       case 0x31: // '1'
+1218       case 0x32: // '2'
+1219       case 0x33: // '3'
+1220       case 0x34: // '4'
+1221       case 0x35: // '5'
+1222       case 0x36: // '6'
+1223       case 0x37: // '7'
+1224       case 0x38: // '8'
+1225       case 0x39: // '9'
+1226       case 0x2b: // '+'
+1227       case 0x2d: // '-'
+1228       case 0x2e: // '.'
+1229         return this.getNumber();
+1230       case 0x28: // '('
+1231         return this.getString();
+1232       case 0x2f: // '/'
+1233         return this.getName();
+1234       // array punctuation
+1235       case 0x5b: // '['
+1236         this.nextChar();
+1237         return Cmd.get("[");
+1238       case 0x5d: // ']'
+1239         this.nextChar();
+1240         return Cmd.get("]");
+1241       // hex string or dict punctuation
+1242       case 0x3c: // '<'
+1243         ch = this.nextChar();
+1244         if (ch === 0x3c) {
+1245           // dict punctuation
+1246           this.nextChar();
+1247           return Cmd.get("<<");
+1248         }
+1249         return this.getHexString();
+1250       // dict punctuation
+1251       case 0x3e: // '>'
+1252         ch = this.nextChar();
+1253         if (ch === 0x3e) {
+1254           this.nextChar();
+1255           return Cmd.get(">>");
+1256         }
+1257         return Cmd.get(">");
+1258       case 0x7b: // '{'
+1259         this.nextChar();
+1260         return Cmd.get("{");
+1261       case 0x7d: // '}'
+1262         this.nextChar();
+1263         return Cmd.get("}");
+1264       case 0x29: // ')'
+1265         // Consume the current character in order to avoid permanently hanging
+1266         // the worker thread if `Lexer.getObj` is called from within a loop
+1267         // containing try-catch statements, since we would otherwise attempt
+1268         // to parse the *same* character over and over (fixes issue8061.pdf).
+1269         this.nextChar();
+1270         throw new FormatError(`Illegal character: ${ch}`);
+1271     }
+1272 
+1273     // Start reading a command.
+1274     let str = String.fromCharCode(ch);
+1275     // A valid command cannot start with a non-visible ASCII character,
+1276     // and the next character may be (the start of) a valid command.
+1277     if (ch < 0x20 || ch > 0x7f) {
+1278       const nextCh = this.peekChar();
+1279       if (nextCh >= 0x20 && nextCh <= 0x7f) {
+1280         this.nextChar();
+1281         return Cmd.get(str);
+1282       }
+1283     }
+1284     const knownCommands = this.knownCommands;
+1285     let knownCommandFound = knownCommands?.[str] !== undefined;
+1286     while ((ch = this.nextChar()) >= 0 && !specialChars[ch]) {
+1287       // Stop if a known command is found and next character does not make
+1288       // the string a command.
+1289       const possibleCommand = str + String.fromCharCode(ch);
+1290       if (knownCommandFound && knownCommands[possibleCommand] === undefined) {
+1291         break;
+1292       }
+1293       if (str.length === 128) {
+1294         throw new FormatError(`Command token too long: ${str.length}`);
+1295       }
+1296       str = possibleCommand;
+1297       knownCommandFound = knownCommands?.[str] !== undefined;
+1298     }
+1299     if (str === "true") {
+1300       return true;
+1301     }
+1302     if (str === "false") {
+1303       return false;
+1304     }
+1305     if (str === "null") {
+1306       return null;
+1307     }
+1308 
+1309     if (str === "BI") {
+1310       // Keep track of the current stream position, since it's needed in order
+1311       // to correctly cache inline images; see `Parser.makeInlineImage`.
+1312       this.beginInlineImagePos = this.stream.pos;
+1313     }
+1314 
+1315     return Cmd.get(str);
+1316   }
+1317 
+1318   skipToNextLine() {
+1319     let ch = this.currentChar;
+1320     while (ch >= 0) {
+1321       if (ch === /* CR = */ 0x0d) {
+1322         ch = this.nextChar();
+1323         if (ch === /* LF = */ 0x0a) {
+1324           this.nextChar();
+1325         }
+1326         break;
+1327       } else if (ch === /* LF = */ 0x0a) {
+1328         this.nextChar();
+1329         break;
+1330       }
+1331       ch = this.nextChar();
+1332     }
+1333   }
+1334 }
+1335 
+1336 class Linearization {
+1337   static create(stream) {
+1338     function getInt(linDict, name, allowZeroValue = false) {
+1339       const obj = linDict.get(name);
+1340       if (Number.isInteger(obj) && (allowZeroValue ? obj >= 0 : obj > 0)) {
+1341         return obj;
+1342       }
+1343       throw new Error(
+1344         `The "${name}" parameter in the linearization ` +
+1345           "dictionary is invalid."
+1346       );
+1347     }
+1348 
+1349     function getHints(linDict) {
+1350       const hints = linDict.get("H");
+1351       let hintsLength;
+1352 
+1353       if (
+1354         Array.isArray(hints) &&
+1355         ((hintsLength = hints.length) === 2 || hintsLength === 4)
+1356       ) {
+1357         for (let index = 0; index < hintsLength; index++) {
+1358           const hint = hints[index];
+1359           if (!(Number.isInteger(hint) && hint > 0)) {
+1360             throw new Error(
+1361               `Hint (${index}) in the linearization dictionary is invalid.`
+1362             );
+1363           }
+1364         }
+1365         return hints;
+1366       }
+1367       throw new Error("Hint array in the linearization dictionary is invalid.");
+1368     }
+1369 
+1370     const parser = new Parser({
+1371       lexer: new Lexer(stream),
+1372       xref: null,
+1373     });
+1374     const obj1 = parser.getObj();
+1375     const obj2 = parser.getObj();
+1376     const obj3 = parser.getObj();
+1377     const linDict = parser.getObj();
+1378     let obj, length;
+1379     if (
+1380       !(
+1381         Number.isInteger(obj1) &&
+1382         Number.isInteger(obj2) &&
+1383         isCmd(obj3, "obj") &&
+1384         linDict instanceof Dict &&
+1385         typeof (obj = linDict.get("Linearized")) === "number" &&
+1386         obj > 0
+1387       )
+1388     ) {
+1389       return null; // No valid linearization dictionary found.
+1390     } else if ((length = getInt(linDict, "L")) !== stream.length) {
+1391       throw new Error(
+1392         'The "L" parameter in the linearization dictionary ' +
+1393           "does not equal the stream length."
+1394       );
+1395     }
+1396     return {
+1397       length,
+1398       hints: getHints(linDict),
+1399       objectNumberFirst: getInt(linDict, "O"),
+1400       endFirst: getInt(linDict, "E"),
+1401       numPages: getInt(linDict, "N"),
+1402       mainXRefEntriesOffset: getInt(linDict, "T"),
+1403       pageFirst: linDict.has("P")
+1404         ? getInt(linDict, "P", /* allowZeroValue = */ true)
+1405         : 0,
+1406     };
+1407   }
+1408 }
+1409 
+1410 export { Lexer, Linearization, Parser };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/parser_spec.js
+/* Copyright 2017 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { Cmd, EOF, Name } from "../../src/core/primitives.js";
+import { Lexer, Linearization, Parser } from "../../src/core/parser.js";
+import { FormatError } from "../../src/shared/util.js";
+import { StringStream } from "../../src/core/stream.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. You can use the PDF file for testing as follows:
+const { getDocument } = await import('../../src/display/api.js');
+const { buildGetDocumentParams } = await import('./test_utils.js');
+const loadingTask = getDocument(buildGetDocumentParams('issue18122.pdf'))
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

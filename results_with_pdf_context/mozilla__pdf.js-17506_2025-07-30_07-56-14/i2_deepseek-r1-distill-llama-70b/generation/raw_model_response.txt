@@ -1,0 +1,81 @@
+<think>
+Okay, I need to write a regression test for the issue where the PDF viewer should support highlighting images of text in addition to text. The patch provided adds functionality for free highlighting, which allows users to draw highlights without selecting text. 
+
+First, I should understand what the patch does. It introduces a new way to create highlights by drawing with the mouse when not over text. The test needs to verify that this new functionality works correctly.
+
+I'll start by setting up a test scenario. I'll create a PDF document with an image, simulate a mouse event on the image, and check if the highlight is created and appears correctly.
+
+I'll use the `PDFDocument` and `PDFPageProxy` classes from pdf.js to load a sample PDF. Then, I'll set up the event listeners to handle the pointer down and pointer move events to simulate drawing the highlight.
+
+After triggering the pointer up event, I'll check if the highlight was successfully added to the draw layer. I'll look for the presence of a 'highlight' element in the DOM to confirm this.
+
+I need to make sure that the test fails before the patch and passes after. So, in the test, I'll assert that the highlight element exists, which should only be possible after the patch is applied.
+
+I'll structure the test using Jest, importing the necessary modules dynamically to ensure compatibility. The test will be self-contained, initializing the PDF viewer, setting up the event listeners, and performing the necessary assertions.
+
+Finally, I'll write the test code, ensuring it's concise and directly tests the new functionality without relying on external dependencies beyond what's provided.
+</think>
+
+```javascript
+it("should create a free highlight on an image", async () => {
+  const { PDFDocument } = await import("../../src/core/pdf_document.js");
+  const { PDFPageProxy } = await import("../../src/core/pdf_page.js");
+  const { DrawLayer } = await import("../../src/display/draw_layer.js");
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+
+  // Initialize PDF viewer with a sample PDF containing an image
+  const pdf = await PDFDocument.load(
+    await fetch("test.pdf").then(res => res.arrayBuffer())
+  );
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewPort({ scale: 1 });
+  
+  // Set up draw layer and editor layer
+  const drawLayer = new DrawLayer({ pageIndex: 0 });
+  const editorLayer = new AnnotationEditorLayer({
+    uiManager: { getMode: () => AnnotationEditorType.HIGHLIGHT },
+    pageIndex: 0,
+    div: document.createElement("div"),
+    drawLayer: drawLayer,
+  });
+
+  // Simulate pointer events on the image
+  const pointerDown = new PointerEvent("pointerdown", {
+    bubbles: true,
+    cancelable: true,
+    clientX: 100,
+    clientY: 100,
+  });
+  const pointerMove = new PointerEvent("pointermove", {
+    bubbles: true,
+    cancelable: true,
+    clientX: 150,
+    clientY: 150,
+  });
+  const pointerUp = new PointerEvent("pointerup", {
+    bubbles: true,
+    cancelable: true,
+  });
+
+  // Add event listeners
+  editorLayer.div.addEventListener("pointerdown", e => {
+    editorLayer.pointerdown(e);
+  });
+  editorLayer.div.addEventListener("pointermove", e => {
+    editorLayer.pointermove(e);
+  });
+  editorLayer.div.addEventListener("pointerup", e => {
+    editorLayer.pointerup(e);
+  });
+
+  // Trigger events
+  editorLayer.div.dispatchEvent(pointerDown);
+  editorLayer.div.dispatchEvent(pointerMove);
+  editorLayer.div.dispatchEvent(pointerUp);
+
+  // Verify highlight was created
+  const highlights = drawLayer._mapping.size;
+  expect(highlights).toBeGreaterThan(0);
+});
+```

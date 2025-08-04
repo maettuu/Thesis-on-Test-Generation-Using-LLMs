@@ -1,0 +1,104 @@
+<think>
+Okay, I need to write a regression test for the issue where the £ symbol doesn't display correctly in PDF.js. The user provided a patch that modifies the standard_fonts.js file, specifically adding a mapping for £ (U+00A3) to the correct glyph. 
+
+First, I should understand the problem. The £ symbol was showing as ά (U+03AC) because the glyph mapping was incorrect. The patch adds t[940] = 163; which maps the CID 940 to the correct GID 163, ensuring £ displays properly.
+
+Now, to write the test. I'll use the test file provided, test/unit/api_spec.js. I need to import the necessary modules. The test should open a PDF containing the £ symbol and check if it's rendered correctly.
+
+I'll use the TestPdfsServer to get the test PDF. The PDF is named "PoundSymbol.pdf" and is located in TEST_PDFS_PATH. I'll set up a before hook to start the server and after to stop it.
+
+In the test, I'll create a PDFDocumentProxy using getDocument to load the PDF. Then, I'll get the first page and its text content. I'll extract the text and check if it includes the £ symbol.
+
+Wait, how does the text extraction work? The text might be encoded, so I need to ensure that the £ is correctly extracted. Alternatively, maybe I should check the glyph mapping directly, but that might be more complex. Text extraction is more straightforward for a regression test.
+
+I'll write the test using Jest's it function. I'll use async/await for the operations. I'll import the required modules, set up the server, load the PDF, get the page, extract the text, and assert that the £ is present.
+
+I should also handle any potential errors, maybe with try-catch, but the test should fail if any step throws an error.
+
+So, the test structure would be:
+
+- Import necessary modules.
+- Use beforeAll to start the server.
+- Use afterAll to stop it.
+- In the test, get the document, load the page, extract text, and assert.
+
+Wait, but the example structure given by the user uses a single it block without hooks. So maybe I should structure it differently. Alternatively, perhaps the test can be self-contained within the it block.
+
+Alternatively, I can create a new test file, but the user wants to add the test to the existing test/unit/api_spec.js. So I'll add the it block there.
+
+I'll need to import TestPdfsServer and get the PDF path. Then, in the test, I'll start the server, get the PDF, load the page, extract the text, and check for the £.
+
+I should make sure that the test only runs in Node.js, as the TestPdfsServer is Node-specific. So I'll check if isNodeJS is true before running the test.
+
+Putting it all together, the test will:
+
+1. Start the TestPdfsServer before the test.
+2. Use getDocument to load the PDF.
+3. Get the first page and its text content.
+4. Check if the text includes the £ symbol.
+5. Stop the server after the test.
+
+I think that's a solid plan. Now, I'll write the code accordingly, ensuring all imports are correctly referenced and the test is self-contained.
+</think>
+
+it("should correctly render £ symbol in PDF", async () => {
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const { getDocument } = await import("../../src/display/api.js");
+  const { CMAP_URL, TEST_PDFS_PATH } = await import("./test_utils.js");
+  
+  let server;
+  beforeAll(async () => {
+    server = await TestPdfsServer.start();
+  });
+  
+  afterAll(async () => {
+    await server.stop();
+  });
+
+  const pdfPath = `${TEST_PDFS_PATH}/PoundSymbol.pdf`;
+  const loadingTask = getDocument({
+    url: pdfPath,
+    transport: new PDFDataRangeTransport(
+      `${server.url}${CMAP_URL}?file=${encodeURIComponent(pdfPath)}`
+    ),
+  });
+  
+  const pdf = await PDFDocumentProxy.create(loadingTask);
+  const page = await pdf.getPage(1);
+  const textContent = await page.getTextContent();
+  const text = textContent.items.map(item => item.str).join("");
+  
+  expect(text).toContain("£");
+});
+
+```javascript
+it("should correctly render £ symbol in PDF", async () => {
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const { getDocument } = await import("../../src/display/api.js");
+  const { CMAP_URL, TEST_PDFS_PATH } = await import("./test_utils.js");
+  
+  let server;
+  beforeAll(async () => {
+    server = await TestPdfsServer.start();
+  });
+  
+  afterAll(async () => {
+    await server.stop();
+  });
+
+  const pdfPath = `${TEST_PDFS_PATH}/PoundSymbol.pdf`;
+  const loadingTask = getDocument({
+    url: pdfPath,
+    transport: new PDFDataRangeTransport(
+      `${server.url}${CMAP_URL}?file=${encodeURIComponent(pdfPath)}`
+    ),
+  });
+  
+  const pdf = await PDFDocumentProxy.create(loadingTask);
+  const page = await pdf.getPage(1);
+  const textContent = await page.getTextContent();
+  const text = textContent.items.map(item => item.str).join("");
+  
+  expect(text).toContain("£");
+});
+```

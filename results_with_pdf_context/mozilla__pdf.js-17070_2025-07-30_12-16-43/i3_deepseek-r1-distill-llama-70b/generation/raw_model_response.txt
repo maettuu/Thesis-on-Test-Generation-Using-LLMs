@@ -1,0 +1,44 @@
+<think>
+Okay, I need to write a test that checks if the patch resolves the issue where comments and sticky notes aren't rendered in the viewer. The user provided a PDF file, issue17069.pdf, which has these annotations.
+
+First, I'll look at the existing test file to see what imports and setup I can reuse. The test file already imports necessary modules like Annotation, AnnotationFactory, and others. It also has imports for creating a test setup with XRefMock and other utilities.
+
+I need to write an 'it' block that tests the rendering of annotations. The test should fail before the patch and pass after. So, I'll set up a scenario where I load the PDF, get the first page, and check the annotations.
+
+I'll use the getDocument function from the display API to load the PDF. Then, I'll get the first page and its annotations. I'll loop through each annotation and check if any of them are PopupAnnotation instances, which are used for comments.
+
+Before the patch, the PopupAnnotation might not be rendered because the noHTML flag wasn't set correctly. After the patch, the noHTML flag should be set to false, allowing the HTML rendering to show the comment.
+
+In the test, I'll count how many PopupAnnotations are found. If at least one is found and rendered, the test passes. If not, it fails.
+
+I'll structure the test to load the PDF, process the page, and check the annotations. The test will use async/await for the asynchronous operations.
+
+I'll also make sure to import any necessary modules dynamically to maintain compatibility with Node.js.
+
+So, the test will look for the presence of PopupAnnotations and ensure they are rendered correctly after the patch.
+</think>
+
+```javascript
+it("should render popup annotations as HTML", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue17069.pdf'));
+  
+  const pdfDocument = await loadingTask;
+  const pdfPage = await pdfDocument.getPage(0);
+  const annotations = await pdfPage.getAnnotations();
+  
+  let popupAnnotationCount = 0;
+  
+  for (const annotation of annotations) {
+    const { subtype } = await annotation.get_data();
+    if (subtype === AnnotationType.POPUP) {
+      popupAnnotationCount++;
+      const html = await annotation.get_html();
+      assert(html.length > 0, "Popup annotation HTML is empty");
+    }
+  }
+  
+  assert(popupAnnotationCount > 0, "No popup annotations found");
+});
+```

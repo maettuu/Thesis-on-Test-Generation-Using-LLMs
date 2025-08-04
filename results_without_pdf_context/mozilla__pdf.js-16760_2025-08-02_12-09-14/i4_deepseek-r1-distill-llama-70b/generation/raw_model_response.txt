@@ -1,0 +1,48 @@
+<think>
+Okay, I need to write a regression test for the issue where a PDF file stops rendering in Firefox 115.0.2 but worked in 109.0.1. The user provided a patch that modifies the XRef.js file, specifically updating a regular expression. My test should fail before the patch and pass after applying it.
+
+First, I'll look at the patch. The change is in XRef.js where the gEndobjRegExp is updated. The original regex was /\b(endobj|\d+\s+\d+\s+obj|xref|trailer)\b/g, and the patch changes it to /\b(endobj|\d+\s+\d+\s+obj|xref|trailer\s*<<)\b/g. So the trailer part now allows optional whitespace before the <<.
+
+The issue is that the PDF is a polyglot file, which might have non-traditional structures. The old regex didn't account for trailers followed by << with possible whitespace, causing the parser to fail.
+
+I need to create a test that loads this specific PDF and checks if it's parsed correctly. The test should throw an error before the patch and succeed after.
+
+I'll structure the test using Jest. I'll import the necessary modules, set up a mock PDFManager, and use the XRef class. The test will attempt to parse the provided PDF file.
+
+Before the patch, the parse method should throw an XRefParseException. After the patch, it should parse without errors.
+
+I'll use async/await because the fetch might be asynchronous. I'll set up the PDFManager to return the sample PDF data when fetch is called.
+
+So, the test will try to get the document, and if it doesn't throw an error, the test passes. Before the patch, it should throw, so the test would fail, indicating the regression. After the patch, it should pass.
+
+I'll make sure to only import necessary modules and keep the test self-contained without external dependencies beyond what's provided.
+</think>
+
+```javascript
+it("should correctly parse PDF with non-traditional trailer structure", async () => {
+  const { XRef } = await import("../../src/core/xref.js");
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const pdfManager = {
+    password: null,
+    requestRange: async (begin, end) => {
+      return new Uint8Array();
+    },
+  };
+
+  const pdfData = new Uint8Array(await fetch("https://github.com/mozilla/pdf.js/files/12185373/issue16759.pdf").then(res => res.arrayBuffer()));
+
+  await expect(
+    PDFDocument.load({
+      data: pdfData,
+      xref: new XRef({
+        getByte: () => 0,
+        getBytes: () => new Uint8Array(),
+        makeSubStream: () => ({ getByte: () => 0, getBytes: () => new Uint8Array() }),
+        pos: 0,
+        start: 0,
+      }, pdfManager),
+      pdfManager,
+    })
+  ).resolves.not.toThrow(XRefParseException);
+});
+```

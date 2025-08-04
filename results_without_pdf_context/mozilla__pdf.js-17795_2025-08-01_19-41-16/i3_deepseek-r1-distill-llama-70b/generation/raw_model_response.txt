@@ -1,0 +1,62 @@
+<think>
+Okay, I need to create a test for the regression issue where some inlined images aren't rendering correctly because they're missing the closing 'EI' operator. The patch adds a try-catch block around the image processing code to handle cases where images can't be decoded, preventing the entire rendering from failing.
+
+First, I'll look at the existing test file to see what's available. It imports necessary modules like PartialEvaluator, OperatorList, and XRefMock. I can use these to set up a mock environment.
+
+I'll create a test case where an inlined image is added without the 'EI' operator. The test should check if the evaluator correctly handles this by logging a warning but not throwing an error. 
+
+I'll set up a mock XRef to simulate the PDF data. Then, I'll create a PartialEvaluator instance and process the content. I'll use Jest's fake timers to wait for asynchronous operations to complete.
+
+In the test, I'll add an inlined image without the 'EI' operator. The evaluator should catch this as an error, log a warning, and continue processing without crashing. I'll check the console output to ensure the warning is logged and that no error is thrown.
+
+By doing this, the test will verify that the patch correctly handles the missing 'EI' case, thus fixing the issue where only one image was rendered.
+</think>
+
+```javascript
+it("should handle inlined images without EI", async () => {
+  const xref = new XRefMock();
+  const idFactory = createIdFactory();
+  const handler = {
+    send: jest.fn(),
+    sendWithPromise: jest.fn(),
+  };
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler,
+    pageIndex: 0,
+    idFactory,
+    options: {
+      ignoreErrors: false,
+    },
+  });
+
+  const dict = new Dict();
+  const image = new Stream(new Uint8Array([0, 1, 2, 3, 4, 5]));
+  const operatorList = new OperatorList();
+
+  // Mock the image processing to throw an error
+  const originalCreateImageData = PartialEvaluator.prototype.createImageData;
+  PartialEvaluator.prototype.createImageData = async () => {
+    throw new Error("Failed to decode image");
+  };
+
+  const consoleSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+  // Add an inlined image without EI
+  await evaluator.buildPaintImageXObject({
+    resources: dict,
+    image,
+    isInline: true,
+    operatorList,
+    cacheKey: null,
+    localImageCache: null,
+    localColorSpaceCache: null,
+  });
+
+  // Verify that the warning was logged
+  expect(consoleSpy).toHaveBeenCalledWith("Unable to decode inline image: \"Failed to decode image\".");
+
+  // Restore the original method
+  PartialEvaluator.prototype.createImageData = originalCreateImageData;
+});
+```

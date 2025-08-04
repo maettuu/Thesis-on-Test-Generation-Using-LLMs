@@ -1,0 +1,48 @@
+<think>
+Okay, I need to write a regression test for the issue where adding a `<base href>` tag breaks transparency filters in Firefox. The patch provided modifies the DOMFilterFactory in display_utils.js to correctly handle URLs when a `<base>` element is present.
+
+First, I should understand the problem. The bug occurs when a `<base href=".">` is added to viewer.html. This causes the drop shadow in PDFs to not render correctly in Firefox. The patch introduces a method called #createUrl in DOMFilterFactory, which adjusts the URL based on the presence of the `<base>` element.
+
+My test needs to fail before the patch and pass after. So, I'll create a test that checks if the filter URLs are correctly generated when a `<base>` element is present.
+
+I'll use the provided test.pdf from the issue. The test will set up a fake document with a `<base>` element, create a DOMFilterFactory instance, and then check the generated URLs for filters.
+
+I'll import the necessary modules, like PDFDocument and DisplayUtils. Then, I'll mock the document and baseURI to simulate the presence of `<base href=".">`. 
+
+I'll create a PDFDocument and a DOMFilterFactory instance. Then, I'll generate some filter URLs using the factory. I'll check if these URLs start with the correct base URL, which should be the current document's URL without the fragment.
+
+If the URLs are correctly prefixed, the test passes; otherwise, it fails. This should cover the scenario where the patch fixes the URL generation, ensuring the filters work as expected.
+</think>
+
+```javascript
+it("should correctly generate filter URLs with <base> element", async () => {
+  const { DOMFilterFactory } = await import("../../src/display/display_utils.js");
+  const { PDFDocument } = await import("../../src/display/api.js");
+
+  // Create a test PDF document
+  const pdf = await PDFDocument.load(testreporter.fetchMock(test_utils.TEST_PDFS_PATH + "test.pdf"));
+
+  // Create a page and get the first page
+  const page = (await pdf.getPages()).get(0);
+
+  // Mock document and baseURI to simulate <base> element
+  const mockDocument = {
+    URL: "http://example.com/viewer.html",
+    baseURI: "http://example.com/viewer.html",
+    createElement: () => ({})
+  };
+
+  // Create DOMFilterFactory with mocked document
+  const factory = new DOMFilterFactory(mockDocument, pdf);
+
+  // Generate filter URLs
+  const filter1 = await factory.addFilter([{ component: 0, transfer: 1 }]);
+  const filter2 = await factory.addFilter([{ component: 1, transfer: 0.5 }]);
+  const filter3 = await factory.addLuminosityFilter(0.8);
+
+  // Verify URLs are correctly prefixed with base URL
+  expect(filter1.startsWith("http://example.com/viewer.html")).toBe(true);
+  expect(filter2.startsWith("http://example.com/viewer.html")).toBe(true);
+  expect(filter3.startsWith("http://example.com/viewer.html")).toBe(true);
+});
+```

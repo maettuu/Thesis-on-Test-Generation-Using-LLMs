@@ -1,0 +1,33 @@
+```javascript
+it("should skip cancelled tasks to improve rendering performance", async () => {
+  const { MessageHandler } = await import("../../src/shared/message_handler.js");
+  const { PDFDocumentProxy, getDocument } = await import("../../src/display/api.js");
+
+  const pdfUrl = "path/to/large/pdf"; // Replace with a valid path to a large PDF
+  const loadingTask = getDocument(pdfUrl);
+  const pdfDocument = await loadingTask.promise;
+  const page = await pdfDocument.getPage(1);
+
+  const messageHandler = new MessageHandler("main", "worker", {
+    addEventListener: (type, listener) => {
+      if (type === "message") {
+        setTimeout(() => {
+          listener({ data: { targetName: "main", action: "GetOperatorList", stream: 1 } });
+          listener({ data: { targetName: "main", action: "GetOperatorList", stream: 1, streamId: 1 } });
+          listener({ data: { targetName: "main", action: "GetOperatorList", stream: 1, streamId: 1, stream: 1 } });
+        }, 0);
+      }
+    },
+    postMessage: () => {}
+  });
+
+  const startTime = performance.now();
+  await page.getOperatorList();
+  const endTime = performance.now();
+
+  const executionTime = endTime - startTime;
+  const expectedMaxTime = 1000; // Expected max time in ms for improved performance
+
+  expect(executionTime).toBeLessThan(expectedMaxTime);
+});
+```

@@ -1,0 +1,47 @@
+<think>
+Okay, so I need to write a regression test for this issue where the PDF isn't generating a text layer because of a font problem. The user provided a patch, and I need to make sure the test fails before the patch and passes after.
+
+First, I'll look at the issue details. The PDF in question is "Capital.Bancorp.Inc.Corporate.Responsibility.2025509.SD000000003063823863-1-2.pdf". The problem is that when opened in Firefox or Chrome with PDF.js, the text layer isn't generated, but it works in the native viewer. The error messages point to an invalid font name during font loading.
+
+The patch modifies the evaluator.js file. It seems to adjust how fonts, especially Type3 fonts, are handled. The key changes are around setting the fontName and handling cases where the font descriptor might be missing or invalid.
+
+So, the test should check if the text layer is correctly generated for this specific PDF. Before the patch, the test should fail because the text layer isn't present. After applying the patch, the test should pass.
+
+I'll structure the test using Jest. The test will load the PDF, try to select text, and check if the text layer has content. If it does, the test passes; otherwise, it fails.
+
+I'll need to import the necessary modules, like PDFDocument and TextLayer from pdf.js. Then, I'll set up an async function to load the PDF, create a page, render it, and check the text layer.
+
+I should also handle any exceptions and use a small timeout to ensure the text layer is loaded. The expect statement will check if the text layer's textContent is not empty.
+
+I need to make sure the test is self-contained and only uses the provided imports. I'll dynamically import the required modules to avoid any issues with Node.js compatibility.
+
+Finally, I'll write the test so that it's concise and directly tests the behavior change caused by the patch.
+</think>
+
+```javascript
+it("should generate text layer for PDF with problematic font", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { TextLayer } = await import("../../src/display/text_layer.js");
+  const { getCrossOriginHostname } = await import("./test_utils.js");
+
+  const hostname = getCrossOriginHostname();
+  const pdfPath = `${hostname}/web/test_files/Capital.Bancorp.Inc.Corporate.Responsibility.2025509.SD000000003063823863-1-2.pdf`;
+  const pdf = await PDFDocument.load(await fetch(pdfPath).then((res) => res.clone()));
+  const page = await pdf.getPage(1);
+  const textLayer = new TextLayer({
+    page,
+    container: document.createElement("div"),
+    viewport: page.getViewport({ scale: 1 }),
+  });
+
+  await new Promise((resolve) => {
+    textLayer.addEventListener("rendered", () => {
+      resolve();
+    });
+    textLayer.render();
+  });
+
+  const textContent = textLayer.textContent;
+  expect(textContent).not.toBe("");
+});
+```

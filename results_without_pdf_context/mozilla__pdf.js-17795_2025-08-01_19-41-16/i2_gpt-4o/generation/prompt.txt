@@ -1,0 +1,722 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Incorrect rendering with some inlined images
+Attach (recommended) or Link to PDF file here:
+[image1.pdf](https://github.com/mozilla/pdf.js/files/14607428/image1.pdf)
+
+For context, the pdf has been found on the PDFBox bug tracker:
+https://issues.apache.org/jira/projects/PDFBOX/issues/PDFBOX-5776
+
+Configuration:
+- Web browser and its version: Firefox nightly
+- Operating system and its version: Mac
+
+Steps to reproduce the problem:
+1. Open the pdf
+2. only one image is rendered
+
+What is the expected behavior? (add screenshot)
+From Preview
+<img width="573" alt="image" src="https://github.com/mozilla/pdf.js/assets/5641725/a9be4615-60f8-440e-890c-3ab6f0ea18b7">
+
+The file contains some inlined images without the closing `EI`.
+
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/evaluator.js b/src/core/evaluator.js
+--- a/src/core/evaluator.js
++++ b/src/core/evaluator.js
+@@ -739,27 +739,36 @@ class PartialEvaluator {
+       !dict.has("Mask") &&
+       w + h < SMALL_IMAGE_DIMENSIONS
+     ) {
+-      const imageObj = new PDFImage({
+-        xref: this.xref,
+-        res: resources,
+-        image,
+-        isInline,
+-        pdfFunctionFactory: this._pdfFunctionFactory,
+-        localColorSpaceCache,
+-      });
+-      // We force the use of RGBA_32BPP images here, because we can't handle
+-      // any other kind.
+-      imgData = await imageObj.createImageData(
+-        /* forceRGBA = */ true,
+-        /* isOffscreenCanvasSupported = */ false
+-      );
+-      operatorList.isOffscreenCanvasSupported =
+-        this.options.isOffscreenCanvasSupported;
+-      operatorList.addImageOps(
+-        OPS.paintInlineImageXObject,
+-        [imgData],
+-        optionalContent
+-      );
++      try {
++        const imageObj = new PDFImage({
++          xref: this.xref,
++          res: resources,
++          image,
++          isInline,
++          pdfFunctionFactory: this._pdfFunctionFactory,
++          localColorSpaceCache,
++        });
++        // We force the use of RGBA_32BPP images here, because we can't handle
++        // any other kind.
++        imgData = await imageObj.createImageData(
++          /* forceRGBA = */ true,
++          /* isOffscreenCanvasSupported = */ false
++        );
++        operatorList.isOffscreenCanvasSupported =
++          this.options.isOffscreenCanvasSupported;
++        operatorList.addImageOps(
++          OPS.paintInlineImageXObject,
++          [imgData],
++          optionalContent
++        );
++      } catch (reason) {
++        const msg = `Unable to decode inline image: "${reason}".`;
++
++        if (!this.options.ignoreErrors) {
++          throw new Error(msg);
++        }
++        warn(msg);
++      }
+       return;
+     }
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.23.9
+- @babel/preset-env: ^7.23.9
+- @babel/runtime: ^7.23.9
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.9.0
+- @jazzer.js/core: ^2.1.0
+- autoprefixer: ^10.4.17
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001587
+- canvas: ^2.11.2
+- core-js: ^3.36.0
+- cross-env: ^7.0.3
+- eslint: ^8.56.0
+- eslint-config-prettier: ^8.10.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.29.1
+- eslint-plugin-jasmine: ^4.1.3
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.3.2
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.1.3
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^51.0.1
+- globals: ^14.0.0
+- gulp: ^4.0.2
+- gulp-cli: ^2.3.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.3.1
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.35
+- postcss-dark-theme-class: ^1.2.1
+- postcss-dir-pseudo-class: ^8.0.1
+- postcss-discard-comments: ^6.0.1
+- postcss-nesting: ^12.0.2
+- prettier: ^3.2.5
+- puppeteer: ^22.3.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^16.2.1
+- stylelint-prettier: ^5.0.0
+- terser-webpack-plugin: ^5.3.10
+- through2: ^4.0.2
+- tsc-alias: ^1.8.8
+- ttest: ^4.0.0
+- typescript: ^5.3.3
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.90.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/outliner.js`: Outliner
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/evaluator.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 /* eslint-disable no-var */
+16 
+17 import {
+18   AbortException,
+19   assert,
+20   CMapCompressionType,
+21   FONT_IDENTITY_MATRIX,
+22   FormatError,
+23   IDENTITY_MATRIX,
+24   info,
+25   isArrayEqual,
+26   normalizeUnicode,
+27   OPS,
+28   PromiseCapability,
+29   shadow,
+30   stringToPDFString,
+31   TextRenderingMode,
+32   Util,
+33   warn,
+34 } from "../shared/util.js";
+35 import { CMapFactory, IdentityCMap } from "./cmap.js";
+36 import { Cmd, Dict, EOF, isName, Name, Ref, RefSet } from "./primitives.js";
+37 import { ErrorFont, Font } from "./fonts.js";
+38 import {
+39   getEncoding,
+40   MacRomanEncoding,
+41   StandardEncoding,
+42   SymbolSetEncoding,
+43   WinAnsiEncoding,
+44   ZapfDingbatsEncoding,
+45 } from "./encodings.js";
+46 import {
+47   getFontNameToFileMap,
+48   getSerifFonts,
+49   getStandardFontName,
+50   getStdFontMap,
+51   getSymbolsFonts,
+52   isKnownFontName,
+53 } from "./standard_fonts.js";
+54 import { getTilingPatternIR, Pattern } from "./pattern.js";
+55 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
+56 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
+57 import { isPDFFunction, PDFFunctionFactory } from "./function.js";
+58 import { Lexer, Parser } from "./parser.js";
+59 import {
+60   LocalColorSpaceCache,
+61   LocalGStateCache,
+62   LocalImageCache,
+63   LocalTilingPatternCache,
+64   RegionalImageCache,
+65 } from "./image_utils.js";
+66 import { NullStream, Stream } from "./stream.js";
+67 import { BaseStream } from "./base_stream.js";
+68 import { bidi } from "./bidi.js";
+69 import { ColorSpace } from "./colorspace.js";
+70 import { DecodeStream } from "./decode_stream.js";
+71 import { FontFlags } from "./fonts_utils.js";
+72 import { getFontSubstitution } from "./font_substitutions.js";
+73 import { getGlyphsUnicode } from "./glyphlist.js";
+74 import { getMetrics } from "./metrics.js";
+75 import { getUnicodeForGlyph } from "./unicode.js";
+76 import { ImageResizer } from "./image_resizer.js";
+77 import { MurmurHash3_64 } from "../shared/murmurhash3.js";
+78 import { OperatorList } from "./operator_list.js";
+79 import { PDFImage } from "./image.js";
+80 
+81 const DefaultPartialEvaluatorOptions = Object.freeze({
+82   maxImageSize: -1,
+83   disableFontFace: false,
+84   ignoreErrors: false,
+85   isEvalSupported: true,
+86   isOffscreenCanvasSupported: false,
+87   canvasMaxAreaInBytes: -1,
+88   fontExtraProperties: false,
+89   useSystemFonts: true,
+90   cMapUrl: null,
+91   standardFontDataUrl: null,
+92 });
+93 
+94 const PatternType = {
+95   TILING: 1,
+96   SHADING: 2,
+97 };
+98 
+99 // Optionally avoid sending individual, or very few, text chunks to reduce
+100 // `postMessage` overhead with ReadableStream (see issue 13962).
+101 //
+102 // PLEASE NOTE: This value should *not* be too large (it's used as a lower limit
+103 // in `enqueueChunk`), since that would cause streaming of textContent to become
+104 // essentially useless in practice by sending all (or most) chunks at once.
+105 // Also, a too large value would (indirectly) affect the main-thread `textLayer`
+106 // building negatively by forcing all textContent to be handled at once, which
+107 // could easily end up hurting *overall* performance (e.g. rendering as well).
+108 const TEXT_CHUNK_BATCH_SIZE = 10;
+109 
+110 const deferred = Promise.resolve();
+111 
+112 // Convert PDF blend mode names to HTML5 blend mode names.
+173 
+180 // Trying to minimize Date.now() usage and check every 100 time.
+203 
+204 class PartialEvaluator {
+205   constructor({
+206     xref,
+207     handler,
+208     pageIndex,
+209     idFactory,
+210     fontCache,
+211     builtInCMapCache,
+212     standardFontDataCache,
+213     globalImageCache,
+214     systemFontCache,
+215     options = null,
+216   }) {
+217     this.xref = xref;
+218     this.handler = handler;
+219     this.pageIndex = pageIndex;
+220     this.idFactory = idFactory;
+221     this.fontCache = fontCache;
+222     this.builtInCMapCache = builtInCMapCache;
+223     this.standardFontDataCache = standardFontDataCache;
+224     this.globalImageCache = globalImageCache;
+225     this.systemFontCache = systemFontCache;
+226     this.options = options || DefaultPartialEvaluatorOptions;
+227     this.parsingType3Font = false;
+228 
+229     this._regionalImageCache = new RegionalImageCache();
+230     this._fetchBuiltInCMapBound = this.fetchBuiltInCMap.bind(this);
+231     ImageResizer.setMaxArea(this.options.canvasMaxAreaInBytes);
+232   }
+233 
+570   async buildPaintImageXObject({
+571     resources,
+572     image,
+573     isInline = false,
+574     operatorList,
+575     cacheKey,
+576     localImageCache,
+577     localColorSpaceCache,
+578   }) {
+579     const dict = image.dict;
+580     const imageRef = dict.objId;
+581     const w = dict.get("W", "Width");
+582     const h = dict.get("H", "Height");
+583 
+584     if (!(w && typeof w === "number") || !(h && typeof h === "number")) {
+585       warn("Image dimensions are missing, or not numbers.");
+586       return;
+587     }
+588     const maxImageSize = this.options.maxImageSize;
+589     if (maxImageSize !== -1 && w * h > maxImageSize) {
+590       const msg = "Image exceeded maximum allowed size and was removed.";
+591 
+592       if (this.options.ignoreErrors) {
+593         warn(msg);
+594         return;
+595       }
+596       throw new Error(msg);
+597     }
+598 
+599     let optionalContent;
+600     if (dict.has("OC")) {
+601       optionalContent = await this.parseMarkedContentProps(
+602         dict.get("OC"),
+603         resources
+604       );
+605     }
+606 
+607     const imageMask = dict.get("IM", "ImageMask") || false;
+608     let imgData, args;
+609     if (imageMask) {
+610       // This depends on a tmpCanvas being filled with the
+611       // current fillStyle, such that processing the pixel
+612       // data can't be done here. Instead of creating a
+613       // complete PDFImage, only read the information needed
+614       // for later.
+615       const interpolate = dict.get("I", "Interpolate");
+616       const bitStrideLength = (w + 7) >> 3;
+617       const imgArray = image.getBytes(bitStrideLength * h);
+618       const decode = dict.getArray("D", "Decode");
+619 
+620       if (this.parsingType3Font) {
+621         imgData = PDFImage.createRawMask({
+622           imgArray,
+623           width: w,
+624           height: h,
+625           imageIsFromDecodeStream: image instanceof DecodeStream,
+626           inverseDecode: decode?.[0] > 0,
+627           interpolate,
+628         });
+629 
+630         imgData.cached = !!cacheKey;
+631         args = [imgData];
+632 
+633         operatorList.addImageOps(
+634           OPS.paintImageMaskXObject,
+635           args,
+636           optionalContent
+637         );
+638 
+639         if (cacheKey) {
+640           const cacheData = {
+641             fn: OPS.paintImageMaskXObject,
+642             args,
+643             optionalContent,
+644           };
+645           localImageCache.set(cacheKey, imageRef, cacheData);
+646 
+647           if (imageRef) {
+648             this._regionalImageCache.set(
+649               /* name = */ null,
+650               imageRef,
+651               cacheData
+652             );
+653           }
+654         }
+655         return;
+656       }
+657 
+658       imgData = await PDFImage.createMask({
+659         imgArray,
+660         width: w,
+661         height: h,
+662         imageIsFromDecodeStream: image instanceof DecodeStream,
+663         inverseDecode: decode?.[0] > 0,
+664         interpolate,
+665         isOffscreenCanvasSupported: this.options.isOffscreenCanvasSupported,
+666       });
+667 
+668       if (imgData.isSingleOpaquePixel) {
+669         // Handles special case of mainly LaTeX documents which use image
+670         // masks to draw lines with the current fill style.
+671         operatorList.addImageOps(
+672           OPS.paintSolidColorImageMask,
+673           [],
+674           optionalContent
+675         );
+676 
+677         if (cacheKey) {
+678           const cacheData = {
+679             fn: OPS.paintSolidColorImageMask,
+680             args: [],
+681             optionalContent,
+682           };
+683           localImageCache.set(cacheKey, imageRef, cacheData);
+684 
+685           if (imageRef) {
+686             this._regionalImageCache.set(
+687               /* name = */ null,
+688               imageRef,
+689               cacheData
+690             );
+691           }
+692         }
+693         return;
+694       }
+695 
+696       const objId = `mask_${this.idFactory.createObjId()}`;
+697       operatorList.addDependency(objId);
+698 
+699       imgData.dataLen = imgData.bitmap
+700         ? imgData.width * imgData.height * 4
+701         : imgData.data.length;
+702       this._sendImgData(objId, imgData);
+703 
+704       args = [
+705         {
+706           data: objId,
+707           width: imgData.width,
+708           height: imgData.height,
+709           interpolate: imgData.interpolate,
+710           count: 1,
+711         },
+712       ];
+713       operatorList.addImageOps(
+714         OPS.paintImageMaskXObject,
+715         args,
+716         optionalContent
+717       );
+718 
+719       if (cacheKey) {
+720         const cacheData = {
+721           fn: OPS.paintImageMaskXObject,
+722           args,
+723           optionalContent,
+724         };
+725         localImageCache.set(cacheKey, imageRef, cacheData);
+726 
+727         if (imageRef) {
+728           this._regionalImageCache.set(/* name = */ null, imageRef, cacheData);
+729         }
+730       }
+731       return;
+732     }
+733 
+734     const SMALL_IMAGE_DIMENSIONS = 200;
+735     // Inlining small images into the queue as RGB data
+736     if (
+737       isInline &&
+738       !dict.has("SMask") &&
+739       !dict.has("Mask") &&
+740       w + h < SMALL_IMAGE_DIMENSIONS
+741     ) {
+742       const imageObj = new PDFImage({
+743         xref: this.xref,
+744         res: resources,
+745         image,
+746         isInline,
+747         pdfFunctionFactory: this._pdfFunctionFactory,
+748         localColorSpaceCache,
+749       });
+750       // We force the use of RGBA_32BPP images here, because we can't handle
+751       // any other kind.
+752       imgData = await imageObj.createImageData(
+753         /* forceRGBA = */ true,
+754         /* isOffscreenCanvasSupported = */ false
+755       );
+756       operatorList.isOffscreenCanvasSupported =
+757         this.options.isOffscreenCanvasSupported;
+758       operatorList.addImageOps(
+759         OPS.paintInlineImageXObject,
+760         [imgData],
+761         optionalContent
+762       );
+763       return;
+764     }
+765 
+766     // If there is no imageMask, create the PDFImage and a lot
+767     // of image processing can be done here.
+768     let objId = `img_${this.idFactory.createObjId()}`,
+769       cacheGlobally = false;
+770 
+771     if (this.parsingType3Font) {
+772       objId = `${this.idFactory.getDocId()}_type3_${objId}`;
+773     } else if (cacheKey && imageRef) {
+774       cacheGlobally = this.globalImageCache.shouldCache(
+775         imageRef,
+776         this.pageIndex
+777       );
+778 
+779       if (cacheGlobally) {
+780         assert(!isInline, "Cannot cache an inline image globally.");
+781 
+782         objId = `${this.idFactory.getDocId()}_${objId}`;
+783       }
+784     }
+785 
+786     // Ensure that the dependency is added before the image is decoded.
+787     operatorList.addDependency(objId);
+788     args = [objId, w, h];
+789     operatorList.addImageOps(OPS.paintImageXObject, args, optionalContent);
+790 
+791     // For large images, at least 500x500 in size, that we'll cache globally
+792     // check if the image is still cached locally on the main-thread to avoid
+793     // having to re-parse the image (since that can be slow).
+794     if (cacheGlobally && w * h > 250000) {
+795       const localLength = await this.handler.sendWithPromise("commonobj", [
+796         objId,
+797         "CopyLocalImage",
+798         { imageRef },
+799       ]);
+800 
+801       if (localLength) {
+802         this.globalImageCache.setData(imageRef, {
+803           objId,
+804           fn: OPS.paintImageXObject,
+805           args,
+806           optionalContent,
+807           byteSize: 0, // Temporary entry, to avoid `setData` returning early.
+808         });
+809         this.globalImageCache.addByteSize(imageRef, localLength);
+810         return;
+811       }
+812     }
+813 
+814     PDFImage.buildImage({
+815       xref: this.xref,
+816       res: resources,
+817       image,
+818       isInline,
+819       pdfFunctionFactory: this._pdfFunctionFactory,
+820       localColorSpaceCache,
+821     })
+822       .then(async imageObj => {
+823         imgData = await imageObj.createImageData(
+824           /* forceRGBA = */ false,
+825           /* isOffscreenCanvasSupported = */ this.options
+826             .isOffscreenCanvasSupported
+827         );
+828         imgData.dataLen = imgData.bitmap
+829           ? imgData.width * imgData.height * 4
+830           : imgData.data.length;
+831         imgData.ref = imageRef;
+832 
+833         if (cacheGlobally) {
+834           this.globalImageCache.addByteSize(imageRef, imgData.dataLen);
+835         }
+836         return this._sendImgData(objId, imgData, cacheGlobally);
+837       })
+838       .catch(reason => {
+839         warn(`Unable to decode image "${objId}": "${reason}".`);
+840 
+841         return this._sendImgData(objId, /* imgData = */ null, cacheGlobally);
+842       });
+843 
+844     if (cacheKey) {
+845       const cacheData = {
+846         fn: OPS.paintImageXObject,
+847         args,
+848         optionalContent,
+849       };
+850       localImageCache.set(cacheKey, imageRef, cacheData);
+851 
+852       if (imageRef) {
+853         this._regionalImageCache.set(/* name = */ null, imageRef, cacheData);
+854 
+855         if (cacheGlobally) {
+856           this.globalImageCache.setData(imageRef, {
+857             objId,
+858             fn: OPS.paintImageXObject,
+859             args,
+860             optionalContent,
+861             byteSize: 0, // Temporary entry, note `addByteSize` above.
+862           });
+863         }
+864       }
+865     }
+866   }
+867 
+4450 }
+4451 
+5038 
+</code>
+
+PR summary:
+<pr_summary>
+Don't render corrupted inlined images
+Fixes #17794.
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

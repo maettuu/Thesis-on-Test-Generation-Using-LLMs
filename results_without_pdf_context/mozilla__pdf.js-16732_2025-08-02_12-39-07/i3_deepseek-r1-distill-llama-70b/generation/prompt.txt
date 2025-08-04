@@ -1,0 +1,5598 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+The Mouse cursor should change its state according to the edge we resize it from for added images and drawings in PDF documents
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/editor/editor.js b/src/display/editor/editor.js
+--- a/src/display/editor/editor.js
++++ b/src/display/editor/editor.js
+@@ -21,11 +21,6 @@
+ import { bindEvents, ColorManager } from "./tools.js";
+ import { FeatureTest, shadow, unreachable } from "../../shared/util.js";
+ 
+-// The dimensions of the resizer is 15x15:
+-// https://searchfox.org/mozilla-central/rev/1ce190047b9556c3c10ab4de70a0e61d893e2954/toolkit/content/minimal-xul.css#136-137
+-// so each dimension must be greater than RESIZER_SIZE.
+-const RESIZER_SIZE = 16;
+-
+ /**
+  * @typedef {Object} AnnotationEditorParameters
+  * @property {AnnotationEditorUIManager} uiManager - the global manager
+@@ -41,6 +36,10 @@ const RESIZER_SIZE = 16;
+ class AnnotationEditor {
+   #keepAspectRatio = false;
+ 
++  #resizersDiv = null;
++
++  #resizePosition = null;
++
+   #boundFocusin = this.focusin.bind(this);
+ 
+   #boundFocusout = this.focusout.bind(this);
+@@ -75,6 +74,7 @@ class AnnotationEditor {
+     this.div = null;
+     this._uiManager = parameters.uiManager;
+     this.annotationElementId = null;
++    this._willKeepAspectRatio = false;
+ 
+     const {
+       rotation,
+@@ -401,6 +401,274 @@ class AnnotationEditor {
+     return [0, 0];
+   }
+ 
++  #createResizers() {
++    if (this.#resizersDiv) {
++      return;
++    }
++    this.#resizersDiv = document.createElement("div");
++    this.#resizersDiv.classList.add("resizers");
++    const classes = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
++    if (!this._willKeepAspectRatio) {
++      classes.push("topMiddle", "middleRight", "bottomMiddle", "middleLeft");
++    }
++    for (const name of classes) {
++      const div = document.createElement("div");
++      this.#resizersDiv.append(div);
++      div.classList.add("resizer", name);
++      div.addEventListener(
++        "pointerdown",
++        this.#resizerPointerdown.bind(this, name)
++      );
++    }
++    this.div.prepend(this.#resizersDiv);
++  }
++
++  #resizerPointerdown(name, event) {
++    event.preventDefault();
++    this.#resizePosition = [event.clientX, event.clientY];
++    const boundResizerPointermove = this.#resizerPointermove.bind(this, name);
++    const savedDraggable = this.div.draggable;
++    this.div.draggable = false;
++    const resizingClassName = `resizing${name
++      .charAt(0)
++      .toUpperCase()}${name.slice(1)}`;
++    this.parent.div.classList.add(resizingClassName);
++    const pointerMoveOptions = { passive: true, capture: true };
++    window.addEventListener(
++      "pointermove",
++      boundResizerPointermove,
++      pointerMoveOptions
++    );
++    const pointerUpCallback = () => {
++      // Stop the undo accumulation in order to have an undo action for each
++      // resize session.
++      this._uiManager.stopUndoAccumulation();
++      this.div.draggable = savedDraggable;
++      this.parent.div.classList.remove(resizingClassName);
++      window.removeEventListener(
++        "pointermove",
++        boundResizerPointermove,
++        pointerMoveOptions
++      );
++    };
++    window.addEventListener("pointerup", pointerUpCallback, {
++      once: true,
++    });
++  }
++
++  #resizerPointermove(name, event) {
++    const { clientX, clientY } = event;
++    const deltaX = clientX - this.#resizePosition[0];
++    const deltaY = clientY - this.#resizePosition[1];
++    this.#resizePosition[0] = clientX;
++    this.#resizePosition[1] = clientY;
++    const [parentWidth, parentHeight] = this.parentDimensions;
++    const savedX = this.x;
++    const savedY = this.y;
++    const savedWidth = this.width;
++    const savedHeight = this.height;
++    const minWidth = AnnotationEditor.MIN_SIZE / parentWidth;
++    const minHeight = AnnotationEditor.MIN_SIZE / parentHeight;
++    let cmd;
++
++    // 10000 because we multiply by 100 and use toFixed(2) in fixAndSetPosition.
++    // Without rounding, the positions of the corners other than the top left
++    // one can be slightly wrong.
++    const round = x => Math.round(x * 10000) / 10000;
++    const updatePosition = (width, height) => {
++      // We must take the parent dimensions as they are when undo/redo.
++      const [pWidth, pHeight] = this.parentDimensions;
++      this.setDims(pWidth * width, pHeight * height);
++      this.fixAndSetPosition();
++    };
++    const undo = () => {
++      this.width = savedWidth;
++      this.height = savedHeight;
++      this.x = savedX;
++      this.y = savedY;
++      updatePosition(savedWidth, savedHeight);
++    };
++
++    switch (name) {
++      case "topLeft": {
++        if (Math.sign(deltaX) * Math.sign(deltaY) < 0) {
++          return;
++        }
++        const dist = Math.hypot(deltaX, deltaY);
++        const oldDiag = Math.hypot(
++          savedWidth * parentWidth,
++          savedHeight * parentHeight
++        );
++        const brX = round(savedX + savedWidth);
++        const brY = round(savedY + savedHeight);
++        const ratio = Math.max(
++          Math.min(
++            1 - Math.sign(deltaX) * (dist / oldDiag),
++            // Avoid the editor to be larger than the page.
++            1 / savedWidth,
++            1 / savedHeight
++          ),
++          // Avoid the editor to be smaller than the minimum size.
++          minWidth / savedWidth,
++          minHeight / savedHeight
++        );
++        const newWidth = round(savedWidth * ratio);
++        const newHeight = round(savedHeight * ratio);
++        const newX = brX - newWidth;
++        const newY = brY - newHeight;
++        cmd = () => {
++          this.width = newWidth;
++          this.height = newHeight;
++          this.x = newX;
++          this.y = newY;
++          updatePosition(newWidth, newHeight);
++        };
++        break;
++      }
++      case "topMiddle": {
++        const bmY = round(this.y + savedHeight);
++        const newHeight = round(
++          Math.max(minHeight, Math.min(1, savedHeight - deltaY / parentHeight))
++        );
++        const newY = bmY - newHeight;
++        cmd = () => {
++          this.height = newHeight;
++          this.y = newY;
++          updatePosition(savedWidth, newHeight);
++        };
++        break;
++      }
++      case "topRight": {
++        if (Math.sign(deltaX) * Math.sign(deltaY) > 0) {
++          return;
++        }
++        const dist = Math.hypot(deltaX, deltaY);
++        const oldDiag = Math.hypot(
++          this.width * parentWidth,
++          this.height * parentHeight
++        );
++        const blY = round(savedY + this.height);
++        const ratio = Math.max(
++          Math.min(
++            1 + Math.sign(deltaX) * (dist / oldDiag),
++            1 / savedWidth,
++            1 / savedHeight
++          ),
++          minWidth / savedWidth,
++          minHeight / savedHeight
++        );
++        const newWidth = round(savedWidth * ratio);
++        const newHeight = round(savedHeight * ratio);
++        const newY = blY - newHeight;
++        cmd = () => {
++          this.width = newWidth;
++          this.height = newHeight;
++          this.y = newY;
++          updatePosition(newWidth, newHeight);
++        };
++        break;
++      }
++      case "middleRight": {
++        const newWidth = round(
++          Math.max(minWidth, Math.min(1, savedWidth + deltaX / parentWidth))
++        );
++        cmd = () => {
++          this.width = newWidth;
++          updatePosition(newWidth, savedHeight);
++        };
++        break;
++      }
++      case "bottomRight": {
++        if (Math.sign(deltaX) * Math.sign(deltaY) < 0) {
++          return;
++        }
++        const dist = Math.hypot(deltaX, deltaY);
++        const oldDiag = Math.hypot(
++          this.width * parentWidth,
++          this.height * parentHeight
++        );
++        const ratio = Math.max(
++          Math.min(
++            1 + Math.sign(deltaX) * (dist / oldDiag),
++            1 / savedWidth,
++            1 / savedHeight
++          ),
++          minWidth / savedWidth,
++          minHeight / savedHeight
++        );
++        const newWidth = round(savedWidth * ratio);
++        const newHeight = round(savedHeight * ratio);
++        cmd = () => {
++          this.width = newWidth;
++          this.height = newHeight;
++          updatePosition(newWidth, newHeight);
++        };
++        break;
++      }
++      case "bottomMiddle": {
++        const newHeight = round(
++          Math.max(minHeight, Math.min(1, savedHeight + deltaY / parentHeight))
++        );
++        cmd = () => {
++          this.height = newHeight;
++          updatePosition(savedWidth, newHeight);
++        };
++        break;
++      }
++      case "bottomLeft": {
++        if (Math.sign(deltaX) * Math.sign(deltaY) > 0) {
++          return;
++        }
++        const dist = Math.hypot(deltaX, deltaY);
++        const oldDiag = Math.hypot(
++          this.width * parentWidth,
++          this.height * parentHeight
++        );
++        const trX = round(savedX + this.width);
++        const ratio = Math.max(
++          Math.min(
++            1 - Math.sign(deltaX) * (dist / oldDiag),
++            1 / savedWidth,
++            1 / savedHeight
++          ),
++          minWidth / savedWidth,
++          minHeight / savedHeight
++        );
++        const newWidth = round(savedWidth * ratio);
++        const newHeight = round(savedHeight * ratio);
++        const newX = trX - newWidth;
++        cmd = () => {
++          this.width = newWidth;
++          this.height = newHeight;
++          this.x = newX;
++          updatePosition(newWidth, newHeight);
++        };
++        break;
++      }
++      case "middleLeft": {
++        const mrX = round(savedX + savedWidth);
++        const newWidth = round(
++          Math.max(minWidth, Math.min(1, savedWidth - deltaX / parentWidth))
++        );
++        const newX = mrX - newWidth;
++        cmd = () => {
++          this.width = newWidth;
++          this.x = newX;
++          updatePosition(newWidth, savedHeight);
++        };
++        break;
++      }
++    }
++    this.addCommands({
++      cmd,
++      undo,
++      mustExec: true,
++      type: this.resizeType,
++      overwriteIfSameType: true,
++      keepUndo: true,
++    });
++  }
++
+   /**
+    * Render this editor in a div.
+    * @returns {HTMLDivElement}
+@@ -654,10 +922,35 @@ class AnnotationEditor {
+     }
+   }
+ 
++  /**
++   * @returns {number} the type to use in the undo/redo stack when resizing.
++   */
++  get resizeType() {
++    return -1;
++  }
++
++  /**
++   * @returns {boolean} true if this editor can be resized.
++   */
++  get isResizable() {
++    return false;
++  }
++
++  /**
++   * Add the resizers to this editor.
++   */
++  makeResizable() {
++    if (this.isResizable) {
++      this.#createResizers();
++      this.#resizersDiv.classList.remove("hidden");
++    }
++  }
++
+   /**
+    * Select this editor.
+    */
+   select() {
++    this.makeResizable();
+     this.div?.classList.add("selectedEditor");
+   }
+ 
+@@ -665,6 +958,7 @@ class AnnotationEditor {
+    * Unselect this editor.
+    */
+   unselect() {
++    this.#resizersDiv?.classList.add("hidden");
+     this.div?.classList.remove("selectedEditor");
+   }
+ 
+@@ -735,17 +1029,10 @@ class AnnotationEditor {
+     const { style } = this.div;
+     style.aspectRatio = aspectRatio;
+     style.height = "auto";
+-    if (aspectRatio >= 1) {
+-      style.minHeight = `${RESIZER_SIZE}px`;
+-      style.minWidth = `${Math.round(aspectRatio * RESIZER_SIZE)}px`;
+-    } else {
+-      style.minWidth = `${RESIZER_SIZE}px`;
+-      style.minHeight = `${Math.round(RESIZER_SIZE / aspectRatio)}px`;
+-    }
+   }
+ 
+   static get MIN_SIZE() {
+-    return RESIZER_SIZE;
++    return 16;
+   }
+ }
+
+diff --git a/src/display/editor/ink.js b/src/display/editor/ink.js
+--- a/src/display/editor/ink.js
++++ b/src/display/editor/ink.js
+@@ -79,6 +79,7 @@ class InkEditor extends AnnotationEditor {
+     this.translationX = this.translationY = 0;
+     this.x = 0;
+     this.y = 0;
++    this._willKeepAspectRatio = true;
+   }
+ 
+   /** @inheritdoc */
+@@ -156,6 +157,11 @@ class InkEditor extends AnnotationEditor {
+     ];
+   }
+ 
++  /** @inheritdoc */
++  get resizeType() {
++    return AnnotationEditorParamsType.INK_DIMS;
++  }
++
+   /**
+    * Update the thickness and make this action undoable.
+    * @param {number} thickness
+@@ -619,6 +625,7 @@ class InkEditor extends AnnotationEditor {
+     this.div.classList.add("disabled");
+ 
+     this.#fitToContent(/* firstTime = */ true);
++    this.makeResizable();
+ 
+     this.parent.addInkEditorIfNeeded(/* isCommitting = */ true);
+ 
+@@ -754,6 +761,11 @@ class InkEditor extends AnnotationEditor {
+     this.#observer.observe(this.div);
+   }
+ 
++  /** @inheritdoc */
++  get isResizable() {
++    return !this.isEmpty() && this.#disableEditing;
++  }
++
+   /** @inheritdoc */
+   render() {
+     if (this.div) {
+
+diff --git a/src/display/editor/stamp.js b/src/display/editor/stamp.js
+--- a/src/display/editor/stamp.js
++++ b/src/display/editor/stamp.js
+@@ -13,8 +13,11 @@
+  * limitations under the License.
+  */
+ 
++import {
++  AnnotationEditorParamsType,
++  AnnotationEditorType,
++} from "../../shared/util.js";
+ import { AnnotationEditor } from "./editor.js";
+-import { AnnotationEditorType } from "../../shared/util.js";
+ import { PixelsPerInch } from "../display_utils.js";
+ import { StampAnnotationElement } from "../annotation_layer.js";
+ 
+@@ -123,6 +126,11 @@ class StampEditor extends AnnotationEditor {
+     }
+   }
+ 
++  /** @inheritdoc */
++  get resizeType() {
++    return AnnotationEditorParamsType.STAMP_DIMS;
++  }
++
+   /** @inheritdoc */
+   remove() {
+     if (this.#bitmapId) {
+@@ -170,6 +178,11 @@ class StampEditor extends AnnotationEditor {
+     );
+   }
+ 
++  /** @inheritdoc */
++  get isResizable() {
++    return true;
++  }
++
+   /** @inheritdoc */
+   render() {
+     if (this.div) {
+@@ -194,7 +207,6 @@ class StampEditor extends AnnotationEditor {
+     if (this.width) {
+       // This editor was created in using copy (ctrl+c).
+       const [parentWidth, parentHeight] = this.parentDimensions;
+-      this.setAspectRatio(this.width * parentWidth, this.height * parentHeight);
+       this.setAt(
+         baseX * parentWidth,
+         baseY * parentHeight,
+@@ -233,8 +245,6 @@ class StampEditor extends AnnotationEditor {
+       (height * parentHeight) / pageHeight
+     );
+ 
+-    this.setAspectRatio(width, height);
+-
+     const canvas = (this.#canvas = document.createElement("canvas"));
+     div.append(canvas);
+     this.#drawBitmap(width, height);
+
+diff --git a/src/display/editor/tools.js b/src/display/editor/tools.js
+--- a/src/display/editor/tools.js
++++ b/src/display/editor/tools.js
+@@ -280,6 +280,12 @@ class CommandManager {
+     this.#commands.push(save);
+   }
+ 
++  stopUndoAccumulation() {
++    if (this.#position !== -1) {
++      this.#commands[this.#position].type = NaN;
++    }
++  }
++
+   /**
+    * Undo the last command.
+    */
+@@ -1168,6 +1174,10 @@ class AnnotationEditorUIManager {
+     return this.#selectedEditors.size !== 0;
+   }
+ 
++  stopUndoAccumulation() {
++    this.#commandManager.stopUndoAccumulation();
++  }
++
+   /**
+    * Undo the last command.
+    */
+
+diff --git a/src/shared/util.js b/src/shared/util.js
+--- a/src/shared/util.js
++++ b/src/shared/util.js
+@@ -83,6 +83,8 @@ const AnnotationEditorParamsType = {
+   INK_COLOR: 11,
+   INK_THICKNESS: 12,
+   INK_OPACITY: 13,
++  INK_DIMS: 14,
++  STAMP_DIMS: 21,
+ };
+ 
+ // Permission flags from Table 22, Section 7.6.3.2 of the PDF specification.
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.22.9
+- @babel/plugin-transform-modules-commonjs: ^7.22.5
+- @babel/preset-env: ^7.22.9
+- @babel/runtime: ^7.22.6
+- @javascript-obfuscator/escodegen: 2.3.0
+- acorn: ^8.10.0
+- autoprefixer: ^10.4.14
+- babel-loader: ^9.1.3
+- caniuse-lite: ^1.0.30001517
+- canvas: ^2.11.2
+- core-js: ^3.31.1
+- cross-env: ^7.0.3
+- es-module-shims: 1.4.7
+- eslint: ^8.45.0
+- eslint-config-prettier: ^8.8.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^7.1.0
+- eslint-plugin-import: ^2.27.5
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-mozilla: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.0.2
+- eslint-plugin-prettier: ^5.0.0
+- eslint-plugin-sort-exports: ^0.8.0
+- eslint-plugin-unicorn: ^48.0.0
+- globals: ^13.20.0
+- gulp: ^4.0.2
+- gulp-postcss: ^9.0.1
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^5.1.0
+- jasmine: ^5.1.0
+- jsdoc: ^4.0.2
+- jstransformer-markdown-it: ^3.0.0
+- merge-stream: ^2.0.0
+- mkdirp: ^3.0.1
+- needle: ^3.2.0
+- path2d-polyfill: ^2.0.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.27
+- postcss-dir-pseudo-class: ^8.0.0
+- prettier: ^3.0.0
+- puppeteer: ^20.9.0
+- rimraf: ^3.0.2
+- streamqueue: ^1.1.2
+- stylelint: ^15.10.2
+- stylelint-prettier: ^4.0.0
+- terser: ^5.19.2
+- through2: ^4.0.2
+- ttest: ^4.0.0
+- typescript: ^5.1.6
+- typogr: ^0.6.8
+- vinyl: ^3.0.0
+- webpack: ^5.88.2
+- webpack-stream: ^7.0.0
+- wintersmith: ^2.5.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Image
+- `../../src/core/jpg.js`: JpegImage
+- `../../src/core/jpx.js`: JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, PDFWorkerUtil, RenderTask, SVGGraphics, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, loadScript, setLayerDimensions
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/svg.js`: SVGGraphics
+- `../../src/display/text_layer.js`: TextLayerRenderTask, renderTextLayer, updateTextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, PromiseCapability, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isArrayBuffer, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/l10n_utils.js`: NullL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/editor/editor.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 // eslint-disable-next-line max-len
+17 /** @typedef {import("./annotation_editor_layer.js").AnnotationEditorLayer} AnnotationEditorLayer */
+18 // eslint-disable-next-line max-len
+19 /** @typedef {import("./tools.js").AnnotationEditorUIManager} AnnotationEditorUIManager */
+20 
+21 import { bindEvents, ColorManager } from "./tools.js";
+22 import { FeatureTest, shadow, unreachable } from "../../shared/util.js";
+23 
+24 // The dimensions of the resizer is 15x15:
+25 // https://searchfox.org/mozilla-central/rev/1ce190047b9556c3c10ab4de70a0e61d893e2954/toolkit/content/minimal-xul.css#136-137
+26 // so each dimension must be greater than RESIZER_SIZE.
+27 const RESIZER_SIZE = 16;
+28 
+29 /**
+30  * @typedef {Object} AnnotationEditorParameters
+31  * @property {AnnotationEditorUIManager} uiManager - the global manager
+32  * @property {AnnotationEditorLayer} parent - the layer containing this editor
+33  * @property {string} id - editor id
+34  * @property {number} x - x-coordinate
+35  * @property {number} y - y-coordinate
+36  */
+37 
+38 /**
+39  * Base class for editors.
+40  */
+41 class AnnotationEditor {
+42   #keepAspectRatio = false;
+43 
+44   #boundFocusin = this.focusin.bind(this);
+45 
+46   #boundFocusout = this.focusout.bind(this);
+47 
+48   #hasBeenSelected = false;
+49 
+50   #isEditing = false;
+51 
+52   #isInEditMode = false;
+53 
+54   _uiManager = null;
+55 
+56   #zIndex = AnnotationEditor._zIndex++;
+57 
+58   static _colorManager = new ColorManager();
+59 
+60   static _zIndex = 1;
+61 
+62   /**
+63    * @param {AnnotationEditorParameters} parameters
+64    */
+65   constructor(parameters) {
+66     if (this.constructor === AnnotationEditor) {
+67       unreachable("Cannot initialize AnnotationEditor.");
+68     }
+69 
+70     this.parent = parameters.parent;
+71     this.id = parameters.id;
+72     this.width = this.height = null;
+73     this.pageIndex = parameters.parent.pageIndex;
+74     this.name = parameters.name;
+75     this.div = null;
+76     this._uiManager = parameters.uiManager;
+77     this.annotationElementId = null;
+78 
+79     const {
+80       rotation,
+81       rawDims: { pageWidth, pageHeight, pageX, pageY },
+82     } = this.parent.viewport;
+83 
+84     this.rotation = rotation;
+85     this.pageRotation =
+86       (360 + rotation - this._uiManager.viewParameters.rotation) % 360;
+87     this.pageDimensions = [pageWidth, pageHeight];
+88     this.pageTranslation = [pageX, pageY];
+89 
+90     const [width, height] = this.parentDimensions;
+91     this.x = parameters.x / width;
+92     this.y = parameters.y / height;
+93 
+94     this.isAttachedToDOM = false;
+95     this.deleted = false;
+96   }
+97 
+98   static get _defaultLineColor() {
+99     return shadow(
+100       this,
+101       "_defaultLineColor",
+102       this._colorManager.getHexCode("CanvasText")
+103     );
+104   }
+105 
+106   static deleteAnnotationElement(editor) {
+107     const fakeEditor = new FakeEditor({
+108       id: editor.parent.getNextId(),
+109       parent: editor.parent,
+110       uiManager: editor._uiManager,
+111     });
+112     fakeEditor.annotationElementId = editor.annotationElementId;
+113     fakeEditor.deleted = true;
+114     fakeEditor._uiManager.addToAnnotationStorage(fakeEditor);
+115   }
+116 
+117   /**
+118    * Initialize the l10n stuff for this type of editor.
+119    * @param {Object} _l10n
+120    */
+121   static initialize(_l10n) {}
+122 
+123   /**
+124    * Update the default parameters for this type of editor.
+125    * @param {number} _type
+126    * @param {*} _value
+127    */
+128   static updateDefaultParams(_type, _value) {}
+129 
+130   /**
+131    * Get the default properties to set in the UI for this type of editor.
+132    * @returns {Array}
+133    */
+134   static get defaultPropertiesToUpdate() {
+135     return [];
+136   }
+137 
+138   /**
+139    * Get the properties to update in the UI for this editor.
+140    * @returns {Array}
+141    */
+142   get propertiesToUpdate() {
+143     return [];
+144   }
+145 
+146   /**
+147    * Add some commands into the CommandManager (undo/redo stuff).
+148    * @param {Object} params
+149    */
+150   addCommands(params) {
+151     this._uiManager.addCommands(params);
+152   }
+153 
+154   get currentLayer() {
+155     return this._uiManager.currentLayer;
+156   }
+157 
+158   /**
+159    * This editor will be behind the others.
+160    */
+161   setInBackground() {
+162     this.div.style.zIndex = 0;
+163   }
+164 
+165   /**
+166    * This editor will be in the foreground.
+167    */
+168   setInForeground() {
+169     this.div.style.zIndex = this.#zIndex;
+170   }
+171 
+172   setParent(parent) {
+173     if (parent !== null) {
+174       this.pageIndex = parent.pageIndex;
+175       this.pageDimensions = parent.pageDimensions;
+176     }
+177     this.parent = parent;
+178   }
+179 
+180   /**
+181    * onfocus callback.
+182    */
+183   focusin(event) {
+184     if (!this.#hasBeenSelected) {
+185       this.parent.setSelected(this);
+186     } else {
+187       this.#hasBeenSelected = false;
+188     }
+189   }
+190 
+191   /**
+192    * onblur callback.
+193    * @param {FocusEvent} event
+194    */
+195   focusout(event) {
+196     if (!this.isAttachedToDOM) {
+197       return;
+198     }
+199 
+200     // In case of focusout, the relatedTarget is the element which
+201     // is grabbing the focus.
+202     // So if the related target is an element under the div for this
+203     // editor, then the editor isn't unactive.
+204     const target = event.relatedTarget;
+205     if (target?.closest(`#${this.id}`)) {
+206       return;
+207     }
+208 
+209     event.preventDefault();
+210 
+211     if (!this.parent?.isMultipleSelection) {
+212       this.commitOrRemove();
+213     }
+214   }
+215 
+216   commitOrRemove() {
+217     if (this.isEmpty()) {
+218       this.remove();
+219     } else {
+220       this.commit();
+221     }
+222   }
+223 
+224   /**
+225    * Commit the data contained in this editor.
+226    */
+227   commit() {
+228     this.addToAnnotationStorage();
+229   }
+230 
+231   addToAnnotationStorage() {
+232     this._uiManager.addToAnnotationStorage(this);
+233   }
+234 
+235   /**
+236    * We use drag-and-drop in order to move an editor on a page.
+237    * @param {DragEvent} event
+238    */
+239   dragstart(event) {
+240     const rect = this.parent.div.getBoundingClientRect();
+241     this.startX = event.clientX - rect.x;
+242     this.startY = event.clientY - rect.y;
+243     event.dataTransfer.setData("text/plain", this.id);
+244     event.dataTransfer.effectAllowed = "move";
+245   }
+246 
+247   /**
+248    * Set the editor position within its parent.
+249    * @param {number} x
+250    * @param {number} y
+251    * @param {number} tx - x-translation in screen coordinates.
+252    * @param {number} ty - y-translation in screen coordinates.
+253    */
+254   setAt(x, y, tx, ty) {
+255     const [width, height] = this.parentDimensions;
+256     [tx, ty] = this.screenToPageTranslation(tx, ty);
+257 
+258     this.x = (x + tx) / width;
+259     this.y = (y + ty) / height;
+260 
+261     this.fixAndSetPosition();
+262   }
+263 
+264   /**
+265    * Translate the editor position within its parent.
+266    * @param {number} x - x-translation in screen coordinates.
+267    * @param {number} y - y-translation in screen coordinates.
+268    */
+269   translate(x, y) {
+270     const [width, height] = this.parentDimensions;
+271     [x, y] = this.screenToPageTranslation(x, y);
+272 
+273     this.x += x / width;
+274     this.y += y / height;
+275 
+276     this.fixAndSetPosition();
+277   }
+278 
+279   fixAndSetPosition() {
+280     const [pageWidth, pageHeight] = this.pageDimensions;
+281     let { x, y, width, height } = this;
+282     width *= pageWidth;
+283     height *= pageHeight;
+284     x *= pageWidth;
+285     y *= pageHeight;
+286 
+287     switch (this.rotation) {
+288       case 0:
+289         x = Math.max(0, Math.min(pageWidth - width, x));
+290         y = Math.max(0, Math.min(pageHeight - height, y));
+291         break;
+292       case 90:
+293         x = Math.max(0, Math.min(pageWidth - height, x));
+294         y = Math.min(pageHeight, Math.max(width, y));
+295         break;
+296       case 180:
+297         x = Math.min(pageWidth, Math.max(width, x));
+298         y = Math.min(pageHeight, Math.max(height, y));
+299         break;
+300       case 270:
+301         x = Math.min(pageWidth, Math.max(height, x));
+302         y = Math.max(0, Math.min(pageHeight - width, y));
+303         break;
+304     }
+305 
+306     this.x = x / pageWidth;
+307     this.y = y / pageHeight;
+308 
+309     this.div.style.left = `${(100 * this.x).toFixed(2)}%`;
+310     this.div.style.top = `${(100 * this.y).toFixed(2)}%`;
+311   }
+312 
+313   /**
+314    * Convert a screen translation into a page one.
+315    * @param {number} x
+316    * @param {number} y
+317    */
+318   screenToPageTranslation(x, y) {
+319     switch (this.parentRotation) {
+320       case 90:
+321         return [y, -x];
+322       case 180:
+323         return [-x, -y];
+324       case 270:
+325         return [-y, x];
+326       default:
+327         return [x, y];
+328     }
+329   }
+330 
+331   /**
+332    * Convert a page translation into a screen one.
+333    * @param {number} x
+334    * @param {number} y
+335    */
+336   pageTranslationToScreen(x, y) {
+337     switch (this.parentRotation) {
+338       case 90:
+339         return [-y, x];
+340       case 180:
+341         return [-x, -y];
+342       case 270:
+343         return [y, -x];
+344       default:
+345         return [x, y];
+346     }
+347   }
+348 
+349   get parentScale() {
+350     return this._uiManager.viewParameters.realScale;
+351   }
+352 
+353   get parentRotation() {
+354     return (this._uiManager.viewParameters.rotation + this.pageRotation) % 360;
+355   }
+356 
+357   get parentDimensions() {
+358     const { realScale } = this._uiManager.viewParameters;
+359     const [pageWidth, pageHeight] = this.pageDimensions;
+360     return [pageWidth * realScale, pageHeight * realScale];
+361   }
+362 
+363   /**
+364    * Set the dimensions of this editor.
+365    * @param {number} width
+366    * @param {number} height
+367    */
+368   setDims(width, height) {
+369     const [parentWidth, parentHeight] = this.parentDimensions;
+370     this.div.style.width = `${((100 * width) / parentWidth).toFixed(2)}%`;
+371     if (!this.#keepAspectRatio) {
+372       this.div.style.height = `${((100 * height) / parentHeight).toFixed(2)}%`;
+373     }
+374   }
+375 
+376   fixDims() {
+377     const { style } = this.div;
+378     const { height, width } = style;
+379     const widthPercent = width.endsWith("%");
+380     const heightPercent = !this.#keepAspectRatio && height.endsWith("%");
+381     if (widthPercent && heightPercent) {
+382       return;
+383     }
+384 
+385     const [parentWidth, parentHeight] = this.parentDimensions;
+386     if (!widthPercent) {
+387       style.width = `${((100 * parseFloat(width)) / parentWidth).toFixed(2)}%`;
+388     }
+389     if (!this.#keepAspectRatio && !heightPercent) {
+390       style.height = `${((100 * parseFloat(height)) / parentHeight).toFixed(
+391         2
+392       )}%`;
+393     }
+394   }
+395 
+396   /**
+397    * Get the translation used to position this editor when it's created.
+398    * @returns {Array<number>}
+399    */
+400   getInitialTranslation() {
+401     return [0, 0];
+402   }
+403 
+404   /**
+405    * Render this editor in a div.
+406    * @returns {HTMLDivElement}
+407    */
+408   render() {
+409     this.div = document.createElement("div");
+410     this.div.setAttribute("data-editor-rotation", (360 - this.rotation) % 360);
+411     this.div.className = this.name;
+412     this.div.setAttribute("id", this.id);
+413     this.div.setAttribute("tabIndex", 0);
+414 
+415     this.setInForeground();
+416 
+417     this.div.addEventListener("focusin", this.#boundFocusin);
+418     this.div.addEventListener("focusout", this.#boundFocusout);
+419 
+420     const [parentWidth, parentHeight] = this.parentDimensions;
+421     if (this.parentRotation % 180 !== 0) {
+422       this.div.style.maxWidth = `${((100 * parentHeight) / parentWidth).toFixed(
+423         2
+424       )}%`;
+425       this.div.style.maxHeight = `${(
+426         (100 * parentWidth) /
+427         parentHeight
+428       ).toFixed(2)}%`;
+429     }
+430 
+431     const [tx, ty] = this.getInitialTranslation();
+432     this.translate(tx, ty);
+433 
+434     bindEvents(this, this.div, ["dragstart", "pointerdown"]);
+435 
+436     return this.div;
+437   }
+438 
+439   /**
+440    * Onpointerdown callback.
+441    * @param {PointerEvent} event
+442    */
+443   pointerdown(event) {
+444     const { isMac } = FeatureTest.platform;
+445     if (event.button !== 0 || (event.ctrlKey && isMac)) {
+446       // Avoid to focus this editor because of a non-left click.
+447       event.preventDefault();
+448       return;
+449     }
+450 
+451     if (
+452       (event.ctrlKey && !isMac) ||
+453       event.shiftKey ||
+454       (event.metaKey && isMac)
+455     ) {
+456       this.parent.toggleSelected(this);
+457     } else {
+458       this.parent.setSelected(this);
+459     }
+460 
+461     this.#hasBeenSelected = true;
+462   }
+463 
+464   /**
+465    * Convert the current rect into a page one.
+466    */
+467   getRect(tx, ty) {
+468     const scale = this.parentScale;
+469     const [pageWidth, pageHeight] = this.pageDimensions;
+470     const [pageX, pageY] = this.pageTranslation;
+471     const shiftX = tx / scale;
+472     const shiftY = ty / scale;
+473     const x = this.x * pageWidth;
+474     const y = this.y * pageHeight;
+475     const width = this.width * pageWidth;
+476     const height = this.height * pageHeight;
+477 
+478     switch (this.rotation) {
+479       case 0:
+480         return [
+481           x + shiftX + pageX,
+482           pageHeight - y - shiftY - height + pageY,
+483           x + shiftX + width + pageX,
+484           pageHeight - y - shiftY + pageY,
+485         ];
+486       case 90:
+487         return [
+488           x + shiftY + pageX,
+489           pageHeight - y + shiftX + pageY,
+490           x + shiftY + height + pageX,
+491           pageHeight - y + shiftX + width + pageY,
+492         ];
+493       case 180:
+494         return [
+495           x - shiftX - width + pageX,
+496           pageHeight - y + shiftY + pageY,
+497           x - shiftX + pageX,
+498           pageHeight - y + shiftY + height + pageY,
+499         ];
+500       case 270:
+501         return [
+502           x - shiftY - height + pageX,
+503           pageHeight - y - shiftX - width + pageY,
+504           x - shiftY + pageX,
+505           pageHeight - y - shiftX + pageY,
+506         ];
+507       default:
+508         throw new Error("Invalid rotation");
+509     }
+510   }
+511 
+512   getRectInCurrentCoords(rect, pageHeight) {
+513     const [x1, y1, x2, y2] = rect;
+514 
+515     const width = x2 - x1;
+516     const height = y2 - y1;
+517 
+518     switch (this.rotation) {
+519       case 0:
+520         return [x1, pageHeight - y2, width, height];
+521       case 90:
+522         return [x1, pageHeight - y1, height, width];
+523       case 180:
+524         return [x2, pageHeight - y1, width, height];
+525       case 270:
+526         return [x2, pageHeight - y2, height, width];
+527       default:
+528         throw new Error("Invalid rotation");
+529     }
+530   }
+531 
+532   /**
+533    * Executed once this editor has been rendered.
+534    */
+535   onceAdded() {}
+536 
+537   /**
+538    * Check if the editor contains something.
+539    * @returns {boolean}
+540    */
+541   isEmpty() {
+542     return false;
+543   }
+544 
+545   /**
+546    * Enable edit mode.
+547    */
+548   enableEditMode() {
+549     this.#isInEditMode = true;
+550   }
+551 
+552   /**
+553    * Disable edit mode.
+554    */
+555   disableEditMode() {
+556     this.#isInEditMode = false;
+557   }
+558 
+559   /**
+560    * Check if the editor is edited.
+561    * @returns {boolean}
+562    */
+563   isInEditMode() {
+564     return this.#isInEditMode;
+565   }
+566 
+567   /**
+568    * If it returns true, then this editor handle the keyboard
+569    * events itself.
+570    * @returns {boolean}
+571    */
+572   shouldGetKeyboardEvents() {
+573     return false;
+574   }
+575 
+576   /**
+577    * Check if this editor needs to be rebuilt or not.
+578    * @returns {boolean}
+579    */
+580   needsToBeRebuilt() {
+581     return this.div && !this.isAttachedToDOM;
+582   }
+583 
+584   /**
+585    * Rebuild the editor in case it has been removed on undo.
+586    *
+587    * To implement in subclasses.
+588    */
+589   rebuild() {
+590     this.div?.addEventListener("focusin", this.#boundFocusin);
+591     this.div?.addEventListener("focusout", this.#boundFocusout);
+592   }
+593 
+594   /**
+595    * Serialize the editor.
+596    * The result of the serialization will be used to construct a
+597    * new annotation to add to the pdf document.
+598    *
+599    * To implement in subclasses.
+600    * @param {boolean} isForCopying
+601    * @param {Object} [context]
+602    */
+603   serialize(_isForCopying = false, _context = null) {
+604     unreachable("An editor must be serializable");
+605   }
+606 
+607   /**
+608    * Deserialize the editor.
+609    * The result of the deserialization is a new editor.
+610    *
+611    * @param {Object} data
+612    * @param {AnnotationEditorLayer} parent
+613    * @param {AnnotationEditorUIManager} uiManager
+614    * @returns {AnnotationEditor}
+615    */
+616   static deserialize(data, parent, uiManager) {
+617     const editor = new this.prototype.constructor({
+618       parent,
+619       id: parent.getNextId(),
+620       uiManager,
+621     });
+622     editor.rotation = data.rotation;
+623 
+624     const [pageWidth, pageHeight] = editor.pageDimensions;
+625     const [x, y, width, height] = editor.getRectInCurrentCoords(
+626       data.rect,
+627       pageHeight
+628     );
+629     editor.x = x / pageWidth;
+630     editor.y = y / pageHeight;
+631     editor.width = width / pageWidth;
+632     editor.height = height / pageHeight;
+633 
+634     return editor;
+635   }
+636 
+637   /**
+638    * Remove this editor.
+639    * It's used on ctrl+backspace action.
+640    */
+641   remove() {
+642     this.div.removeEventListener("focusin", this.#boundFocusin);
+643     this.div.removeEventListener("focusout", this.#boundFocusout);
+644 
+645     if (!this.isEmpty()) {
+646       // The editor is removed but it can be back at some point thanks to
+647       // undo/redo so we must commit it before.
+648       this.commit();
+649     }
+650     if (this.parent) {
+651       this.parent.remove(this);
+652     } else {
+653       this._uiManager.removeEditor(this);
+654     }
+655   }
+656 
+657   /**
+658    * Select this editor.
+659    */
+660   select() {
+661     this.div?.classList.add("selectedEditor");
+662   }
+663 
+664   /**
+665    * Unselect this editor.
+666    */
+667   unselect() {
+668     this.div?.classList.remove("selectedEditor");
+669   }
+670 
+671   /**
+672    * Update some parameters which have been changed through the UI.
+673    * @param {number} type
+674    * @param {*} value
+675    */
+676   updateParams(type, value) {}
+677 
+678   /**
+679    * When the user disables the editing mode some editors can change some of
+680    * their properties.
+681    */
+682   disableEditing() {}
+683 
+684   /**
+685    * When the user enables the editing mode some editors can change some of
+686    * their properties.
+687    */
+688   enableEditing() {}
+689 
+690   /**
+691    * The editor is about to be edited.
+692    */
+693   enterInEditMode() {}
+694 
+695   /**
+696    * Get the div which really contains the displayed content.
+697    */
+698   get contentDiv() {
+699     return this.div;
+700   }
+701 
+702   /**
+703    * If true then the editor is currently edited.
+704    * @type {boolean}
+705    */
+706   get isEditing() {
+707     return this.#isEditing;
+708   }
+709 
+710   /**
+711    * When set to true, it means that this editor is currently edited.
+712    * @param {boolean} value
+713    */
+714   set isEditing(value) {
+715     this.#isEditing = value;
+716     if (!this.parent) {
+717       return;
+718     }
+719     if (value) {
+720       this.parent.setSelected(this);
+721       this.parent.setActiveEditor(this);
+722     } else {
+723       this.parent.setActiveEditor(null);
+724     }
+725   }
+726 
+727   /**
+728    * Set the aspect ratio to use when resizing.
+729    * @param {number} width
+730    * @param {number} height
+731    */
+732   setAspectRatio(width, height) {
+733     this.#keepAspectRatio = true;
+734     const aspectRatio = width / height;
+735     const { style } = this.div;
+736     style.aspectRatio = aspectRatio;
+737     style.height = "auto";
+738     if (aspectRatio >= 1) {
+739       style.minHeight = `${RESIZER_SIZE}px`;
+740       style.minWidth = `${Math.round(aspectRatio * RESIZER_SIZE)}px`;
+741     } else {
+742       style.minWidth = `${RESIZER_SIZE}px`;
+743       style.minHeight = `${Math.round(RESIZER_SIZE / aspectRatio)}px`;
+744     }
+745   }
+746 
+747   static get MIN_SIZE() {
+748     return RESIZER_SIZE;
+749   }
+750 }
+751 
+752 // This class is used to fake an editor which has been deleted.
+753 class FakeEditor extends AnnotationEditor {
+754   constructor(params) {
+755     super(params);
+756     this.annotationElementId = params.annotationElementId;
+757     this.deleted = true;
+758   }
+759 
+760   serialize() {
+761     return {
+762       id: this.annotationElementId,
+763       deleted: true,
+764       pageIndex: this.pageIndex,
+765     };
+766   }
+767 }
+768 
+769 export { AnnotationEditor };
+File:
+src/display/editor/ink.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   AnnotationEditorParamsType,
+18   AnnotationEditorType,
+19   Util,
+20 } from "../../shared/util.js";
+21 import { AnnotationEditor } from "./editor.js";
+22 import { InkAnnotationElement } from "../annotation_layer.js";
+23 import { opacityToHex } from "./tools.js";
+24 
+25 /**
+26  * Basic draw editor in order to generate an Ink annotation.
+27  */
+28 class InkEditor extends AnnotationEditor {
+29   #baseHeight = 0;
+30 
+31   #baseWidth = 0;
+32 
+33   #boundCanvasContextMenu = this.canvasContextMenu.bind(this);
+34 
+35   #boundCanvasPointermove = this.canvasPointermove.bind(this);
+36 
+37   #boundCanvasPointerleave = this.canvasPointerleave.bind(this);
+38 
+39   #boundCanvasPointerup = this.canvasPointerup.bind(this);
+40 
+41   #boundCanvasPointerdown = this.canvasPointerdown.bind(this);
+42 
+43   #currentPath2D = new Path2D();
+44 
+45   #disableEditing = false;
+46 
+47   #hasSomethingToDraw = false;
+48 
+49   #isCanvasInitialized = false;
+50 
+51   #observer = null;
+52 
+53   #realWidth = 0;
+54 
+55   #realHeight = 0;
+56 
+57   #requestFrameCallback = null;
+58 
+59   static _defaultColor = null;
+60 
+61   static _defaultOpacity = 1;
+62 
+63   static _defaultThickness = 1;
+64 
+65   static _l10nPromise;
+66 
+67   static _type = "ink";
+68 
+69   constructor(params) {
+70     super({ ...params, name: "inkEditor" });
+71     this.color = params.color || null;
+72     this.thickness = params.thickness || null;
+73     this.opacity = params.opacity || null;
+74     this.paths = [];
+75     this.bezierPath2D = [];
+76     this.allRawPaths = [];
+77     this.currentPath = [];
+78     this.scaleFactor = 1;
+79     this.translationX = this.translationY = 0;
+80     this.x = 0;
+81     this.y = 0;
+82   }
+83 
+84   /** @inheritdoc */
+85   static initialize(l10n) {
+86     this._l10nPromise = new Map(
+87       ["editor_ink_canvas_aria_label", "editor_ink2_aria_label"].map(str => [
+88         str,
+89         l10n.get(str),
+90       ])
+91     );
+92   }
+93 
+94   /** @inheritdoc */
+95   static updateDefaultParams(type, value) {
+96     switch (type) {
+97       case AnnotationEditorParamsType.INK_THICKNESS:
+98         InkEditor._defaultThickness = value;
+99         break;
+100       case AnnotationEditorParamsType.INK_COLOR:
+101         InkEditor._defaultColor = value;
+102         break;
+103       case AnnotationEditorParamsType.INK_OPACITY:
+104         InkEditor._defaultOpacity = value / 100;
+105         break;
+106     }
+107   }
+108 
+109   /** @inheritdoc */
+110   updateParams(type, value) {
+111     switch (type) {
+112       case AnnotationEditorParamsType.INK_THICKNESS:
+113         this.#updateThickness(value);
+114         break;
+115       case AnnotationEditorParamsType.INK_COLOR:
+116         this.#updateColor(value);
+117         break;
+118       case AnnotationEditorParamsType.INK_OPACITY:
+119         this.#updateOpacity(value);
+120         break;
+121     }
+122   }
+123 
+124   /** @inheritdoc */
+125   static get defaultPropertiesToUpdate() {
+126     return [
+127       [AnnotationEditorParamsType.INK_THICKNESS, InkEditor._defaultThickness],
+128       [
+129         AnnotationEditorParamsType.INK_COLOR,
+130         InkEditor._defaultColor || AnnotationEditor._defaultLineColor,
+131       ],
+132       [
+133         AnnotationEditorParamsType.INK_OPACITY,
+134         Math.round(InkEditor._defaultOpacity * 100),
+135       ],
+136     ];
+137   }
+138 
+139   /** @inheritdoc */
+140   get propertiesToUpdate() {
+141     return [
+142       [
+143         AnnotationEditorParamsType.INK_THICKNESS,
+144         this.thickness || InkEditor._defaultThickness,
+145       ],
+146       [
+147         AnnotationEditorParamsType.INK_COLOR,
+148         this.color ||
+149           InkEditor._defaultColor ||
+150           AnnotationEditor._defaultLineColor,
+151       ],
+152       [
+153         AnnotationEditorParamsType.INK_OPACITY,
+154         Math.round(100 * (this.opacity ?? InkEditor._defaultOpacity)),
+155       ],
+156     ];
+157   }
+158 
+159   /**
+160    * Update the thickness and make this action undoable.
+161    * @param {number} thickness
+162    */
+163   #updateThickness(thickness) {
+164     const savedThickness = this.thickness;
+165     this.addCommands({
+166       cmd: () => {
+167         this.thickness = thickness;
+168         this.#fitToContent();
+169       },
+170       undo: () => {
+171         this.thickness = savedThickness;
+172         this.#fitToContent();
+173       },
+174       mustExec: true,
+175       type: AnnotationEditorParamsType.INK_THICKNESS,
+176       overwriteIfSameType: true,
+177       keepUndo: true,
+178     });
+179   }
+180 
+181   /**
+182    * Update the color and make this action undoable.
+183    * @param {string} color
+184    */
+185   #updateColor(color) {
+186     const savedColor = this.color;
+187     this.addCommands({
+188       cmd: () => {
+189         this.color = color;
+190         this.#redraw();
+191       },
+192       undo: () => {
+193         this.color = savedColor;
+194         this.#redraw();
+195       },
+196       mustExec: true,
+197       type: AnnotationEditorParamsType.INK_COLOR,
+198       overwriteIfSameType: true,
+199       keepUndo: true,
+200     });
+201   }
+202 
+203   /**
+204    * Update the opacity and make this action undoable.
+205    * @param {number} opacity
+206    */
+207   #updateOpacity(opacity) {
+208     opacity /= 100;
+209     const savedOpacity = this.opacity;
+210     this.addCommands({
+211       cmd: () => {
+212         this.opacity = opacity;
+213         this.#redraw();
+214       },
+215       undo: () => {
+216         this.opacity = savedOpacity;
+217         this.#redraw();
+218       },
+219       mustExec: true,
+220       type: AnnotationEditorParamsType.INK_OPACITY,
+221       overwriteIfSameType: true,
+222       keepUndo: true,
+223     });
+224   }
+225 
+226   /** @inheritdoc */
+227   rebuild() {
+228     super.rebuild();
+229     if (this.div === null) {
+230       return;
+231     }
+232 
+233     if (!this.canvas) {
+234       this.#createCanvas();
+235       this.#createObserver();
+236     }
+237 
+238     if (!this.isAttachedToDOM) {
+239       // At some point this editor was removed and we're rebuilding it,
+240       // hence we must add it to its parent.
+241       this.parent.add(this);
+242       this.#setCanvasDims();
+243     }
+244     this.#fitToContent();
+245   }
+246 
+247   /** @inheritdoc */
+248   remove() {
+249     if (this.canvas === null) {
+250       return;
+251     }
+252 
+253     if (!this.isEmpty()) {
+254       this.commit();
+255     }
+256 
+257     // Destroy the canvas.
+258     this.canvas.width = this.canvas.height = 0;
+259     this.canvas.remove();
+260     this.canvas = null;
+261 
+262     this.#observer.disconnect();
+263     this.#observer = null;
+264 
+265     super.remove();
+266   }
+267 
+268   setParent(parent) {
+269     if (!this.parent && parent) {
+270       // We've a parent hence the rescale will be handled thanks to the
+271       // ResizeObserver.
+272       this._uiManager.removeShouldRescale(this);
+273     } else if (this.parent && parent === null) {
+274       // The editor is removed from the DOM, hence we handle the rescale thanks
+275       // to the onScaleChanging callback.
+276       // This way, it'll be saved/printed correctly.
+277       this._uiManager.addShouldRescale(this);
+278     }
+279     super.setParent(parent);
+280   }
+281 
+282   onScaleChanging() {
+283     const [parentWidth, parentHeight] = this.parentDimensions;
+284     const width = this.width * parentWidth;
+285     const height = this.height * parentHeight;
+286     this.setDimensions(width, height);
+287   }
+288 
+289   /** @inheritdoc */
+290   enableEditMode() {
+291     if (this.#disableEditing || this.canvas === null) {
+292       return;
+293     }
+294 
+295     super.enableEditMode();
+296     this.div.draggable = false;
+297     this.canvas.addEventListener("pointerdown", this.#boundCanvasPointerdown);
+298   }
+299 
+300   /** @inheritdoc */
+301   disableEditMode() {
+302     if (!this.isInEditMode() || this.canvas === null) {
+303       return;
+304     }
+305 
+306     super.disableEditMode();
+307     this.div.draggable = !this.isEmpty();
+308     this.div.classList.remove("editing");
+309 
+310     this.canvas.removeEventListener(
+311       "pointerdown",
+312       this.#boundCanvasPointerdown
+313     );
+314   }
+315 
+316   /** @inheritdoc */
+317   onceAdded() {
+318     this.div.draggable = !this.isEmpty();
+319   }
+320 
+321   /** @inheritdoc */
+322   isEmpty() {
+323     return (
+324       this.paths.length === 0 ||
+325       (this.paths.length === 1 && this.paths[0].length === 0)
+326     );
+327   }
+328 
+329   #getInitialBBox() {
+330     const {
+331       parentRotation,
+332       parentDimensions: [width, height],
+333     } = this;
+334     switch (parentRotation) {
+335       case 90:
+336         return [0, height, height, width];
+337       case 180:
+338         return [width, height, width, height];
+339       case 270:
+340         return [width, 0, height, width];
+341       default:
+342         return [0, 0, width, height];
+343     }
+344   }
+345 
+346   /**
+347    * Set line styles.
+348    */
+349   #setStroke() {
+350     const { ctx, color, opacity, thickness, parentScale, scaleFactor } = this;
+351     ctx.lineWidth = (thickness * parentScale) / scaleFactor;
+352     ctx.lineCap = "round";
+353     ctx.lineJoin = "round";
+354     ctx.miterLimit = 10;
+355     ctx.strokeStyle = `${color}${opacityToHex(opacity)}`;
+356   }
+357 
+358   /**
+359    * Start to draw on the canvas.
+360    * @param {number} x
+361    * @param {number} y
+362    */
+363   #startDrawing(x, y) {
+364     this.canvas.addEventListener("contextmenu", this.#boundCanvasContextMenu);
+365     this.canvas.addEventListener("pointerleave", this.#boundCanvasPointerleave);
+366     this.canvas.addEventListener("pointermove", this.#boundCanvasPointermove);
+367     this.canvas.addEventListener("pointerup", this.#boundCanvasPointerup);
+368     this.canvas.removeEventListener(
+369       "pointerdown",
+370       this.#boundCanvasPointerdown
+371     );
+372 
+373     this.isEditing = true;
+374     if (!this.#isCanvasInitialized) {
+375       this.#isCanvasInitialized = true;
+376       this.#setCanvasDims();
+377       this.thickness ||= InkEditor._defaultThickness;
+378       this.color ||=
+379         InkEditor._defaultColor || AnnotationEditor._defaultLineColor;
+380       this.opacity ??= InkEditor._defaultOpacity;
+381     }
+382     this.currentPath.push([x, y]);
+383     this.#hasSomethingToDraw = false;
+384     this.#setStroke();
+385 
+386     this.#requestFrameCallback = () => {
+387       this.#drawPoints();
+388       if (this.#requestFrameCallback) {
+389         window.requestAnimationFrame(this.#requestFrameCallback);
+390       }
+391     };
+392     window.requestAnimationFrame(this.#requestFrameCallback);
+393   }
+394 
+395   /**
+396    * Draw on the canvas.
+397    * @param {number} x
+398    * @param {number} y
+399    */
+400   #draw(x, y) {
+401     const [lastX, lastY] = this.currentPath.at(-1);
+402     if (this.currentPath.length > 1 && x === lastX && y === lastY) {
+403       return;
+404     }
+405     const currentPath = this.currentPath;
+406     let path2D = this.#currentPath2D;
+407     currentPath.push([x, y]);
+408     this.#hasSomethingToDraw = true;
+409 
+410     if (currentPath.length <= 2) {
+411       path2D.moveTo(...currentPath[0]);
+412       path2D.lineTo(x, y);
+413       return;
+414     }
+415 
+416     if (currentPath.length === 3) {
+417       this.#currentPath2D = path2D = new Path2D();
+418       path2D.moveTo(...currentPath[0]);
+419     }
+420 
+421     this.#makeBezierCurve(
+422       path2D,
+423       ...currentPath.at(-3),
+424       ...currentPath.at(-2),
+425       x,
+426       y
+427     );
+428   }
+429 
+430   #endPath() {
+431     if (this.currentPath.length === 0) {
+432       return;
+433     }
+434     const lastPoint = this.currentPath.at(-1);
+435     this.#currentPath2D.lineTo(...lastPoint);
+436   }
+437 
+438   /**
+439    * Stop to draw on the canvas.
+440    * @param {number} x
+441    * @param {number} y
+442    */
+443   #stopDrawing(x, y) {
+444     this.#requestFrameCallback = null;
+445 
+446     x = Math.min(Math.max(x, 0), this.canvas.width);
+447     y = Math.min(Math.max(y, 0), this.canvas.height);
+448 
+449     this.#draw(x, y);
+450     this.#endPath();
+451 
+452     // Interpolate the path entered by the user with some
+453     // Bezier's curves in order to have a smoother path and
+454     // to reduce the data size used to draw it in the PDF.
+455     let bezier;
+456     if (this.currentPath.length !== 1) {
+457       bezier = this.#generateBezierPoints();
+458     } else {
+459       // We have only one point finally.
+460       const xy = [x, y];
+461       bezier = [[xy, xy.slice(), xy.slice(), xy]];
+462     }
+463     const path2D = this.#currentPath2D;
+464     const currentPath = this.currentPath;
+465     this.currentPath = [];
+466     this.#currentPath2D = new Path2D();
+467 
+468     const cmd = () => {
+469       this.allRawPaths.push(currentPath);
+470       this.paths.push(bezier);
+471       this.bezierPath2D.push(path2D);
+472       this.rebuild();
+473     };
+474 
+475     const undo = () => {
+476       this.allRawPaths.pop();
+477       this.paths.pop();
+478       this.bezierPath2D.pop();
+479       if (this.paths.length === 0) {
+480         this.remove();
+481       } else {
+482         if (!this.canvas) {
+483           this.#createCanvas();
+484           this.#createObserver();
+485         }
+486         this.#fitToContent();
+487       }
+488     };
+489 
+490     this.addCommands({ cmd, undo, mustExec: true });
+491   }
+492 
+493   #drawPoints() {
+494     if (!this.#hasSomethingToDraw) {
+495       return;
+496     }
+497     this.#hasSomethingToDraw = false;
+498 
+499     const thickness = Math.ceil(this.thickness * this.parentScale);
+500     const lastPoints = this.currentPath.slice(-3);
+501     const x = lastPoints.map(xy => xy[0]);
+502     const y = lastPoints.map(xy => xy[1]);
+503     const xMin = Math.min(...x) - thickness;
+504     const xMax = Math.max(...x) + thickness;
+505     const yMin = Math.min(...y) - thickness;
+506     const yMax = Math.max(...y) + thickness;
+507 
+508     const { ctx } = this;
+509     ctx.save();
+510 
+511     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+512       // In Chrome, the clip() method doesn't work as expected.
+513       ctx.clearRect(xMin, yMin, xMax - xMin, yMax - yMin);
+514       ctx.beginPath();
+515       ctx.rect(xMin, yMin, xMax - xMin, yMax - yMin);
+516       ctx.clip();
+517     } else {
+518       ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+519     }
+520 
+521     for (const path of this.bezierPath2D) {
+522       ctx.stroke(path);
+523     }
+524     ctx.stroke(this.#currentPath2D);
+525 
+526     ctx.restore();
+527   }
+528 
+529   #makeBezierCurve(path2D, x0, y0, x1, y1, x2, y2) {
+530     const prevX = (x0 + x1) / 2;
+531     const prevY = (y0 + y1) / 2;
+532     const x3 = (x1 + x2) / 2;
+533     const y3 = (y1 + y2) / 2;
+534 
+535     path2D.bezierCurveTo(
+536       prevX + (2 * (x1 - prevX)) / 3,
+537       prevY + (2 * (y1 - prevY)) / 3,
+538       x3 + (2 * (x1 - x3)) / 3,
+539       y3 + (2 * (y1 - y3)) / 3,
+540       x3,
+541       y3
+542     );
+543   }
+544 
+545   #generateBezierPoints() {
+546     const path = this.currentPath;
+547     if (path.length <= 2) {
+548       return [[path[0], path[0], path.at(-1), path.at(-1)]];
+549     }
+550 
+551     const bezierPoints = [];
+552     let i;
+553     let [x0, y0] = path[0];
+554     for (i = 1; i < path.length - 2; i++) {
+555       const [x1, y1] = path[i];
+556       const [x2, y2] = path[i + 1];
+557       const x3 = (x1 + x2) / 2;
+558       const y3 = (y1 + y2) / 2;
+559 
+560       // The quadratic is: [[x0, y0], [x1, y1], [x3, y3]].
+561       // Convert the quadratic to a cubic
+562       // (see https://fontforge.org/docs/techref/bezier.html#converting-truetype-to-postscript)
+563       const control1 = [x0 + (2 * (x1 - x0)) / 3, y0 + (2 * (y1 - y0)) / 3];
+564       const control2 = [x3 + (2 * (x1 - x3)) / 3, y3 + (2 * (y1 - y3)) / 3];
+565 
+566       bezierPoints.push([[x0, y0], control1, control2, [x3, y3]]);
+567 
+568       [x0, y0] = [x3, y3];
+569     }
+570 
+571     const [x1, y1] = path[i];
+572     const [x2, y2] = path[i + 1];
+573 
+574     // The quadratic is: [[x0, y0], [x1, y1], [x2, y2]].
+575     const control1 = [x0 + (2 * (x1 - x0)) / 3, y0 + (2 * (y1 - y0)) / 3];
+576     const control2 = [x2 + (2 * (x1 - x2)) / 3, y2 + (2 * (y1 - y2)) / 3];
+577 
+578     bezierPoints.push([[x0, y0], control1, control2, [x2, y2]]);
+579     return bezierPoints;
+580   }
+581 
+582   /**
+583    * Redraw all the paths.
+584    */
+585   #redraw() {
+586     if (this.isEmpty()) {
+587       this.#updateTransform();
+588       return;
+589     }
+590     this.#setStroke();
+591 
+592     const { canvas, ctx } = this;
+593     ctx.setTransform(1, 0, 0, 1, 0, 0);
+594     ctx.clearRect(0, 0, canvas.width, canvas.height);
+595     this.#updateTransform();
+596 
+597     for (const path of this.bezierPath2D) {
+598       ctx.stroke(path);
+599     }
+600   }
+601 
+602   /**
+603    * Commit the curves we have in this editor.
+604    */
+605   commit() {
+606     if (this.#disableEditing) {
+607       return;
+608     }
+609 
+610     super.commit();
+611 
+612     this.isEditing = false;
+613     this.disableEditMode();
+614 
+615     // This editor must be on top of the main ink editor.
+616     this.setInForeground();
+617 
+618     this.#disableEditing = true;
+619     this.div.classList.add("disabled");
+620 
+621     this.#fitToContent(/* firstTime = */ true);
+622 
+623     this.parent.addInkEditorIfNeeded(/* isCommitting = */ true);
+624 
+625     // When commiting, the position of this editor is changed, hence we must
+626     // move it to the right position in the DOM.
+627     this.parent.moveEditorInDOM(this);
+628     this.div.focus({
+629       preventScroll: true /* See issue #15744 */,
+630     });
+631   }
+632 
+633   /** @inheritdoc */
+634   focusin(event) {
+635     super.focusin(event);
+636     this.enableEditMode();
+637   }
+638 
+639   /**
+640    * onpointerdown callback for the canvas we're drawing on.
+641    * @param {PointerEvent} event
+642    */
+643   canvasPointerdown(event) {
+644     if (event.button !== 0 || !this.isInEditMode() || this.#disableEditing) {
+645       return;
+646     }
+647 
+648     // We want to draw on top of any other editors.
+649     // Since it's the last child, there's no need to give it a higher z-index.
+650     this.setInForeground();
+651 
+652     event.preventDefault();
+653 
+654     if (event.type !== "mouse") {
+655       this.div.focus();
+656     }
+657 
+658     this.#startDrawing(event.offsetX, event.offsetY);
+659   }
+660 
+661   /**
+662    * oncontextmenu callback for the canvas we're drawing on.
+663    * @param {PointerEvent} event
+664    */
+665   canvasContextMenu(event) {
+666     event.preventDefault();
+667   }
+668 
+669   /**
+670    * onpointermove callback for the canvas we're drawing on.
+671    * @param {PointerEvent} event
+672    */
+673   canvasPointermove(event) {
+674     event.preventDefault();
+675     this.#draw(event.offsetX, event.offsetY);
+676   }
+677 
+678   /**
+679    * onpointerup callback for the canvas we're drawing on.
+680    * @param {PointerEvent} event
+681    */
+682   canvasPointerup(event) {
+683     event.preventDefault();
+684     this.#endDrawing(event);
+685   }
+686 
+687   /**
+688    * onpointerleave callback for the canvas we're drawing on.
+689    * @param {PointerEvent} event
+690    */
+691   canvasPointerleave(event) {
+692     this.#endDrawing(event);
+693   }
+694 
+695   /**
+696    * End the drawing.
+697    * @param {PointerEvent} event
+698    */
+699   #endDrawing(event) {
+700     this.canvas.removeEventListener(
+701       "pointerleave",
+702       this.#boundCanvasPointerleave
+703     );
+704     this.canvas.removeEventListener(
+705       "pointermove",
+706       this.#boundCanvasPointermove
+707     );
+708     this.canvas.removeEventListener("pointerup", this.#boundCanvasPointerup);
+709     this.canvas.addEventListener("pointerdown", this.#boundCanvasPointerdown);
+710 
+711     // Slight delay to avoid the context menu to appear (it can happen on a long
+712     // tap with a pen).
+713     setTimeout(() => {
+714       this.canvas.removeEventListener(
+715         "contextmenu",
+716         this.#boundCanvasContextMenu
+717       );
+718     }, 10);
+719 
+720     this.#stopDrawing(event.offsetX, event.offsetY);
+721 
+722     this.addToAnnotationStorage();
+723 
+724     // Since the ink editor covers all of the page and we want to be able
+725     // to select another editor, we just put this one in the background.
+726     this.setInBackground();
+727   }
+728 
+729   /**
+730    * Create the canvas element.
+731    */
+732   #createCanvas() {
+733     this.canvas = document.createElement("canvas");
+734     this.canvas.width = this.canvas.height = 0;
+735     this.canvas.className = "inkEditorCanvas";
+736 
+737     InkEditor._l10nPromise
+738       .get("editor_ink_canvas_aria_label")
+739       .then(msg => this.canvas?.setAttribute("aria-label", msg));
+740     this.div.append(this.canvas);
+741     this.ctx = this.canvas.getContext("2d");
+742   }
+743 
+744   /**
+745    * Create the resize observer.
+746    */
+747   #createObserver() {
+748     this.#observer = new ResizeObserver(entries => {
+749       const rect = entries[0].contentRect;
+750       if (rect.width && rect.height) {
+751         this.setDimensions(rect.width, rect.height);
+752       }
+753     });
+754     this.#observer.observe(this.div);
+755   }
+756 
+757   /** @inheritdoc */
+758   render() {
+759     if (this.div) {
+760       return this.div;
+761     }
+762 
+763     let baseX, baseY;
+764     if (this.width) {
+765       baseX = this.x;
+766       baseY = this.y;
+767     }
+768 
+769     super.render();
+770 
+771     InkEditor._l10nPromise
+772       .get("editor_ink2_aria_label")
+773       .then(msg => this.div?.setAttribute("aria-label", msg));
+774 
+775     const [x, y, w, h] = this.#getInitialBBox();
+776     this.setAt(x, y, 0, 0);
+777     this.setDims(w, h);
+778 
+779     this.#createCanvas();
+780 
+781     if (this.width) {
+782       // This editor was created in using copy (ctrl+c).
+783       const [parentWidth, parentHeight] = this.parentDimensions;
+784       this.setAspectRatio(this.width * parentWidth, this.height * parentHeight);
+785       this.setAt(
+786         baseX * parentWidth,
+787         baseY * parentHeight,
+788         this.width * parentWidth,
+789         this.height * parentHeight
+790       );
+791       this.#isCanvasInitialized = true;
+792       this.#setCanvasDims();
+793       this.setDims(this.width * parentWidth, this.height * parentHeight);
+794       this.#redraw();
+795       this.div.classList.add("disabled");
+796     } else {
+797       this.div.classList.add("editing");
+798       this.enableEditMode();
+799     }
+800 
+801     this.#createObserver();
+802 
+803     return this.div;
+804   }
+805 
+806   #setCanvasDims() {
+807     if (!this.#isCanvasInitialized) {
+808       return;
+809     }
+810     const [parentWidth, parentHeight] = this.parentDimensions;
+811     this.canvas.width = Math.ceil(this.width * parentWidth);
+812     this.canvas.height = Math.ceil(this.height * parentHeight);
+813     this.#updateTransform();
+814   }
+815 
+816   /**
+817    * When the dimensions of the div change the inner canvas must
+818    * renew its dimensions, hence it must redraw its own contents.
+819    * @param {number} width - the new width of the div
+820    * @param {number} height - the new height of the div
+821    * @returns
+822    */
+823   setDimensions(width, height) {
+824     const roundedWidth = Math.round(width);
+825     const roundedHeight = Math.round(height);
+826     if (
+827       this.#realWidth === roundedWidth &&
+828       this.#realHeight === roundedHeight
+829     ) {
+830       return;
+831     }
+832 
+833     this.#realWidth = roundedWidth;
+834     this.#realHeight = roundedHeight;
+835 
+836     this.canvas.style.visibility = "hidden";
+837 
+838     const [parentWidth, parentHeight] = this.parentDimensions;
+839     this.width = width / parentWidth;
+840     this.height = height / parentHeight;
+841     this.fixAndSetPosition();
+842 
+843     if (this.#disableEditing) {
+844       this.#setScaleFactor(width, height);
+845     }
+846 
+847     this.#setCanvasDims();
+848     this.#redraw();
+849 
+850     this.canvas.style.visibility = "visible";
+851 
+852     // For any reason the dimensions couldn't be in percent but in pixels, hence
+853     // we must fix them.
+854     this.fixDims();
+855   }
+856 
+857   #setScaleFactor(width, height) {
+858     const padding = this.#getPadding();
+859     const scaleFactorW = (width - padding) / this.#baseWidth;
+860     const scaleFactorH = (height - padding) / this.#baseHeight;
+861     this.scaleFactor = Math.min(scaleFactorW, scaleFactorH);
+862   }
+863 
+864   /**
+865    * Update the canvas transform.
+866    */
+867   #updateTransform() {
+868     const padding = this.#getPadding() / 2;
+869     this.ctx.setTransform(
+870       this.scaleFactor,
+871       0,
+872       0,
+873       this.scaleFactor,
+874       this.translationX * this.scaleFactor + padding,
+875       this.translationY * this.scaleFactor + padding
+876     );
+877   }
+878 
+879   /**
+880    * Convert into a Path2D.
+881    * @param {Arra<Array<number>} bezier
+882    * @returns {Path2D}
+883    */
+884   static #buildPath2D(bezier) {
+885     const path2D = new Path2D();
+886     for (let i = 0, ii = bezier.length; i < ii; i++) {
+887       const [first, control1, control2, second] = bezier[i];
+888       if (i === 0) {
+889         path2D.moveTo(...first);
+890       }
+891       path2D.bezierCurveTo(
+892         control1[0],
+893         control1[1],
+894         control2[0],
+895         control2[1],
+896         second[0],
+897         second[1]
+898       );
+899     }
+900     return path2D;
+901   }
+902 
+903   static #toPDFCoordinates(points, rect, rotation) {
+904     const [blX, blY, trX, trY] = rect;
+905 
+906     switch (rotation) {
+907       case 0:
+908         for (let i = 0, ii = points.length; i < ii; i += 2) {
+909           points[i] += blX;
+910           points[i + 1] = trY - points[i + 1];
+911         }
+912         break;
+913       case 90:
+914         for (let i = 0, ii = points.length; i < ii; i += 2) {
+915           const x = points[i];
+916           points[i] = points[i + 1] + blX;
+917           points[i + 1] = x + blY;
+918         }
+919         break;
+920       case 180:
+921         for (let i = 0, ii = points.length; i < ii; i += 2) {
+922           points[i] = trX - points[i];
+923           points[i + 1] += blY;
+924         }
+925         break;
+926       case 270:
+927         for (let i = 0, ii = points.length; i < ii; i += 2) {
+928           const x = points[i];
+929           points[i] = trX - points[i + 1];
+930           points[i + 1] = trY - x;
+931         }
+932         break;
+933       default:
+934         throw new Error("Invalid rotation");
+935     }
+936     return points;
+937   }
+938 
+939   static #fromPDFCoordinates(points, rect, rotation) {
+940     const [blX, blY, trX, trY] = rect;
+941 
+942     switch (rotation) {
+943       case 0:
+944         for (let i = 0, ii = points.length; i < ii; i += 2) {
+945           points[i] -= blX;
+946           points[i + 1] = trY - points[i + 1];
+947         }
+948         break;
+949       case 90:
+950         for (let i = 0, ii = points.length; i < ii; i += 2) {
+951           const x = points[i];
+952           points[i] = points[i + 1] - blY;
+953           points[i + 1] = x - blX;
+954         }
+955         break;
+956       case 180:
+957         for (let i = 0, ii = points.length; i < ii; i += 2) {
+958           points[i] = trX - points[i];
+959           points[i + 1] -= blY;
+960         }
+961         break;
+962       case 270:
+963         for (let i = 0, ii = points.length; i < ii; i += 2) {
+964           const x = points[i];
+965           points[i] = trY - points[i + 1];
+966           points[i + 1] = trX - x;
+967         }
+968         break;
+969       default:
+970         throw new Error("Invalid rotation");
+971     }
+972     return points;
+973   }
+974 
+975   /**
+976    * Transform and serialize the paths.
+977    * @param {number} s - scale factor
+978    * @param {number} tx - abscissa of the translation
+979    * @param {number} ty - ordinate of the translation
+980    * @param {Array<number>} rect - the bounding box of the annotation
+981    */
+982   #serializePaths(s, tx, ty, rect) {
+983     const paths = [];
+984     const padding = this.thickness / 2;
+985     const shiftX = s * tx + padding;
+986     const shiftY = s * ty + padding;
+987     for (const bezier of this.paths) {
+988       const buffer = [];
+989       const points = [];
+990       for (let j = 0, jj = bezier.length; j < jj; j++) {
+991         const [first, control1, control2, second] = bezier[j];
+992         const p10 = s * first[0] + shiftX;
+993         const p11 = s * first[1] + shiftY;
+994         const p20 = s * control1[0] + shiftX;
+995         const p21 = s * control1[1] + shiftY;
+996         const p30 = s * control2[0] + shiftX;
+997         const p31 = s * control2[1] + shiftY;
+998         const p40 = s * second[0] + shiftX;
+999         const p41 = s * second[1] + shiftY;
+1000 
+1001         if (j === 0) {
+1002           buffer.push(p10, p11);
+1003           points.push(p10, p11);
+1004         }
+1005         buffer.push(p20, p21, p30, p31, p40, p41);
+1006         points.push(p20, p21);
+1007         if (j === jj - 1) {
+1008           points.push(p40, p41);
+1009         }
+1010       }
+1011       paths.push({
+1012         bezier: InkEditor.#toPDFCoordinates(buffer, rect, this.rotation),
+1013         points: InkEditor.#toPDFCoordinates(points, rect, this.rotation),
+1014       });
+1015     }
+1016 
+1017     return paths;
+1018   }
+1019 
+1020   /**
+1021    * Get the bounding box containing all the paths.
+1022    * @returns {Array<number>}
+1023    */
+1024   #getBbox() {
+1025     let xMin = Infinity;
+1026     let xMax = -Infinity;
+1027     let yMin = Infinity;
+1028     let yMax = -Infinity;
+1029 
+1030     for (const path of this.paths) {
+1031       for (const [first, control1, control2, second] of path) {
+1032         const bbox = Util.bezierBoundingBox(
+1033           ...first,
+1034           ...control1,
+1035           ...control2,
+1036           ...second
+1037         );
+1038         xMin = Math.min(xMin, bbox[0]);
+1039         yMin = Math.min(yMin, bbox[1]);
+1040         xMax = Math.max(xMax, bbox[2]);
+1041         yMax = Math.max(yMax, bbox[3]);
+1042       }
+1043     }
+1044 
+1045     return [xMin, yMin, xMax, yMax];
+1046   }
+1047 
+1048   /**
+1049    * The bounding box is computed with null thickness, so we must take
+1050    * it into account for the display.
+1051    * It corresponds to the total padding, hence it should be divided by 2
+1052    * in order to have left/right paddings.
+1053    * @returns {number}
+1054    */
+1055   #getPadding() {
+1056     return this.#disableEditing
+1057       ? Math.ceil(this.thickness * this.parentScale)
+1058       : 0;
+1059   }
+1060 
+1061   /**
+1062    * Set the div position and dimensions in order to fit to
+1063    * the bounding box of the contents.
+1064    * @returns {undefined}
+1065    */
+1066   #fitToContent(firstTime = false) {
+1067     if (this.isEmpty()) {
+1068       return;
+1069     }
+1070 
+1071     if (!this.#disableEditing) {
+1072       this.#redraw();
+1073       return;
+1074     }
+1075 
+1076     const bbox = this.#getBbox();
+1077     const padding = this.#getPadding();
+1078     this.#baseWidth = Math.max(AnnotationEditor.MIN_SIZE, bbox[2] - bbox[0]);
+1079     this.#baseHeight = Math.max(AnnotationEditor.MIN_SIZE, bbox[3] - bbox[1]);
+1080 
+1081     const width = Math.ceil(padding + this.#baseWidth * this.scaleFactor);
+1082     const height = Math.ceil(padding + this.#baseHeight * this.scaleFactor);
+1083 
+1084     const [parentWidth, parentHeight] = this.parentDimensions;
+1085     this.width = width / parentWidth;
+1086     this.height = height / parentHeight;
+1087 
+1088     this.setAspectRatio(width, height);
+1089 
+1090     const prevTranslationX = this.translationX;
+1091     const prevTranslationY = this.translationY;
+1092 
+1093     this.translationX = -bbox[0];
+1094     this.translationY = -bbox[1];
+1095     this.#setCanvasDims();
+1096     this.#redraw();
+1097 
+1098     this.#realWidth = width;
+1099     this.#realHeight = height;
+1100 
+1101     this.setDims(width, height);
+1102     const unscaledPadding = firstTime ? padding / this.scaleFactor / 2 : 0;
+1103     this.translate(
+1104       prevTranslationX - this.translationX - unscaledPadding,
+1105       prevTranslationY - this.translationY - unscaledPadding
+1106     );
+1107   }
+1108 
+1109   /** @inheritdoc */
+1110   static deserialize(data, parent, uiManager) {
+1111     if (data instanceof InkAnnotationElement) {
+1112       return null;
+1113     }
+1114     const editor = super.deserialize(data, parent, uiManager);
+1115 
+1116     editor.thickness = data.thickness;
+1117     editor.color = Util.makeHexColor(...data.color);
+1118     editor.opacity = data.opacity;
+1119 
+1120     const [pageWidth, pageHeight] = editor.pageDimensions;
+1121     const width = editor.width * pageWidth;
+1122     const height = editor.height * pageHeight;
+1123     const scaleFactor = editor.parentScale;
+1124     const padding = data.thickness / 2;
+1125 
+1126     editor.#disableEditing = true;
+1127     editor.#realWidth = Math.round(width);
+1128     editor.#realHeight = Math.round(height);
+1129 
+1130     const { paths, rect, rotation } = data;
+1131 
+1132     for (let { bezier } of paths) {
+1133       bezier = InkEditor.#fromPDFCoordinates(bezier, rect, rotation);
+1134       const path = [];
+1135       editor.paths.push(path);
+1136       let p0 = scaleFactor * (bezier[0] - padding);
+1137       let p1 = scaleFactor * (bezier[1] - padding);
+1138       for (let i = 2, ii = bezier.length; i < ii; i += 6) {
+1139         const p10 = scaleFactor * (bezier[i] - padding);
+1140         const p11 = scaleFactor * (bezier[i + 1] - padding);
+1141         const p20 = scaleFactor * (bezier[i + 2] - padding);
+1142         const p21 = scaleFactor * (bezier[i + 3] - padding);
+1143         const p30 = scaleFactor * (bezier[i + 4] - padding);
+1144         const p31 = scaleFactor * (bezier[i + 5] - padding);
+1145         path.push([
+1146           [p0, p1],
+1147           [p10, p11],
+1148           [p20, p21],
+1149           [p30, p31],
+1150         ]);
+1151         p0 = p30;
+1152         p1 = p31;
+1153       }
+1154       const path2D = this.#buildPath2D(path);
+1155       editor.bezierPath2D.push(path2D);
+1156     }
+1157 
+1158     const bbox = editor.#getBbox();
+1159     editor.#baseWidth = Math.max(AnnotationEditor.MIN_SIZE, bbox[2] - bbox[0]);
+1160     editor.#baseHeight = Math.max(AnnotationEditor.MIN_SIZE, bbox[3] - bbox[1]);
+1161     editor.#setScaleFactor(width, height);
+1162 
+1163     return editor;
+1164   }
+1165 
+1166   /** @inheritdoc */
+1167   serialize() {
+1168     if (this.isEmpty()) {
+1169       return null;
+1170     }
+1171 
+1172     const rect = this.getRect(0, 0);
+1173     const color = AnnotationEditor._colorManager.convert(this.ctx.strokeStyle);
+1174 
+1175     return {
+1176       annotationType: AnnotationEditorType.INK,
+1177       color,
+1178       thickness: this.thickness,
+1179       opacity: this.opacity,
+1180       paths: this.#serializePaths(
+1181         this.scaleFactor / this.parentScale,
+1182         this.translationX,
+1183         this.translationY,
+1184         rect
+1185       ),
+1186       pageIndex: this.pageIndex,
+1187       rect,
+1188       rotation: this.rotation,
+1189     };
+1190   }
+1191 }
+1192 
+1193 export { InkEditor };
+File:
+src/display/editor/stamp.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { AnnotationEditor } from "./editor.js";
+17 import { AnnotationEditorType } from "../../shared/util.js";
+18 import { PixelsPerInch } from "../display_utils.js";
+19 import { StampAnnotationElement } from "../annotation_layer.js";
+20 
+21 /**
+22  * Basic text editor in order to create a FreeTex annotation.
+23  */
+24 class StampEditor extends AnnotationEditor {
+25   #bitmap = null;
+26 
+27   #bitmapId = null;
+28 
+29   #bitmapPromise = null;
+30 
+31   #bitmapUrl = null;
+32 
+33   #canvas = null;
+34 
+35   #observer = null;
+36 
+37   #resizeTimeoutId = null;
+38 
+39   #isSvg = false;
+40 
+41   static _type = "stamp";
+42 
+43   constructor(params) {
+44     super({ ...params, name: "stampEditor" });
+45     this.#bitmapUrl = params.bitmapUrl;
+46   }
+47 
+48   #getBitmap() {
+49     if (this.#bitmapId) {
+50       this._uiManager.imageManager.getFromId(this.#bitmapId).then(data => {
+51         if (!data) {
+52           this.remove();
+53           return;
+54         }
+55         this.#bitmap = data.bitmap;
+56         this.#createCanvas();
+57       });
+58       return;
+59     }
+60 
+61     if (this.#bitmapUrl) {
+62       const url = this.#bitmapUrl;
+63       this.#bitmapUrl = null;
+64       this.#bitmapPromise = this._uiManager.imageManager
+65         .getFromUrl(url)
+66         .then(data => {
+67           this.#bitmapPromise = null;
+68           if (!data) {
+69             this.remove();
+70             return;
+71           }
+72           ({
+73             bitmap: this.#bitmap,
+74             id: this.#bitmapId,
+75             isSvg: this.#isSvg,
+76           } = data);
+77           this.#createCanvas();
+78         });
+79       return;
+80     }
+81 
+82     const input = document.createElement("input");
+83     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+84       input.hidden = true;
+85       input.id = "stampEditorFileInput";
+86       document.body.append(input);
+87     }
+88     input.type = "file";
+89     input.accept = "image/*";
+90     this.#bitmapPromise = new Promise(resolve => {
+91       input.addEventListener("change", async () => {
+92         this.#bitmapPromise = null;
+93         if (!input.files || input.files.length === 0) {
+94           this.remove();
+95         } else {
+96           const data = await this._uiManager.imageManager.getFromFile(
+97             input.files[0]
+98           );
+99           if (!data) {
+100             this.remove();
+101             return;
+102           }
+103           ({
+104             bitmap: this.#bitmap,
+105             id: this.#bitmapId,
+106             isSvg: this.#isSvg,
+107           } = data);
+108           this.#createCanvas();
+109         }
+110         if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+111           input.remove();
+112         }
+113         resolve();
+114       });
+115       input.addEventListener("cancel", () => {
+116         this.#bitmapPromise = null;
+117         this.remove();
+118         resolve();
+119       });
+120     });
+121     if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("TESTING")) {
+122       input.click();
+123     }
+124   }
+125 
+126   /** @inheritdoc */
+127   remove() {
+128     if (this.#bitmapId) {
+129       this.#bitmap = null;
+130       this._uiManager.imageManager.deleteId(this.#bitmapId);
+131       this.#canvas?.remove();
+132       this.#canvas = null;
+133       this.#observer?.disconnect();
+134       this.#observer = null;
+135     }
+136     super.remove();
+137   }
+138 
+139   /** @inheritdoc */
+140   rebuild() {
+141     super.rebuild();
+142     if (this.div === null) {
+143       return;
+144     }
+145 
+146     if (this.#bitmapId) {
+147       this.#getBitmap();
+148     }
+149 
+150     if (!this.isAttachedToDOM) {
+151       // At some point this editor was removed and we're rebuilting it,
+152       // hence we must add it to its parent.
+153       this.parent.add(this);
+154     }
+155   }
+156 
+157   /** @inheritdoc */
+158   onceAdded() {
+159     this.div.draggable = true;
+160     this.parent.addUndoableEditor(this);
+161     this.div.focus();
+162   }
+163 
+164   /** @inheritdoc */
+165   isEmpty() {
+166     return (
+167       this.#bitmapPromise === null &&
+168       this.#bitmap === null &&
+169       this.#bitmapUrl === null
+170     );
+171   }
+172 
+173   /** @inheritdoc */
+174   render() {
+175     if (this.div) {
+176       return this.div;
+177     }
+178 
+179     let baseX, baseY;
+180     if (this.width) {
+181       baseX = this.x;
+182       baseY = this.y;
+183     }
+184 
+185     super.render();
+186 
+187     if (this.#bitmap) {
+188       this.#createCanvas();
+189     } else {
+190       this.div.classList.add("loading");
+191       this.#getBitmap();
+192     }
+193 
+194     if (this.width) {
+195       // This editor was created in using copy (ctrl+c).
+196       const [parentWidth, parentHeight] = this.parentDimensions;
+197       this.setAspectRatio(this.width * parentWidth, this.height * parentHeight);
+198       this.setAt(
+199         baseX * parentWidth,
+200         baseY * parentHeight,
+201         this.width * parentWidth,
+202         this.height * parentHeight
+203       );
+204     }
+205 
+206     return this.div;
+207   }
+208 
+209   #createCanvas() {
+210     const { div } = this;
+211     let { width, height } = this.#bitmap;
+212     const [pageWidth, pageHeight] = this.pageDimensions;
+213     const MAX_RATIO = 0.75;
+214     if (this.width) {
+215       width = this.width * pageWidth;
+216       height = this.height * pageHeight;
+217     } else if (
+218       width > MAX_RATIO * pageWidth ||
+219       height > MAX_RATIO * pageHeight
+220     ) {
+221       // If the the image is too big compared to the page dimensions
+222       // (more than MAX_RATIO) then we scale it down.
+223       const factor = Math.min(
+224         (MAX_RATIO * pageWidth) / width,
+225         (MAX_RATIO * pageHeight) / height
+226       );
+227       width *= factor;
+228       height *= factor;
+229     }
+230     const [parentWidth, parentHeight] = this.parentDimensions;
+231     this.setDims(
+232       (width * parentWidth) / pageWidth,
+233       (height * parentHeight) / pageHeight
+234     );
+235 
+236     this.setAspectRatio(width, height);
+237 
+238     const canvas = (this.#canvas = document.createElement("canvas"));
+239     div.append(canvas);
+240     this.#drawBitmap(width, height);
+241     this.#createObserver();
+242     div.classList.remove("loading");
+243   }
+244 
+245   /**
+246    * When the dimensions of the div change the inner canvas must
+247    * renew its dimensions, hence it must redraw its own contents.
+248    * @param {number} width - the new width of the div
+249    * @param {number} height - the new height of the div
+250    * @returns
+251    */
+252   #setDimensions(width, height) {
+253     const [parentWidth, parentHeight] = this.parentDimensions;
+254     this.width = width / parentWidth;
+255     this.height = height / parentHeight;
+256     this.setDims(width, height);
+257     this.fixAndSetPosition();
+258     if (this.#resizeTimeoutId !== null) {
+259       clearTimeout(this.#resizeTimeoutId);
+260     }
+261     // When the user is resizing the editor we just use CSS to scale the image
+262     // to avoid redrawing it too often.
+263     // And once the user stops resizing the editor we redraw the image in
+264     // rescaling it correctly (see this.#scaleBitmap).
+265     const TIME_TO_WAIT = 200;
+266     this.#resizeTimeoutId = setTimeout(() => {
+267       this.#resizeTimeoutId = null;
+268       this.#drawBitmap(width, height);
+269     }, TIME_TO_WAIT);
+270   }
+271 
+272   #scaleBitmap(width, height) {
+273     const { width: bitmapWidth, height: bitmapHeight } = this.#bitmap;
+274 
+275     let newWidth = bitmapWidth;
+276     let newHeight = bitmapHeight;
+277     let bitmap = this.#bitmap;
+278     while (newWidth > 2 * width || newHeight > 2 * height) {
+279       const prevWidth = newWidth;
+280       const prevHeight = newHeight;
+281 
+282       if (newWidth > 2 * width) {
+283         // See bug 1820511 (Windows specific bug).
+284         // TODO: once the above bug is fixed we could revert to:
+285         // newWidth = Math.ceil(newWidth / 2);
+286         newWidth =
+287           newWidth >= 16384
+288             ? Math.floor(newWidth / 2) - 1
+289             : Math.ceil(newWidth / 2);
+290       }
+291       if (newHeight > 2 * height) {
+292         newHeight =
+293           newHeight >= 16384
+294             ? Math.floor(newHeight / 2) - 1
+295             : Math.ceil(newHeight / 2);
+296       }
+297 
+298       const offscreen = new OffscreenCanvas(newWidth, newHeight);
+299       const ctx = offscreen.getContext("2d");
+300       ctx.drawImage(
+301         bitmap,
+302         0,
+303         0,
+304         prevWidth,
+305         prevHeight,
+306         0,
+307         0,
+308         newWidth,
+309         newHeight
+310       );
+311       bitmap = offscreen.transferToImageBitmap();
+312     }
+313 
+314     return bitmap;
+315   }
+316 
+317   #drawBitmap(width, height) {
+318     const canvas = this.#canvas;
+319     if (!canvas || (canvas.width === width && canvas.height === height)) {
+320       return;
+321     }
+322     canvas.width = width;
+323     canvas.height = height;
+324     const bitmap = this.#isSvg
+325       ? this.#bitmap
+326       : this.#scaleBitmap(width, height);
+327     const ctx = canvas.getContext("2d");
+328     ctx.filter = this._uiManager.hcmFilter;
+329     ctx.drawImage(
+330       bitmap,
+331       0,
+332       0,
+333       bitmap.width,
+334       bitmap.height,
+335       0,
+336       0,
+337       width,
+338       height
+339     );
+340   }
+341 
+342   #serializeBitmap(toUrl) {
+343     if (toUrl) {
+344       if (this.#isSvg) {
+345         const url = this._uiManager.imageManager.getSvgUrl(this.#bitmapId);
+346         if (url) {
+347           return url;
+348         }
+349       }
+350       // We convert to a data url because it's sync and the url can live in the
+351       // clipboard.
+352       const canvas = document.createElement("canvas");
+353       ({ width: canvas.width, height: canvas.height } = this.#bitmap);
+354       const ctx = canvas.getContext("2d");
+355       ctx.drawImage(this.#bitmap, 0, 0);
+356 
+357       return canvas.toDataURL();
+358     }
+359 
+360     if (this.#isSvg) {
+361       const [pageWidth, pageHeight] = this.pageDimensions;
+362       // Multiply by PixelsPerInch.PDF_TO_CSS_UNITS in order to increase the
+363       // image resolution when rasterizing it.
+364       const width = Math.round(
+365         this.width * pageWidth * PixelsPerInch.PDF_TO_CSS_UNITS
+366       );
+367       const height = Math.round(
+368         this.height * pageHeight * PixelsPerInch.PDF_TO_CSS_UNITS
+369       );
+370       const offscreen = new OffscreenCanvas(width, height);
+371       const ctx = offscreen.getContext("2d");
+372       ctx.drawImage(
+373         this.#bitmap,
+374         0,
+375         0,
+376         this.#bitmap.width,
+377         this.#bitmap.height,
+378         0,
+379         0,
+380         width,
+381         height
+382       );
+383       return offscreen.transferToImageBitmap();
+384     }
+385 
+386     return structuredClone(this.#bitmap);
+387   }
+388 
+389   /**
+390    * Create the resize observer.
+391    */
+392   #createObserver() {
+393     this.#observer = new ResizeObserver(entries => {
+394       const rect = entries[0].contentRect;
+395       if (rect.width && rect.height) {
+396         this.#setDimensions(rect.width, rect.height);
+397       }
+398     });
+399     this.#observer.observe(this.div);
+400   }
+401 
+402   /** @inheritdoc */
+403   static deserialize(data, parent, uiManager) {
+404     if (data instanceof StampAnnotationElement) {
+405       return null;
+406     }
+407     const editor = super.deserialize(data, parent, uiManager);
+408     const { rect, bitmapUrl, bitmapId, isSvg } = data;
+409     if (bitmapId && uiManager.imageManager.isValidId(bitmapId)) {
+410       editor.#bitmapId = bitmapId;
+411     } else {
+412       editor.#bitmapUrl = bitmapUrl;
+413     }
+414     editor.#isSvg = isSvg;
+415 
+416     const [parentWidth, parentHeight] = editor.pageDimensions;
+417     editor.width = (rect[2] - rect[0]) / parentWidth;
+418     editor.height = (rect[3] - rect[1]) / parentHeight;
+419 
+420     return editor;
+421   }
+422 
+423   /** @inheritdoc */
+424   serialize(isForCopying = false, context = null) {
+425     if (this.isEmpty()) {
+426       return null;
+427     }
+428 
+429     const serialized = {
+430       annotationType: AnnotationEditorType.STAMP,
+431       bitmapId: this.#bitmapId,
+432       pageIndex: this.pageIndex,
+433       rect: this.getRect(0, 0),
+434       rotation: this.rotation,
+435       isSvg: this.#isSvg,
+436     };
+437 
+438     if (isForCopying) {
+439       // We don't know what's the final destination (this pdf or another one)
+440       // of this annotation and the clipboard doesn't support ImageBitmaps,
+441       // hence we serialize the bitmap to a data url.
+442       serialized.bitmapUrl = this.#serializeBitmap(/* toUrl = */ true);
+443       return serialized;
+444     }
+445 
+446     if (context === null) {
+447       return serialized;
+448     }
+449 
+450     context.stamps ||= new Map();
+451     const area = this.#isSvg
+452       ? (serialized.rect[2] - serialized.rect[0]) *
+453         (serialized.rect[3] - serialized.rect[1])
+454       : null;
+455     if (!context.stamps.has(this.#bitmapId)) {
+456       // We don't want to have multiple copies of the same bitmap in the
+457       // annotationMap, hence we only add the bitmap the first time we meet it.
+458       context.stamps.set(this.#bitmapId, { area, serialized });
+459       serialized.bitmap = this.#serializeBitmap(/* toUrl = */ false);
+460     } else if (this.#isSvg) {
+461       // If we have multiple copies of the same svg but with different sizes,
+462       // then we want to keep the biggest one.
+463       const prevData = context.stamps.get(this.#bitmapId);
+464       if (area > prevData.area) {
+465         prevData.area = area;
+466         prevData.serialized.bitmap.close();
+467         prevData.serialized.bitmap = this.#serializeBitmap(/* toUrl = */ false);
+468       }
+469     }
+470     return serialized;
+471   }
+472 }
+473 
+474 export { StampEditor };
+File:
+src/display/editor/tools.js
+1 /* Copyright 2022 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 /** @typedef {import("./editor.js").AnnotationEditor} AnnotationEditor */
+17 // eslint-disable-next-line max-len
+18 /** @typedef {import("./annotation_editor_layer.js").AnnotationEditorLayer} AnnotationEditorLayer */
+19 
+20 import {
+21   AnnotationEditorPrefix,
+22   AnnotationEditorType,
+23   FeatureTest,
+24   getUuid,
+25   shadow,
+26   Util,
+27   warn,
+28 } from "../../shared/util.js";
+29 import { getColorValues, getRGB, PixelsPerInch } from "../display_utils.js";
+30 
+31 function bindEvents(obj, element, names) {
+32   for (const name of names) {
+33     element.addEventListener(name, obj[name].bind(obj));
+34   }
+35 }
+36 
+37 /**
+38  * Convert a number between 0 and 100 into an hex number between 0 and 255.
+39  * @param {number} opacity
+40  * @return {string}
+41  */
+42 function opacityToHex(opacity) {
+43   return Math.round(Math.min(255, Math.max(1, 255 * opacity)))
+44     .toString(16)
+45     .padStart(2, "0");
+46 }
+47 
+48 /**
+49  * Class to create some unique ids for the different editors.
+50  */
+51 class IdManager {
+52   #id = 0;
+53 
+54   /**
+55    * Get a unique id.
+56    * @returns {string}
+57    */
+58   getId() {
+59     return `${AnnotationEditorPrefix}${this.#id++}`;
+60   }
+61 }
+62 
+63 /**
+64  * Class to manage the images used by the editors.
+65  * The main idea is to try to minimize the memory used by the images.
+66  * The images are cached and reused when possible
+67  * We use a refCounter to know when an image is not used anymore but we need to
+68  * be able to restore an image after a remove+undo, so we keep a file reference
+69  * or an url one.
+70  */
+71 class ImageManager {
+72   #baseId = getUuid();
+73 
+74   #id = 0;
+75 
+76   #cache = null;
+77 
+78   async #get(key, rawData) {
+79     this.#cache ||= new Map();
+80     let data = this.#cache.get(key);
+81     if (data === null) {
+82       // We already tried to load the image but it failed.
+83       return null;
+84     }
+85     if (data?.bitmap) {
+86       data.refCounter += 1;
+87       return data;
+88     }
+89     try {
+90       data ||= {
+91         bitmap: null,
+92         id: `image_${this.#baseId}_${this.#id++}`,
+93         refCounter: 0,
+94         isSvg: false,
+95       };
+96       let image;
+97       if (typeof rawData === "string") {
+98         data.url = rawData;
+99 
+100         const response = await fetch(rawData);
+101         if (!response.ok) {
+102           throw new Error(response.statusText);
+103         }
+104         image = await response.blob();
+105       } else {
+106         image = data.file = rawData;
+107       }
+108 
+109       if (image.type === "image/svg+xml") {
+110         // Unfortunately, createImageBitmap doesn't work with SVG images.
+111         // (see https://bugzilla.mozilla.org/1841972).
+112         const fileReader = new FileReader();
+113         const imageElement = new Image();
+114         const imagePromise = new Promise((resolve, reject) => {
+115           imageElement.onload = () => {
+116             data.bitmap = imageElement;
+117             data.isSvg = true;
+118             resolve();
+119           };
+120           fileReader.onload = () => {
+121             imageElement.src = data.svgUrl = fileReader.result;
+122           };
+123           imageElement.onerror = fileReader.onerror = reject;
+124         });
+125         fileReader.readAsDataURL(image);
+126         await imagePromise;
+127       } else {
+128         data.bitmap = await createImageBitmap(image);
+129       }
+130       data.refCounter = 1;
+131     } catch (e) {
+132       console.error(e);
+133       data = null;
+134     }
+135     this.#cache.set(key, data);
+136     if (data) {
+137       this.#cache.set(data.id, data);
+138     }
+139     return data;
+140   }
+141 
+142   async getFromFile(file) {
+143     const { lastModified, name, size, type } = file;
+144     return this.#get(`${lastModified}_${name}_${size}_${type}`, file);
+145   }
+146 
+147   async getFromUrl(url) {
+148     return this.#get(url, url);
+149   }
+150 
+151   async getFromId(id) {
+152     this.#cache ||= new Map();
+153     const data = this.#cache.get(id);
+154     if (!data) {
+155       return null;
+156     }
+157     if (data.bitmap) {
+158       data.refCounter += 1;
+159       return data;
+160     }
+161 
+162     if (data.file) {
+163       return this.getFromFile(data.file);
+164     }
+165     return this.getFromUrl(data.url);
+166   }
+167 
+168   getSvgUrl(id) {
+169     const data = this.#cache.get(id);
+170     if (!data?.isSvg) {
+171       return null;
+172     }
+173     return data.svgUrl;
+174   }
+175 
+176   deleteId(id) {
+177     this.#cache ||= new Map();
+178     const data = this.#cache.get(id);
+179     if (!data) {
+180       return;
+181     }
+182     data.refCounter -= 1;
+183     if (data.refCounter !== 0) {
+184       return;
+185     }
+186     data.bitmap = null;
+187   }
+188 
+189   // We can use the id only if it belongs this manager.
+190   // We must take care of having the right manager because we can copy/paste
+191   // some images from other documents, hence it'd be a pity to use an id from an
+192   // other manager.
+193   isValidId(id) {
+194     return id.startsWith(`image_${this.#baseId}_`);
+195   }
+196 }
+197 
+198 /**
+199  * Class to handle undo/redo.
+200  * Commands are just saved in a buffer.
+201  * If we hit some memory issues we could likely use a circular buffer.
+202  * It has to be used as a singleton.
+203  */
+204 class CommandManager {
+205   #commands = [];
+206 
+207   #locked = false;
+208 
+209   #maxSize;
+210 
+211   #position = -1;
+212 
+213   constructor(maxSize = 128) {
+214     this.#maxSize = maxSize;
+215   }
+216 
+217   /**
+218    * @typedef {Object} addOptions
+219    * @property {function} cmd
+220    * @property {function} undo
+221    * @property {boolean} mustExec
+222    * @property {number} type
+223    * @property {boolean} overwriteIfSameType
+224    * @property {boolean} keepUndo
+225    */
+226 
+227   /**
+228    * Add a new couple of commands to be used in case of redo/undo.
+229    * @param {addOptions} options
+230    */
+231   add({
+232     cmd,
+233     undo,
+234     mustExec,
+235     type = NaN,
+236     overwriteIfSameType = false,
+237     keepUndo = false,
+238   }) {
+239     if (mustExec) {
+240       cmd();
+241     }
+242 
+243     if (this.#locked) {
+244       return;
+245     }
+246 
+247     const save = { cmd, undo, type };
+248     if (this.#position === -1) {
+249       if (this.#commands.length > 0) {
+250         // All the commands have been undone and then a new one is added
+251         // hence we clear the queue.
+252         this.#commands.length = 0;
+253       }
+254       this.#position = 0;
+255       this.#commands.push(save);
+256       return;
+257     }
+258 
+259     if (overwriteIfSameType && this.#commands[this.#position].type === type) {
+260       // For example when we change a color we don't want to
+261       // be able to undo all the steps, hence we only want to
+262       // keep the last undoable action in this sequence of actions.
+263       if (keepUndo) {
+264         save.undo = this.#commands[this.#position].undo;
+265       }
+266       this.#commands[this.#position] = save;
+267       return;
+268     }
+269 
+270     const next = this.#position + 1;
+271     if (next === this.#maxSize) {
+272       this.#commands.splice(0, 1);
+273     } else {
+274       this.#position = next;
+275       if (next < this.#commands.length) {
+276         this.#commands.splice(next);
+277       }
+278     }
+279 
+280     this.#commands.push(save);
+281   }
+282 
+283   /**
+284    * Undo the last command.
+285    */
+286   undo() {
+287     if (this.#position === -1) {
+288       // Nothing to undo.
+289       return;
+290     }
+291 
+292     // Avoid to insert something during the undo execution.
+293     this.#locked = true;
+294     this.#commands[this.#position].undo();
+295     this.#locked = false;
+296 
+297     this.#position -= 1;
+298   }
+299 
+300   /**
+301    * Redo the last command.
+302    */
+303   redo() {
+304     if (this.#position < this.#commands.length - 1) {
+305       this.#position += 1;
+306 
+307       // Avoid to insert something during the redo execution.
+308       this.#locked = true;
+309       this.#commands[this.#position].cmd();
+310       this.#locked = false;
+311     }
+312   }
+313 
+314   /**
+315    * Check if there is something to undo.
+316    * @returns {boolean}
+317    */
+318   hasSomethingToUndo() {
+319     return this.#position !== -1;
+320   }
+321 
+322   /**
+323    * Check if there is something to redo.
+324    * @returns {boolean}
+325    */
+326   hasSomethingToRedo() {
+327     return this.#position < this.#commands.length - 1;
+328   }
+329 
+330   destroy() {
+331     this.#commands = null;
+332   }
+333 }
+334 
+335 /**
+336  * Class to handle the different keyboards shortcuts we can have on mac or
+337  * non-mac OSes.
+338  */
+339 class KeyboardManager {
+340   /**
+341    * Create a new keyboard manager class.
+342    * @param {Array<Array>} callbacks - an array containing an array of shortcuts
+343    * and a callback to call.
+344    * A shortcut is a string like `ctrl+c` or `mac+ctrl+c` for mac OS.
+345    */
+346   constructor(callbacks) {
+347     this.buffer = [];
+348     this.callbacks = new Map();
+349     this.allKeys = new Set();
+350 
+351     const { isMac } = FeatureTest.platform;
+352     for (const [keys, callback, bubbles = false] of callbacks) {
+353       for (const key of keys) {
+354         const isMacKey = key.startsWith("mac+");
+355         if (isMac && isMacKey) {
+356           this.callbacks.set(key.slice(4), { callback, bubbles });
+357           this.allKeys.add(key.split("+").at(-1));
+358         } else if (!isMac && !isMacKey) {
+359           this.callbacks.set(key, { callback, bubbles });
+360           this.allKeys.add(key.split("+").at(-1));
+361         }
+362       }
+363     }
+364   }
+365 
+366   /**
+367    * Serialize an event into a string in order to match a
+368    * potential key for a callback.
+369    * @param {KeyboardEvent} event
+370    * @returns {string}
+371    */
+372   #serialize(event) {
+373     if (event.altKey) {
+374       this.buffer.push("alt");
+375     }
+376     if (event.ctrlKey) {
+377       this.buffer.push("ctrl");
+378     }
+379     if (event.metaKey) {
+380       this.buffer.push("meta");
+381     }
+382     if (event.shiftKey) {
+383       this.buffer.push("shift");
+384     }
+385     this.buffer.push(event.key);
+386     const str = this.buffer.join("+");
+387     this.buffer.length = 0;
+388 
+389     return str;
+390   }
+391 
+392   /**
+393    * Execute a callback, if any, for a given keyboard event.
+394    * The self is used as `this` in the callback.
+395    * @param {Object} self.
+396    * @param {KeyboardEvent} event
+397    * @returns
+398    */
+399   exec(self, event) {
+400     if (!this.allKeys.has(event.key)) {
+401       return;
+402     }
+403     const info = this.callbacks.get(this.#serialize(event));
+404     if (!info) {
+405       return;
+406     }
+407     const { callback, bubbles } = info;
+408     callback.bind(self)();
+409 
+410     // For example, ctrl+s in a FreeText must be handled by the viewer, hence
+411     // the event must bubble.
+412     if (!bubbles) {
+413       event.stopPropagation();
+414       event.preventDefault();
+415     }
+416   }
+417 }
+418 
+419 class ColorManager {
+420   static _colorsMapping = new Map([
+421     ["CanvasText", [0, 0, 0]],
+422     ["Canvas", [255, 255, 255]],
+423   ]);
+424 
+425   get _colors() {
+426     if (
+427       typeof PDFJSDev !== "undefined" &&
+428       PDFJSDev.test("LIB") &&
+429       typeof document === "undefined"
+430     ) {
+431       return shadow(this, "_colors", ColorManager._colorsMapping);
+432     }
+433 
+434     const colors = new Map([
+435       ["CanvasText", null],
+436       ["Canvas", null],
+437     ]);
+438     getColorValues(colors);
+439     return shadow(this, "_colors", colors);
+440   }
+441 
+442   /**
+443    * In High Contrast Mode, the color on the screen is not always the
+444    * real color used in the pdf.
+445    * For example in some cases white can appear to be black but when saving
+446    * we want to have white.
+447    * @param {string} color
+448    * @returns {Array<number>}
+449    */
+450   convert(color) {
+451     const rgb = getRGB(color);
+452     if (!window.matchMedia("(forced-colors: active)").matches) {
+453       return rgb;
+454     }
+455 
+456     for (const [name, RGB] of this._colors) {
+457       if (RGB.every((x, i) => x === rgb[i])) {
+458         return ColorManager._colorsMapping.get(name);
+459       }
+460     }
+461     return rgb;
+462   }
+463 
+464   /**
+465    * An input element must have its color value as a hex string
+466    * and not as color name.
+467    * So this function converts a name into an hex string.
+468    * @param {string} name
+469    * @returns {string}
+470    */
+471   getHexCode(name) {
+472     const rgb = this._colors.get(name);
+473     if (!rgb) {
+474       return name;
+475     }
+476     return Util.makeHexColor(...rgb);
+477   }
+478 }
+479 
+480 /**
+481  * A pdf has several pages and each of them when it will rendered
+482  * will have an AnnotationEditorLayer which will contain the some
+483  * new Annotations associated to an editor in order to modify them.
+484  *
+485  * This class is used to manage all the different layers, editors and
+486  * some action like copy/paste, undo/redo, ...
+487  */
+488 class AnnotationEditorUIManager {
+489   #activeEditor = null;
+490 
+491   #allEditors = new Map();
+492 
+493   #allLayers = new Map();
+494 
+495   #annotationStorage = null;
+496 
+497   #commandManager = new CommandManager();
+498 
+499   #currentPageIndex = 0;
+500 
+501   #deletedAnnotationsElementIds = new Set();
+502 
+503   #editorTypes = null;
+504 
+505   #editorsToRescale = new Set();
+506 
+507   #eventBus = null;
+508 
+509   #filterFactory = null;
+510 
+511   #idManager = new IdManager();
+512 
+513   #isEnabled = false;
+514 
+515   #mode = AnnotationEditorType.NONE;
+516 
+517   #selectedEditors = new Set();
+518 
+519   #pageColors = null;
+520 
+521   #boundCopy = this.copy.bind(this);
+522 
+523   #boundCut = this.cut.bind(this);
+524 
+525   #boundPaste = this.paste.bind(this);
+526 
+527   #boundKeydown = this.keydown.bind(this);
+528 
+529   #boundOnEditingAction = this.onEditingAction.bind(this);
+530 
+531   #boundOnPageChanging = this.onPageChanging.bind(this);
+532 
+533   #boundOnScaleChanging = this.onScaleChanging.bind(this);
+534 
+535   #boundOnRotationChanging = this.onRotationChanging.bind(this);
+536 
+537   #previousStates = {
+538     isEditing: false,
+539     isEmpty: true,
+540     hasSomethingToUndo: false,
+541     hasSomethingToRedo: false,
+542     hasSelectedEditor: false,
+543   };
+544 
+545   #container = null;
+546 
+547   static get _keyboardManager() {
+548     return shadow(
+549       this,
+550       "_keyboardManager",
+551       new KeyboardManager([
+552         [
+553           ["ctrl+a", "mac+meta+a"],
+554           AnnotationEditorUIManager.prototype.selectAll,
+555         ],
+556         [["ctrl+z", "mac+meta+z"], AnnotationEditorUIManager.prototype.undo],
+557         [
+558           // On mac, depending of the OS version, the event.key is either "z" or
+559           // "Z" when the user presses "meta+shift+z".
+560           [
+561             "ctrl+y",
+562             "ctrl+shift+z",
+563             "mac+meta+shift+z",
+564             "ctrl+shift+Z",
+565             "mac+meta+shift+Z",
+566           ],
+567           AnnotationEditorUIManager.prototype.redo,
+568         ],
+569         [
+570           [
+571             "Backspace",
+572             "alt+Backspace",
+573             "ctrl+Backspace",
+574             "shift+Backspace",
+575             "mac+Backspace",
+576             "mac+alt+Backspace",
+577             "mac+ctrl+Backspace",
+578             "Delete",
+579             "ctrl+Delete",
+580             "shift+Delete",
+581             "mac+Delete",
+582           ],
+583           AnnotationEditorUIManager.prototype.delete,
+584         ],
+585         [
+586           ["Escape", "mac+Escape"],
+587           AnnotationEditorUIManager.prototype.unselectAll,
+588         ],
+589       ])
+590     );
+591   }
+592 
+593   constructor(container, eventBus, pdfDocument, pageColors) {
+594     this.#container = container;
+595     this.#eventBus = eventBus;
+596     this.#eventBus._on("editingaction", this.#boundOnEditingAction);
+597     this.#eventBus._on("pagechanging", this.#boundOnPageChanging);
+598     this.#eventBus._on("scalechanging", this.#boundOnScaleChanging);
+599     this.#eventBus._on("rotationchanging", this.#boundOnRotationChanging);
+600     this.#annotationStorage = pdfDocument.annotationStorage;
+601     this.#filterFactory = pdfDocument.filterFactory;
+602     this.#pageColors = pageColors;
+603     this.viewParameters = {
+604       realScale: PixelsPerInch.PDF_TO_CSS_UNITS,
+605       rotation: 0,
+606     };
+607   }
+608 
+609   destroy() {
+610     this.#removeKeyboardManager();
+611     this.#eventBus._off("editingaction", this.#boundOnEditingAction);
+612     this.#eventBus._off("pagechanging", this.#boundOnPageChanging);
+613     this.#eventBus._off("scalechanging", this.#boundOnScaleChanging);
+614     this.#eventBus._off("rotationchanging", this.#boundOnRotationChanging);
+615     for (const layer of this.#allLayers.values()) {
+616       layer.destroy();
+617     }
+618     this.#allLayers.clear();
+619     this.#allEditors.clear();
+620     this.#editorsToRescale.clear();
+621     this.#activeEditor = null;
+622     this.#selectedEditors.clear();
+623     this.#commandManager.destroy();
+624   }
+625 
+626   get hcmFilter() {
+627     return shadow(
+628       this,
+629       "hcmFilter",
+630       this.#pageColors
+631         ? this.#filterFactory.addHCMFilter(
+632             this.#pageColors.foreground,
+633             this.#pageColors.background
+634           )
+635         : "none"
+636     );
+637   }
+638 
+639   onPageChanging({ pageNumber }) {
+640     this.#currentPageIndex = pageNumber - 1;
+641   }
+642 
+643   focusMainContainer() {
+644     this.#container.focus();
+645   }
+646 
+647   addShouldRescale(editor) {
+648     this.#editorsToRescale.add(editor);
+649   }
+650 
+651   removeShouldRescale(editor) {
+652     this.#editorsToRescale.delete(editor);
+653   }
+654 
+655   onScaleChanging({ scale }) {
+656     this.commitOrRemove();
+657     this.viewParameters.realScale = scale * PixelsPerInch.PDF_TO_CSS_UNITS;
+658     for (const editor of this.#editorsToRescale) {
+659       editor.onScaleChanging();
+660     }
+661   }
+662 
+663   onRotationChanging({ pagesRotation }) {
+664     this.commitOrRemove();
+665     this.viewParameters.rotation = pagesRotation;
+666   }
+667 
+668   /**
+669    * Add an editor in the annotation storage.
+670    * @param {AnnotationEditor} editor
+671    */
+672   addToAnnotationStorage(editor) {
+673     if (
+674       !editor.isEmpty() &&
+675       this.#annotationStorage &&
+676       !this.#annotationStorage.has(editor.id)
+677     ) {
+678       this.#annotationStorage.setValue(editor.id, editor);
+679     }
+680   }
+681 
+682   #addKeyboardManager() {
+683     // The keyboard events are caught at the container level in order to be able
+684     // to execute some callbacks even if the current page doesn't have focus.
+685     this.#container.addEventListener("keydown", this.#boundKeydown);
+686   }
+687 
+688   #removeKeyboardManager() {
+689     this.#container.removeEventListener("keydown", this.#boundKeydown);
+690   }
+691 
+692   #addCopyPasteListeners() {
+693     document.addEventListener("copy", this.#boundCopy);
+694     document.addEventListener("cut", this.#boundCut);
+695     document.addEventListener("paste", this.#boundPaste);
+696   }
+697 
+698   #removeCopyPasteListeners() {
+699     document.removeEventListener("copy", this.#boundCopy);
+700     document.removeEventListener("cut", this.#boundCut);
+701     document.removeEventListener("paste", this.#boundPaste);
+702   }
+703 
+704   /**
+705    * Copy callback.
+706    * @param {ClipboardEvent} event
+707    */
+708   copy(event) {
+709     event.preventDefault();
+710 
+711     if (this.#activeEditor) {
+712       // An editor is being edited so just commit it.
+713       this.#activeEditor.commitOrRemove();
+714     }
+715 
+716     if (!this.hasSelection) {
+717       return;
+718     }
+719 
+720     const editors = [];
+721     for (const editor of this.#selectedEditors) {
+722       const serialized = editor.serialize(/* isForCopying = */ true);
+723       if (serialized) {
+724         editors.push(serialized);
+725       }
+726     }
+727     if (editors.length === 0) {
+728       return;
+729     }
+730 
+731     event.clipboardData.setData("application/pdfjs", JSON.stringify(editors));
+732   }
+733 
+734   /**
+735    * Cut callback.
+736    * @param {ClipboardEvent} event
+737    */
+738   cut(event) {
+739     this.copy(event);
+740     this.delete();
+741   }
+742 
+743   /**
+744    * Paste callback.
+745    * @param {ClipboardEvent} event
+746    */
+747   paste(event) {
+748     event.preventDefault();
+749 
+750     let data = event.clipboardData.getData("application/pdfjs");
+751     if (!data) {
+752       return;
+753     }
+754 
+755     try {
+756       data = JSON.parse(data);
+757     } catch (ex) {
+758       warn(`paste: "${ex.message}".`);
+759       return;
+760     }
+761 
+762     if (!Array.isArray(data)) {
+763       return;
+764     }
+765 
+766     this.unselectAll();
+767     const layer = this.#allLayers.get(this.#currentPageIndex);
+768 
+769     try {
+770       const newEditors = [];
+771       for (const editor of data) {
+772         const deserializedEditor = layer.deserialize(editor);
+773         if (!deserializedEditor) {
+774           return;
+775         }
+776         newEditors.push(deserializedEditor);
+777       }
+778 
+779       const cmd = () => {
+780         for (const editor of newEditors) {
+781           this.#addEditorToLayer(editor);
+782         }
+783         this.#selectEditors(newEditors);
+784       };
+785       const undo = () => {
+786         for (const editor of newEditors) {
+787           editor.remove();
+788         }
+789       };
+790       this.addCommands({ cmd, undo, mustExec: true });
+791     } catch (ex) {
+792       warn(`paste: "${ex.message}".`);
+793     }
+794   }
+795 
+796   /**
+797    * Keydown callback.
+798    * @param {KeyboardEvent} event
+799    */
+800   keydown(event) {
+801     if (!this.getActive()?.shouldGetKeyboardEvents()) {
+802       AnnotationEditorUIManager._keyboardManager.exec(this, event);
+803     }
+804   }
+805 
+806   /**
+807    * Execute an action for a given name.
+808    * For example, the user can click on the "Undo" entry in the context menu
+809    * and it'll trigger the undo action.
+810    * @param {Object} details
+811    */
+812   onEditingAction(details) {
+813     if (["undo", "redo", "delete", "selectAll"].includes(details.name)) {
+814       this[details.name]();
+815     }
+816   }
+817 
+818   /**
+819    * Update the different possible states of this manager, e.g. is there
+820    * something to undo, redo, ...
+821    * @param {Object} details
+822    */
+823   #dispatchUpdateStates(details) {
+824     const hasChanged = Object.entries(details).some(
+825       ([key, value]) => this.#previousStates[key] !== value
+826     );
+827 
+828     if (hasChanged) {
+829       this.#eventBus.dispatch("annotationeditorstateschanged", {
+830         source: this,
+831         details: Object.assign(this.#previousStates, details),
+832       });
+833     }
+834   }
+835 
+836   #dispatchUpdateUI(details) {
+837     this.#eventBus.dispatch("annotationeditorparamschanged", {
+838       source: this,
+839       details,
+840     });
+841   }
+842 
+843   /**
+844    * Set the editing state.
+845    * It can be useful to temporarily disable it when the user is editing a
+846    * FreeText annotation.
+847    * @param {boolean} isEditing
+848    */
+849   setEditingState(isEditing) {
+850     if (isEditing) {
+851       this.#addKeyboardManager();
+852       this.#addCopyPasteListeners();
+853       this.#dispatchUpdateStates({
+854         isEditing: this.#mode !== AnnotationEditorType.NONE,
+855         isEmpty: this.#isEmpty(),
+856         hasSomethingToUndo: this.#commandManager.hasSomethingToUndo(),
+857         hasSomethingToRedo: this.#commandManager.hasSomethingToRedo(),
+858         hasSelectedEditor: false,
+859       });
+860     } else {
+861       this.#removeKeyboardManager();
+862       this.#removeCopyPasteListeners();
+863       this.#dispatchUpdateStates({
+864         isEditing: false,
+865       });
+866     }
+867   }
+868 
+869   registerEditorTypes(types) {
+870     if (this.#editorTypes) {
+871       return;
+872     }
+873     this.#editorTypes = types;
+874     for (const editorType of this.#editorTypes) {
+875       this.#dispatchUpdateUI(editorType.defaultPropertiesToUpdate);
+876     }
+877   }
+878 
+879   /**
+880    * Get an id.
+881    * @returns {string}
+882    */
+883   getId() {
+884     return this.#idManager.getId();
+885   }
+886 
+887   get currentLayer() {
+888     return this.#allLayers.get(this.#currentPageIndex);
+889   }
+890 
+891   get currentPageIndex() {
+892     return this.#currentPageIndex;
+893   }
+894 
+895   /**
+896    * Add a new layer for a page which will contains the editors.
+897    * @param {AnnotationEditorLayer} layer
+898    */
+899   addLayer(layer) {
+900     this.#allLayers.set(layer.pageIndex, layer);
+901     if (this.#isEnabled) {
+902       layer.enable();
+903     } else {
+904       layer.disable();
+905     }
+906   }
+907 
+908   /**
+909    * Remove a layer.
+910    * @param {AnnotationEditorLayer} layer
+911    */
+912   removeLayer(layer) {
+913     this.#allLayers.delete(layer.pageIndex);
+914   }
+915 
+916   /**
+917    * Change the editor mode (None, FreeText, Ink, ...)
+918    * @param {number} mode
+919    * @param {string|null} editId
+920    */
+921   updateMode(mode, editId = null) {
+922     this.#mode = mode;
+923     if (mode === AnnotationEditorType.NONE) {
+924       this.setEditingState(false);
+925       this.#disableAll();
+926       return;
+927     }
+928     this.setEditingState(true);
+929     this.#enableAll();
+930     for (const layer of this.#allLayers.values()) {
+931       layer.updateMode(mode);
+932     }
+933     if (!editId) {
+934       return;
+935     }
+936     for (const editor of this.#allEditors.values()) {
+937       if (editor.annotationElementId === editId) {
+938         this.setSelected(editor);
+939         editor.enterInEditMode();
+940         break;
+941       }
+942     }
+943   }
+944 
+945   /**
+946    * Update the toolbar if it's required to reflect the tool currently used.
+947    * @param {number} mode
+948    * @returns {undefined}
+949    */
+950   updateToolbar(mode) {
+951     if (mode === this.#mode) {
+952       return;
+953     }
+954     this.#eventBus.dispatch("switchannotationeditormode", {
+955       source: this,
+956       mode,
+957     });
+958   }
+959 
+960   /**
+961    * Update a parameter in the current editor or globally.
+962    * @param {number} type
+963    * @param {*} value
+964    */
+965   updateParams(type, value) {
+966     if (!this.#editorTypes) {
+967       return;
+968     }
+969 
+970     for (const editor of this.#selectedEditors) {
+971       editor.updateParams(type, value);
+972     }
+973 
+974     for (const editorType of this.#editorTypes) {
+975       editorType.updateDefaultParams(type, value);
+976     }
+977   }
+978 
+979   /**
+980    * Enable all the layers.
+981    */
+982   #enableAll() {
+983     if (!this.#isEnabled) {
+984       this.#isEnabled = true;
+985       for (const layer of this.#allLayers.values()) {
+986         layer.enable();
+987       }
+988     }
+989   }
+990 
+991   /**
+992    * Disable all the layers.
+993    */
+994   #disableAll() {
+995     this.unselectAll();
+996     if (this.#isEnabled) {
+997       this.#isEnabled = false;
+998       for (const layer of this.#allLayers.values()) {
+999         layer.disable();
+1000       }
+1001     }
+1002   }
+1003 
+1004   /**
+1005    * Get all the editors belonging to a give page.
+1006    * @param {number} pageIndex
+1007    * @returns {Array<AnnotationEditor>}
+1008    */
+1009   getEditors(pageIndex) {
+1010     const editors = [];
+1011     for (const editor of this.#allEditors.values()) {
+1012       if (editor.pageIndex === pageIndex) {
+1013         editors.push(editor);
+1014       }
+1015     }
+1016     return editors;
+1017   }
+1018 
+1019   /**
+1020    * Get an editor with the given id.
+1021    * @param {string} id
+1022    * @returns {AnnotationEditor}
+1023    */
+1024   getEditor(id) {
+1025     return this.#allEditors.get(id);
+1026   }
+1027 
+1028   /**
+1029    * Add a new editor.
+1030    * @param {AnnotationEditor} editor
+1031    */
+1032   addEditor(editor) {
+1033     this.#allEditors.set(editor.id, editor);
+1034   }
+1035 
+1036   /**
+1037    * Remove an editor.
+1038    * @param {AnnotationEditor} editor
+1039    */
+1040   removeEditor(editor) {
+1041     this.#allEditors.delete(editor.id);
+1042     this.unselect(editor);
+1043     if (
+1044       !editor.annotationElementId ||
+1045       !this.#deletedAnnotationsElementIds.has(editor.annotationElementId)
+1046     ) {
+1047       this.#annotationStorage?.remove(editor.id);
+1048     }
+1049   }
+1050 
+1051   /**
+1052    * The annotation element with the given id has been deleted.
+1053    * @param {AnnotationEditor} editor
+1054    */
+1055   addDeletedAnnotationElement(editor) {
+1056     this.#deletedAnnotationsElementIds.add(editor.annotationElementId);
+1057     editor.deleted = true;
+1058   }
+1059 
+1060   /**
+1061    * Check if the annotation element with the given id has been deleted.
+1062    * @param {string} annotationElementId
+1063    * @returns {boolean}
+1064    */
+1065   isDeletedAnnotationElement(annotationElementId) {
+1066     return this.#deletedAnnotationsElementIds.has(annotationElementId);
+1067   }
+1068 
+1069   /**
+1070    * The annotation element with the given id have been restored.
+1071    * @param {AnnotationEditor} editor
+1072    */
+1073   removeDeletedAnnotationElement(editor) {
+1074     this.#deletedAnnotationsElementIds.delete(editor.annotationElementId);
+1075     editor.deleted = false;
+1076   }
+1077 
+1078   /**
+1079    * Add an editor to the layer it belongs to or add it to the global map.
+1080    * @param {AnnotationEditor} editor
+1081    */
+1082   #addEditorToLayer(editor) {
+1083     const layer = this.#allLayers.get(editor.pageIndex);
+1084     if (layer) {
+1085       layer.addOrRebuild(editor);
+1086     } else {
+1087       this.addEditor(editor);
+1088     }
+1089   }
+1090 
+1091   /**
+1092    * Set the given editor as the active one.
+1093    * @param {AnnotationEditor} editor
+1094    */
+1095   setActiveEditor(editor) {
+1096     if (this.#activeEditor === editor) {
+1097       return;
+1098     }
+1099 
+1100     this.#activeEditor = editor;
+1101     if (editor) {
+1102       this.#dispatchUpdateUI(editor.propertiesToUpdate);
+1103     }
+1104   }
+1105 
+1106   /**
+1107    * Add or remove an editor the current selection.
+1108    * @param {AnnotationEditor} editor
+1109    */
+1110   toggleSelected(editor) {
+1111     if (this.#selectedEditors.has(editor)) {
+1112       this.#selectedEditors.delete(editor);
+1113       editor.unselect();
+1114       this.#dispatchUpdateStates({
+1115         hasSelectedEditor: this.hasSelection,
+1116       });
+1117       return;
+1118     }
+1119     this.#selectedEditors.add(editor);
+1120     editor.select();
+1121     this.#dispatchUpdateUI(editor.propertiesToUpdate);
+1122     this.#dispatchUpdateStates({
+1123       hasSelectedEditor: true,
+1124     });
+1125   }
+1126 
+1127   /**
+1128    * Set the last selected editor.
+1129    * @param {AnnotationEditor} editor
+1130    */
+1131   setSelected(editor) {
+1132     for (const ed of this.#selectedEditors) {
+1133       if (ed !== editor) {
+1134         ed.unselect();
+1135       }
+1136     }
+1137     this.#selectedEditors.clear();
+1138 
+1139     this.#selectedEditors.add(editor);
+1140     editor.select();
+1141     this.#dispatchUpdateUI(editor.propertiesToUpdate);
+1142     this.#dispatchUpdateStates({
+1143       hasSelectedEditor: true,
+1144     });
+1145   }
+1146 
+1147   /**
+1148    * Check if the editor is selected.
+1149    * @param {AnnotationEditor} editor
+1150    */
+1151   isSelected(editor) {
+1152     return this.#selectedEditors.has(editor);
+1153   }
+1154 
+1155   /**
+1156    * Unselect an editor.
+1157    * @param {AnnotationEditor} editor
+1158    */
+1159   unselect(editor) {
+1160     editor.unselect();
+1161     this.#selectedEditors.delete(editor);
+1162     this.#dispatchUpdateStates({
+1163       hasSelectedEditor: this.hasSelection,
+1164     });
+1165   }
+1166 
+1167   get hasSelection() {
+1168     return this.#selectedEditors.size !== 0;
+1169   }
+1170 
+1171   /**
+1172    * Undo the last command.
+1173    */
+1174   undo() {
+1175     this.#commandManager.undo();
+1176     this.#dispatchUpdateStates({
+1177       hasSomethingToUndo: this.#commandManager.hasSomethingToUndo(),
+1178       hasSomethingToRedo: true,
+1179       isEmpty: this.#isEmpty(),
+1180     });
+1181   }
+1182 
+1183   /**
+1184    * Redo the last undoed command.
+1185    */
+1186   redo() {
+1187     this.#commandManager.redo();
+1188     this.#dispatchUpdateStates({
+1189       hasSomethingToUndo: true,
+1190       hasSomethingToRedo: this.#commandManager.hasSomethingToRedo(),
+1191       isEmpty: this.#isEmpty(),
+1192     });
+1193   }
+1194 
+1195   /**
+1196    * Add a command to execute (cmd) and another one to undo it.
+1197    * @param {Object} params
+1198    */
+1199   addCommands(params) {
+1200     this.#commandManager.add(params);
+1201     this.#dispatchUpdateStates({
+1202       hasSomethingToUndo: true,
+1203       hasSomethingToRedo: false,
+1204       isEmpty: this.#isEmpty(),
+1205     });
+1206   }
+1207 
+1208   #isEmpty() {
+1209     if (this.#allEditors.size === 0) {
+1210       return true;
+1211     }
+1212 
+1213     if (this.#allEditors.size === 1) {
+1214       for (const editor of this.#allEditors.values()) {
+1215         return editor.isEmpty();
+1216       }
+1217     }
+1218 
+1219     return false;
+1220   }
+1221 
+1222   /**
+1223    * Delete the current editor or all.
+1224    */
+1225   delete() {
+1226     this.commitOrRemove();
+1227     if (!this.hasSelection) {
+1228       return;
+1229     }
+1230 
+1231     const editors = [...this.#selectedEditors];
+1232     const cmd = () => {
+1233       for (const editor of editors) {
+1234         editor.remove();
+1235       }
+1236     };
+1237     const undo = () => {
+1238       for (const editor of editors) {
+1239         this.#addEditorToLayer(editor);
+1240       }
+1241     };
+1242 
+1243     this.addCommands({ cmd, undo, mustExec: true });
+1244   }
+1245 
+1246   commitOrRemove() {
+1247     // An editor is being edited so just commit it.
+1248     this.#activeEditor?.commitOrRemove();
+1249   }
+1250 
+1251   /**
+1252    * Select the editors.
+1253    * @param {Array<AnnotationEditor>} editors
+1254    */
+1255   #selectEditors(editors) {
+1256     this.#selectedEditors.clear();
+1257     for (const editor of editors) {
+1258       if (editor.isEmpty()) {
+1259         continue;
+1260       }
+1261       this.#selectedEditors.add(editor);
+1262       editor.select();
+1263     }
+1264     this.#dispatchUpdateStates({ hasSelectedEditor: true });
+1265   }
+1266 
+1267   /**
+1268    * Select all the editors.
+1269    */
+1270   selectAll() {
+1271     for (const editor of this.#selectedEditors) {
+1272       editor.commit();
+1273     }
+1274     this.#selectEditors(this.#allEditors.values());
+1275   }
+1276 
+1277   /**
+1278    * Unselect all the selected editors.
+1279    */
+1280   unselectAll() {
+1281     if (this.#activeEditor) {
+1282       // An editor is being edited so just commit it.
+1283       this.#activeEditor.commitOrRemove();
+1284       return;
+1285     }
+1286 
+1287     if (this.#selectedEditors.size === 0) {
+1288       return;
+1289     }
+1290     for (const editor of this.#selectedEditors) {
+1291       editor.unselect();
+1292     }
+1293     this.#selectedEditors.clear();
+1294     this.#dispatchUpdateStates({
+1295       hasSelectedEditor: false,
+1296     });
+1297   }
+1298 
+1299   /**
+1300    * Is the current editor the one passed as argument?
+1301    * @param {AnnotationEditor} editor
+1302    * @returns
+1303    */
+1304   isActive(editor) {
+1305     return this.#activeEditor === editor;
+1306   }
+1307 
+1308   /**
+1309    * Get the current active editor.
+1310    * @returns {AnnotationEditor|null}
+1311    */
+1312   getActive() {
+1313     return this.#activeEditor;
+1314   }
+1315 
+1316   /**
+1317    * Get the current editor mode.
+1318    * @returns {number}
+1319    */
+1320   getMode() {
+1321     return this.#mode;
+1322   }
+1323 
+1324   get imageManager() {
+1325     return shadow(this, "imageManager", new ImageManager());
+1326   }
+1327 }
+1328 
+1329 export {
+1330   AnnotationEditorUIManager,
+1331   bindEvents,
+1332   ColorManager,
+1333   CommandManager,
+1334   KeyboardManager,
+1335   opacityToHex,
+1336 };
+File:
+src/shared/util.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 /* globals process */
+16 
+17 // NW.js / Electron is a browser context, but copies some Node.js objects; see
+18 // http://docs.nwjs.io/en/latest/For%20Users/Advanced/JavaScript%20Contexts%20in%20NW.js/#access-nodejs-and-nwjs-api-in-browser-context
+19 // https://www.electronjs.org/docs/api/process#processversionselectron-readonly
+20 // https://www.electronjs.org/docs/api/process#processtype-readonly
+21 const isNodeJS =
+22   (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+23   typeof process === "object" &&
+24   process + "" === "[object process]" &&
+25   !process.versions.nw &&
+26   !(process.versions.electron && process.type && process.type !== "browser");
+27 
+28 const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0];
+29 const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
+30 
+31 const MAX_IMAGE_SIZE_TO_CACHE = 10e6; // Ten megabytes.
+32 
+33 // Represent the percentage of the height of a single-line field over
+34 // the font size. Acrobat seems to use this value.
+35 const LINE_FACTOR = 1.35;
+36 const LINE_DESCENT_FACTOR = 0.35;
+37 const BASELINE_FACTOR = LINE_DESCENT_FACTOR / LINE_FACTOR;
+38 
+39 /**
+40  * Refer to the `WorkerTransport.getRenderingIntent`-method in the API, to see
+41  * how these flags are being used:
+42  *  - ANY, DISPLAY, and PRINT are the normal rendering intents, note the
+43  *    `PDFPageProxy.{render, getOperatorList, getAnnotations}`-methods.
+44  *  - ANNOTATIONS_FORMS, ANNOTATIONS_STORAGE, ANNOTATIONS_DISABLE control which
+45  *    annotations are rendered onto the canvas (i.e. by being included in the
+46  *    operatorList), note the `PDFPageProxy.{render, getOperatorList}`-methods
+47  *    and their `annotationMode`-option.
+48  *  - OPLIST is used with the `PDFPageProxy.getOperatorList`-method, note the
+49  *    `OperatorList`-constructor (on the worker-thread).
+50  */
+51 const RenderingIntentFlag = {
+52   ANY: 0x01,
+53   DISPLAY: 0x02,
+54   PRINT: 0x04,
+55   SAVE: 0x08,
+56   ANNOTATIONS_FORMS: 0x10,
+57   ANNOTATIONS_STORAGE: 0x20,
+58   ANNOTATIONS_DISABLE: 0x40,
+59   OPLIST: 0x100,
+60 };
+61 
+62 const AnnotationMode = {
+63   DISABLE: 0,
+64   ENABLE: 1,
+65   ENABLE_FORMS: 2,
+66   ENABLE_STORAGE: 3,
+67 };
+68 
+69 const AnnotationEditorPrefix = "pdfjs_internal_editor_";
+70 
+71 const AnnotationEditorType = {
+72   DISABLE: -1,
+73   NONE: 0,
+74   FREETEXT: 3,
+75   STAMP: 13,
+76   INK: 15,
+77 };
+78 
+79 const AnnotationEditorParamsType = {
+80   FREETEXT_SIZE: 1,
+81   FREETEXT_COLOR: 2,
+82   FREETEXT_OPACITY: 3,
+83   INK_COLOR: 11,
+84   INK_THICKNESS: 12,
+85   INK_OPACITY: 13,
+86 };
+87 
+88 // Permission flags from Table 22, Section 7.6.3.2 of the PDF specification.
+89 const PermissionFlag = {
+90   PRINT: 0x04,
+91   MODIFY_CONTENTS: 0x08,
+92   COPY: 0x10,
+93   MODIFY_ANNOTATIONS: 0x20,
+94   FILL_INTERACTIVE_FORMS: 0x100,
+95   COPY_FOR_ACCESSIBILITY: 0x200,
+96   ASSEMBLE: 0x400,
+97   PRINT_HIGH_QUALITY: 0x800,
+98 };
+99 
+100 const TextRenderingMode = {
+101   FILL: 0,
+102   STROKE: 1,
+103   FILL_STROKE: 2,
+104   INVISIBLE: 3,
+105   FILL_ADD_TO_PATH: 4,
+106   STROKE_ADD_TO_PATH: 5,
+107   FILL_STROKE_ADD_TO_PATH: 6,
+108   ADD_TO_PATH: 7,
+109   FILL_STROKE_MASK: 3,
+110   ADD_TO_PATH_FLAG: 4,
+111 };
+112 
+113 const ImageKind = {
+114   GRAYSCALE_1BPP: 1,
+115   RGB_24BPP: 2,
+116   RGBA_32BPP: 3,
+117 };
+118 
+119 const AnnotationType = {
+120   TEXT: 1,
+121   LINK: 2,
+122   FREETEXT: 3,
+123   LINE: 4,
+124   SQUARE: 5,
+125   CIRCLE: 6,
+126   POLYGON: 7,
+127   POLYLINE: 8,
+128   HIGHLIGHT: 9,
+129   UNDERLINE: 10,
+130   SQUIGGLY: 11,
+131   STRIKEOUT: 12,
+132   STAMP: 13,
+133   CARET: 14,
+134   INK: 15,
+135   POPUP: 16,
+136   FILEATTACHMENT: 17,
+137   SOUND: 18,
+138   MOVIE: 19,
+139   WIDGET: 20,
+140   SCREEN: 21,
+141   PRINTERMARK: 22,
+142   TRAPNET: 23,
+143   WATERMARK: 24,
+144   THREED: 25,
+145   REDACT: 26,
+146 };
+147 
+148 const AnnotationReplyType = {
+149   GROUP: "Group",
+150   REPLY: "R",
+151 };
+152 
+153 const AnnotationFlag = {
+154   INVISIBLE: 0x01,
+155   HIDDEN: 0x02,
+156   PRINT: 0x04,
+157   NOZOOM: 0x08,
+158   NOROTATE: 0x10,
+159   NOVIEW: 0x20,
+160   READONLY: 0x40,
+161   LOCKED: 0x80,
+162   TOGGLENOVIEW: 0x100,
+163   LOCKEDCONTENTS: 0x200,
+164 };
+165 
+166 const AnnotationFieldFlag = {
+167   READONLY: 0x0000001,
+168   REQUIRED: 0x0000002,
+169   NOEXPORT: 0x0000004,
+170   MULTILINE: 0x0001000,
+171   PASSWORD: 0x0002000,
+172   NOTOGGLETOOFF: 0x0004000,
+173   RADIO: 0x0008000,
+174   PUSHBUTTON: 0x0010000,
+175   COMBO: 0x0020000,
+176   EDIT: 0x0040000,
+177   SORT: 0x0080000,
+178   FILESELECT: 0x0100000,
+179   MULTISELECT: 0x0200000,
+180   DONOTSPELLCHECK: 0x0400000,
+181   DONOTSCROLL: 0x0800000,
+182   COMB: 0x1000000,
+183   RICHTEXT: 0x2000000,
+184   RADIOSINUNISON: 0x2000000,
+185   COMMITONSELCHANGE: 0x4000000,
+186 };
+187 
+188 const AnnotationBorderStyleType = {
+189   SOLID: 1,
+190   DASHED: 2,
+191   BEVELED: 3,
+192   INSET: 4,
+193   UNDERLINE: 5,
+194 };
+195 
+196 const AnnotationActionEventType = {
+197   E: "Mouse Enter",
+198   X: "Mouse Exit",
+199   D: "Mouse Down",
+200   U: "Mouse Up",
+201   Fo: "Focus",
+202   Bl: "Blur",
+203   PO: "PageOpen",
+204   PC: "PageClose",
+205   PV: "PageVisible",
+206   PI: "PageInvisible",
+207   K: "Keystroke",
+208   F: "Format",
+209   V: "Validate",
+210   C: "Calculate",
+211 };
+212 
+213 const DocumentActionEventType = {
+214   WC: "WillClose",
+215   WS: "WillSave",
+216   DS: "DidSave",
+217   WP: "WillPrint",
+218   DP: "DidPrint",
+219 };
+220 
+221 const PageActionEventType = {
+222   O: "PageOpen",
+223   C: "PageClose",
+224 };
+225 
+226 const VerbosityLevel = {
+227   ERRORS: 0,
+228   WARNINGS: 1,
+229   INFOS: 5,
+230 };
+231 
+232 const CMapCompressionType = {
+233   NONE: 0,
+234   BINARY: 1,
+235 };
+236 
+237 // All the possible operations for an operator list.
+238 const OPS = {
+239   // Intentionally start from 1 so it is easy to spot bad operators that will be
+240   // 0's.
+241   // PLEASE NOTE: We purposely keep any removed operators commented out, since
+242   //              re-numbering the list would risk breaking third-party users.
+243   dependency: 1,
+244   setLineWidth: 2,
+245   setLineCap: 3,
+246   setLineJoin: 4,
+247   setMiterLimit: 5,
+248   setDash: 6,
+249   setRenderingIntent: 7,
+250   setFlatness: 8,
+251   setGState: 9,
+252   save: 10,
+253   restore: 11,
+254   transform: 12,
+255   moveTo: 13,
+256   lineTo: 14,
+257   curveTo: 15,
+258   curveTo2: 16,
+259   curveTo3: 17,
+260   closePath: 18,
+261   rectangle: 19,
+262   stroke: 20,
+263   closeStroke: 21,
+264   fill: 22,
+265   eoFill: 23,
+266   fillStroke: 24,
+267   eoFillStroke: 25,
+268   closeFillStroke: 26,
+269   closeEOFillStroke: 27,
+270   endPath: 28,
+271   clip: 29,
+272   eoClip: 30,
+273   beginText: 31,
+274   endText: 32,
+275   setCharSpacing: 33,
+276   setWordSpacing: 34,
+277   setHScale: 35,
+278   setLeading: 36,
+279   setFont: 37,
+280   setTextRenderingMode: 38,
+281   setTextRise: 39,
+282   moveText: 40,
+283   setLeadingMoveText: 41,
+284   setTextMatrix: 42,
+285   nextLine: 43,
+286   showText: 44,
+287   showSpacedText: 45,
+288   nextLineShowText: 46,
+289   nextLineSetSpacingShowText: 47,
+290   setCharWidth: 48,
+291   setCharWidthAndBounds: 49,
+292   setStrokeColorSpace: 50,
+293   setFillColorSpace: 51,
+294   setStrokeColor: 52,
+295   setStrokeColorN: 53,
+296   setFillColor: 54,
+297   setFillColorN: 55,
+298   setStrokeGray: 56,
+299   setFillGray: 57,
+300   setStrokeRGBColor: 58,
+301   setFillRGBColor: 59,
+302   setStrokeCMYKColor: 60,
+303   setFillCMYKColor: 61,
+304   shadingFill: 62,
+305   beginInlineImage: 63,
+306   beginImageData: 64,
+307   endInlineImage: 65,
+308   paintXObject: 66,
+309   markPoint: 67,
+310   markPointProps: 68,
+311   beginMarkedContent: 69,
+312   beginMarkedContentProps: 70,
+313   endMarkedContent: 71,
+314   beginCompat: 72,
+315   endCompat: 73,
+316   paintFormXObjectBegin: 74,
+317   paintFormXObjectEnd: 75,
+318   beginGroup: 76,
+319   endGroup: 77,
+320   // beginAnnotations: 78,
+321   // endAnnotations: 79,
+322   beginAnnotation: 80,
+323   endAnnotation: 81,
+324   // paintJpegXObject: 82,
+325   paintImageMaskXObject: 83,
+326   paintImageMaskXObjectGroup: 84,
+327   paintImageXObject: 85,
+328   paintInlineImageXObject: 86,
+329   paintInlineImageXObjectGroup: 87,
+330   paintImageXObjectRepeat: 88,
+331   paintImageMaskXObjectRepeat: 89,
+332   paintSolidColorImageMask: 90,
+333   constructPath: 91,
+334 };
+335 
+336 const PasswordResponses = {
+337   NEED_PASSWORD: 1,
+338   INCORRECT_PASSWORD: 2,
+339 };
+340 
+341 let verbosity = VerbosityLevel.WARNINGS;
+342 
+343 function setVerbosityLevel(level) {
+344   if (Number.isInteger(level)) {
+345     verbosity = level;
+346   }
+347 }
+348 
+349 function getVerbosityLevel() {
+350   return verbosity;
+351 }
+352 
+353 // A notice for devs. These are good for things that are helpful to devs, such
+354 // as warning that Workers were disabled, which is important to devs but not
+355 // end users.
+356 function info(msg) {
+357   if (verbosity >= VerbosityLevel.INFOS) {
+358     console.log(`Info: ${msg}`);
+359   }
+360 }
+361 
+362 // Non-fatal warnings.
+363 function warn(msg) {
+364   if (verbosity >= VerbosityLevel.WARNINGS) {
+365     console.log(`Warning: ${msg}`);
+366   }
+367 }
+368 
+369 function unreachable(msg) {
+370   throw new Error(msg);
+371 }
+372 
+373 function assert(cond, msg) {
+374   if (!cond) {
+375     unreachable(msg);
+376   }
+377 }
+378 
+379 // Checks if URLs use one of the allowed protocols, e.g. to avoid XSS.
+380 function _isValidProtocol(url) {
+381   switch (url?.protocol) {
+382     case "http:":
+383     case "https:":
+384     case "ftp:":
+385     case "mailto:":
+386     case "tel:":
+387       return true;
+388     default:
+389       return false;
+390   }
+391 }
+392 
+393 /**
+394  * Attempts to create a valid absolute URL.
+395  *
+396  * @param {URL|string} url - An absolute, or relative, URL.
+397  * @param {URL|string} [baseUrl] - An absolute URL.
+398  * @param {Object} [options]
+399  * @returns Either a valid {URL}, or `null` otherwise.
+400  */
+401 function createValidAbsoluteUrl(url, baseUrl = null, options = null) {
+402   if (!url) {
+403     return null;
+404   }
+405   try {
+406     if (options && typeof url === "string") {
+407       // Let URLs beginning with "www." default to using the "http://" protocol.
+408       if (options.addDefaultProtocol && url.startsWith("www.")) {
+409         const dots = url.match(/\./g);
+410         // Avoid accidentally matching a *relative* URL pointing to a file named
+411         // e.g. "www.pdf" or similar.
+412         if (dots?.length >= 2) {
+413           url = `http://${url}`;
+414         }
+415       }
+416 
+417       // According to ISO 32000-1:2008, section 12.6.4.7, URIs should be encoded
+418       // in 7-bit ASCII. Some bad PDFs use UTF-8 encoding; see bug 1122280.
+419       if (options.tryConvertEncoding) {
+420         try {
+421           url = stringToUTF8String(url);
+422         } catch {}
+423       }
+424     }
+425 
+426     const absoluteUrl = baseUrl ? new URL(url, baseUrl) : new URL(url);
+427     if (_isValidProtocol(absoluteUrl)) {
+428       return absoluteUrl;
+429     }
+430   } catch {
+431     /* `new URL()` will throw on incorrect data. */
+432   }
+433   return null;
+434 }
+435 
+436 function shadow(obj, prop, value, nonSerializable = false) {
+437   if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+438     assert(
+439       prop in obj,
+440       `shadow: Property "${prop && prop.toString()}" not found in object.`
+441     );
+442   }
+443   Object.defineProperty(obj, prop, {
+444     value,
+445     enumerable: !nonSerializable,
+446     configurable: true,
+447     writable: false,
+448   });
+449   return value;
+450 }
+451 
+452 /**
+453  * @type {any}
+454  */
+455 const BaseException = (function BaseExceptionClosure() {
+456   // eslint-disable-next-line no-shadow
+457   function BaseException(message, name) {
+458     if (this.constructor === BaseException) {
+459       unreachable("Cannot initialize BaseException.");
+460     }
+461     this.message = message;
+462     this.name = name;
+463   }
+464   BaseException.prototype = new Error();
+465   BaseException.constructor = BaseException;
+466 
+467   return BaseException;
+468 })();
+469 
+470 class PasswordException extends BaseException {
+471   constructor(msg, code) {
+472     super(msg, "PasswordException");
+473     this.code = code;
+474   }
+475 }
+476 
+477 class UnknownErrorException extends BaseException {
+478   constructor(msg, details) {
+479     super(msg, "UnknownErrorException");
+480     this.details = details;
+481   }
+482 }
+483 
+484 class InvalidPDFException extends BaseException {
+485   constructor(msg) {
+486     super(msg, "InvalidPDFException");
+487   }
+488 }
+489 
+490 class MissingPDFException extends BaseException {
+491   constructor(msg) {
+492     super(msg, "MissingPDFException");
+493   }
+494 }
+495 
+496 class UnexpectedResponseException extends BaseException {
+497   constructor(msg, status) {
+498     super(msg, "UnexpectedResponseException");
+499     this.status = status;
+500   }
+501 }
+502 
+503 /**
+504  * Error caused during parsing PDF data.
+505  */
+506 class FormatError extends BaseException {
+507   constructor(msg) {
+508     super(msg, "FormatError");
+509   }
+510 }
+511 
+512 /**
+513  * Error used to indicate task cancellation.
+514  */
+515 class AbortException extends BaseException {
+516   constructor(msg) {
+517     super(msg, "AbortException");
+518   }
+519 }
+520 
+521 function bytesToString(bytes) {
+522   if (typeof bytes !== "object" || bytes?.length === undefined) {
+523     unreachable("Invalid argument for bytesToString");
+524   }
+525   const length = bytes.length;
+526   const MAX_ARGUMENT_COUNT = 8192;
+527   if (length < MAX_ARGUMENT_COUNT) {
+528     return String.fromCharCode.apply(null, bytes);
+529   }
+530   const strBuf = [];
+531   for (let i = 0; i < length; i += MAX_ARGUMENT_COUNT) {
+532     const chunkEnd = Math.min(i + MAX_ARGUMENT_COUNT, length);
+533     const chunk = bytes.subarray(i, chunkEnd);
+534     strBuf.push(String.fromCharCode.apply(null, chunk));
+535   }
+536   return strBuf.join("");
+537 }
+538 
+539 function stringToBytes(str) {
+540   if (typeof str !== "string") {
+541     unreachable("Invalid argument for stringToBytes");
+542   }
+543   const length = str.length;
+544   const bytes = new Uint8Array(length);
+545   for (let i = 0; i < length; ++i) {
+546     bytes[i] = str.charCodeAt(i) & 0xff;
+547   }
+548   return bytes;
+549 }
+550 
+551 function string32(value) {
+552   if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+553     assert(
+554       typeof value === "number" && Math.abs(value) < 2 ** 32,
+555       `string32: Unexpected input "${value}".`
+556     );
+557   }
+558   return String.fromCharCode(
+559     (value >> 24) & 0xff,
+560     (value >> 16) & 0xff,
+561     (value >> 8) & 0xff,
+562     value & 0xff
+563   );
+564 }
+565 
+566 function objectSize(obj) {
+567   return Object.keys(obj).length;
+568 }
+569 
+570 // Ensure that the returned Object has a `null` prototype; hence why
+571 // `Object.fromEntries(...)` is not used.
+572 function objectFromMap(map) {
+573   const obj = Object.create(null);
+574   for (const [key, value] of map) {
+575     obj[key] = value;
+576   }
+577   return obj;
+578 }
+579 
+580 // Checks the endianness of the platform.
+581 function isLittleEndian() {
+582   const buffer8 = new Uint8Array(4);
+583   buffer8[0] = 1;
+584   const view32 = new Uint32Array(buffer8.buffer, 0, 1);
+585   return view32[0] === 1;
+586 }
+587 
+588 // Checks if it's possible to eval JS expressions.
+589 function isEvalSupported() {
+590   try {
+591     new Function(""); // eslint-disable-line no-new, no-new-func
+592     return true;
+593   } catch {
+594     return false;
+595   }
+596 }
+597 
+598 class FeatureTest {
+599   static get isLittleEndian() {
+600     return shadow(this, "isLittleEndian", isLittleEndian());
+601   }
+602 
+603   static get isEvalSupported() {
+604     return shadow(this, "isEvalSupported", isEvalSupported());
+605   }
+606 
+607   static get isOffscreenCanvasSupported() {
+608     return shadow(
+609       this,
+610       "isOffscreenCanvasSupported",
+611       typeof OffscreenCanvas !== "undefined"
+612     );
+613   }
+614 
+615   static get platform() {
+616     if (
+617       (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+618       typeof navigator === "undefined"
+619     ) {
+620       return shadow(this, "platform", { isWin: false, isMac: false });
+621     }
+622     return shadow(this, "platform", {
+623       isWin: navigator.platform.includes("Win"),
+624       isMac: navigator.platform.includes("Mac"),
+625     });
+626   }
+627 }
+628 
+629 const hexNumbers = [...Array(256).keys()].map(n =>
+630   n.toString(16).padStart(2, "0")
+631 );
+632 
+633 class Util {
+634   static makeHexColor(r, g, b) {
+635     return `#${hexNumbers[r]}${hexNumbers[g]}${hexNumbers[b]}`;
+636   }
+637 
+638   // Apply a scaling matrix to some min/max values.
+639   // If a scaling factor is negative then min and max must be
+640   // swaped.
+641   static scaleMinMax(transform, minMax) {
+642     let temp;
+643     if (transform[0]) {
+644       if (transform[0] < 0) {
+645         temp = minMax[0];
+646         minMax[0] = minMax[1];
+647         minMax[1] = temp;
+648       }
+649       minMax[0] *= transform[0];
+650       minMax[1] *= transform[0];
+651 
+652       if (transform[3] < 0) {
+653         temp = minMax[2];
+654         minMax[2] = minMax[3];
+655         minMax[3] = temp;
+656       }
+657       minMax[2] *= transform[3];
+658       minMax[3] *= transform[3];
+659     } else {
+660       temp = minMax[0];
+661       minMax[0] = minMax[2];
+662       minMax[2] = temp;
+663       temp = minMax[1];
+664       minMax[1] = minMax[3];
+665       minMax[3] = temp;
+666 
+667       if (transform[1] < 0) {
+668         temp = minMax[2];
+669         minMax[2] = minMax[3];
+670         minMax[3] = temp;
+671       }
+672       minMax[2] *= transform[1];
+673       minMax[3] *= transform[1];
+674 
+675       if (transform[2] < 0) {
+676         temp = minMax[0];
+677         minMax[0] = minMax[1];
+678         minMax[1] = temp;
+679       }
+680       minMax[0] *= transform[2];
+681       minMax[1] *= transform[2];
+682     }
+683     minMax[0] += transform[4];
+684     minMax[1] += transform[4];
+685     minMax[2] += transform[5];
+686     minMax[3] += transform[5];
+687   }
+688 
+689   // Concatenates two transformation matrices together and returns the result.
+690   static transform(m1, m2) {
+691     return [
+692       m1[0] * m2[0] + m1[2] * m2[1],
+693       m1[1] * m2[0] + m1[3] * m2[1],
+694       m1[0] * m2[2] + m1[2] * m2[3],
+695       m1[1] * m2[2] + m1[3] * m2[3],
+696       m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+697       m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+698     ];
+699   }
+700 
+701   // For 2d affine transforms
+702   static applyTransform(p, m) {
+703     const xt = p[0] * m[0] + p[1] * m[2] + m[4];
+704     const yt = p[0] * m[1] + p[1] * m[3] + m[5];
+705     return [xt, yt];
+706   }
+707 
+708   static applyInverseTransform(p, m) {
+709     const d = m[0] * m[3] - m[1] * m[2];
+710     const xt = (p[0] * m[3] - p[1] * m[2] + m[2] * m[5] - m[4] * m[3]) / d;
+711     const yt = (-p[0] * m[1] + p[1] * m[0] + m[4] * m[1] - m[5] * m[0]) / d;
+712     return [xt, yt];
+713   }
+714 
+715   // Applies the transform to the rectangle and finds the minimum axially
+716   // aligned bounding box.
+717   static getAxialAlignedBoundingBox(r, m) {
+718     const p1 = this.applyTransform(r, m);
+719     const p2 = this.applyTransform(r.slice(2, 4), m);
+720     const p3 = this.applyTransform([r[0], r[3]], m);
+721     const p4 = this.applyTransform([r[2], r[1]], m);
+722     return [
+723       Math.min(p1[0], p2[0], p3[0], p4[0]),
+724       Math.min(p1[1], p2[1], p3[1], p4[1]),
+725       Math.max(p1[0], p2[0], p3[0], p4[0]),
+726       Math.max(p1[1], p2[1], p3[1], p4[1]),
+727     ];
+728   }
+729 
+730   static inverseTransform(m) {
+731     const d = m[0] * m[3] - m[1] * m[2];
+732     return [
+733       m[3] / d,
+734       -m[1] / d,
+735       -m[2] / d,
+736       m[0] / d,
+737       (m[2] * m[5] - m[4] * m[3]) / d,
+738       (m[4] * m[1] - m[5] * m[0]) / d,
+739     ];
+740   }
+741 
+742   // This calculation uses Singular Value Decomposition.
+743   // The SVD can be represented with formula A = USV. We are interested in the
+744   // matrix S here because it represents the scale values.
+745   static singularValueDecompose2dScale(m) {
+746     const transpose = [m[0], m[2], m[1], m[3]];
+747 
+748     // Multiply matrix m with its transpose.
+749     const a = m[0] * transpose[0] + m[1] * transpose[2];
+750     const b = m[0] * transpose[1] + m[1] * transpose[3];
+751     const c = m[2] * transpose[0] + m[3] * transpose[2];
+752     const d = m[2] * transpose[1] + m[3] * transpose[3];
+753 
+754     // Solve the second degree polynomial to get roots.
+755     const first = (a + d) / 2;
+756     const second = Math.sqrt((a + d) ** 2 - 4 * (a * d - c * b)) / 2;
+757     const sx = first + second || 1;
+758     const sy = first - second || 1;
+759 
+760     // Scale values are the square roots of the eigenvalues.
+761     return [Math.sqrt(sx), Math.sqrt(sy)];
+762   }
+763 
+764   // Normalize rectangle rect=[x1, y1, x2, y2] so that (x1,y1) < (x2,y2)
+765   // For coordinate systems whose origin lies in the bottom-left, this
+766   // means normalization to (BL,TR) ordering. For systems with origin in the
+767   // top-left, this means (TL,BR) ordering.
+768   static normalizeRect(rect) {
+769     const r = rect.slice(0); // clone rect
+770     if (rect[0] > rect[2]) {
+771       r[0] = rect[2];
+772       r[2] = rect[0];
+773     }
+774     if (rect[1] > rect[3]) {
+775       r[1] = rect[3];
+776       r[3] = rect[1];
+777     }
+778     return r;
+779   }
+780 
+781   // Returns a rectangle [x1, y1, x2, y2] corresponding to the
+782   // intersection of rect1 and rect2. If no intersection, returns 'null'
+783   // The rectangle coordinates of rect1, rect2 should be [x1, y1, x2, y2]
+784   static intersect(rect1, rect2) {
+785     const xLow = Math.max(
+786       Math.min(rect1[0], rect1[2]),
+787       Math.min(rect2[0], rect2[2])
+788     );
+789     const xHigh = Math.min(
+790       Math.max(rect1[0], rect1[2]),
+791       Math.max(rect2[0], rect2[2])
+792     );
+793     if (xLow > xHigh) {
+794       return null;
+795     }
+796     const yLow = Math.max(
+797       Math.min(rect1[1], rect1[3]),
+798       Math.min(rect2[1], rect2[3])
+799     );
+800     const yHigh = Math.min(
+801       Math.max(rect1[1], rect1[3]),
+802       Math.max(rect2[1], rect2[3])
+803     );
+804     if (yLow > yHigh) {
+805       return null;
+806     }
+807 
+808     return [xLow, yLow, xHigh, yHigh];
+809   }
+810 
+811   // From https://github.com/adobe-webplatform/Snap.svg/blob/b365287722a72526000ac4bfcf0ce4cac2faa015/src/path.js#L852
+812   static bezierBoundingBox(x0, y0, x1, y1, x2, y2, x3, y3) {
+813     const tvalues = [],
+814       bounds = [[], []];
+815     let a, b, c, t, t1, t2, b2ac, sqrtb2ac;
+816     for (let i = 0; i < 2; ++i) {
+817       if (i === 0) {
+818         b = 6 * x0 - 12 * x1 + 6 * x2;
+819         a = -3 * x0 + 9 * x1 - 9 * x2 + 3 * x3;
+820         c = 3 * x1 - 3 * x0;
+821       } else {
+822         b = 6 * y0 - 12 * y1 + 6 * y2;
+823         a = -3 * y0 + 9 * y1 - 9 * y2 + 3 * y3;
+824         c = 3 * y1 - 3 * y0;
+825       }
+826       if (Math.abs(a) < 1e-12) {
+827         if (Math.abs(b) < 1e-12) {
+828           continue;
+829         }
+830         t = -c / b;
+831         if (0 < t && t < 1) {
+832           tvalues.push(t);
+833         }
+834         continue;
+835       }
+836       b2ac = b * b - 4 * c * a;
+837       sqrtb2ac = Math.sqrt(b2ac);
+838       if (b2ac < 0) {
+839         continue;
+840       }
+841       t1 = (-b + sqrtb2ac) / (2 * a);
+842       if (0 < t1 && t1 < 1) {
+843         tvalues.push(t1);
+844       }
+845       t2 = (-b - sqrtb2ac) / (2 * a);
+846       if (0 < t2 && t2 < 1) {
+847         tvalues.push(t2);
+848       }
+849     }
+850 
+851     let j = tvalues.length,
+852       mt;
+853     const jlen = j;
+854     while (j--) {
+855       t = tvalues[j];
+856       mt = 1 - t;
+857       bounds[0][j] =
+858         mt * mt * mt * x0 +
+859         3 * mt * mt * t * x1 +
+860         3 * mt * t * t * x2 +
+861         t * t * t * x3;
+862       bounds[1][j] =
+863         mt * mt * mt * y0 +
+864         3 * mt * mt * t * y1 +
+865         3 * mt * t * t * y2 +
+866         t * t * t * y3;
+867     }
+868 
+869     bounds[0][jlen] = x0;
+870     bounds[1][jlen] = y0;
+871     bounds[0][jlen + 1] = x3;
+872     bounds[1][jlen + 1] = y3;
+873     bounds[0].length = bounds[1].length = jlen + 2;
+874 
+875     return [
+876       Math.min(...bounds[0]),
+877       Math.min(...bounds[1]),
+878       Math.max(...bounds[0]),
+879       Math.max(...bounds[1]),
+880     ];
+881   }
+882 }
+883 
+884 const PDFStringTranslateTable = [
+885   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x2d8,
+886   0x2c7, 0x2c6, 0x2d9, 0x2dd, 0x2db, 0x2da, 0x2dc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+887   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+888   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+889   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+890   0, 0, 0, 0, 0, 0, 0, 0, 0x2022, 0x2020, 0x2021, 0x2026, 0x2014, 0x2013, 0x192,
+891   0x2044, 0x2039, 0x203a, 0x2212, 0x2030, 0x201e, 0x201c, 0x201d, 0x2018,
+892   0x2019, 0x201a, 0x2122, 0xfb01, 0xfb02, 0x141, 0x152, 0x160, 0x178, 0x17d,
+893   0x131, 0x142, 0x153, 0x161, 0x17e, 0, 0x20ac,
+894 ];
+895 
+896 function stringToPDFString(str) {
+897   if (str[0] >= "\xEF") {
+898     let encoding;
+899     if (str[0] === "\xFE" && str[1] === "\xFF") {
+900       encoding = "utf-16be";
+901     } else if (str[0] === "\xFF" && str[1] === "\xFE") {
+902       encoding = "utf-16le";
+903     } else if (str[0] === "\xEF" && str[1] === "\xBB" && str[2] === "\xBF") {
+904       encoding = "utf-8";
+905     }
+906 
+907     if (encoding) {
+908       try {
+909         const decoder = new TextDecoder(encoding, { fatal: true });
+910         const buffer = stringToBytes(str);
+911         return decoder.decode(buffer);
+912       } catch (ex) {
+913         warn(`stringToPDFString: "${ex}".`);
+914       }
+915     }
+916   }
+917   // ISO Latin 1
+918   const strBuf = [];
+919   for (let i = 0, ii = str.length; i < ii; i++) {
+920     const code = PDFStringTranslateTable[str.charCodeAt(i)];
+921     strBuf.push(code ? String.fromCharCode(code) : str.charAt(i));
+922   }
+923   return strBuf.join("");
+924 }
+925 
+926 function stringToUTF8String(str) {
+927   return decodeURIComponent(escape(str));
+928 }
+929 
+930 function utf8StringToString(str) {
+931   return unescape(encodeURIComponent(str));
+932 }
+933 
+934 function isArrayBuffer(v) {
+935   return typeof v === "object" && v?.byteLength !== undefined;
+936 }
+937 
+938 function isArrayEqual(arr1, arr2) {
+939   if (arr1.length !== arr2.length) {
+940     return false;
+941   }
+942   for (let i = 0, ii = arr1.length; i < ii; i++) {
+943     if (arr1[i] !== arr2[i]) {
+944       return false;
+945     }
+946   }
+947   return true;
+948 }
+949 
+950 function getModificationDate(date = new Date()) {
+951   const buffer = [
+952     date.getUTCFullYear().toString(),
+953     (date.getUTCMonth() + 1).toString().padStart(2, "0"),
+954     date.getUTCDate().toString().padStart(2, "0"),
+955     date.getUTCHours().toString().padStart(2, "0"),
+956     date.getUTCMinutes().toString().padStart(2, "0"),
+957     date.getUTCSeconds().toString().padStart(2, "0"),
+958   ];
+959 
+960   return buffer.join("");
+961 }
+962 
+963 class PromiseCapability {
+964   #settled = false;
+965 
+966   constructor() {
+967     /**
+968      * @type {Promise<any>} The Promise object.
+969      */
+970     this.promise = new Promise((resolve, reject) => {
+971       /**
+972        * @type {function} Fulfills the Promise.
+973        */
+974       this.resolve = data => {
+975         this.#settled = true;
+976         resolve(data);
+977       };
+978 
+979       /**
+980        * @type {function} Rejects the Promise.
+981        */
+982       this.reject = reason => {
+983         if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+984           assert(reason instanceof Error, 'Expected valid "reason" argument.');
+985         }
+986         this.#settled = true;
+987         reject(reason);
+988       };
+989     });
+990   }
+991 
+992   /**
+993    * @type {boolean} If the Promise has been fulfilled/rejected.
+994    */
+995   get settled() {
+996     return this.#settled;
+997   }
+998 }
+999 
+1000 let NormalizeRegex = null;
+1001 let NormalizationMap = null;
+1002 function normalizeUnicode(str) {
+1003   if (!NormalizeRegex) {
+1004     // In order to generate the following regex:
+1005     //  - create a PDF containing all the chars in the range 0000-FFFF with
+1006     //    a NFKC which is different of the char.
+1007     //  - copy and paste all those chars and get the ones where NFKC is
+1008     //    required.
+1009     // It appears that most the chars here contain some ligatures.
+1010     NormalizeRegex =
+1011       /([\u00a0\u00b5\u037e\u0eb3\u2000-\u200a\u202f\u2126\ufb00-\ufb04\ufb06\ufb20-\ufb36\ufb38-\ufb3c\ufb3e\ufb40-\ufb41\ufb43-\ufb44\ufb46-\ufba1\ufba4-\ufba9\ufbae-\ufbb1\ufbd3-\ufbdc\ufbde-\ufbe7\ufbea-\ufbf8\ufbfc-\ufbfd\ufc00-\ufc5d\ufc64-\ufcf1\ufcf5-\ufd3d\ufd88\ufdf4\ufdfa-\ufdfb\ufe71\ufe77\ufe79\ufe7b\ufe7d]+)|(\ufb05+)/gu;
+1012     NormalizationMap = new Map([["ﬅ", "ſt"]]);
+1013   }
+1014   return str.replaceAll(NormalizeRegex, (_, p1, p2) => {
+1015     return p1 ? p1.normalize("NFKC") : NormalizationMap.get(p2);
+1016   });
+1017 }
+1018 
+1019 function getUuid() {
+1020   if (
+1021     (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+1022     (typeof crypto !== "undefined" && typeof crypto?.randomUUID === "function")
+1023   ) {
+1024     return crypto.randomUUID();
+1025   }
+1026   const buf = new Uint8Array(32);
+1027   if (
+1028     typeof crypto !== "undefined" &&
+1029     typeof crypto?.getRandomValues === "function"
+1030   ) {
+1031     crypto.getRandomValues(buf);
+1032   } else {
+1033     for (let i = 0; i < 32; i++) {
+1034       buf[i] = Math.floor(Math.random() * 255);
+1035     }
+1036   }
+1037   return bytesToString(buf);
+1038 }
+1039 
+1040 export {
+1041   AbortException,
+1042   AnnotationActionEventType,
+1043   AnnotationBorderStyleType,
+1044   AnnotationEditorParamsType,
+1045   AnnotationEditorPrefix,
+1046   AnnotationEditorType,
+1047   AnnotationFieldFlag,
+1048   AnnotationFlag,
+1049   AnnotationMode,
+1050   AnnotationReplyType,
+1051   AnnotationType,
+1052   assert,
+1053   BaseException,
+1054   BASELINE_FACTOR,
+1055   bytesToString,
+1056   CMapCompressionType,
+1057   createValidAbsoluteUrl,
+1058   DocumentActionEventType,
+1059   FeatureTest,
+1060   FONT_IDENTITY_MATRIX,
+1061   FormatError,
+1062   getModificationDate,
+1063   getUuid,
+1064   getVerbosityLevel,
+1065   IDENTITY_MATRIX,
+1066   ImageKind,
+1067   info,
+1068   InvalidPDFException,
+1069   isArrayBuffer,
+1070   isArrayEqual,
+1071   isNodeJS,
+1072   LINE_DESCENT_FACTOR,
+1073   LINE_FACTOR,
+1074   MAX_IMAGE_SIZE_TO_CACHE,
+1075   MissingPDFException,
+1076   normalizeUnicode,
+1077   objectFromMap,
+1078   objectSize,
+1079   OPS,
+1080   PageActionEventType,
+1081   PasswordException,
+1082   PasswordResponses,
+1083   PermissionFlag,
+1084   PromiseCapability,
+1085   RenderingIntentFlag,
+1086   setVerbosityLevel,
+1087   shadow,
+1088   string32,
+1089   stringToBytes,
+1090   stringToPDFString,
+1091   stringToUTF8String,
+1092   TextRenderingMode,
+1093   UnexpectedResponseException,
+1094   UnknownErrorException,
+1095   unreachable,
+1096   utf8StringToString,
+1097   Util,
+1098   VerbosityLevel,
+1099   warn,
+1100 };
+</code>
+
+Test file:
+<test_file>
+File:
+test/unit/editor_spec.js
+/* Copyright 2022 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { CommandManager } from "../../src/display/editor/tools.js";
+</test_file>
+
+Your task:
+You are a software tester at pdf.js.
+1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.
+2. Write exactly one javascript test `it("...", async () => {...})` block.
+3. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+4. The test must be self-contained and to-the-point.
+5. If you need something new use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+6. Return only the javascript code for the new `it(...)` block (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

@@ -1,0 +1,64 @@
+<think>
+Okay, I need to write a test that checks if the patch fixes the issue where applying a transform breaks the pattern. The user provided a PDF where the rectangles with skew and rotation don't show the pattern correctly. 
+
+First, I should set up a test that uses the test.pdf file. I'll create a test case that loads this PDF, renders it, and checks the appearance of the patterns.
+
+I'll use the `pdfjs-lib` to load the PDF document. Then, I'll render the first page. After rendering, I'll create a canvas element to capture the rendered output.
+
+To compare the output, I'll use `pngjs` to process the rendered image and a reference image. I'll check if the actual image matches the expected image.
+
+I need to import the necessary modules dynamically. Since the test runs in Node.js, I'll use `require` for `pdfjs-lib`, `pngjs`, and `jsdom` for DOM handling.
+
+The test will generate a hash of the rendered image and compare it with the expected hash. If they match, the test passes; otherwise, it fails.
+
+I'll structure the test with `beforeEach` to set up the test PDF path and reference image. The actual test case will load the PDF, render the page, capture the image, and compare it.
+
+I should handle any errors during loading or rendering to fail the test appropriately.
+
+Finally, I'll write the test using `it` from `ttest` and ensure it's self-contained without any external dependencies beyond the provided imports.
+</think>
+
+```javascript
+const { createCanvas } = require('canvas');
+const { PNG } = require('pngjs').PNG;
+const { JSDOM } = require('jsdom');
+const pdfjsLib = require('../../src/display/canvas.js');
+
+it("should fix pattern rendering with transform", async () => {
+  const pdfPath = require.resolve("../../test.pdf");
+  const expectedHash = "4e5b0eab2c1a4c0fbef7d9c0f4d0e1f2";
+
+  let container = new JSDOM().window.document.createElement("div");
+  const canvas = createCanvas(400, 400);
+  const ctx = canvas.getContext('2d');
+
+  const pdfDoc = await pdfjsLib.PDFDocumentLoadingTask.load(pdfPath);
+  const pdfPage = await pdfDoc.getPage(1);
+  const viewport = pdfPage.getViewBox({ scale: 1 });
+
+  await pdfPage.render({
+    canvasContext: ctx,
+    viewport: viewport,
+    enableWebGL: false,
+    useCanvasBGRA: true
+  });
+
+  const actualCanvas = createCanvas(400, 400);
+  const actualCtx = actualCanvas.getContext('2d');
+  actualCtx.drawImage(canvas, 0, 0);
+
+  const img = new PNG({
+    width: actualCanvas.width,
+    height: actualCanvas.height
+  });
+
+  const stream = img.pack().pipe(require('crypto').createHash('sha256'));
+  const hash = await new Promise((resolve, reject) => {
+    stream.on('finish', () => resolve(stream.read().toString('hex')));
+    stream.on('error', reject);
+    actualCanvas.createPNGStream().pipe(stream);
+  });
+
+  expect(hash).toBe(expectedHash);
+});
+```

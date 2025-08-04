@@ -1,0 +1,55 @@
+it("should render freetext annotation", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('bug1851498.pdf'));
+
+  try {
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewPort({ scale: 1 });
+
+    class AnnotationLayer {
+      constructor() {
+        this.div = document.createElement('div');
+        this.zIndex = 0;
+      }
+
+      async render(params) {
+        const { annotations } = params;
+        setLayerDimensions(this.div, viewport);
+
+        const elementParams = {
+          data: null,
+          layer: this.div,
+          linkService: null,
+          downloadManager: null,
+          imageResourcesPath: "",
+          renderForms: true,
+          svgFactory: null,
+          annotationStorage: null,
+          enableScripting: false,
+          hasJSActions: false,
+          fieldObjects: null,
+          parent: this
+        };
+
+        for (const data of annotations) {
+          if (data.annotationType === AnnotationType.FREETEXT) {
+            elementParams.data = data;
+            const element = new FreeTextAnnotationElement(elementParams);
+            const rendered = element.render();
+            this.div.append(rendered);
+          }
+        }
+      }
+    }
+
+    const layer = new AnnotationLayer();
+    await layer.render({ annotations: page.getAnnotations() });
+
+    const freetextAnnotations = layer.div.querySelectorAll('.freeTextAnnotation');
+    expect(freetextAnnotations.length).toBeGreaterThan(0);
+  } catch (error) {
+    throw new Error('Failed to load or render PDF');
+  }
+});

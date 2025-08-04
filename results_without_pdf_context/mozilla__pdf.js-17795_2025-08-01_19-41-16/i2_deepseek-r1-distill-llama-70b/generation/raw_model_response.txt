@@ -1,0 +1,58 @@
+<think>
+Okay, I need to write a regression test for the issue where some inlined images aren't rendering correctly in pdf.js. The problem occurs because the images are missing the closing 'EI' tag, which causes the parser to get confused. The patch adds error handling around the image decoding process, so if an error occurs, it either throws an error or logs a warning, depending on the options.
+
+First, I should figure out how to simulate the scenario. The test should load a PDF with an inlined image that's missing the 'EI' and check if the image is rendered correctly after the patch. Before the patch, the test should fail because the image isn't rendered, and after, it should pass because the image is either handled correctly or an appropriate error is thrown.
+
+I'll need to create a test PDF that includes such an image. But since I can't create files here, I'll assume that such a PDF is available and can be loaded. The test will use the 'PDFDocument' and 'PDFPage' from the pdf.js API to load the document and render the page.
+
+The test will have two parts: one without ignoring errors and one with ignoring errors. In the first case, the test should throw an error because the image can't be decoded. In the second case, the test should not throw an error but should log a warning, allowing the rendering to proceed without the problematic image.
+
+I'll structure the test using Jest's 'it' function. I'll import the necessary modules dynamically to ensure compatibility with Node.js. Then, I'll load the test PDF and try to render the first page. 
+
+In the first scenario, without ignoring errors, the test expects an error to be thrown. In the second scenario, with ignoreErrors set to true, it should not throw an error but should handle the issue gracefully.
+
+I'll use 'await' to handle the asynchronous operations and wrap the rendering in a try-catch block to detect any errors. The test will pass if the correct behavior is observed in both scenarios.
+
+Finally, I'll write the code, making sure to only include the JavaScript test block without any extra comments or explanations.
+</think>
+
+```javascript
+it("should handle inlined images without closing EI", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { PDFPage } = await import("../../src/display/pdf_page.js");
+  const { Util } = await import("../../src/shared/util.js");
+  
+  // Load the test PDF with inlined image missing EI
+  const pdfData = await fetch("example.pdf").then(res => res.arrayBuffer());
+  const pdfDoc = await PDFDocument.load(pdfData, { ignoreErrors: false });
+  const page = await pdfDoc.getPage(1);
+  
+  // Test without ignoreErrors (should throw error)
+  {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    let errorThrown = false;
+    try {
+      await page.render();
+    } catch (e) {
+      errorthrown = true;
+    }
+    expect(errorThrown).toBe(true);
+    consoleSpy.mockRestore();
+  }
+  
+  // Test with ignoreErrors (should not throw error)
+  {
+    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const pdfDocIgnoreErrors = await PDFDocument.load(pdfData, { ignoreErrors: true });
+    const pageIgnoreErrors = await pdfDocIgnoreErrors.getPage(1);
+    let errorThrown = false;
+    try {
+      await pageIgnoreErrors.render();
+    } catch (e) {
+      errorthrown = true;
+    }
+    expect(errorThrown).toBe(false);
+    consoleSpy.mockRestore();
+  }
+});
+```

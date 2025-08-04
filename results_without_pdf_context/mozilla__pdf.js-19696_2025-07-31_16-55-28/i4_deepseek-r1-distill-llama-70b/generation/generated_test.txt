@@ -1,0 +1,41 @@
+it("should correctly render symbol in PDF", async () => {
+  const { PDFDocument } = await import('pdf-lib');
+  const { PDFDocument as PD } = await import('../../src/display/api.js');
+  const { TextLayerBuilder } = await import('../../src/web/text_layer_builder.js');
+
+  // Create a PDF with the £ symbol
+  const pdfDoc = new PDFDocument();
+  const page = pdfDoc.addPage();
+  const font = page.setFont('Helvetica');
+  page.text('£', 100, 100, { font });
+
+  // Convert the PDF buffer to a Blob
+  const pdfBuffer = await pdfDoc.toBuffer();
+  const pdfBlob = new Blob([pdfBuffer], { type: 'application/pdf' });
+
+  // Open the PDF in pdf.js
+  const loadingTask = PD.getDocument(pdfBlob);
+  const pdf = await loadingTask.promise;
+  const pagePromise = pdf.getPage(1);
+  const pdfPage = await pagePromise;
+
+  // Setup text layer
+  const container = document.createElement('div');
+  const textLayerBuilder = new TextLayerBuilder({
+    container: container,
+    viewport: pdfPage.getViewport(1),
+  });
+
+  // Render the page and get the text
+  const renderTask = pdfPage.render({
+    viewport: pdfPage.getViewport(1),
+    textLayer: textLayerBuilder,
+  });
+  await renderTask.promise;
+
+  // Get the extracted text
+  const text = await pdfPage.getTextContent();
+
+  // Verify the £ symbol is correctly rendered
+  expect(text.items[0].str).toContain('£');
+});

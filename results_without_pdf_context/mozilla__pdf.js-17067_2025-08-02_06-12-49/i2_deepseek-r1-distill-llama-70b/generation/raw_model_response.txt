@@ -1,0 +1,45 @@
+<think>
+Okay, I need to write a regression test for the patch that fixes the issue where applying a transform breaks the pattern in PDF.js. The test should fail before the patch and pass after. 
+
+First, I'll look at the problem. The user provided a PDF where two rectangles with skew and rotation don't show the pattern correctly in Firefox using PDF.js. The patch modifies the updateRectMinMax method in canvas.js to correctly compute the bounding box after transformation.
+
+So, the test should check if the bounding box is calculated correctly for transformed rectangles. 
+
+I'll create a test case that defines a rectangle, applies a transformation (like skew and rotation), and then checks if the min and max coordinates are correctly updated. 
+
+I'll import Util from the shared utilities and create a mock CanvasExtraState object. Then, I'll set initial min and max values to high and low numbers respectively. Applying a sample transform, I'll call updateRectMinMax and compare the resulting min and max with the expected values.
+
+The test should fail before the patch because the old method didn't account for all four corners, but after the patch, it should pass as the method now correctly includes all points.
+
+I'll structure the test using Jest, importing necessary modules and setting up the scenario. The expected values are based on the transformed corners, ensuring the test accurately reflects the fix.
+</think>
+
+```javascript
+it("should correctly compute the bounding box of a transformed rectangle", async () => {
+  const { Util } = await import("../../src/shared/util.js");
+  const canvasExtraState = {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+    updateRectMinMax: CanvasExtraState.prototype.updateRectMinMax
+  };
+  
+  const transform = [1, 0.5, 0, 1, 0, 0]; // Skew and rotation example
+  const rect = [0, 0, 100, 100]; // Original rectangle
+  
+  canvasExtraState.updateRectMinMax(transform, rect);
+  
+  const p1 = Util.applyTransform(rect, transform);
+  const p2 = Util.applyTransform(rect.slice(2), transform);
+  const expectedMinX = Math.min(p1[0], p2[0], p1[0], p2[0]);
+  const expectedMinY = Math.min(p1[1], p2[1], p1[1], p2[1]);
+  const expectedMaxX = Math.max(p1[0], p2[0], p1[0], p2[0]);
+  const expectedMaxY = Math.max(p1[1], p2[1], p1[1], p2[1]);
+  
+  expect(canvasExtraState.minX).toBe(expectedMinX);
+  expect(canvasExtraState.minY).toBe(expectedMinY);
+  expect(canvasExtraState.maxX).toBe(expectedMaxX);
+  expect(canvasExtraState.maxY).toBe(expectedMaxY);
+});
+```

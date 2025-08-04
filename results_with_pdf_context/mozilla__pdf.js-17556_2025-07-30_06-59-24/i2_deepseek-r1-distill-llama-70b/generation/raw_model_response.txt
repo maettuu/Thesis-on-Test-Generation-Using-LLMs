@@ -1,0 +1,29 @@
+<think>
+Okay, I need to write a regression test for the issue where PDF.js incorrectly treats `toString` as a valid operator. The problem was that the `opMap` used a regular JavaScript object, which inherited properties like `toString` from the prototype chain. This caused invalid operators to be considered valid, leading to exceptions later on.
+
+First, I should understand the issue thoroughly. The user provided a PDF file (hello.pdf) that includes a stream with the token `toString`. Before the patch, this token was mistakenly recognized as a valid operator because `opMap` had the standard `Object.prototype`, which includes `toString`. The patch changes `opMap` to use a null-prototype object, preventing such false positives.
+
+My test needs to verify that after the patch, `toString` is no longer considered a valid operator. The test should fail before the patch and pass after.
+
+I'll structure the test using Jest. The test will load the problematic PDF and check if parsing it throws an exception. Before the patch, this should throw an error because `toString` is treated as a valid operator but doesn't have the required properties. After the patch, since `toString` isn't in the `opMap`, it should be ignored, and no exception should occur.
+
+I'll use the provided imports to load the PDF. I'll import `getDocument` from `../../src/display/api.js` and `buildGetDocumentParams` from `./test_utils.js` to set up the test PDF.
+
+In the test, I'll use `await getDocument` to load the PDF. If the loading doesn't throw an error, that means the issue is resolved. If it does throw, the test will fail, indicating the patch isn't effective.
+
+I need to ensure the test is self-contained and doesn't rely on external dependencies. The test should be concise and directly target the issue without unnecessary steps.
+
+So, the test will attempt to load the PDF and expect that no error is thrown during parsing. This confirms that the `opMap` correctly ignores `toString` as an invalid operator after the patch.
+</think>
+
+```javascript
+it("should ignore non-operator tokens like toString", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue17554.pdf'));
+  
+  // Before the patch, this would throw an exception when parsing the invalid operator
+  // After the patch, the invalid operator should be ignored
+  await expect(loadingTask).resolves.not.toThrow();
+});
+```

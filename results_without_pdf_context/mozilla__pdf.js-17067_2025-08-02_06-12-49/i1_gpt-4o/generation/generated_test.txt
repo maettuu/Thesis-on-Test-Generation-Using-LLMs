@@ -1,0 +1,36 @@
+it("should render skewed and rotated rectangles with correct color gradient", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { DefaultCanvasFactory } = await import("../../src/display/display_utils.js");
+
+  const loadingTask = getDocument(buildGetDocumentParams("test.pdf"));
+  const pdfDocument = await loadingTask.promise;
+  const page = await pdfDocument.getPage(1);
+
+  const canvasFactory = new DefaultCanvasFactory();
+  const viewport = page.getViewport({ scale: 1.0 });
+  const canvasAndContext = canvasFactory.create(viewport.width, viewport.height);
+  const renderContext = {
+    canvasContext: canvasAndContext.context,
+    viewport,
+  };
+
+  await page.render(renderContext).promise;
+
+  const imageData = canvasAndContext.context.getImageData(0, 0, viewport.width, viewport.height).data;
+  const hasGradient = (data) => {
+    let hasRed = false, hasBlue = false, hasGreen = false, hasPurple = false;
+    for (let i = 0; i < data.length; i += 4) {
+      const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+      if (r > 200 && g < 50 && b < 50) hasRed = true;
+      if (r < 50 && g < 50 && b > 200) hasBlue = true;
+      if (r < 50 && g > 200 && b < 50) hasGreen = true;
+      if (r > 100 && g < 50 && b > 100) hasPurple = true;
+    }
+    return hasRed && hasBlue && hasGreen && hasPurple;
+  };
+
+  expect(hasGradient(imageData)).toBe(true);
+
+  canvasFactory.destroy(canvasAndContext);
+  await pdfDocument.destroy();
+});

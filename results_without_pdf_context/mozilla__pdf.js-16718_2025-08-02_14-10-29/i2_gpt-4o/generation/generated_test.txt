@@ -1,0 +1,32 @@
+it("should save PDF annotations correctly", async () => {
+  const { PDFDocumentProxy, getDocument } = await import("../../src/display/api.js");
+  const { AnnotationStorage } = await import("../../src/display/annotation_storage.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+
+  const loadingTask = getDocument(buildGetDocumentParams("test.pdf"));
+  const pdfDocument = await loadingTask.promise;
+  const annotationStorage = new AnnotationStorage();
+
+  const page = await pdfDocument.getPage(1);
+  const annotations = await page.getAnnotations();
+  annotations.forEach(annotation => {
+    annotationStorage.setValue(annotation.id, { value: "Test" });
+  });
+
+  const savedData = await pdfDocument.saveDocument({
+    isPureXfa: false,
+    numPages: pdfDocument.numPages,
+    annotationStorage,
+    filename: "test.pdf",
+  });
+
+  const newLoadingTask = getDocument({ data: savedData });
+  const newPdfDocument = await newLoadingTask.promise;
+  const newPage = await newPdfDocument.getPage(1);
+  const newAnnotations = await newPage.getAnnotations();
+
+  const expected = annotations.map(a => ({ ...a, value: "Test" }));
+  const actual = newAnnotations.map(a => ({ ...a, value: annotationStorage.getValue(a.id).value }));
+
+  expect(actual).toEqual(expected);
+});

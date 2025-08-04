@@ -1,0 +1,34 @@
+it("should add mask class to the free highlight mask use element", async () => {
+  const { DrawLayer } = await import("../../src/display/draw_layer.js");
+  const originalCreateElement = DrawLayer._svgFactory.createElement;
+  let useCount = 0;
+  let freeUse = null;
+  let svgCreated = null;
+  DrawLayer._svgFactory.createElement = function(type) {
+    if (type === "svg") {
+      svgCreated = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      return svgCreated;
+    }
+    const el = originalCreateElement.call(this, type);
+    if (type === "use") {
+      if (useCount === 0) {
+        freeUse = el;
+      }
+      useCount++;
+    }
+    return el;
+  };
+  const drawLayer = new DrawLayer({ pageIndex: 0 });
+  const outlines = {
+    free: true,
+    box: { x: 0, y: 0, width: 100, height: 100 },
+    toSVGPath() {
+      return "M0,0 L100,0 L100,100 L0,100 Z";
+    }
+  };
+  drawLayer.highlightOutline(outlines);
+  DrawLayer._svgFactory.createElement = originalCreateElement;
+  if (!freeUse || !freeUse.classList.contains("mask")) {
+    throw new Error("Expected the free highlight mask use element to have 'mask' class.");
+  }
+});

@@ -1,0 +1,40 @@
+it("should render polygon annotation with both outline and fill", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue20062.pdf'));
+
+  const doc = await loadingTask;
+  const page = await doc.getPage(0);
+  const annotations = await page.getAnnotations();
+
+  const polygonAnnotation = annotations.find(annotation => 
+    annotation instanceof MarkupAnnotation && 
+    annotation.data.subtype === 'Polygon' &&
+    annotation.color &&
+    annotation.data.backgroundColor
+  );
+
+  if (!polygonAnnotation) {
+    throw new Error("PolygonAnnotation with fill not found in PDF");
+  }
+
+  const operatorList = await polygonAnnotation.getOperatorList({
+    task: new WorkerTask(),
+    evaluator: {
+      xref: new XRefMock(),
+      options: {
+        isOffscreenCanvasSupported: true,
+      },
+    },
+    intent: RenderingIntentFlag.DISPLAY,
+    annotationStorage: null,
+  });
+
+  const ops = operatorList.opList.ops;
+  const hasFill = ops.some(op => op.cmd === 'f');
+  const hasStroke = ops.some(op => op.cmd === 'S');
+
+  if (!hasFill || !hasStroke) {
+    throw new Error("PolygonAnnotation is missing fill or stroke in rendering");
+  }
+});

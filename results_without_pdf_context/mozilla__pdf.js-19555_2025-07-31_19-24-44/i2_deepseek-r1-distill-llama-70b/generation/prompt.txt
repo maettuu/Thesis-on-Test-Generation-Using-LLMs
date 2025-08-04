@@ -1,0 +1,946 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Feature]: Support rare RC4 encryption where R=4, key length < 128 bits
+### Is the feature relevant to the Firefox PDF Viewer?
+
+Yes
+
+### Feature description
+
+
+
+I've come across some PDFs that open fine in Acrobat, but seemingly no other viewer / parser. Upon further inspection, it seems these PDFs use a rare RC4 encryption scheme where R=4 & V=4, but the key length is given as 40 bits / 5 bytes instead of the normally expected 128 bits / 16 bytes.
+
+I can't find this behavior explicitly described in the PDF specs, but it seems that Acrobat extends the shorter key to 16 bytes (appending 0x00 bytes) in this situation before the steps described in "Algorithm 1: Encryption of data using the RC4 or AES algorithms".
+
+I've been able to generate a sample file that demonstrates the issue and uses a 40-bit key. I also made a similar file with a 48-bit key. Note that these files have an empty / blank user password, and Acrobat opens them without a password prompt.
+
+[R=4, V=4, 40-bit RC4.pdf](https://github.com/user-attachments/files/18788789/R.4.V.4.40-bit.RC4.pdf)
+[R=4, V=4, 48-bit RC4.pdf](https://github.com/user-attachments/files/18788788/R.4.V.4.48-bit.RC4.pdf)
+
+
+### Other PDF viewers
+
+_No response_
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/crypto.js b/src/core/crypto.js
+--- a/src/core/crypto.js
++++ b/src/core/crypto.js
+@@ -1787,7 +1787,14 @@ class CipherTransformFactory {
+       );
+     }
+ 
+-    this.encryptionKey = encryptionKey;
++    if (algorithm === 4 && encryptionKey.length < 16) {
++      // Extend key to 16 byte minimum (undocumented),
++      // fixes issue19484_1.pdf and issue19484_2.pdf.
++      this.encryptionKey = new Uint8Array(16);
++      this.encryptionKey.set(encryptionKey);
++    } else {
++      this.encryptionKey = encryptionKey;
++    }
+ 
+     if (algorithm >= 4) {
+       const cf = dict.get("CF");
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.26.9
+- @babel/preset-env: ^7.26.9
+- @babel/runtime: ^7.26.9
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- @napi-rs/canvas: ^0.1.67
+- @types/node: ^22.13.5
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001700
+- core-js: ^3.40.0
+- eslint: ^9.21.0
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^4.0.1
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-perfectionist: ^4.9.0
+- eslint-plugin-prettier: ^5.2.3
+- eslint-plugin-unicorn: ^57.0.0
+- globals: ^16.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.1.0
+- highlight.js: ^11.11.1
+- jasmine: ^5.6.0
+- jsdoc: ^4.0.4
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.6
+- ordered-read-streams: ^2.0.0
+- pngjs: ^7.0.0
+- postcss: ^8.5.3
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.1
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.1
+- prettier: ^3.5.2
+- puppeteer: ^24.2.1
+- stylelint: ^16.14.1
+- stylelint-prettier: ^5.0.3
+- svglint: ^3.1.0
+- terser-webpack-plugin: ^5.3.11
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.7.3
+- vinyl: ^3.0.0
+- webpack: ^5.98.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=20
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeChanges, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/canvas_factory.js`: DOMCanvasFactory
+- `../../src/display/cmap_reader_factory.js`: DOMCMapReaderFactory
+- `../../src/display/display_utils.js`: OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, SupportedImageMimeTypes, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions, stopEvent
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/drawers/signaturedraw.js`: SignatureExtractor
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodeCMapReaderFactory, NodeStandardFontDataFactory, fetchData
+- `../../src/display/standard_fontdata_factory.js`: DOMStandardFontDataFactory
+- `../../src/display/svg_factory.js`: DOMSVGFactory
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/touch_manager.js`: TouchManager
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, FeatureTest, FormatError, ImageKind, InvalidPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, ResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getUuid, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String, toBase64Util
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/autolinker.js`: Autolinker
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `../reporter.js`: TestReporter
+- `./common_pdfstream_tests.js`: testCrossOriginRedirects
+- `./test_utils.js`: CMAP_URL, DefaultCMapReaderFactory, DefaultFileReaderFactory, DefaultStandardFontDataFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, TestPdfsServer, XRefMock, buildGetDocumentParams, createIdFactory, getCrossOriginHostname
+</imports>
+
+Code:
+<code>
+File:
+src/core/crypto.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import {
+17   bytesToString,
+18   FormatError,
+19   isArrayEqual,
+20   PasswordException,
+21   PasswordResponses,
+22   stringToBytes,
+23   unreachable,
+24   utf8StringToString,
+25   warn,
+26 } from "../shared/util.js";
+27 import { Dict, isName, Name } from "./primitives.js";
+28 import { DecryptStream } from "./decrypt_stream.js";
+29 
+78 const calculateMD5 = (function calculateMD5Closure() {
+79   const r = new Uint8Array([
+80     7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5,
+81     9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11,
+82     16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10,
+83     15, 21,
+84   ]);
+85 
+86   const k = new Int32Array([
+87     -680876936, -389564586, 606105819, -1044525330, -176418897, 1200080426,
+88     -1473231341, -45705983, 1770035416, -1958414417, -42063, -1990404162,
+89     1804603682, -40341101, -1502002290, 1236535329, -165796510, -1069501632,
+90     643717713, -373897302, -701558691, 38016083, -660478335, -405537848,
+91     568446438, -1019803690, -187363961, 1163531501, -1444681467, -51403784,
+92     1735328473, -1926607734, -378558, -2022574463, 1839030562, -35309556,
+93     -1530992060, 1272893353, -155497632, -1094730640, 681279174, -358537222,
+94     -722521979, 76029189, -640364487, -421815835, 530742520, -995338651,
+95     -198630844, 1126891415, -1416354905, -57434055, 1700485571, -1894986606,
+96     -1051523, -2054922799, 1873313359, -30611744, -1560198380, 1309151649,
+97     -145523070, -1120210379, 718787259, -343485551,
+98   ]);
+99 
+100   function hash(data, offset, length) {
+101     let h0 = 1732584193,
+102       h1 = -271733879,
+103       h2 = -1732584194,
+104       h3 = 271733878;
+105     // pre-processing
+106     const paddedLength = (length + 72) & ~63; // data + 9 extra bytes
+107     const padded = new Uint8Array(paddedLength);
+108     let i, j;
+109     for (i = 0; i < length; ++i) {
+110       padded[i] = data[offset++];
+111     }
+112     padded[i++] = 0x80;
+113     const n = paddedLength - 8;
+114     while (i < n) {
+115       padded[i++] = 0;
+116     }
+117     padded[i++] = (length << 3) & 0xff;
+118     padded[i++] = (length >> 5) & 0xff;
+119     padded[i++] = (length >> 13) & 0xff;
+120     padded[i++] = (length >> 21) & 0xff;
+121     padded[i++] = (length >>> 29) & 0xff;
+122     padded[i++] = 0;
+123     padded[i++] = 0;
+124     padded[i++] = 0;
+125     const w = new Int32Array(16);
+126     for (i = 0; i < paddedLength; ) {
+127       for (j = 0; j < 16; ++j, i += 4) {
+128         w[j] =
+129           padded[i] |
+130           (padded[i + 1] << 8) |
+131           (padded[i + 2] << 16) |
+132           (padded[i + 3] << 24);
+133       }
+134       let a = h0,
+135         b = h1,
+136         c = h2,
+137         d = h3,
+138         f,
+139         g;
+140       for (j = 0; j < 64; ++j) {
+141         if (j < 16) {
+142           f = (b & c) | (~b & d);
+143           g = j;
+144         } else if (j < 32) {
+145           f = (d & b) | (~d & c);
+146           g = (5 * j + 1) & 15;
+147         } else if (j < 48) {
+148           f = b ^ c ^ d;
+149           g = (3 * j + 5) & 15;
+150         } else {
+151           f = c ^ (b | ~d);
+152           g = (7 * j) & 15;
+153         }
+154         const tmp = d,
+155           rotateArg = (a + f + k[j] + w[g]) | 0,
+156           rotate = r[j];
+157         d = c;
+158         c = b;
+159         b = (b + ((rotateArg << rotate) | (rotateArg >>> (32 - rotate)))) | 0;
+160         a = tmp;
+161       }
+162       h0 = (h0 + a) | 0;
+163       h1 = (h1 + b) | 0;
+164       h2 = (h2 + c) | 0;
+165       h3 = (h3 + d) | 0;
+166     }
+167     // prettier-ignore
+168     return new Uint8Array([
+169       h0 & 0xFF, (h0 >> 8) & 0xFF, (h0 >> 16) & 0xFF, (h0 >>> 24) & 0xFF,
+170       h1 & 0xFF, (h1 >> 8) & 0xFF, (h1 >> 16) & 0xFF, (h1 >>> 24) & 0xFF,
+171       h2 & 0xFF, (h2 >> 8) & 0xFF, (h2 >> 16) & 0xFF, (h2 >>> 24) & 0xFF,
+172       h3 & 0xFF, (h3 >> 8) & 0xFF, (h3 >> 16) & 0xFF, (h3 >>> 24) & 0xFF
+173     ]);
+174   }
+175 
+176   return hash;
+177 })();
+178 
+266 const calculateSHA256 = (function calculateSHA256Closure() {
+267   function rotr(x, n) {
+268     return (x >>> n) | (x << (32 - n));
+269   }
+270 
+271   function ch(x, y, z) {
+272     return (x & y) ^ (~x & z);
+273   }
+274 
+275   function maj(x, y, z) {
+276     return (x & y) ^ (x & z) ^ (y & z);
+277   }
+278 
+279   function sigma(x) {
+280     return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
+281   }
+282 
+283   function sigmaPrime(x) {
+284     return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
+285   }
+286 
+287   function littleSigma(x) {
+288     return rotr(x, 7) ^ rotr(x, 18) ^ (x >>> 3);
+289   }
+290 
+291   function littleSigmaPrime(x) {
+292     return rotr(x, 17) ^ rotr(x, 19) ^ (x >>> 10);
+293   }
+294 
+295   const k = [
+296     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+297     0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+298     0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+299     0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+300     0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+301     0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+302     0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+303     0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+304     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+305     0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+306     0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+307   ];
+308 
+309   function hash(data, offset, length) {
+310     // initial hash values
+311     let h0 = 0x6a09e667,
+312       h1 = 0xbb67ae85,
+313       h2 = 0x3c6ef372,
+314       h3 = 0xa54ff53a,
+315       h4 = 0x510e527f,
+316       h5 = 0x9b05688c,
+317       h6 = 0x1f83d9ab,
+318       h7 = 0x5be0cd19;
+319     // pre-processing
+320     const paddedLength = Math.ceil((length + 9) / 64) * 64;
+321     const padded = new Uint8Array(paddedLength);
+322     let i, j;
+323     for (i = 0; i < length; ++i) {
+324       padded[i] = data[offset++];
+325     }
+326     padded[i++] = 0x80;
+327     const n = paddedLength - 8;
+328     while (i < n) {
+329       padded[i++] = 0;
+330     }
+331     padded[i++] = 0;
+332     padded[i++] = 0;
+333     padded[i++] = 0;
+334     padded[i++] = (length >>> 29) & 0xff;
+335     padded[i++] = (length >> 21) & 0xff;
+336     padded[i++] = (length >> 13) & 0xff;
+337     padded[i++] = (length >> 5) & 0xff;
+338     padded[i++] = (length << 3) & 0xff;
+339     const w = new Uint32Array(64);
+340     // for each 512 bit block
+341     for (i = 0; i < paddedLength; ) {
+342       for (j = 0; j < 16; ++j) {
+343         w[j] =
+344           (padded[i] << 24) |
+345           (padded[i + 1] << 16) |
+346           (padded[i + 2] << 8) |
+347           padded[i + 3];
+348         i += 4;
+349       }
+350 
+351       for (j = 16; j < 64; ++j) {
+352         w[j] =
+353           (littleSigmaPrime(w[j - 2]) +
+354             w[j - 7] +
+355             littleSigma(w[j - 15]) +
+356             w[j - 16]) |
+357           0;
+358       }
+359       let a = h0,
+360         b = h1,
+361         c = h2,
+362         d = h3,
+363         e = h4,
+364         f = h5,
+365         g = h6,
+366         h = h7,
+367         t1,
+368         t2;
+369       for (j = 0; j < 64; ++j) {
+370         t1 = h + sigmaPrime(e) + ch(e, f, g) + k[j] + w[j];
+371         t2 = sigma(a) + maj(a, b, c);
+372         h = g;
+373         g = f;
+374         f = e;
+375         e = (d + t1) | 0;
+376         d = c;
+377         c = b;
+378         b = a;
+379         a = (t1 + t2) | 0;
+380       }
+381       h0 = (h0 + a) | 0;
+382       h1 = (h1 + b) | 0;
+383       h2 = (h2 + c) | 0;
+384       h3 = (h3 + d) | 0;
+385       h4 = (h4 + e) | 0;
+386       h5 = (h5 + f) | 0;
+387       h6 = (h6 + g) | 0;
+388       h7 = (h7 + h) | 0;
+389     }
+390     // prettier-ignore
+391     return new Uint8Array([
+392       (h0 >> 24) & 0xFF, (h0 >> 16) & 0xFF, (h0 >> 8) & 0xFF, (h0) & 0xFF,
+393       (h1 >> 24) & 0xFF, (h1 >> 16) & 0xFF, (h1 >> 8) & 0xFF, (h1) & 0xFF,
+394       (h2 >> 24) & 0xFF, (h2 >> 16) & 0xFF, (h2 >> 8) & 0xFF, (h2) & 0xFF,
+395       (h3 >> 24) & 0xFF, (h3 >> 16) & 0xFF, (h3 >> 8) & 0xFF, (h3) & 0xFF,
+396       (h4 >> 24) & 0xFF, (h4 >> 16) & 0xFF, (h4 >> 8) & 0xFF, (h4) & 0xFF,
+397       (h5 >> 24) & 0xFF, (h5 >> 16) & 0xFF, (h5 >> 8) & 0xFF, (h5) & 0xFF,
+398       (h6 >> 24) & 0xFF, (h6 >> 16) & 0xFF, (h6 >> 8) & 0xFF, (h6) & 0xFF,
+399       (h7 >> 24) & 0xFF, (h7 >> 16) & 0xFF, (h7 >> 8) & 0xFF, (h7) & 0xFF
+400     ]);
+401   }
+402 
+403   return hash;
+404 })();
+405 
+406 const calculateSHA512 = (function calculateSHA512Closure() {
+407   function ch(result, x, y, z, tmp) {
+408     result.assign(x);
+409     result.and(y);
+410     tmp.assign(x);
+411     tmp.not();
+412     tmp.and(z);
+413     result.xor(tmp);
+414   }
+415 
+416   function maj(result, x, y, z, tmp) {
+417     result.assign(x);
+418     result.and(y);
+419     tmp.assign(x);
+420     tmp.and(z);
+421     result.xor(tmp);
+422     tmp.assign(y);
+423     tmp.and(z);
+424     result.xor(tmp);
+425   }
+426 
+427   function sigma(result, x, tmp) {
+428     result.assign(x);
+429     result.rotateRight(28);
+430     tmp.assign(x);
+431     tmp.rotateRight(34);
+432     result.xor(tmp);
+433     tmp.assign(x);
+434     tmp.rotateRight(39);
+435     result.xor(tmp);
+436   }
+437 
+438   function sigmaPrime(result, x, tmp) {
+439     result.assign(x);
+440     result.rotateRight(14);
+441     tmp.assign(x);
+442     tmp.rotateRight(18);
+443     result.xor(tmp);
+444     tmp.assign(x);
+445     tmp.rotateRight(41);
+446     result.xor(tmp);
+447   }
+448 
+449   function littleSigma(result, x, tmp) {
+450     result.assign(x);
+451     result.rotateRight(1);
+452     tmp.assign(x);
+453     tmp.rotateRight(8);
+454     result.xor(tmp);
+455     tmp.assign(x);
+456     tmp.shiftRight(7);
+457     result.xor(tmp);
+458   }
+459 
+460   function littleSigmaPrime(result, x, tmp) {
+461     result.assign(x);
+462     result.rotateRight(19);
+463     tmp.assign(x);
+464     tmp.rotateRight(61);
+465     result.xor(tmp);
+466     tmp.assign(x);
+467     tmp.shiftRight(6);
+468     result.xor(tmp);
+469   }
+470 
+471   // prettier-ignore
+472   const k = [
+473     new Word64(0x428a2f98, 0xd728ae22), new Word64(0x71374491, 0x23ef65cd),
+474     new Word64(0xb5c0fbcf, 0xec4d3b2f), new Word64(0xe9b5dba5, 0x8189dbbc),
+475     new Word64(0x3956c25b, 0xf348b538), new Word64(0x59f111f1, 0xb605d019),
+476     new Word64(0x923f82a4, 0xaf194f9b), new Word64(0xab1c5ed5, 0xda6d8118),
+477     new Word64(0xd807aa98, 0xa3030242), new Word64(0x12835b01, 0x45706fbe),
+478     new Word64(0x243185be, 0x4ee4b28c), new Word64(0x550c7dc3, 0xd5ffb4e2),
+479     new Word64(0x72be5d74, 0xf27b896f), new Word64(0x80deb1fe, 0x3b1696b1),
+480     new Word64(0x9bdc06a7, 0x25c71235), new Word64(0xc19bf174, 0xcf692694),
+481     new Word64(0xe49b69c1, 0x9ef14ad2), new Word64(0xefbe4786, 0x384f25e3),
+482     new Word64(0x0fc19dc6, 0x8b8cd5b5), new Word64(0x240ca1cc, 0x77ac9c65),
+483     new Word64(0x2de92c6f, 0x592b0275), new Word64(0x4a7484aa, 0x6ea6e483),
+484     new Word64(0x5cb0a9dc, 0xbd41fbd4), new Word64(0x76f988da, 0x831153b5),
+485     new Word64(0x983e5152, 0xee66dfab), new Word64(0xa831c66d, 0x2db43210),
+486     new Word64(0xb00327c8, 0x98fb213f), new Word64(0xbf597fc7, 0xbeef0ee4),
+487     new Word64(0xc6e00bf3, 0x3da88fc2), new Word64(0xd5a79147, 0x930aa725),
+488     new Word64(0x06ca6351, 0xe003826f), new Word64(0x14292967, 0x0a0e6e70),
+489     new Word64(0x27b70a85, 0x46d22ffc), new Word64(0x2e1b2138, 0x5c26c926),
+490     new Word64(0x4d2c6dfc, 0x5ac42aed), new Word64(0x53380d13, 0x9d95b3df),
+491     new Word64(0x650a7354, 0x8baf63de), new Word64(0x766a0abb, 0x3c77b2a8),
+492     new Word64(0x81c2c92e, 0x47edaee6), new Word64(0x92722c85, 0x1482353b),
+493     new Word64(0xa2bfe8a1, 0x4cf10364), new Word64(0xa81a664b, 0xbc423001),
+494     new Word64(0xc24b8b70, 0xd0f89791), new Word64(0xc76c51a3, 0x0654be30),
+495     new Word64(0xd192e819, 0xd6ef5218), new Word64(0xd6990624, 0x5565a910),
+496     new Word64(0xf40e3585, 0x5771202a), new Word64(0x106aa070, 0x32bbd1b8),
+497     new Word64(0x19a4c116, 0xb8d2d0c8), new Word64(0x1e376c08, 0x5141ab53),
+498     new Word64(0x2748774c, 0xdf8eeb99), new Word64(0x34b0bcb5, 0xe19b48a8),
+499     new Word64(0x391c0cb3, 0xc5c95a63), new Word64(0x4ed8aa4a, 0xe3418acb),
+500     new Word64(0x5b9cca4f, 0x7763e373), new Word64(0x682e6ff3, 0xd6b2b8a3),
+501     new Word64(0x748f82ee, 0x5defb2fc), new Word64(0x78a5636f, 0x43172f60),
+502     new Word64(0x84c87814, 0xa1f0ab72), new Word64(0x8cc70208, 0x1a6439ec),
+503     new Word64(0x90befffa, 0x23631e28), new Word64(0xa4506ceb, 0xde82bde9),
+504     new Word64(0xbef9a3f7, 0xb2c67915), new Word64(0xc67178f2, 0xe372532b),
+505     new Word64(0xca273ece, 0xea26619c), new Word64(0xd186b8c7, 0x21c0c207),
+506     new Word64(0xeada7dd6, 0xcde0eb1e), new Word64(0xf57d4f7f, 0xee6ed178),
+507     new Word64(0x06f067aa, 0x72176fba), new Word64(0x0a637dc5, 0xa2c898a6),
+508     new Word64(0x113f9804, 0xbef90dae), new Word64(0x1b710b35, 0x131c471b),
+509     new Word64(0x28db77f5, 0x23047d84), new Word64(0x32caab7b, 0x40c72493),
+510     new Word64(0x3c9ebe0a, 0x15c9bebc), new Word64(0x431d67c4, 0x9c100d4c),
+511     new Word64(0x4cc5d4be, 0xcb3e42b6), new Word64(0x597f299c, 0xfc657e2a),
+512     new Word64(0x5fcb6fab, 0x3ad6faec), new Word64(0x6c44198c, 0x4a475817)];
+513 
+514   function hash(data, offset, length, mode384 = false) {
+515     // initial hash values
+516     let h0, h1, h2, h3, h4, h5, h6, h7;
+517     if (!mode384) {
+518       h0 = new Word64(0x6a09e667, 0xf3bcc908);
+519       h1 = new Word64(0xbb67ae85, 0x84caa73b);
+520       h2 = new Word64(0x3c6ef372, 0xfe94f82b);
+521       h3 = new Word64(0xa54ff53a, 0x5f1d36f1);
+522       h4 = new Word64(0x510e527f, 0xade682d1);
+523       h5 = new Word64(0x9b05688c, 0x2b3e6c1f);
+524       h6 = new Word64(0x1f83d9ab, 0xfb41bd6b);
+525       h7 = new Word64(0x5be0cd19, 0x137e2179);
+526     } else {
+527       // SHA384 is exactly the same
+528       // except with different starting values and a trimmed result
+529       h0 = new Word64(0xcbbb9d5d, 0xc1059ed8);
+530       h1 = new Word64(0x629a292a, 0x367cd507);
+531       h2 = new Word64(0x9159015a, 0x3070dd17);
+532       h3 = new Word64(0x152fecd8, 0xf70e5939);
+533       h4 = new Word64(0x67332667, 0xffc00b31);
+534       h5 = new Word64(0x8eb44a87, 0x68581511);
+535       h6 = new Word64(0xdb0c2e0d, 0x64f98fa7);
+536       h7 = new Word64(0x47b5481d, 0xbefa4fa4);
+537     }
+538 
+539     // pre-processing
+540     const paddedLength = Math.ceil((length + 17) / 128) * 128;
+541     const padded = new Uint8Array(paddedLength);
+542     let i, j;
+543     for (i = 0; i < length; ++i) {
+544       padded[i] = data[offset++];
+545     }
+546     padded[i++] = 0x80;
+547     const n = paddedLength - 16;
+548     while (i < n) {
+549       padded[i++] = 0;
+550     }
+551     padded[i++] = 0;
+552     padded[i++] = 0;
+553     padded[i++] = 0;
+554     padded[i++] = 0;
+555     padded[i++] = 0;
+556     padded[i++] = 0;
+557     padded[i++] = 0;
+558     padded[i++] = 0;
+559     padded[i++] = 0;
+560     padded[i++] = 0;
+561     padded[i++] = 0;
+562     padded[i++] = (length >>> 29) & 0xff;
+563     padded[i++] = (length >> 21) & 0xff;
+564     padded[i++] = (length >> 13) & 0xff;
+565     padded[i++] = (length >> 5) & 0xff;
+566     padded[i++] = (length << 3) & 0xff;
+567 
+568     const w = new Array(80);
+569     for (i = 0; i < 80; i++) {
+570       w[i] = new Word64(0, 0);
+571     }
+572     let a = new Word64(0, 0),
+573       b = new Word64(0, 0),
+574       c = new Word64(0, 0);
+575     let d = new Word64(0, 0),
+576       e = new Word64(0, 0),
+577       f = new Word64(0, 0);
+578     let g = new Word64(0, 0),
+579       h = new Word64(0, 0);
+580     const t1 = new Word64(0, 0),
+581       t2 = new Word64(0, 0);
+582     const tmp1 = new Word64(0, 0),
+583       tmp2 = new Word64(0, 0);
+584     let tmp3;
+585 
+586     // for each 1024 bit block
+587     for (i = 0; i < paddedLength; ) {
+588       for (j = 0; j < 16; ++j) {
+589         w[j].high =
+590           (padded[i] << 24) |
+591           (padded[i + 1] << 16) |
+592           (padded[i + 2] << 8) |
+593           padded[i + 3];
+594         w[j].low =
+595           (padded[i + 4] << 24) |
+596           (padded[i + 5] << 16) |
+597           (padded[i + 6] << 8) |
+598           padded[i + 7];
+599         i += 8;
+600       }
+601       for (j = 16; j < 80; ++j) {
+602         tmp3 = w[j];
+603         littleSigmaPrime(tmp3, w[j - 2], tmp2);
+604         tmp3.add(w[j - 7]);
+605         littleSigma(tmp1, w[j - 15], tmp2);
+606         tmp3.add(tmp1);
+607         tmp3.add(w[j - 16]);
+608       }
+609 
+610       a.assign(h0);
+611       b.assign(h1);
+612       c.assign(h2);
+613       d.assign(h3);
+614       e.assign(h4);
+615       f.assign(h5);
+616       g.assign(h6);
+617       h.assign(h7);
+618       for (j = 0; j < 80; ++j) {
+619         t1.assign(h);
+620         sigmaPrime(tmp1, e, tmp2);
+621         t1.add(tmp1);
+622         ch(tmp1, e, f, g, tmp2);
+623         t1.add(tmp1);
+624         t1.add(k[j]);
+625         t1.add(w[j]);
+626 
+627         sigma(t2, a, tmp2);
+628         maj(tmp1, a, b, c, tmp2);
+629         t2.add(tmp1);
+630 
+631         tmp3 = h;
+632         h = g;
+633         g = f;
+634         f = e;
+635         d.add(t1);
+636         e = d;
+637         d = c;
+638         c = b;
+639         b = a;
+640         tmp3.assign(t1);
+641         tmp3.add(t2);
+642         a = tmp3;
+643       }
+644       h0.add(a);
+645       h1.add(b);
+646       h2.add(c);
+647       h3.add(d);
+648       h4.add(e);
+649       h5.add(f);
+650       h6.add(g);
+651       h7.add(h);
+652     }
+653 
+654     let result;
+655     if (!mode384) {
+656       result = new Uint8Array(64);
+657       h0.copyTo(result, 0);
+658       h1.copyTo(result, 8);
+659       h2.copyTo(result, 16);
+660       h3.copyTo(result, 24);
+661       h4.copyTo(result, 32);
+662       h5.copyTo(result, 40);
+663       h6.copyTo(result, 48);
+664       h7.copyTo(result, 56);
+665     } else {
+666       result = new Uint8Array(48);
+667       h0.copyTo(result, 0);
+668       h1.copyTo(result, 8);
+669       h2.copyTo(result, 16);
+670       h3.copyTo(result, 24);
+671       h4.copyTo(result, 32);
+672       h5.copyTo(result, 40);
+673     }
+674     return result;
+675   }
+676 
+677   return hash;
+678 })();
+679 
+1418 class CipherTransformFactory {
+1419   static #defaultPasswordBytes = new Uint8Array([
+1420     0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41, 0x64, 0x00, 0x4e, 0x56,
+1421     0xff, 0xfa, 0x01, 0x08, 0x2e, 0x2e, 0x00, 0xb6, 0xd0, 0x68, 0x3e, 0x80,
+1422     0x2f, 0x0c, 0xa9, 0xfe, 0x64, 0x53, 0x69, 0x7a,
+1423   ]);
+1424 
+1652   constructor(dict, fileId, password) {
+1653     const filter = dict.get("Filter");
+1654     if (!isName(filter, "Standard")) {
+1655       throw new FormatError("unknown encryption method");
+1656     }
+1657     this.filterName = filter.name;
+1658     this.dict = dict;
+1659     const algorithm = dict.get("V");
+1660     if (
+1661       !Number.isInteger(algorithm) ||
+1662       (algorithm !== 1 && algorithm !== 2 && algorithm !== 4 && algorithm !== 5)
+1663     ) {
+1664       throw new FormatError("unsupported encryption algorithm");
+1665     }
+1666     this.algorithm = algorithm;
+1667     let keyLength = dict.get("Length");
+1668     if (!keyLength) {
+1669       // Spec asks to rely on encryption dictionary's Length entry, however
+1670       // some PDFs don't have it. Trying to recover.
+1671       if (algorithm <= 3) {
+1672         // For 1 and 2 it's fixed to 40-bit, for 3 40-bit is a minimal value.
+1673         keyLength = 40;
+1674       } else {
+1675         // Trying to find default handler -- it usually has Length.
+1676         const cfDict = dict.get("CF");
+1677         const streamCryptoName = dict.get("StmF");
+1678         if (cfDict instanceof Dict && streamCryptoName instanceof Name) {
+1679           cfDict.suppressEncryption = true; // See comment below.
+1680           const handlerDict = cfDict.get(streamCryptoName.name);
+1681           keyLength = handlerDict?.get("Length") || 128;
+1682           if (keyLength < 40) {
+1683             // Sometimes it's incorrect value of bits, generators specify
+1684             // bytes.
+1685             keyLength <<= 3;
+1686           }
+1687         }
+1688       }
+1689     }
+1690     if (!Number.isInteger(keyLength) || keyLength < 40 || keyLength % 8 !== 0) {
+1691       throw new FormatError("invalid key length");
+1692     }
+1693 
+1694     const ownerBytes = stringToBytes(dict.get("O")),
+1695       userBytes = stringToBytes(dict.get("U"));
+1696     // prepare keys
+1697     const ownerPassword = ownerBytes.subarray(0, 32);
+1698     const userPassword = userBytes.subarray(0, 32);
+1699     const flags = dict.get("P");
+1700     const revision = dict.get("R");
+1701     // meaningful when V is 4 or 5
+1702     const encryptMetadata =
+1703       (algorithm === 4 || algorithm === 5) &&
+1704       dict.get("EncryptMetadata") !== false;
+1705     this.encryptMetadata = encryptMetadata;
+1706 
+1707     const fileIdBytes = stringToBytes(fileId);
+1708     let passwordBytes;
+1709     if (password) {
+1710       if (revision === 6) {
+1711         try {
+1712           password = utf8StringToString(password);
+1713         } catch {
+1714           warn(
+1715             "CipherTransformFactory: Unable to convert UTF8 encoded password."
+1716           );
+1717         }
+1718       }
+1719       passwordBytes = stringToBytes(password);
+1720     }
+1721 
+1722     let encryptionKey;
+1723     if (algorithm !== 5) {
+1724       encryptionKey = this.#prepareKeyData(
+1725         fileIdBytes,
+1726         passwordBytes,
+1727         ownerPassword,
+1728         userPassword,
+1729         flags,
+1730         revision,
+1731         keyLength,
+1732         encryptMetadata
+1733       );
+1734     } else {
+1735       const ownerValidationSalt = ownerBytes.subarray(32, 40);
+1736       const ownerKeySalt = ownerBytes.subarray(40, 48);
+1737       const uBytes = userBytes.subarray(0, 48);
+1738       const userValidationSalt = userBytes.subarray(32, 40);
+1739       const userKeySalt = userBytes.subarray(40, 48);
+1740       const ownerEncryption = stringToBytes(dict.get("OE"));
+1741       const userEncryption = stringToBytes(dict.get("UE"));
+1742       const perms = stringToBytes(dict.get("Perms"));
+1743       encryptionKey = this.#createEncryptionKey20(
+1744         revision,
+1745         passwordBytes,
+1746         ownerPassword,
+1747         ownerValidationSalt,
+1748         ownerKeySalt,
+1749         uBytes,
+1750         userPassword,
+1751         userValidationSalt,
+1752         userKeySalt,
+1753         ownerEncryption,
+1754         userEncryption,
+1755         perms
+1756       );
+1757     }
+1758     if (!encryptionKey && !password) {
+1759       throw new PasswordException(
+1760         "No password given",
+1761         PasswordResponses.NEED_PASSWORD
+1762       );
+1763     } else if (!encryptionKey && password) {
+1764       // Attempting use the password as an owner password
+1765       const decodedPassword = this.#decodeUserPassword(
+1766         passwordBytes,
+1767         ownerPassword,
+1768         revision,
+1769         keyLength
+1770       );
+1771       encryptionKey = this.#prepareKeyData(
+1772         fileIdBytes,
+1773         decodedPassword,
+1774         ownerPassword,
+1775         userPassword,
+1776         flags,
+1777         revision,
+1778         keyLength,
+1779         encryptMetadata
+1780       );
+1781     }
+1782 
+1783     if (!encryptionKey) {
+1784       throw new PasswordException(
+1785         "Incorrect Password",
+1786         PasswordResponses.INCORRECT_PASSWORD
+1787       );
+1788     }
+1789 
+1790     this.encryptionKey = encryptionKey;
+1791 
+1792     if (algorithm >= 4) {
+1793       const cf = dict.get("CF");
+1794       if (cf instanceof Dict) {
+1795         // The 'CF' dictionary itself should not be encrypted, and by setting
+1796         // `suppressEncryption` we can prevent an infinite loop inside of
+1797         // `XRef_fetchUncompressed` if the dictionary contains indirect
+1798         // objects (fixes issue7665.pdf).
+1799         cf.suppressEncryption = true;
+1800       }
+1801       this.cf = cf;
+1802       this.stmf = dict.get("StmF") || Name.get("Identity");
+1803       this.strf = dict.get("StrF") || Name.get("Identity");
+1804       this.eff = dict.get("EFF") || this.stmf;
+1805     }
+1806   }
+1807 
+1839 }
+1840 
+</code>
+
+PR summary:
+<pr_summary>
+Pad rev 4 encryption keys to be >= 16 bytes (issue 19484)
+This PR fixes issue https://github.com/mozilla/pdf.js/issues/19484 by extending too-short keys to 16 bytes (padded with 0s) for revision 4 encryption. This key-extension behavior seems undocumented, but is necessary to properly decrypt string & stream data of problematic files found in the wild (supposedly generated by InDesign).
+</pr_summary>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

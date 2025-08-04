@@ -1,0 +1,75 @@
+<think>
+Okay, I need to write a regression test for the issue where Voice Over doesn't read highlighted text during editing in a PDF. The patch provided makes several changes to improve accessibility, so the test should verify that after the patch, the highlighted text is accessible.
+
+First, I should understand what the patch does. Looking at the changes, I see that in highlight.js, when rendering, if there's text, a <mark> element is created with the class "visuallyHidden". This means the text is invisible but readable by screen readers.
+
+So, the test needs to check if this <mark> element exists with the correct text when a highlight is created.
+
+I'll start by importing the necessary modules. Since the test runs in Node.js, I'll use dynamic imports for the PDFDocument and PDFPage from the display API.
+
+Next, I'll create a sample PDF with a page containing text. I'll use a simple PDFString with "Hello World!" as the content.
+
+Then, I'll render the page and create a text layer. I'll select the text "Hello World!" to simulate a user highlighting it.
+
+After that, I'll create the HighlightEditor with the selection. The key part is to check the rendered output. I'll look for the <mark> element within the highlightDiv and verify that it contains the selected text.
+
+If the <mark> element exists and the text matches, the test passes. Otherwise, it fails.
+
+I also need to ensure that the test would fail before the patch because the <mark> element wasn't added. So, the test specifically checks for the presence and content of this element.
+
+Finally, I'll structure the test using Jest's async/await syntax, making sure all steps are properly awaited and errors are handled if any occur.
+</think>
+
+```javascript
+it("should have accessible highlighted text for screen readers", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { PDFPage } = await import("../../src/display/display_utils.js");
+  const { TextLayer } = await import("../../src/display/text_layer.js");
+  const { HighlightEditor } = await import("../../src/display/editor/highlight.js");
+
+  // Create a simple PDF with a page containing text
+  const pdf = new PDFDocument({
+    content: [
+      "1 0 0 1 0 0 cm",
+      "/F1 12 Tf",
+      "(Hello World!) Tj",
+      "ET",
+    ],
+  });
+
+  const page = new PDFPage(pdf, 0);
+  const textLayer = new TextLayer({
+    pageIndex: 0,
+    container: document.createElement("div"),
+  });
+
+  // Render the text layer
+  await textLayer.render();
+
+  // Create a selection for the highlighted text
+  const selection = document.getSelection();
+  selection.removeRange(selection.getRangeAt(0));
+  const range = document.createRange();
+  range.selectNodeContents(textLayer.div);
+  selection.addRange(range);
+
+  // Create the highlight editor
+  const highlightEditor = new HighlightEditor({
+    anchorNode: range.startContainer,
+    anchorOffset: 0,
+    focusNode: range.endContainer,
+    focusOffset: range.endOffset,
+    boxes: [],
+    methodOfCreation: "keyboard",
+    text: "Hello World!",
+  });
+
+  // Render the highlight editor
+  const highlightDiv = highlightEditor.render();
+
+  // Check for the accessible text element
+  const markElement = highlightDiv.querySelector("mark.visuallyHidden");
+  expect(markElement).toBeTruthy();
+  expect(markElement.textContent).toBe("Hello World!");
+});
+```

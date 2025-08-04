@@ -1,0 +1,33 @@
+it("should not log warning when printing a pdf with an added annotation", async () => {
+  const { AnnotationFactory } = await import("../../src/core/annotation.js");
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { Ref, Dict } = await import("../../src/core/primitives.js");
+  const { PDFWorker } = await import("../../src/display/api.js");
+
+  const pdfManager = {
+    ensureCatalog: () => Promise.resolve(new Dict()),
+    ensureDoc: () => Promise.resolve(),
+    getPage: () => Promise.resolve({ annotations: [new Ref(1, 0)] }),
+    ensure: (context, method, args) => {
+      if (method === "_create") {
+        return Promise.resolve(new AnnotationFactory._create(...args));
+      }
+      return Promise.resolve();
+    },
+  };
+
+  const annotationGlobals = await AnnotationFactory.createGlobals(pdfManager);
+  const xref = { fetchIfRef: () => new Dict() };
+  const ref = new Ref(1, 0);
+  const idFactory = { createObjId: () => 1 };
+
+  const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+  await AnnotationFactory.create(xref, ref, annotationGlobals, idFactory, true, null);
+
+  expect(consoleWarnSpy).not.toHaveBeenCalledWith(
+    "Unknown field name, falling back to empty field name."
+  );
+
+  consoleWarnSpy.mockRestore();
+});

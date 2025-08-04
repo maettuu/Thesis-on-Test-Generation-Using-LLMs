@@ -1,0 +1,46 @@
+<think>
+Alright, I need to write a regression test for the issue where SVG images couldn't be resized in pdf.js. The patch provided changes a method in tools.js, so I should focus on that.
+
+First, I'll review the patch. It changes _checkIfSVGFitsInCanvas to a getter _isSVGFittingCanvas and uses it differently. The method seems to check if SVGs fit without preserving aspect ratio.
+
+My test should verify that after the patch, SVGs can be resized correctly. I'll use PDFPageProxy to load an SVG and check its dimensions after resizing.
+
+I'll create an SVG with specific dimensions and embed it into a PDF. Then, I'll use pdf.js to load the PDF and check the page's width and height. If the resizing works, the dimensions should match the expected values.
+
+I'll need to generate an SVG on the fly, create a PDF with it, and then load it using getDocument. After the page is rendered, I'll compare the actual dimensions with the expected ones.
+
+I should also handle any potential errors and ensure the test is self-contained without relying on external files. Using the provided imports, I'll structure the test within an it block, using async/await for promises.
+
+Finally, I'll make sure the test fails before the patch and passes after, confirming the fix works.
+</think>
+
+```javascript
+it("should correctly resize SVG images", async () => {
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const { SVGGraphics } = await import("../../src/display/svg.js");
+  const { createIdFactory } = await import("./test_utils.js");
+
+  // Create a test SVG image
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="red"/></svg>`;
+  const blob = new Blob([svg], { type: "image/svg+xml" });
+  const url = URL.createObjectURL(blob);
+
+  // Create a PDF document with the SVG image
+  const pdf = await PDFDocumentProxy.load({
+    data: new Uint8Array(),
+    fingerprint: createIdFactory(),
+    url: url,
+  });
+
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+
+  // Check if the SVG image can be resized
+  const expectedWidth = 200;
+  const expectedHeight = 200;
+  const actualDimensions = await page.getImageDimensions();
+
+  expect(actualDimensions.width).toBe(expectedWidth);
+  expect(actualDimensions.height).toBe(expectedHeight);
+});
+```

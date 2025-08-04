@@ -1,0 +1,40 @@
+it("should add highlight and comment context menu options", async () => {
+  const { build } = await import("../../src/display/api.js");
+  const pdfBuffer = await import("../../src/core/pdf_buffer.js");
+  const pdfDocument = await build({
+    pdfBuffer,
+    cMapUrl: "",
+    isVerbose: false,
+  });
+  const page = await pdfDocument.getPage(1);
+  const textLayer = await page.getTextContent();
+  const div = document.createElement("div");
+  div.appendChild(textLayer.div);
+
+  const selection = document.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(textLayer.div.firstChild);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  document.dispatchEvent(new Event("selectionchange"));
+
+  const onContextMenu = jest.fn();
+  document.addEventListener("contextmenu", (e) => {
+    onContextMenu();
+  });
+
+  const contextMenuEvent = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+  });
+  textLayer.div.dispatchEvent(contextMenuEvent);
+
+  const expectedActions = ["highlightSelection", "commentSelection"];
+  const actualActions = onContextMenu.mock.calls;
+
+  expect(actualActions.length).toBe(1);
+  expect(actualActions[0][0]).toContain("highlightSelection");
+  expect(actualActions[0][0]).toContain("commentSelection");
+
+  await pdfDocument.destroy();
+});

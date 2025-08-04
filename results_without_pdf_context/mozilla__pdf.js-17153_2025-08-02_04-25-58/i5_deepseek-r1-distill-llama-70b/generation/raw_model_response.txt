@@ -1,0 +1,43 @@
+<think>
+Okay, I need to create a regression test for the issue where the `navigator` object doesn't have the `platform` attribute, causing an error when using `pdfjs-dist` in a Node.js environment. The patch provided modifies how the `platform` property is determined in `util.js`.
+
+First, I should understand what the patch does. It changes the `platform` getter in `FeatureTest` class. Before the patch, it directly accessed `navigator.platform`, which isn't available in Node.js, leading to an error. The patch adds checks to see if `navigator` exists and if `platform` is a string. If so, it uses `navigator.platform`; otherwise, it defaults `isMac` to false.
+
+To write a test that fails before the patch and passes after, I need to simulate the environment where `navigator` is undefined or doesn't have `platform`. Since the test is in Node.js, `navigator` isn't available by default, so I can mock it.
+
+I'll structure the test using Jest. I'll import `FeatureTest` from the correct path. Then, I'll mock `navigator` in different scenarios. 
+
+In the first scenario, I'll set `navigator` to an object without `platform` to simulate the pre-patch environment. This should cause `isMac` to be false. 
+
+In the second scenario, I'll set `navigator.platform` to a string that includes "Mac" to ensure `isMac` is true after the patch.
+
+I'll also need to handle cases where `navigator` is undefined or `platform` isn't a string, ensuring the patch correctly defaults `isMac` to false.
+
+So, the test will have two main cases: one without the patch (expecting failure) and one with the patch (expecting success). But since the test should run in the patched environment, I'll mock the conditions that would cause the issue before the patch.
+
+I'll write the test to check if `isMac` is correctly determined in both scenarios. This way, after applying the patch, the test should pass, confirming the fix.
+</think>
+
+```javascript
+it("should handle navigator.platform correctly in Node.js", async () => {
+  const { FeatureTest } = await import("../../src/shared/util.js");
+  
+  // Mock navigator for test cases
+  const originalNavigator = global.navigator;
+  
+  // Test case 1: navigator is undefined (pre-patch behavior)
+  global.navigator = undefined;
+  const featureTest1 = new FeatureTest();
+  const isMac1 = featureTest1.platform.isMac;
+  expect(isMac1).toBe(false);
+  
+  // Test case 2: navigator with platform string (post-patch behavior)
+  global.navigator = { platform: "Macintosh" };
+  const featureTest2 = new FeatureTest();
+  const isMac2 = featureTest2.platform.isMac;
+  expect(isMac2).toBe(true);
+  
+  // Restore original navigator
+  global.navigator = originalNavigator;
+});
+```

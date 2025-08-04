@@ -1,0 +1,37 @@
+```javascript
+it("should render read-only form fields when AnnotationMode is ENABLED", async () => {
+  const { PDFDocumentProxy, PDFPageProxy, PDFWorkerUtil, RenderTask } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams, TEST_PDFS_PATH } = await import("./test_utils.js");
+  const { PageViewport } = await import("../../src/display/display_utils.js");
+
+  const pdfUrl = `${TEST_PDFS_PATH}/simple-form-readonly.pdf`;
+  const params = buildGetDocumentParams(pdfUrl, null, null, { annotationMode: 1 });
+  const pdfDocument = await getDocument(params);
+  const pdfPage = await pdfDocument.getPage(1);
+  const viewport = new PageViewport({ width: 100, height: 100 });
+  const renderTask = new RenderTask({
+    canvasContext: null,
+    viewport,
+    renderInteractiveForms: false,
+  });
+  const annotationStorage = new (await import("../../src/display/annotation_storage.js")).AnnotationStorage();
+
+  const textWidgetAnnotations = pdfPage.getAnnotations().filter(annotation => annotation.subtype === "Widget");
+  const textWidgetAnnotation = textWidgetAnnotations.find(annotation => annotation.fieldName === "ReadOnlyField");
+
+  const isRenderableBeforePatch = textWidgetAnnotation.hasAppearance && !textWidgetAnnotation.fieldValue;
+  const isRenderableAfterPatch = await import("../../src/display/annotation_layer.js").then(module => {
+    const TextWidgetAnnotationElement = module.TextWidgetAnnotationElement;
+    const parameters = {
+      data: textWidgetAnnotation,
+      renderForms: false,
+      annotationStorage,
+    };
+    const textWidgetAnnotationElement = new TextWidgetAnnotationElement(parameters);
+    return textWidgetAnnotationElement.isRenderable;
+  });
+
+  expect(isRenderableBeforePatch).toBe(false);
+  expect(isRenderableAfterPatch).toBe(true);
+});
+```

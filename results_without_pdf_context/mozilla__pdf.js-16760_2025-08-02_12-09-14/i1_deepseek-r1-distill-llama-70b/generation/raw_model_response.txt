@@ -1,0 +1,51 @@
+<think>
+Okay, I need to write a regression test for the issue where a certain PDF file stopped rendering in Firefox 115.0.2 but worked in 109.0.1. The problem was fixed by a patch in xref.js, so the test should fail before the patch and pass after.
+
+First, I'll look at the existing test file, test/unit/api_spec.js. It imports several modules, including getDocument from display/api.js. I can use that to load the PDF.
+
+The test should attempt to load the problematic PDF and check if it's parsed correctly. If it throws an InvalidPDFException, the test fails. So, I'll wrap the getDocument call in a try-catch block.
+
+I need to use the specific PDF file from the issue. The URL is given as https://lab6.com/1, but since it's a test, I should probably use a local copy. However, the test_utils.js has a TEST_PDFS_PATH, so I can construct the URL using that.
+
+The test will be an async function. I'll use await to wait for getDocument to complete. If it succeeds, the test passes; if it throws, it fails.
+
+I should structure the test with try-catch inside the async function. If an InvalidPDFException is caught, the test fails. Otherwise, it passes.
+
+I'll name the test "should handle edge case PDF with non-traditional structure" to describe the issue.
+
+Now, putting it all together, the test imports the necessary modules, constructs the URL, and tries to get the document. If it doesn't throw, the test passes.
+
+I should make sure the test is self-contained and only uses the provided imports. No new dependencies are needed.
+
+So, the code will import getDocument and TEST_PDFS_PATH, construct the URL, and test loading the PDF.
+</think>
+
+```javascript
+it("should handle edge case PDF with non-traditional structure", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { TEST_PDFS_PATH } = await import("./test_utils.js");
+  
+  const pdfUrl = `${TEST_PDFS_PATH}/issue16759.pdf`;
+  let pdfDoc;
+  
+  try {
+    pdfDoc = await getDocument({
+      url: pdfUrl,
+      pdfWorker: new PDFWorker(),
+      pdfDocumentLoader: new PDFDocumentLoadingTask({
+        url: pdfUrl,
+        transporter: new PDFDataRangeTransport(),
+      }),
+    });
+  } catch (error) {
+    if (error instanceof InvalidPDFException) {
+      throw new Error("PDF failed to parse with InvalidPDFException");
+    }
+    throw error;
+  }
+  
+  if (!pdfDoc) {
+    throw new Error("Failed to load PDF document");
+  }
+});
+```

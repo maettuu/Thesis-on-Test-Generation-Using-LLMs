@@ -1,0 +1,45 @@
+it("should skip cancelled tasks in worker", async () => {
+  const { MessageHandler } = await import("../../src/shared/message_handler.js");
+  const mockComObj = {
+    addEventListener: jest.fn(),
+    postMessage: jest.fn(),
+  };
+
+  const handler = new MessageHandler("test-source", "test-target", mockComObj);
+
+  const messages = [
+    { action: "renderPage", data: { page: 1 } },
+    { action: "renderPage", data: { page: 2 }, stream: StreamKind.CANCEL, streamId: "cancel1" },
+    { action: "renderPage", data: { page: 3 } },
+  ];
+
+  let callbackCount = 0;
+  const expectedData = { pagesRendered: 2 };
+
+  await new Promise(resolve => {
+    mockComObj.addEventListener.mock.calls[0][1]({
+      data: messages[0],
+    });
+    mockComObj.addEventListener.mock.calls[0][1]({
+      data: messages[1],
+    });
+    mockComObj.addEventListener.mock.calls[0][1]({
+      data: messages[2],
+    });
+
+    handler.actionHandler.renderPage = jest.fn((data) => {
+      callbackCount++;
+      return Promise.resolve(expectedData);
+    });
+
+    const check = () => {
+      expect(callbackCount).toBe(2);
+      expect(mockComObj.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expectedData })
+      );
+      resolve();
+    };
+
+    setTimeout(check, 0);
+  });
+});

@@ -1,0 +1,28 @@
+it("should not balloon memory when scrolling through PDF with large images", async () => {
+  const { PDFDocument, PDFPageProxy } = await import("../../src/display/api.js");
+  const { puppeteer } = await import("puppeteer");
+
+  const browser = await puppeteer.launch();
+  const page = await browser.newPage();
+  const largePdfPath = require.resolve("../../test/pdfs/large-image.pdf");
+
+  // Load PDF with multiple large images
+  await page.goto(`file://${largePdfPath}`, { waitUntil: "networkidle0" });
+
+  // Simulate scrolling through pages
+  await page.evaluate(async () => {
+    const pdfDoc = await PDFDocument.load(await fetch("file://../test/pdfs/large-image.pdf").then(res => res.arrayBuffer()));
+    await pdfDoc.getPage(1).render();
+    history.back();
+  });
+
+  // Verify memory usage is within expected range after cleanup
+  const memoryUsage = await page.evaluate(() => {
+    return performance.memory.usedJSHeapSize;
+  });
+
+  await browser.close();
+
+  // Adjust the expected threshold based on your environment
+  expect(memoryUsage).toBeLessThan(20 * 1024 * 1024); // 20MB
+});

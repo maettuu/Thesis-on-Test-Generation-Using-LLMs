@@ -1,0 +1,60 @@
+it("should render emojis in PDFs correctly", async () => {
+  const { PDFDocument, Page } = await import("../../src/core/document.js");
+  const { FreeTextAnnotation } = await import("../../src/core/annotation.js");
+  const { FakeUnicodeFont } = await import("../../src/core/default_appearance.js");
+
+  // Create a new PDF document
+  const pdf = new PDFDocument();
+  const page = pdf.addPage(new Page());
+
+  // Create a free text annotation with emojis
+  const annotation = new FreeTextAnnotation({
+    xref: pdf.xref,
+    dict: {
+      NT: "FreeText",
+      "T": "Test",
+      "Subj": "Emojis",
+      "Contents": new Uint8Array(),
+      "AP": {},
+      "C": 1,
+      "M": "D:20230101",
+      "F": 0,
+      "P": page.ref,
+      "Rect": [0, 0, 100, 100],
+      "Q": 0,
+      "H": "FitH",
+      "S": "StrikeOut",
+      "Type": "/Annot"
+    },
+    evaluatorOptions: {},
+    data: {
+      hasOwnCanvas: true,
+      defaultAppearanceData: {
+        fontColor: [0, 0, 0],
+        fontSize: 10
+      }
+    }
+  });
+
+  // Set the text content with emojis
+  annotation._contents.str = "👋🏼 Hello, World! 🌍";
+
+  // Render the annotation
+  const fakeFont = new FakeUnicodeFont(pdf.xref, "sans-serif");
+  annotation.appearance = fakeFont.createAppearance(
+    annotation._contents.str,
+    annotation.rectangle,
+    annotation.rotation,
+    10,
+    [0, 0, 0],
+    1
+  );
+
+  // Parse the appearance stream and check for emojis
+  const appearanceStream = annotation.appearance;
+  const textContent = await parseAppearanceStream(appearanceStream, {}, pdf.xref);
+
+  // Verify the text content contains the expected emojis
+  expect(textContent).toContain("👋🏼");
+  expect(textContent).toContain("🌍");
+});

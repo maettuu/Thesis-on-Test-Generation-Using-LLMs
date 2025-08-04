@@ -1,0 +1,51 @@
+<think>
+Okay, I need to write a test for the issue where the ImageDecoder doesn't support decoding CMYK JPEG images. The patch adds support for this by using the ImageDecoder with the correct type when possible. 
+
+First, I'll look at the existing code. The test file is test/unit/api_spec.js, which imports various modules. I can use the TestPdfsServer from test_utils.js to serve a sample CMYK JPEG file. 
+
+I'll create an async test using Jest's it function. The test will check if the image can be decoded using the ImageDecoder. 
+
+I'll need to set up a server to host the sample PDF with a CMYK JPEG. Then, I'll fetch the PDF document and render the page. 
+
+In the test, I'll create a PDFDocumentProxy and a PDFPageProxy. I'll render the page and check if an error is thrown. If the patch works, no error should occur, and the rendering should be successful.
+
+I'll structure the test to import the necessary modules, set up the server, fetch the document, and render the page. Since the test should fail before the patch and pass after, I'll ensure that the test correctly captures this behavior.
+
+I'll make sure to clean up after the test by closing the server and document to prevent any leaks.
+
+So, putting it all together, the test will import the required modules, set up the server, fetch the document, render the page, and expect no errors.
+</think>
+
+```javascript
+it("should decode CMYK JPEG images using ImageDecoder", async () => {
+  const { TestPdfsServer } = await import("./test_utils.js");
+  const server = new TestPdfsServer();
+  try {
+    await server.start();
+    const pdfPath = `${TEST_PDFS_PATH}/cmyk_jpeg.pdf`;
+    const { pdfDocument } = await getDocument({
+      url: pdfPath,
+      transport: new PDFDataRangeTransport({
+        fetch: fetchDataDOM,
+        url: pdfPath,
+        httpHeaders: {
+          "X-Pdf-Web-Api-BaseVersion": "1",
+          "X-Pdf-Web-Api-ViewerVersion": "1.10.100",
+        },
+      }),
+    });
+    const pdfPage = await pdfDocument.getPage(1);
+    const viewport = PageViewport.fromDimensions(100, 100);
+    const renderTask = RenderTask.fromPDFPage({
+      pdfPage,
+      viewport,
+      renderInteractive: false,
+    });
+    await renderTask.run();
+    expect(renderTask.status).toBe("completed");
+  } finally {
+    await server.stop();
+    server.close();
+  }
+});
+```

@@ -1,0 +1,80 @@
+<think>
+Okay, I need to write a test that checks if the memory usage issue when scrolling through a PDF is fixed by the provided patch. The issue is about memory ballooning, which suggests that the application is not properly releasing memory as the user scrolls, leading to increased memory consumption.
+
+First, I should understand the patch. The patch adds a condition in the WorkerTransport class. It checks if the pageProxy's intentStates size is zero after cleanup. If so, it releases the imageData's bitmap. This should help in freeing up memory when there are no active rendering intents, thus preventing memory from ballooning.
+
+Now, to write a test that verifies this fix. The test should simulate scrolling through a PDF, which involves rendering multiple pages and ensuring that memory doesn't leak.
+
+I'll start by importing the necessary modules. Since the test is in Node.js, I'll use dynamic imports to load the required files. I'll need getDocument from display/api.js to load the PDF and PDFDocumentProxy to interact with the document.
+
+I'll set up a PDF buffer using a known test file. The test file is a large PDF to simulate the scenario where scrolling would cause memory issues.
+
+Next, I'll create a function to get the memory usage. In Node.js, I can use process.memoryUsage().rss() to get the resident set size, which indicates the memory used by the process.
+
+I'll load the PDF document and get the first page. Then, I'll render the page multiple times, each time forcing a garbage collection and measuring the memory usage. After each render, I'll clean up the page to simulate scrolling away.
+
+The key is to check that after each cleanup, the memory usage doesn't keep increasing. Before the patch, each render would leave some memory unreleased, causing the RSS to grow. After the patch, the RSS should stabilize, indicating that the memory is being properly released.
+
+I'll use Jest's beforeEach and afterEach hooks to handle setup and cleanup. Each test run will render the page a set number of times and measure the memory after each render. I'll assert that the memory usage doesn't significantly increase beyond a certain threshold, which would indicate that the memory is being managed correctly.
+
+I also need to ensure that the test is self-contained and doesn't rely on external state. Using a large PDF and multiple render cycles should make the test robust.
+
+Finally, I'll write the test using async/await to handle the promises from the PDF loading and rendering. I'll make sure to await each cleanup and memory check to get accurate measurements.
+</think>
+
+```javascript
+it("should prevent memory ballooning when scrolling through PDF", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { PDFDocumentProxy } = await import("../../src/display/api.js");
+  const pdfBuffer = await (await import("fs/promises")).readFile(`${TEST_PDFS_PATH}/large.pdf`);
+
+  async function getMemoryUsage() {
+    return process.memoryUsage().rss() / 1024 / 1024; // Convert to MB
+  }
+
+  const loadingTask = getDocument({
+    data: pdfBuffer,
+    cMapUrl: CMAP_URL,
+  });
+
+  let pdfDoc;
+  let page;
+
+  beforeEach(async () => {
+    pdfDoc = await loadingTask.promise;
+    page = await pdfDoc.getPage(1);
+  });
+
+  afterEach(async () => {
+    if (page) {
+      await page.cleanup();
+      page = null;
+    }
+    if (pdfDoc) {
+      await pdfDoc.cleanup();
+      pdfDoc = null;
+    }
+  });
+
+  const renderPage = async () => {
+    const viewport = page.getViewport({ scale: 1 });
+    const renderTask = page.render({
+      canvasContext: new (await import("canvas")).Canvas(1, 1).getContext("2d"),
+      viewport,
+    });
+    await renderTask.promise;
+    await page.cleanup();
+  };
+
+  const initialMemory = await getMemoryUsage();
+  const maxMemory = initialMemory * 1.2; // 20% increase tolerance
+
+  for (let i = 0; i < 10; i++) {
+    const memoryBefore = await getMemoryUsage();
+    await renderPage();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const memoryAfter = await getMemoryUsage();
+    expect(memoryAfter).toBeLessThan(maxMemory);
+  }
+});
+```

@@ -1,0 +1,45 @@
+it("should redo an annotation after undoing it", async () => {
+  const { PDFDocument } = await import("../../src/core/document.js");
+  const { AnnotationEditorUIManager } = await import("../../src/display/editor/tools.js");
+  const { AnnotationEditorLayer } = await import("../../src/display/editor/annotation_editor_layer.js");
+
+  // Setup
+  const pdfDocument = new PDFDocument(null, new Uint8Array());
+  const page = pdfDocument.addPage();
+  const container = { addEventListener: jest.fn(), focus: jest.fn() };
+  const eventBus = { _on: jest.fn(), _off: jest.fn(), dispatch: jest.fn() };
+
+  const uiManager = new AnnotationEditorUIManager(container, eventBus, pdfDocument, {});
+  const layer = new AnnotationEditorLayer(page, pdfDocument, null, null, null, null, null, null);
+  uiManager.addLayer(layer);
+
+  // Add an editor
+  const editor = layer.createEditor("text");
+  uiManager.addEditor(editor);
+  expect(uiManager.#allEditors.size).toBe(1);
+
+  // Undo
+  const undoEvent = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    keyCode: 90,
+    key: "z",
+    ctrlKey: true,
+  });
+  container.dispatchEvent(undoEvent);
+  expect(uiManager.#commandManager.hasSomethingToUndo()).toBe(false);
+  expect(uiManager.#allEditors.size).toBe(0);
+
+  // Redo
+  const redoEvent = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    keyCode: 89,
+    key: "y",
+    ctrlKey: true,
+  });
+  container.dispatchEvent(redoEvent);
+
+  // Verify the editor was restored
+  expect(uiManager.#allEditors.size).toBe(1);
+});

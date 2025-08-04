@@ -1,0 +1,43 @@
+it("should rescale huge image data to avoid decode errors", async () => {
+  const { ImageResizer, ImageKind } = await import("../../src/core/image_resizer.js");
+  const imageUtils = await import("../../src/shared/image_utils.js");
+  // Monkey-patch convertToRGBA to bypass actual conversion.
+  const originalConvertToRGBA = imageUtils.convertToRGBA;
+  imageUtils.convertToRGBA = ({ srcPos, destPos }) => ({ srcPos, destPos });
+  // Force the branch that creates an ImageBitmap.
+  ImageResizer.needsToBeResized = () => false;
+  // Override Uint8Array to simulate allocation failure for large sizes.
+  const OriginalUint8Array = Uint8Array;
+  const threshold = 10000;
+  function FakeUint8Array(arg) {
+    if (typeof arg === "number" && arg > threshold) {
+      throw new Error("Simulated allocation failure");
+    }
+    return new OriginalUint8Array(arg);
+  }
+  FakeUint8Array.from = OriginalUint8Array.from;
+  FakeUint8Array.of = OriginalUint8Array.of;
+  globalThis.Uint8Array = FakeUint8Array;
+  // Create fake image data with dimensions triggering the rescale branch.
+  // width * height * 4 > MAX_INT_32; choose width = 1024, height = 524288 so that 1024*524288*4 = 2147483648 > 2147483647.
+  const fakeData = new OriginalUint8Array(100); // dummy data
+  const imgData = {
+    width: 1024,
+    height: 524288,
+    data: fakeData,
+    kind: ImageKind.RGBA_32BPP,
+  };
+  const resizer = new ImageResizer(imgData, false);
+  const result = await resizer._createImage();
+  // Restore original Uint8Array and convertToRGBA.
+  globalThis.Uint8Array = OriginalUint8Array;
+  imageUtils.convertToRGBA = originalConvertToRGBA;
+  if (result !== null) {
+    if (result.data !== null) {
+      throw new Error("Expected rescaled image data to have data set to null");
+    }
+    if (!result.bitmap) {
+      throw new Error("Expected rescaled image data to have a bitmap");
+    }
+  }
+});

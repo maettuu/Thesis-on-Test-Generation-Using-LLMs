@@ -1,0 +1,75 @@
+<think>
+Okay, I need to create a regression test for the issue where text isn't shown when `browser.display.use_document_fonts` is set to 0 in Firefox. The user provided a patch that modifies `canvas.js`, and I need to ensure the test fails before the patch and passes after.
+
+First, I'll examine the problem. The bug occurs when the browser doesn't use document fonts, so the PDF.js viewer can't render the text correctly. The test should simulate this scenario.
+
+Looking at the provided test file, it imports necessary modules, so I can reuse some of those. I'll need to create a test PDF that uses a font which, when document fonts are disabled, should still display correctly after the patch.
+
+I'll set up a test server to serve the PDF. Then, I'll mock the `about:config` setting to disable document fonts. Using `PDFDocument` and `PDFPage`, I'll load the page and check if the text is rendered.
+
+The test will create a canvas element to draw the page. After rendering, it'll check if the canvas contains the expected text. Before the patch, this check should fail, and after, it should pass.
+
+I'll structure the test with `it` block, using async/await for asynchronous operations. I'll import necessary modules dynamically to maintain compatibility.
+
+So, the steps are:
+1. Set up the test server with the PDF.
+2. Disable document fonts in the browser.
+3. Load the PDF and render the page.
+4. Check if the text is present in the canvas.
+5. Assert the result.
+
+This should create a focused test that verifies the patch fixes the issue.
+</think>
+
+```javascript
+it("should render text when document fonts are disabled", async () => {
+  const { PDFDocument } = await import("../../src/display/api.js");
+  const { createIdFactory } = await import("./test_utils.js");
+  
+  // Create a test server for the PDF file
+  const pdfUrl = "test.pdf";
+  const pdfContent = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+  
+  // Set up the browser environment
+  const idFactory = createIdFactory();
+  const xref = new XRefMock();
+  xref.add(0, "obj", new Dict());
+  
+  // Create a minimal PDF document
+  const pdf = await PDFDocument.create(xref);
+  const page = await pdf.getPage(0);
+  
+  // Mock the about:config setting
+  const originalUseDocumentFonts = globalThis.navigator.browser.display.use_document_fonts;
+  globalThis.navigator.browser.display.use_document_fonts = 0;
+  
+  try {
+    // Create a canvas to draw the page
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    
+    // Set up the drawing context
+    const viewport = page.getViewBox();
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    
+    // Draw the page content
+    const renderTask = page.render({
+      canvasContext: ctx,
+      viewport,
+    });
+    
+    await renderTask.promise;
+    
+    // Check if the text is rendered
+    const expectedText = "Hello World";
+    const actualText = ctx.canvas.toDataURL();
+    
+    // Assert the text is present
+    expect(actualText).toContain(expectedText);
+  } finally {
+    // Restore the original setting
+    globalThis.navigator.browser.display.use_document_fonts = originalUseDocumentFonts;
+  }
+});
+```

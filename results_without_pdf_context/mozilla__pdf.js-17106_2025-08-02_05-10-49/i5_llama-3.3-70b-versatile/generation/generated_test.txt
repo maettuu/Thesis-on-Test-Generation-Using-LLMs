@@ -1,0 +1,24 @@
+it("should release ImageBitmap data after cleanup", async () => {
+  const { PDFDocumentProxy, PDFWorkerUtil } = await import("../../src/display/api.js");
+  const { createValidAbsoluteUrl } = await import("../../src/shared/util.js");
+  const { PDFPageProxy } = await import("../../src/display/api.js");
+
+  const pdfUrl = createValidAbsoluteUrl("example.pdf");
+  const pdfDocumentProxy = await PDFDocumentProxy.create(pdfUrl);
+  const pageProxy = await pdfDocumentProxy.getPage(1);
+  const imageData = { bitmap: { close: jest.fn() } };
+
+  PDFWorkerUtil.receiveMessage = jest.fn((message) => {
+    if (message.type === "Image") {
+      return imageData;
+    }
+  });
+
+  pageProxy._intentStates.size = 0;
+  PDFWorkerUtil.receiveMessage({ type: "Image" });
+  expect(imageData.bitmap.close).toHaveBeenCalledTimes(1);
+
+  pageProxy._intentStates.size = 1;
+  PDFWorkerUtil.receiveMessage({ type: "Image" });
+  expect(imageData.bitmap.close).toHaveBeenCalledTimes(1);
+});

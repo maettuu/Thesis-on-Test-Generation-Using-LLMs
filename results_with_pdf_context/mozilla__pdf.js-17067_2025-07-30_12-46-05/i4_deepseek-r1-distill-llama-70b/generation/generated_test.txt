@@ -1,0 +1,52 @@
+it("should correctly render patterns with applied transforms", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const loadingTask = getDocument(buildGetDocumentParams('issue17065.pdf'));
+
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  const renderTask = page.render({
+    canvasContext: context,
+    viewport,
+    enableWebGL: false,
+    enablePatternDownscaling: true
+  });
+
+  await renderTask.promise;
+
+  const canvasData = context.getImageData(0, 0, canvas.width, canvas.height).data;
+
+  // Check top-left rectangle (no transform)
+  const rect1TopLeft = getPixelColor(canvasData, 100, 100);
+  expect(rect1TopLeft).toEqualRGB(255, 0, 0, 255); // Red
+
+  // Check bottom-right rectangle (with skew and rotation)
+  const rect2BottomRight = getPixelColor(canvasData, 300, 300);
+  expect(rect2BottomRight).toEqualRGB(0, 0, 255, 255); // Blue
+});
+
+function getPixelColor(data, x, y) {
+  const index = (y * data.width + x) * 4;
+  return {
+    r: data[index],
+    g: data[index + 1],
+    b: data[index + 2],
+    a: data[index + 3]
+  };
+}
+
+expect.extend({
+  toEqualRGB(received, r, g, b, a) {
+    if (a === undefined) a = 255;
+    return {
+      message: () => `Expected color to be RGBA(${r},${g},${b},${a})`,
+      pass: received.r === r && received.g === g && received.b === b && received.a === a
+    };
+  }
+});

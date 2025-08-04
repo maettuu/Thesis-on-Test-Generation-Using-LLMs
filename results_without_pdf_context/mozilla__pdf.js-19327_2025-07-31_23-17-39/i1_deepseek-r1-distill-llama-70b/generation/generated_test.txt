@@ -1,0 +1,47 @@
+it("should set jpxDecoderOptions.numComponents correctly for JPXDecode images", async () => {
+  const { PDFImage } = await import("../../src/core/image.js");
+  const { Name } = await import("../../src/core/primitives.js");
+  const { PDFFunctionFactory } = await import("../../src/core/function.js");
+  const { JpxImage } = await import("../../src/core/jpx.js");
+  const originalParse = JpxImage.parseImageProperties;
+  JpxImage.parseImageProperties = () => ({
+    width: 100,
+    height: 100,
+    componentsCount: 3,
+    bitsPerComponent: 8,
+  });
+  const fakeStream = { reset() {} };
+  const fakeDict = {
+    get(key) {
+      if (key === "F") return new Name("JPXDecode");
+      if (key === "W") return 100;
+      if (key === "H") return 100;
+      if (key === "I") return false;
+      if (key === "IM") return false;
+    },
+    getRaw(key) {
+      if (key === "CS") return new Name("DeviceRGB");
+    },
+    has(key) {
+      if (key === "SMaskInData") return false;
+      return false;
+    },
+  };
+  const fakeImage = { dict: fakeDict, stream: fakeStream, bitsPerComponent: null };
+  const pdfImage = new PDFImage({
+    xref: {},
+    res: {},
+    image: fakeImage,
+    pdfFunctionFactory: new PDFFunctionFactory(),
+    localColorSpaceCache: {},
+  });
+  JpxImage.parseImageProperties = originalParse;
+  if (!pdfImage.jpxDecoderOptions) {
+    throw new Error("jpxDecoderOptions is not defined");
+  }
+  if (pdfImage.jpxDecoderOptions.numComponents !== 3) {
+    throw new Error(
+      `Expected jpxDecoderOptions.numComponents to be 3 but got ${pdfImage.jpxDecoderOptions.numComponents}`
+    );
+  }
+});

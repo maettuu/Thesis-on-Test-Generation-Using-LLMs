@@ -1,0 +1,1989 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+Text layer and canvas don't always match in the pdf viewer on Windows
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/display/text_layer.js b/src/display/text_layer.js
+--- a/src/display/text_layer.js
++++ b/src/display/text_layer.js
+@@ -16,7 +16,13 @@
+ /** @typedef {import("./display_utils").PageViewport} PageViewport */
+ /** @typedef {import("./api").TextContent} TextContent */
+ 
+-import { AbortException, Util, warn } from "../shared/util.js";
++import {
++  AbortException,
++  FeatureTest,
++  shadow,
++  Util,
++  warn,
++} from "../shared/util.js";
+ import { setLayerDimensions } from "./display_utils.js";
+ 
+ /**
+@@ -152,6 +158,24 @@ class TextLayer {
+     }
+   }
+ 
++  static get fontFamilyMap() {
++    const { isWindows, isFirefox } = FeatureTest.platform;
++    return shadow(
++      this,
++      "fontFamilyMap",
++      new Map([
++        [
++          "sans-serif",
++          `${isWindows && isFirefox ? "Calibri, " : ""}sans-serif`,
++        ],
++        [
++          "monospace",
++          `${isWindows && isFirefox ? "Lucida Console, " : ""}monospace`,
++        ],
++      ])
++    );
++  }
++
+   /**
+    * Render the textLayer.
+    * @returns {Promise}
+@@ -300,9 +324,12 @@ class TextLayer {
+       angle += Math.PI / 2;
+     }
+ 
+-    const fontFamily =
++    let fontFamily =
+       (this.#fontInspectorEnabled && style.fontSubstitution) ||
+       style.fontFamily;
++
++    // Workaround for bug 1922063.
++    fontFamily = TextLayer.fontFamilyMap.get(fontFamily) || fontFamily;
+     const fontHeight = Math.hypot(tx[2], tx[3]);
+     const fontAscent =
+       fontHeight * TextLayer.#getAscent(fontFamily, this.#lang);
+
+diff --git a/src/shared/util.js b/src/shared/util.js
+--- a/src/shared/util.js
++++ b/src/shared/util.js
+@@ -636,9 +636,18 @@ class FeatureTest {
+     ) {
+       return shadow(this, "platform", {
+         isMac: navigator.platform.includes("Mac"),
++        isWindows: navigator.platform.includes("Win"),
++        isFirefox:
++          (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
++          (typeof navigator?.userAgent === "string" &&
++            navigator.userAgent.includes("Firefox")),
+       });
+     }
+-    return shadow(this, "platform", { isMac: false });
++    return shadow(this, "platform", {
++      isMac: false,
++      isWindows: false,
++      isFirefox: false,
++    });
+   }
+ 
+   static get isCSSRoundSupported() {
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.25.2
+- @babel/preset-env: ^7.25.4
+- @babel/runtime: ^7.25.6
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001662
+- canvas: ^2.11.2
+- core-js: ^3.38.1
+- eslint: ^8.57.0
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.1
+- eslint-plugin-import: ^2.30.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.1.0
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^55.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.3.0
+- jsdoc: ^4.0.3
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.4
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.47
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.0
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.0
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.9.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.2
+- vinyl: ^3.0.0
+- webpack: ^5.94.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/display/text_layer.js
+1 /* Copyright 2015 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 /** @typedef {import("./display_utils").PageViewport} PageViewport */
+17 /** @typedef {import("./api").TextContent} TextContent */
+18 
+19 import { AbortException, Util, warn } from "../shared/util.js";
+20 import { setLayerDimensions } from "./display_utils.js";
+21 
+22 /**
+23  * @typedef {Object} TextLayerParameters
+24  * @property {ReadableStream | TextContent} textContentSource - Text content to
+25  *   render, i.e. the value returned by the page's `streamTextContent` or
+26  *   `getTextContent` method.
+27  * @property {HTMLElement} container - The DOM node that will contain the text
+28  *   runs.
+29  * @property {PageViewport} viewport - The target viewport to properly layout
+30  *   the text runs.
+31  */
+32 
+33 /**
+34  * @typedef {Object} TextLayerUpdateParameters
+35  * @property {PageViewport} viewport - The target viewport to properly layout
+36  *   the text runs.
+37  * @property {function} [onBefore] - Callback invoked before the textLayer is
+38  *   updated in the DOM.
+39  */
+40 
+41 const MAX_TEXT_DIVS_TO_RENDER = 100000;
+42 const DEFAULT_FONT_SIZE = 30;
+43 const DEFAULT_FONT_ASCENT = 0.8;
+44 
+45 class TextLayer {
+46   #capability = Promise.withResolvers();
+47 
+48   #container = null;
+49 
+50   #disableProcessItems = false;
+51 
+52   #fontInspectorEnabled = !!globalThis.FontInspector?.enabled;
+53 
+54   #lang = null;
+55 
+56   #layoutTextParams = null;
+57 
+58   #pageHeight = 0;
+59 
+60   #pageWidth = 0;
+61 
+62   #reader = null;
+63 
+64   #rootContainer = null;
+65 
+66   #rotation = 0;
+67 
+68   #scale = 0;
+69 
+70   #styleCache = Object.create(null);
+71 
+72   #textContentItemsStr = [];
+73 
+74   #textContentSource = null;
+75 
+76   #textDivs = [];
+77 
+78   #textDivProperties = new WeakMap();
+79 
+80   #transform = null;
+81 
+82   static #ascentCache = new Map();
+83 
+84   static #canvasContexts = new Map();
+85 
+86   static #canvasCtxFonts = new WeakMap();
+87 
+88   static #minFontSize = null;
+89 
+90   static #pendingTextLayers = new Set();
+91 
+92   /**
+93    * @param {TextLayerParameters} options
+94    */
+95   constructor({ textContentSource, container, viewport }) {
+96     if (textContentSource instanceof ReadableStream) {
+97       this.#textContentSource = textContentSource;
+98     } else if (
+99       (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+100       typeof textContentSource === "object"
+101     ) {
+102       this.#textContentSource = new ReadableStream({
+103         start(controller) {
+104           controller.enqueue(textContentSource);
+105           controller.close();
+106         },
+107       });
+108     } else {
+109       throw new Error('No "textContentSource" parameter specified.');
+110     }
+111     this.#container = this.#rootContainer = container;
+112 
+113     this.#scale = viewport.scale * (globalThis.devicePixelRatio || 1);
+114     this.#rotation = viewport.rotation;
+115     this.#layoutTextParams = {
+116       div: null,
+117       properties: null,
+118       ctx: null,
+119     };
+120     const { pageWidth, pageHeight, pageX, pageY } = viewport.rawDims;
+121     this.#transform = [1, 0, 0, -1, -pageX, pageY + pageHeight];
+122     this.#pageWidth = pageWidth;
+123     this.#pageHeight = pageHeight;
+124 
+125     TextLayer.#ensureMinFontSizeComputed();
+126 
+127     setLayerDimensions(container, viewport);
+128 
+129     // Always clean-up the temporary canvas once rendering is no longer pending.
+130     this.#capability.promise
+131       .finally(() => {
+132         TextLayer.#pendingTextLayers.delete(this);
+133         this.#layoutTextParams = null;
+134         this.#styleCache = null;
+135       })
+136       .catch(() => {
+137         // Avoid "Uncaught promise" messages in the console.
+138       });
+139 
+140     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+141       // For testing purposes.
+142       Object.defineProperty(this, "pageWidth", {
+143         get() {
+144           return this.#pageWidth;
+145         },
+146       });
+147       Object.defineProperty(this, "pageHeight", {
+148         get() {
+149           return this.#pageHeight;
+150         },
+151       });
+152     }
+153   }
+154 
+155   /**
+156    * Render the textLayer.
+157    * @returns {Promise}
+158    */
+159   render() {
+160     const pump = () => {
+161       this.#reader.read().then(({ value, done }) => {
+162         if (done) {
+163           this.#capability.resolve();
+164           return;
+165         }
+166         this.#lang ??= value.lang;
+167         Object.assign(this.#styleCache, value.styles);
+168         this.#processItems(value.items);
+169         pump();
+170       }, this.#capability.reject);
+171     };
+172     this.#reader = this.#textContentSource.getReader();
+173     TextLayer.#pendingTextLayers.add(this);
+174     pump();
+175 
+176     return this.#capability.promise;
+177   }
+178 
+179   /**
+180    * Update a previously rendered textLayer, if necessary.
+181    * @param {TextLayerUpdateParameters} options
+182    * @returns {undefined}
+183    */
+184   update({ viewport, onBefore = null }) {
+185     const scale = viewport.scale * (globalThis.devicePixelRatio || 1);
+186     const rotation = viewport.rotation;
+187 
+188     if (rotation !== this.#rotation) {
+189       onBefore?.();
+190       this.#rotation = rotation;
+191       setLayerDimensions(this.#rootContainer, { rotation });
+192     }
+193 
+194     if (scale !== this.#scale) {
+195       onBefore?.();
+196       this.#scale = scale;
+197       const params = {
+198         div: null,
+199         properties: null,
+200         ctx: TextLayer.#getCtx(this.#lang),
+201       };
+202       for (const div of this.#textDivs) {
+203         params.properties = this.#textDivProperties.get(div);
+204         params.div = div;
+205         this.#layout(params);
+206       }
+207     }
+208   }
+209 
+210   /**
+211    * Cancel rendering of the textLayer.
+212    * @returns {undefined}
+213    */
+214   cancel() {
+215     const abortEx = new AbortException("TextLayer task cancelled.");
+216 
+217     this.#reader?.cancel(abortEx).catch(() => {
+218       // Avoid "Uncaught promise" messages in the console.
+219     });
+220     this.#reader = null;
+221 
+222     this.#capability.reject(abortEx);
+223   }
+224 
+225   /**
+226    * @type {Array<HTMLElement>} HTML elements that correspond to the text items
+227    *   of the textContent input.
+228    *   This is output and will initially be set to an empty array.
+229    */
+230   get textDivs() {
+231     return this.#textDivs;
+232   }
+233 
+234   /**
+235    * @type {Array<string>} Strings that correspond to the `str` property of
+236    *   the text items of the textContent input.
+237    *   This is output and will initially be set to an empty array
+238    */
+239   get textContentItemsStr() {
+240     return this.#textContentItemsStr;
+241   }
+242 
+243   #processItems(items) {
+244     if (this.#disableProcessItems) {
+245       return;
+246     }
+247     this.#layoutTextParams.ctx ??= TextLayer.#getCtx(this.#lang);
+248 
+249     const textDivs = this.#textDivs,
+250       textContentItemsStr = this.#textContentItemsStr;
+251 
+252     for (const item of items) {
+253       // No point in rendering many divs as it would make the browser
+254       // unusable even after the divs are rendered.
+255       if (textDivs.length > MAX_TEXT_DIVS_TO_RENDER) {
+256         warn("Ignoring additional textDivs for performance reasons.");
+257 
+258         this.#disableProcessItems = true; // Avoid multiple warnings for one page.
+259         return;
+260       }
+261 
+262       if (item.str === undefined) {
+263         if (
+264           item.type === "beginMarkedContentProps" ||
+265           item.type === "beginMarkedContent"
+266         ) {
+267           const parent = this.#container;
+268           this.#container = document.createElement("span");
+269           this.#container.classList.add("markedContent");
+270           if (item.id !== null) {
+271             this.#container.setAttribute("id", `${item.id}`);
+272           }
+273           parent.append(this.#container);
+274         } else if (item.type === "endMarkedContent") {
+275           this.#container = this.#container.parentNode;
+276         }
+277         continue;
+278       }
+279       textContentItemsStr.push(item.str);
+280       this.#appendText(item);
+281     }
+282   }
+283 
+284   #appendText(geom) {
+285     // Initialize all used properties to keep the caches monomorphic.
+286     const textDiv = document.createElement("span");
+287     const textDivProperties = {
+288       angle: 0,
+289       canvasWidth: 0,
+290       hasText: geom.str !== "",
+291       hasEOL: geom.hasEOL,
+292       fontSize: 0,
+293     };
+294     this.#textDivs.push(textDiv);
+295 
+296     const tx = Util.transform(this.#transform, geom.transform);
+297     let angle = Math.atan2(tx[1], tx[0]);
+298     const style = this.#styleCache[geom.fontName];
+299     if (style.vertical) {
+300       angle += Math.PI / 2;
+301     }
+302 
+303     const fontFamily =
+304       (this.#fontInspectorEnabled && style.fontSubstitution) ||
+305       style.fontFamily;
+306     const fontHeight = Math.hypot(tx[2], tx[3]);
+307     const fontAscent =
+308       fontHeight * TextLayer.#getAscent(fontFamily, this.#lang);
+309 
+310     let left, top;
+311     if (angle === 0) {
+312       left = tx[4];
+313       top = tx[5] - fontAscent;
+314     } else {
+315       left = tx[4] + fontAscent * Math.sin(angle);
+316       top = tx[5] - fontAscent * Math.cos(angle);
+317     }
+318 
+319     const scaleFactorStr = "calc(var(--scale-factor)*";
+320     const divStyle = textDiv.style;
+321     // Setting the style properties individually, rather than all at once,
+322     // should be OK since the `textDiv` isn't appended to the document yet.
+323     if (this.#container === this.#rootContainer) {
+324       divStyle.left = `${((100 * left) / this.#pageWidth).toFixed(2)}%`;
+325       divStyle.top = `${((100 * top) / this.#pageHeight).toFixed(2)}%`;
+326     } else {
+327       // We're in a marked content span, hence we can't use percents.
+328       divStyle.left = `${scaleFactorStr}${left.toFixed(2)}px)`;
+329       divStyle.top = `${scaleFactorStr}${top.toFixed(2)}px)`;
+330     }
+331     // We multiply the font size by #minFontSize, and then #layout will
+332     // scale the element by 1/#minFontSize. This allows us to effectively
+333     // ignore the minimum font size enforced by the browser, so that the text
+334     // layer <span>s can always match the size of the text in the canvas.
+335     divStyle.fontSize = `${scaleFactorStr}${(TextLayer.#minFontSize * fontHeight).toFixed(2)}px)`;
+336     divStyle.fontFamily = fontFamily;
+337 
+338     textDivProperties.fontSize = fontHeight;
+339 
+340     // Keeps screen readers from pausing on every new text span.
+341     textDiv.setAttribute("role", "presentation");
+342 
+343     textDiv.textContent = geom.str;
+344     // geom.dir may be 'ttb' for vertical texts.
+345     textDiv.dir = geom.dir;
+346 
+347     // `fontName` is only used by the FontInspector, and we only use `dataset`
+348     // here to make the font name available in the debugger.
+349     if (this.#fontInspectorEnabled) {
+350       textDiv.dataset.fontName =
+351         style.fontSubstitutionLoadedName || geom.fontName;
+352     }
+353     if (angle !== 0) {
+354       textDivProperties.angle = angle * (180 / Math.PI);
+355     }
+356     // We don't bother scaling single-char text divs, because it has very
+357     // little effect on text highlighting. This makes scrolling on docs with
+358     // lots of such divs a lot faster.
+359     let shouldScaleText = false;
+360     if (geom.str.length > 1) {
+361       shouldScaleText = true;
+362     } else if (geom.str !== " " && geom.transform[0] !== geom.transform[3]) {
+363       const absScaleX = Math.abs(geom.transform[0]),
+364         absScaleY = Math.abs(geom.transform[3]);
+365       // When the horizontal/vertical scaling differs significantly, also scale
+366       // even single-char text to improve highlighting (fixes issue11713.pdf).
+367       if (
+368         absScaleX !== absScaleY &&
+369         Math.max(absScaleX, absScaleY) / Math.min(absScaleX, absScaleY) > 1.5
+370       ) {
+371         shouldScaleText = true;
+372       }
+373     }
+374     if (shouldScaleText) {
+375       textDivProperties.canvasWidth = style.vertical ? geom.height : geom.width;
+376     }
+377     this.#textDivProperties.set(textDiv, textDivProperties);
+378 
+379     // Finally, layout and append the text to the DOM.
+380     this.#layoutTextParams.div = textDiv;
+381     this.#layoutTextParams.properties = textDivProperties;
+382     this.#layout(this.#layoutTextParams);
+383 
+384     if (textDivProperties.hasText) {
+385       this.#container.append(textDiv);
+386     }
+387     if (textDivProperties.hasEOL) {
+388       const br = document.createElement("br");
+389       br.setAttribute("role", "presentation");
+390       this.#container.append(br);
+391     }
+392   }
+393 
+394   #layout(params) {
+395     const { div, properties, ctx } = params;
+396     const { style } = div;
+397 
+398     let transform = "";
+399     if (TextLayer.#minFontSize > 1) {
+400       transform = `scale(${1 / TextLayer.#minFontSize})`;
+401     }
+402 
+403     if (properties.canvasWidth !== 0 && properties.hasText) {
+404       const { fontFamily } = style;
+405       const { canvasWidth, fontSize } = properties;
+406 
+407       TextLayer.#ensureCtxFont(ctx, fontSize * this.#scale, fontFamily);
+408       // Only measure the width for multi-char text divs, see `appendText`.
+409       const { width } = ctx.measureText(div.textContent);
+410 
+411       if (width > 0) {
+412         transform = `scaleX(${(canvasWidth * this.#scale) / width}) ${transform}`;
+413       }
+414     }
+415     if (properties.angle !== 0) {
+416       transform = `rotate(${properties.angle}deg) ${transform}`;
+417     }
+418     if (transform.length > 0) {
+419       style.transform = transform;
+420     }
+421   }
+422 
+423   /**
+424    * Clean-up global textLayer data.
+425    * @returns {undefined}
+426    */
+427   static cleanup() {
+428     if (this.#pendingTextLayers.size > 0) {
+429       return;
+430     }
+431     this.#ascentCache.clear();
+432 
+433     for (const { canvas } of this.#canvasContexts.values()) {
+434       canvas.remove();
+435     }
+436     this.#canvasContexts.clear();
+437   }
+438 
+439   static #getCtx(lang = null) {
+440     let ctx = this.#canvasContexts.get((lang ||= ""));
+441     if (!ctx) {
+442       // We don't use an OffscreenCanvas here because we use serif/sans serif
+443       // fonts with it and they depends on the locale.
+444       // In Firefox, the <html> element get a lang attribute that depends on
+445       // what Fluent returns for the locale and the OffscreenCanvas uses
+446       // the OS locale.
+447       // Those two locales can be different and consequently the used fonts will
+448       // be different (see bug 1869001).
+449       // Ideally, we should use in the text layer the fonts we've in the pdf (or
+450       // their replacements when they aren't embedded) and then we can use an
+451       // OffscreenCanvas.
+452       const canvas = document.createElement("canvas");
+453       canvas.className = "hiddenCanvasElement";
+454       canvas.lang = lang;
+455       document.body.append(canvas);
+456       ctx = canvas.getContext("2d", {
+457         alpha: false,
+458         willReadFrequently: true,
+459       });
+460       this.#canvasContexts.set(lang, ctx);
+461 
+462       // Also, initialize state for the `#ensureCtxFont` method.
+463       this.#canvasCtxFonts.set(ctx, { size: 0, family: "" });
+464     }
+465     return ctx;
+466   }
+467 
+468   static #ensureCtxFont(ctx, size, family) {
+469     const cached = this.#canvasCtxFonts.get(ctx);
+470     if (size === cached.size && family === cached.family) {
+471       return; // The font is already set.
+472     }
+473     ctx.font = `${size}px ${family}`;
+474     cached.size = size;
+475     cached.family = family;
+476   }
+477 
+478   /**
+479    * Compute the minimum font size enforced by the browser.
+480    */
+481   static #ensureMinFontSizeComputed() {
+482     if (this.#minFontSize !== null) {
+483       return;
+484     }
+485     const div = document.createElement("div");
+486     div.style.opacity = 0;
+487     div.style.lineHeight = 1;
+488     div.style.fontSize = "1px";
+489     div.style.position = "absolute";
+490     div.textContent = "X";
+491     document.body.append(div);
+492     // In `display:block` elements contain a single line of text,
+493     // the height matches the line height (which, when set to 1,
+494     // matches the actual font size).
+495     this.#minFontSize = div.getBoundingClientRect().height;
+496     div.remove();
+497   }
+498 
+499   static #getAscent(fontFamily, lang) {
+500     const cachedAscent = this.#ascentCache.get(fontFamily);
+501     if (cachedAscent) {
+502       return cachedAscent;
+503     }
+504     const ctx = this.#getCtx(lang);
+505 
+506     ctx.canvas.width = ctx.canvas.height = DEFAULT_FONT_SIZE;
+507     this.#ensureCtxFont(ctx, DEFAULT_FONT_SIZE, fontFamily);
+508     const metrics = ctx.measureText("");
+509 
+510     // Both properties aren't available by default in Firefox.
+511     let ascent = metrics.fontBoundingBoxAscent;
+512     let descent = Math.abs(metrics.fontBoundingBoxDescent);
+513     if (ascent) {
+514       const ratio = ascent / (ascent + descent);
+515       this.#ascentCache.set(fontFamily, ratio);
+516 
+517       ctx.canvas.width = ctx.canvas.height = 0;
+518       return ratio;
+519     }
+520 
+521     // Try basic heuristic to guess ascent/descent.
+522     // Draw a g with baseline at 0,0 and then get the line
+523     // number where a pixel has non-null red component (starting
+524     // from bottom).
+525     ctx.strokeStyle = "red";
+526     ctx.clearRect(0, 0, DEFAULT_FONT_SIZE, DEFAULT_FONT_SIZE);
+527     ctx.strokeText("g", 0, 0);
+528     let pixels = ctx.getImageData(
+529       0,
+530       0,
+531       DEFAULT_FONT_SIZE,
+532       DEFAULT_FONT_SIZE
+533     ).data;
+534     descent = 0;
+535     for (let i = pixels.length - 1 - 3; i >= 0; i -= 4) {
+536       if (pixels[i] > 0) {
+537         descent = Math.ceil(i / 4 / DEFAULT_FONT_SIZE);
+538         break;
+539       }
+540     }
+541 
+542     // Draw an A with baseline at 0,DEFAULT_FONT_SIZE and then get the line
+543     // number where a pixel has non-null red component (starting
+544     // from top).
+545     ctx.clearRect(0, 0, DEFAULT_FONT_SIZE, DEFAULT_FONT_SIZE);
+546     ctx.strokeText("A", 0, DEFAULT_FONT_SIZE);
+547     pixels = ctx.getImageData(0, 0, DEFAULT_FONT_SIZE, DEFAULT_FONT_SIZE).data;
+548     ascent = 0;
+549     for (let i = 0, ii = pixels.length; i < ii; i += 4) {
+550       if (pixels[i] > 0) {
+551         ascent = DEFAULT_FONT_SIZE - Math.floor(i / 4 / DEFAULT_FONT_SIZE);
+552         break;
+553       }
+554     }
+555 
+556     ctx.canvas.width = ctx.canvas.height = 0;
+557 
+558     const ratio = ascent ? ascent / (ascent + descent) : DEFAULT_FONT_ASCENT;
+559     this.#ascentCache.set(fontFamily, ratio);
+560     return ratio;
+561   }
+562 }
+563 
+564 export { TextLayer };
+File:
+src/shared/util.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 /* globals process */
+16 
+17 // NW.js / Electron is a browser context, but copies some Node.js objects; see
+18 // http://docs.nwjs.io/en/latest/For%20Users/Advanced/JavaScript%20Contexts%20in%20NW.js/#access-nodejs-and-nwjs-api-in-browser-context
+19 // https://www.electronjs.org/docs/api/process#processversionselectron-readonly
+20 // https://www.electronjs.org/docs/api/process#processtype-readonly
+21 const isNodeJS =
+22   (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+23   typeof process === "object" &&
+24   process + "" === "[object process]" &&
+25   !process.versions.nw &&
+26   !(process.versions.electron && process.type && process.type !== "browser");
+27 
+28 const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0];
+29 const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
+30 
+31 const MAX_IMAGE_SIZE_TO_CACHE = 10e6; // Ten megabytes.
+32 
+33 // Represent the percentage of the height of a single-line field over
+34 // the font size. Acrobat seems to use this value.
+35 const LINE_FACTOR = 1.35;
+36 const LINE_DESCENT_FACTOR = 0.35;
+37 const BASELINE_FACTOR = LINE_DESCENT_FACTOR / LINE_FACTOR;
+38 
+39 /**
+40  * Refer to the `WorkerTransport.getRenderingIntent`-method in the API, to see
+41  * how these flags are being used:
+42  *  - ANY, DISPLAY, and PRINT are the normal rendering intents, note the
+43  *    `PDFPageProxy.{render, getOperatorList, getAnnotations}`-methods.
+44  *  - SAVE is used, on the worker-thread, when saving modified annotations.
+45  *  - ANNOTATIONS_FORMS, ANNOTATIONS_STORAGE, ANNOTATIONS_DISABLE control which
+46  *    annotations are rendered onto the canvas (i.e. by being included in the
+47  *    operatorList), note the `PDFPageProxy.{render, getOperatorList}`-methods
+48  *    and their `annotationMode`-option.
+49  *  - IS_EDITING is used when editing is active in the viewer.
+50  *  - OPLIST is used with the `PDFPageProxy.getOperatorList`-method, note the
+51  *    `OperatorList`-constructor (on the worker-thread).
+52  */
+53 const RenderingIntentFlag = {
+54   ANY: 0x01,
+55   DISPLAY: 0x02,
+56   PRINT: 0x04,
+57   SAVE: 0x08,
+58   ANNOTATIONS_FORMS: 0x10,
+59   ANNOTATIONS_STORAGE: 0x20,
+60   ANNOTATIONS_DISABLE: 0x40,
+61   IS_EDITING: 0x80,
+62   OPLIST: 0x100,
+63 };
+64 
+65 const AnnotationMode = {
+66   DISABLE: 0,
+67   ENABLE: 1,
+68   ENABLE_FORMS: 2,
+69   ENABLE_STORAGE: 3,
+70 };
+71 
+72 const AnnotationEditorPrefix = "pdfjs_internal_editor_";
+73 
+74 const AnnotationEditorType = {
+75   DISABLE: -1,
+76   NONE: 0,
+77   FREETEXT: 3,
+78   HIGHLIGHT: 9,
+79   STAMP: 13,
+80   INK: 15,
+81 };
+82 
+83 const AnnotationEditorParamsType = {
+84   RESIZE: 1,
+85   CREATE: 2,
+86   FREETEXT_SIZE: 11,
+87   FREETEXT_COLOR: 12,
+88   FREETEXT_OPACITY: 13,
+89   INK_COLOR: 21,
+90   INK_THICKNESS: 22,
+91   INK_OPACITY: 23,
+92   HIGHLIGHT_COLOR: 31,
+93   HIGHLIGHT_DEFAULT_COLOR: 32,
+94   HIGHLIGHT_THICKNESS: 33,
+95   HIGHLIGHT_FREE: 34,
+96   HIGHLIGHT_SHOW_ALL: 35,
+97 };
+98 
+99 // Permission flags from Table 22, Section 7.6.3.2 of the PDF specification.
+100 const PermissionFlag = {
+101   PRINT: 0x04,
+102   MODIFY_CONTENTS: 0x08,
+103   COPY: 0x10,
+104   MODIFY_ANNOTATIONS: 0x20,
+105   FILL_INTERACTIVE_FORMS: 0x100,
+106   COPY_FOR_ACCESSIBILITY: 0x200,
+107   ASSEMBLE: 0x400,
+108   PRINT_HIGH_QUALITY: 0x800,
+109 };
+110 
+111 const TextRenderingMode = {
+112   FILL: 0,
+113   STROKE: 1,
+114   FILL_STROKE: 2,
+115   INVISIBLE: 3,
+116   FILL_ADD_TO_PATH: 4,
+117   STROKE_ADD_TO_PATH: 5,
+118   FILL_STROKE_ADD_TO_PATH: 6,
+119   ADD_TO_PATH: 7,
+120   FILL_STROKE_MASK: 3,
+121   ADD_TO_PATH_FLAG: 4,
+122 };
+123 
+124 const ImageKind = {
+125   GRAYSCALE_1BPP: 1,
+126   RGB_24BPP: 2,
+127   RGBA_32BPP: 3,
+128 };
+129 
+130 const AnnotationType = {
+131   TEXT: 1,
+132   LINK: 2,
+133   FREETEXT: 3,
+134   LINE: 4,
+135   SQUARE: 5,
+136   CIRCLE: 6,
+137   POLYGON: 7,
+138   POLYLINE: 8,
+139   HIGHLIGHT: 9,
+140   UNDERLINE: 10,
+141   SQUIGGLY: 11,
+142   STRIKEOUT: 12,
+143   STAMP: 13,
+144   CARET: 14,
+145   INK: 15,
+146   POPUP: 16,
+147   FILEATTACHMENT: 17,
+148   SOUND: 18,
+149   MOVIE: 19,
+150   WIDGET: 20,
+151   SCREEN: 21,
+152   PRINTERMARK: 22,
+153   TRAPNET: 23,
+154   WATERMARK: 24,
+155   THREED: 25,
+156   REDACT: 26,
+157 };
+158 
+159 const AnnotationReplyType = {
+160   GROUP: "Group",
+161   REPLY: "R",
+162 };
+163 
+164 const AnnotationFlag = {
+165   INVISIBLE: 0x01,
+166   HIDDEN: 0x02,
+167   PRINT: 0x04,
+168   NOZOOM: 0x08,
+169   NOROTATE: 0x10,
+170   NOVIEW: 0x20,
+171   READONLY: 0x40,
+172   LOCKED: 0x80,
+173   TOGGLENOVIEW: 0x100,
+174   LOCKEDCONTENTS: 0x200,
+175 };
+176 
+177 const AnnotationFieldFlag = {
+178   READONLY: 0x0000001,
+179   REQUIRED: 0x0000002,
+180   NOEXPORT: 0x0000004,
+181   MULTILINE: 0x0001000,
+182   PASSWORD: 0x0002000,
+183   NOTOGGLETOOFF: 0x0004000,
+184   RADIO: 0x0008000,
+185   PUSHBUTTON: 0x0010000,
+186   COMBO: 0x0020000,
+187   EDIT: 0x0040000,
+188   SORT: 0x0080000,
+189   FILESELECT: 0x0100000,
+190   MULTISELECT: 0x0200000,
+191   DONOTSPELLCHECK: 0x0400000,
+192   DONOTSCROLL: 0x0800000,
+193   COMB: 0x1000000,
+194   RICHTEXT: 0x2000000,
+195   RADIOSINUNISON: 0x2000000,
+196   COMMITONSELCHANGE: 0x4000000,
+197 };
+198 
+199 const AnnotationBorderStyleType = {
+200   SOLID: 1,
+201   DASHED: 2,
+202   BEVELED: 3,
+203   INSET: 4,
+204   UNDERLINE: 5,
+205 };
+206 
+207 const AnnotationActionEventType = {
+208   E: "Mouse Enter",
+209   X: "Mouse Exit",
+210   D: "Mouse Down",
+211   U: "Mouse Up",
+212   Fo: "Focus",
+213   Bl: "Blur",
+214   PO: "PageOpen",
+215   PC: "PageClose",
+216   PV: "PageVisible",
+217   PI: "PageInvisible",
+218   K: "Keystroke",
+219   F: "Format",
+220   V: "Validate",
+221   C: "Calculate",
+222 };
+223 
+224 const DocumentActionEventType = {
+225   WC: "WillClose",
+226   WS: "WillSave",
+227   DS: "DidSave",
+228   WP: "WillPrint",
+229   DP: "DidPrint",
+230 };
+231 
+232 const PageActionEventType = {
+233   O: "PageOpen",
+234   C: "PageClose",
+235 };
+236 
+237 const VerbosityLevel = {
+238   ERRORS: 0,
+239   WARNINGS: 1,
+240   INFOS: 5,
+241 };
+242 
+243 const CMapCompressionType = {
+244   NONE: 0,
+245   BINARY: 1,
+246 };
+247 
+248 // All the possible operations for an operator list.
+249 const OPS = {
+250   // Intentionally start from 1 so it is easy to spot bad operators that will be
+251   // 0's.
+252   // PLEASE NOTE: We purposely keep any removed operators commented out, since
+253   //              re-numbering the list would risk breaking third-party users.
+254   dependency: 1,
+255   setLineWidth: 2,
+256   setLineCap: 3,
+257   setLineJoin: 4,
+258   setMiterLimit: 5,
+259   setDash: 6,
+260   setRenderingIntent: 7,
+261   setFlatness: 8,
+262   setGState: 9,
+263   save: 10,
+264   restore: 11,
+265   transform: 12,
+266   moveTo: 13,
+267   lineTo: 14,
+268   curveTo: 15,
+269   curveTo2: 16,
+270   curveTo3: 17,
+271   closePath: 18,
+272   rectangle: 19,
+273   stroke: 20,
+274   closeStroke: 21,
+275   fill: 22,
+276   eoFill: 23,
+277   fillStroke: 24,
+278   eoFillStroke: 25,
+279   closeFillStroke: 26,
+280   closeEOFillStroke: 27,
+281   endPath: 28,
+282   clip: 29,
+283   eoClip: 30,
+284   beginText: 31,
+285   endText: 32,
+286   setCharSpacing: 33,
+287   setWordSpacing: 34,
+288   setHScale: 35,
+289   setLeading: 36,
+290   setFont: 37,
+291   setTextRenderingMode: 38,
+292   setTextRise: 39,
+293   moveText: 40,
+294   setLeadingMoveText: 41,
+295   setTextMatrix: 42,
+296   nextLine: 43,
+297   showText: 44,
+298   showSpacedText: 45,
+299   nextLineShowText: 46,
+300   nextLineSetSpacingShowText: 47,
+301   setCharWidth: 48,
+302   setCharWidthAndBounds: 49,
+303   setStrokeColorSpace: 50,
+304   setFillColorSpace: 51,
+305   setStrokeColor: 52,
+306   setStrokeColorN: 53,
+307   setFillColor: 54,
+308   setFillColorN: 55,
+309   setStrokeGray: 56,
+310   setFillGray: 57,
+311   setStrokeRGBColor: 58,
+312   setFillRGBColor: 59,
+313   setStrokeCMYKColor: 60,
+314   setFillCMYKColor: 61,
+315   shadingFill: 62,
+316   beginInlineImage: 63,
+317   beginImageData: 64,
+318   endInlineImage: 65,
+319   paintXObject: 66,
+320   markPoint: 67,
+321   markPointProps: 68,
+322   beginMarkedContent: 69,
+323   beginMarkedContentProps: 70,
+324   endMarkedContent: 71,
+325   beginCompat: 72,
+326   endCompat: 73,
+327   paintFormXObjectBegin: 74,
+328   paintFormXObjectEnd: 75,
+329   beginGroup: 76,
+330   endGroup: 77,
+331   // beginAnnotations: 78,
+332   // endAnnotations: 79,
+333   beginAnnotation: 80,
+334   endAnnotation: 81,
+335   // paintJpegXObject: 82,
+336   paintImageMaskXObject: 83,
+337   paintImageMaskXObjectGroup: 84,
+338   paintImageXObject: 85,
+339   paintInlineImageXObject: 86,
+340   paintInlineImageXObjectGroup: 87,
+341   paintImageXObjectRepeat: 88,
+342   paintImageMaskXObjectRepeat: 89,
+343   paintSolidColorImageMask: 90,
+344   constructPath: 91,
+345   setStrokeTransparent: 92,
+346   setFillTransparent: 93,
+347 };
+348 
+349 const PasswordResponses = {
+350   NEED_PASSWORD: 1,
+351   INCORRECT_PASSWORD: 2,
+352 };
+353 
+354 let verbosity = VerbosityLevel.WARNINGS;
+355 
+356 function setVerbosityLevel(level) {
+357   if (Number.isInteger(level)) {
+358     verbosity = level;
+359   }
+360 }
+361 
+362 function getVerbosityLevel() {
+363   return verbosity;
+364 }
+365 
+366 // A notice for devs. These are good for things that are helpful to devs, such
+367 // as warning that Workers were disabled, which is important to devs but not
+368 // end users.
+369 function info(msg) {
+370   if (verbosity >= VerbosityLevel.INFOS) {
+371     console.log(`Info: ${msg}`);
+372   }
+373 }
+374 
+375 // Non-fatal warnings.
+376 function warn(msg) {
+377   if (verbosity >= VerbosityLevel.WARNINGS) {
+378     console.log(`Warning: ${msg}`);
+379   }
+380 }
+381 
+382 function unreachable(msg) {
+383   throw new Error(msg);
+384 }
+385 
+386 function assert(cond, msg) {
+387   if (!cond) {
+388     unreachable(msg);
+389   }
+390 }
+391 
+392 // Checks if URLs use one of the allowed protocols, e.g. to avoid XSS.
+393 function _isValidProtocol(url) {
+394   switch (url?.protocol) {
+395     case "http:":
+396     case "https:":
+397     case "ftp:":
+398     case "mailto:":
+399     case "tel:":
+400       return true;
+401     default:
+402       return false;
+403   }
+404 }
+405 
+406 /**
+407  * Attempts to create a valid absolute URL.
+408  *
+409  * @param {URL|string} url - An absolute, or relative, URL.
+410  * @param {URL|string} [baseUrl] - An absolute URL.
+411  * @param {Object} [options]
+412  * @returns Either a valid {URL}, or `null` otherwise.
+413  */
+414 function createValidAbsoluteUrl(url, baseUrl = null, options = null) {
+415   if (!url) {
+416     return null;
+417   }
+418   try {
+419     if (options && typeof url === "string") {
+420       // Let URLs beginning with "www." default to using the "http://" protocol.
+421       if (options.addDefaultProtocol && url.startsWith("www.")) {
+422         const dots = url.match(/\./g);
+423         // Avoid accidentally matching a *relative* URL pointing to a file named
+424         // e.g. "www.pdf" or similar.
+425         if (dots?.length >= 2) {
+426           url = `http://${url}`;
+427         }
+428       }
+429 
+430       // According to ISO 32000-1:2008, section 12.6.4.7, URIs should be encoded
+431       // in 7-bit ASCII. Some bad PDFs use UTF-8 encoding; see bug 1122280.
+432       if (options.tryConvertEncoding) {
+433         try {
+434           url = stringToUTF8String(url);
+435         } catch {}
+436       }
+437     }
+438 
+439     const absoluteUrl = baseUrl ? new URL(url, baseUrl) : new URL(url);
+440     if (_isValidProtocol(absoluteUrl)) {
+441       return absoluteUrl;
+442     }
+443   } catch {
+444     /* `new URL()` will throw on incorrect data. */
+445   }
+446   return null;
+447 }
+448 
+449 function shadow(obj, prop, value, nonSerializable = false) {
+450   if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+451     assert(
+452       prop in obj,
+453       `shadow: Property "${prop && prop.toString()}" not found in object.`
+454     );
+455   }
+456   Object.defineProperty(obj, prop, {
+457     value,
+458     enumerable: !nonSerializable,
+459     configurable: true,
+460     writable: false,
+461   });
+462   return value;
+463 }
+464 
+465 /**
+466  * @type {any}
+467  */
+468 const BaseException = (function BaseExceptionClosure() {
+469   // eslint-disable-next-line no-shadow
+470   function BaseException(message, name) {
+471     if (
+472       (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) &&
+473       this.constructor === BaseException
+474     ) {
+475       unreachable("Cannot initialize BaseException.");
+476     }
+477     this.message = message;
+478     this.name = name;
+479   }
+480   BaseException.prototype = new Error();
+481   BaseException.constructor = BaseException;
+482 
+483   return BaseException;
+484 })();
+485 
+486 class PasswordException extends BaseException {
+487   constructor(msg, code) {
+488     super(msg, "PasswordException");
+489     this.code = code;
+490   }
+491 }
+492 
+493 class UnknownErrorException extends BaseException {
+494   constructor(msg, details) {
+495     super(msg, "UnknownErrorException");
+496     this.details = details;
+497   }
+498 }
+499 
+500 class InvalidPDFException extends BaseException {
+501   constructor(msg) {
+502     super(msg, "InvalidPDFException");
+503   }
+504 }
+505 
+506 class MissingPDFException extends BaseException {
+507   constructor(msg) {
+508     super(msg, "MissingPDFException");
+509   }
+510 }
+511 
+512 class UnexpectedResponseException extends BaseException {
+513   constructor(msg, status) {
+514     super(msg, "UnexpectedResponseException");
+515     this.status = status;
+516   }
+517 }
+518 
+519 /**
+520  * Error caused during parsing PDF data.
+521  */
+522 class FormatError extends BaseException {
+523   constructor(msg) {
+524     super(msg, "FormatError");
+525   }
+526 }
+527 
+528 /**
+529  * Error used to indicate task cancellation.
+530  */
+531 class AbortException extends BaseException {
+532   constructor(msg) {
+533     super(msg, "AbortException");
+534   }
+535 }
+536 
+537 function bytesToString(bytes) {
+538   if (typeof bytes !== "object" || bytes?.length === undefined) {
+539     unreachable("Invalid argument for bytesToString");
+540   }
+541   const length = bytes.length;
+542   const MAX_ARGUMENT_COUNT = 8192;
+543   if (length < MAX_ARGUMENT_COUNT) {
+544     return String.fromCharCode.apply(null, bytes);
+545   }
+546   const strBuf = [];
+547   for (let i = 0; i < length; i += MAX_ARGUMENT_COUNT) {
+548     const chunkEnd = Math.min(i + MAX_ARGUMENT_COUNT, length);
+549     const chunk = bytes.subarray(i, chunkEnd);
+550     strBuf.push(String.fromCharCode.apply(null, chunk));
+551   }
+552   return strBuf.join("");
+553 }
+554 
+555 function stringToBytes(str) {
+556   if (typeof str !== "string") {
+557     unreachable("Invalid argument for stringToBytes");
+558   }
+559   const length = str.length;
+560   const bytes = new Uint8Array(length);
+561   for (let i = 0; i < length; ++i) {
+562     bytes[i] = str.charCodeAt(i) & 0xff;
+563   }
+564   return bytes;
+565 }
+566 
+567 function string32(value) {
+568   if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+569     assert(
+570       typeof value === "number" && Math.abs(value) < 2 ** 32,
+571       `string32: Unexpected input "${value}".`
+572     );
+573   }
+574   return String.fromCharCode(
+575     (value >> 24) & 0xff,
+576     (value >> 16) & 0xff,
+577     (value >> 8) & 0xff,
+578     value & 0xff
+579   );
+580 }
+581 
+582 function objectSize(obj) {
+583   return Object.keys(obj).length;
+584 }
+585 
+586 // Ensure that the returned Object has a `null` prototype; hence why
+587 // `Object.fromEntries(...)` is not used.
+588 function objectFromMap(map) {
+589   const obj = Object.create(null);
+590   for (const [key, value] of map) {
+591     obj[key] = value;
+592   }
+593   return obj;
+594 }
+595 
+596 // Checks the endianness of the platform.
+597 function isLittleEndian() {
+598   const buffer8 = new Uint8Array(4);
+599   buffer8[0] = 1;
+600   const view32 = new Uint32Array(buffer8.buffer, 0, 1);
+601   return view32[0] === 1;
+602 }
+603 
+604 // Checks if it's possible to eval JS expressions.
+605 function isEvalSupported() {
+606   try {
+607     new Function(""); // eslint-disable-line no-new, no-new-func
+608     return true;
+609   } catch {
+610     return false;
+611   }
+612 }
+613 
+614 class FeatureTest {
+615   static get isLittleEndian() {
+616     return shadow(this, "isLittleEndian", isLittleEndian());
+617   }
+618 
+619   static get isEvalSupported() {
+620     return shadow(this, "isEvalSupported", isEvalSupported());
+621   }
+622 
+623   static get isOffscreenCanvasSupported() {
+624     return shadow(
+625       this,
+626       "isOffscreenCanvasSupported",
+627       typeof OffscreenCanvas !== "undefined"
+628     );
+629   }
+630 
+631   static get platform() {
+632     if (
+633       (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+634       (typeof navigator !== "undefined" &&
+635         typeof navigator?.platform === "string")
+636     ) {
+637       return shadow(this, "platform", {
+638         isMac: navigator.platform.includes("Mac"),
+639       });
+640     }
+641     return shadow(this, "platform", { isMac: false });
+642   }
+643 
+644   static get isCSSRoundSupported() {
+645     return shadow(
+646       this,
+647       "isCSSRoundSupported",
+648       globalThis.CSS?.supports?.("width: round(1.5px, 1px)")
+649     );
+650   }
+651 }
+652 
+653 const hexNumbers = Array.from(Array(256).keys(), n =>
+654   n.toString(16).padStart(2, "0")
+655 );
+656 
+657 class Util {
+658   static makeHexColor(r, g, b) {
+659     return `#${hexNumbers[r]}${hexNumbers[g]}${hexNumbers[b]}`;
+660   }
+661 
+662   // Apply a scaling matrix to some min/max values.
+663   // If a scaling factor is negative then min and max must be
+664   // swapped.
+665   static scaleMinMax(transform, minMax) {
+666     let temp;
+667     if (transform[0]) {
+668       if (transform[0] < 0) {
+669         temp = minMax[0];
+670         minMax[0] = minMax[2];
+671         minMax[2] = temp;
+672       }
+673       minMax[0] *= transform[0];
+674       minMax[2] *= transform[0];
+675 
+676       if (transform[3] < 0) {
+677         temp = minMax[1];
+678         minMax[1] = minMax[3];
+679         minMax[3] = temp;
+680       }
+681       minMax[1] *= transform[3];
+682       minMax[3] *= transform[3];
+683     } else {
+684       temp = minMax[0];
+685       minMax[0] = minMax[1];
+686       minMax[1] = temp;
+687       temp = minMax[2];
+688       minMax[2] = minMax[3];
+689       minMax[3] = temp;
+690 
+691       if (transform[1] < 0) {
+692         temp = minMax[1];
+693         minMax[1] = minMax[3];
+694         minMax[3] = temp;
+695       }
+696       minMax[1] *= transform[1];
+697       minMax[3] *= transform[1];
+698 
+699       if (transform[2] < 0) {
+700         temp = minMax[0];
+701         minMax[0] = minMax[2];
+702         minMax[2] = temp;
+703       }
+704       minMax[0] *= transform[2];
+705       minMax[2] *= transform[2];
+706     }
+707     minMax[0] += transform[4];
+708     minMax[1] += transform[5];
+709     minMax[2] += transform[4];
+710     minMax[3] += transform[5];
+711   }
+712 
+713   // Concatenates two transformation matrices together and returns the result.
+714   static transform(m1, m2) {
+715     return [
+716       m1[0] * m2[0] + m1[2] * m2[1],
+717       m1[1] * m2[0] + m1[3] * m2[1],
+718       m1[0] * m2[2] + m1[2] * m2[3],
+719       m1[1] * m2[2] + m1[3] * m2[3],
+720       m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+721       m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+722     ];
+723   }
+724 
+725   // For 2d affine transforms
+726   static applyTransform(p, m) {
+727     const xt = p[0] * m[0] + p[1] * m[2] + m[4];
+728     const yt = p[0] * m[1] + p[1] * m[3] + m[5];
+729     return [xt, yt];
+730   }
+731 
+732   static applyInverseTransform(p, m) {
+733     const d = m[0] * m[3] - m[1] * m[2];
+734     const xt = (p[0] * m[3] - p[1] * m[2] + m[2] * m[5] - m[4] * m[3]) / d;
+735     const yt = (-p[0] * m[1] + p[1] * m[0] + m[4] * m[1] - m[5] * m[0]) / d;
+736     return [xt, yt];
+737   }
+738 
+739   // Applies the transform to the rectangle and finds the minimum axially
+740   // aligned bounding box.
+741   static getAxialAlignedBoundingBox(r, m) {
+742     const p1 = this.applyTransform(r, m);
+743     const p2 = this.applyTransform(r.slice(2, 4), m);
+744     const p3 = this.applyTransform([r[0], r[3]], m);
+745     const p4 = this.applyTransform([r[2], r[1]], m);
+746     return [
+747       Math.min(p1[0], p2[0], p3[0], p4[0]),
+748       Math.min(p1[1], p2[1], p3[1], p4[1]),
+749       Math.max(p1[0], p2[0], p3[0], p4[0]),
+750       Math.max(p1[1], p2[1], p3[1], p4[1]),
+751     ];
+752   }
+753 
+754   static inverseTransform(m) {
+755     const d = m[0] * m[3] - m[1] * m[2];
+756     return [
+757       m[3] / d,
+758       -m[1] / d,
+759       -m[2] / d,
+760       m[0] / d,
+761       (m[2] * m[5] - m[4] * m[3]) / d,
+762       (m[4] * m[1] - m[5] * m[0]) / d,
+763     ];
+764   }
+765 
+766   // This calculation uses Singular Value Decomposition.
+767   // The SVD can be represented with formula A = USV. We are interested in the
+768   // matrix S here because it represents the scale values.
+769   static singularValueDecompose2dScale(m) {
+770     const transpose = [m[0], m[2], m[1], m[3]];
+771 
+772     // Multiply matrix m with its transpose.
+773     const a = m[0] * transpose[0] + m[1] * transpose[2];
+774     const b = m[0] * transpose[1] + m[1] * transpose[3];
+775     const c = m[2] * transpose[0] + m[3] * transpose[2];
+776     const d = m[2] * transpose[1] + m[3] * transpose[3];
+777 
+778     // Solve the second degree polynomial to get roots.
+779     const first = (a + d) / 2;
+780     const second = Math.sqrt((a + d) ** 2 - 4 * (a * d - c * b)) / 2;
+781     const sx = first + second || 1;
+782     const sy = first - second || 1;
+783 
+784     // Scale values are the square roots of the eigenvalues.
+785     return [Math.sqrt(sx), Math.sqrt(sy)];
+786   }
+787 
+788   // Normalize rectangle rect=[x1, y1, x2, y2] so that (x1,y1) < (x2,y2)
+789   // For coordinate systems whose origin lies in the bottom-left, this
+790   // means normalization to (BL,TR) ordering. For systems with origin in the
+791   // top-left, this means (TL,BR) ordering.
+792   static normalizeRect(rect) {
+793     const r = rect.slice(0); // clone rect
+794     if (rect[0] > rect[2]) {
+795       r[0] = rect[2];
+796       r[2] = rect[0];
+797     }
+798     if (rect[1] > rect[3]) {
+799       r[1] = rect[3];
+800       r[3] = rect[1];
+801     }
+802     return r;
+803   }
+804 
+805   // Returns a rectangle [x1, y1, x2, y2] corresponding to the
+806   // intersection of rect1 and rect2. If no intersection, returns 'null'
+807   // The rectangle coordinates of rect1, rect2 should be [x1, y1, x2, y2]
+808   static intersect(rect1, rect2) {
+809     const xLow = Math.max(
+810       Math.min(rect1[0], rect1[2]),
+811       Math.min(rect2[0], rect2[2])
+812     );
+813     const xHigh = Math.min(
+814       Math.max(rect1[0], rect1[2]),
+815       Math.max(rect2[0], rect2[2])
+816     );
+817     if (xLow > xHigh) {
+818       return null;
+819     }
+820     const yLow = Math.max(
+821       Math.min(rect1[1], rect1[3]),
+822       Math.min(rect2[1], rect2[3])
+823     );
+824     const yHigh = Math.min(
+825       Math.max(rect1[1], rect1[3]),
+826       Math.max(rect2[1], rect2[3])
+827     );
+828     if (yLow > yHigh) {
+829       return null;
+830     }
+831 
+832     return [xLow, yLow, xHigh, yHigh];
+833   }
+834 
+835   static #getExtremumOnCurve(x0, x1, x2, x3, y0, y1, y2, y3, t, minMax) {
+836     if (t <= 0 || t >= 1) {
+837       return;
+838     }
+839     const mt = 1 - t;
+840     const tt = t * t;
+841     const ttt = tt * t;
+842     const x = mt * (mt * (mt * x0 + 3 * t * x1) + 3 * tt * x2) + ttt * x3;
+843     const y = mt * (mt * (mt * y0 + 3 * t * y1) + 3 * tt * y2) + ttt * y3;
+844     minMax[0] = Math.min(minMax[0], x);
+845     minMax[1] = Math.min(minMax[1], y);
+846     minMax[2] = Math.max(minMax[2], x);
+847     minMax[3] = Math.max(minMax[3], y);
+848   }
+849 
+850   static #getExtremum(x0, x1, x2, x3, y0, y1, y2, y3, a, b, c, minMax) {
+851     if (Math.abs(a) < 1e-12) {
+852       if (Math.abs(b) >= 1e-12) {
+853         this.#getExtremumOnCurve(
+854           x0,
+855           x1,
+856           x2,
+857           x3,
+858           y0,
+859           y1,
+860           y2,
+861           y3,
+862           -c / b,
+863           minMax
+864         );
+865       }
+866       return;
+867     }
+868 
+869     const delta = b ** 2 - 4 * c * a;
+870     if (delta < 0) {
+871       return;
+872     }
+873     const sqrtDelta = Math.sqrt(delta);
+874     const a2 = 2 * a;
+875     this.#getExtremumOnCurve(
+876       x0,
+877       x1,
+878       x2,
+879       x3,
+880       y0,
+881       y1,
+882       y2,
+883       y3,
+884       (-b + sqrtDelta) / a2,
+885       minMax
+886     );
+887     this.#getExtremumOnCurve(
+888       x0,
+889       x1,
+890       x2,
+891       x3,
+892       y0,
+893       y1,
+894       y2,
+895       y3,
+896       (-b - sqrtDelta) / a2,
+897       minMax
+898     );
+899   }
+900 
+901   // From https://github.com/adobe-webplatform/Snap.svg/blob/b365287722a72526000ac4bfcf0ce4cac2faa015/src/path.js#L852
+902   static bezierBoundingBox(x0, y0, x1, y1, x2, y2, x3, y3, minMax) {
+903     if (minMax) {
+904       minMax[0] = Math.min(minMax[0], x0, x3);
+905       minMax[1] = Math.min(minMax[1], y0, y3);
+906       minMax[2] = Math.max(minMax[2], x0, x3);
+907       minMax[3] = Math.max(minMax[3], y0, y3);
+908     } else {
+909       minMax = [
+910         Math.min(x0, x3),
+911         Math.min(y0, y3),
+912         Math.max(x0, x3),
+913         Math.max(y0, y3),
+914       ];
+915     }
+916     this.#getExtremum(
+917       x0,
+918       x1,
+919       x2,
+920       x3,
+921       y0,
+922       y1,
+923       y2,
+924       y3,
+925       3 * (-x0 + 3 * (x1 - x2) + x3),
+926       6 * (x0 - 2 * x1 + x2),
+927       3 * (x1 - x0),
+928       minMax
+929     );
+930     this.#getExtremum(
+931       x0,
+932       x1,
+933       x2,
+934       x3,
+935       y0,
+936       y1,
+937       y2,
+938       y3,
+939       3 * (-y0 + 3 * (y1 - y2) + y3),
+940       6 * (y0 - 2 * y1 + y2),
+941       3 * (y1 - y0),
+942       minMax
+943     );
+944     return minMax;
+945   }
+946 }
+947 
+948 const PDFStringTranslateTable = [
+949   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x2d8,
+950   0x2c7, 0x2c6, 0x2d9, 0x2dd, 0x2db, 0x2da, 0x2dc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+951   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+952   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+953   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+954   0, 0, 0, 0, 0, 0, 0, 0, 0x2022, 0x2020, 0x2021, 0x2026, 0x2014, 0x2013, 0x192,
+955   0x2044, 0x2039, 0x203a, 0x2212, 0x2030, 0x201e, 0x201c, 0x201d, 0x2018,
+956   0x2019, 0x201a, 0x2122, 0xfb01, 0xfb02, 0x141, 0x152, 0x160, 0x178, 0x17d,
+957   0x131, 0x142, 0x153, 0x161, 0x17e, 0, 0x20ac,
+958 ];
+959 
+960 function stringToPDFString(str) {
+961   // See section 7.9.2.2 Text String Type.
+962   // The string can contain some language codes bracketed with 0x0b,
+963   // so we must remove them.
+964   if (str[0] >= "\xEF") {
+965     let encoding;
+966     if (str[0] === "\xFE" && str[1] === "\xFF") {
+967       encoding = "utf-16be";
+968       if (str.length % 2 === 1) {
+969         str = str.slice(0, -1);
+970       }
+971     } else if (str[0] === "\xFF" && str[1] === "\xFE") {
+972       encoding = "utf-16le";
+973       if (str.length % 2 === 1) {
+974         str = str.slice(0, -1);
+975       }
+976     } else if (str[0] === "\xEF" && str[1] === "\xBB" && str[2] === "\xBF") {
+977       encoding = "utf-8";
+978     }
+979 
+980     if (encoding) {
+981       try {
+982         const decoder = new TextDecoder(encoding, { fatal: true });
+983         const buffer = stringToBytes(str);
+984         const decoded = decoder.decode(buffer);
+985         if (!decoded.includes("\x1b")) {
+986           return decoded;
+987         }
+988         return decoded.replaceAll(/\x1b[^\x1b]*(?:\x1b|$)/g, "");
+989       } catch (ex) {
+990         warn(`stringToPDFString: "${ex}".`);
+991       }
+992     }
+993   }
+994   // ISO Latin 1
+995   const strBuf = [];
+996   for (let i = 0, ii = str.length; i < ii; i++) {
+997     const charCode = str.charCodeAt(i);
+998     if (charCode === 0x1b) {
+999       // eslint-disable-next-line no-empty
+1000       while (++i < ii && str.charCodeAt(i) !== 0x1b) {}
+1001       continue;
+1002     }
+1003     const code = PDFStringTranslateTable[charCode];
+1004     strBuf.push(code ? String.fromCharCode(code) : str.charAt(i));
+1005   }
+1006   return strBuf.join("");
+1007 }
+1008 
+1009 function stringToUTF8String(str) {
+1010   return decodeURIComponent(escape(str));
+1011 }
+1012 
+1013 function utf8StringToString(str) {
+1014   return unescape(encodeURIComponent(str));
+1015 }
+1016 
+1017 function isArrayEqual(arr1, arr2) {
+1018   if (arr1.length !== arr2.length) {
+1019     return false;
+1020   }
+1021   for (let i = 0, ii = arr1.length; i < ii; i++) {
+1022     if (arr1[i] !== arr2[i]) {
+1023       return false;
+1024     }
+1025   }
+1026   return true;
+1027 }
+1028 
+1029 function getModificationDate(date = new Date()) {
+1030   const buffer = [
+1031     date.getUTCFullYear().toString(),
+1032     (date.getUTCMonth() + 1).toString().padStart(2, "0"),
+1033     date.getUTCDate().toString().padStart(2, "0"),
+1034     date.getUTCHours().toString().padStart(2, "0"),
+1035     date.getUTCMinutes().toString().padStart(2, "0"),
+1036     date.getUTCSeconds().toString().padStart(2, "0"),
+1037   ];
+1038 
+1039   return buffer.join("");
+1040 }
+1041 
+1042 let NormalizeRegex = null;
+1043 let NormalizationMap = null;
+1044 function normalizeUnicode(str) {
+1045   if (!NormalizeRegex) {
+1046     // In order to generate the following regex:
+1047     //  - create a PDF containing all the chars in the range 0000-FFFF with
+1048     //    a NFKC which is different of the char.
+1049     //  - copy and paste all those chars and get the ones where NFKC is
+1050     //    required.
+1051     // It appears that most the chars here contain some ligatures.
+1052     NormalizeRegex =
+1053       /([\u00a0\u00b5\u037e\u0eb3\u2000-\u200a\u202f\u2126\ufb00-\ufb04\ufb06\ufb20-\ufb36\ufb38-\ufb3c\ufb3e\ufb40-\ufb41\ufb43-\ufb44\ufb46-\ufba1\ufba4-\ufba9\ufbae-\ufbb1\ufbd3-\ufbdc\ufbde-\ufbe7\ufbea-\ufbf8\ufbfc-\ufbfd\ufc00-\ufc5d\ufc64-\ufcf1\ufcf5-\ufd3d\ufd88\ufdf4\ufdfa-\ufdfb\ufe71\ufe77\ufe79\ufe7b\ufe7d]+)|(\ufb05+)/gu;
+1054     NormalizationMap = new Map([["ﬅ", "ſt"]]);
+1055   }
+1056   return str.replaceAll(NormalizeRegex, (_, p1, p2) =>
+1057     p1 ? p1.normalize("NFKC") : NormalizationMap.get(p2)
+1058   );
+1059 }
+1060 
+1061 function getUuid() {
+1062   if (
+1063     (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+1064     (typeof crypto !== "undefined" && typeof crypto?.randomUUID === "function")
+1065   ) {
+1066     return crypto.randomUUID();
+1067   }
+1068   const buf = new Uint8Array(32);
+1069   if (
+1070     typeof crypto !== "undefined" &&
+1071     typeof crypto?.getRandomValues === "function"
+1072   ) {
+1073     crypto.getRandomValues(buf);
+1074   } else {
+1075     for (let i = 0; i < 32; i++) {
+1076       buf[i] = Math.floor(Math.random() * 255);
+1077     }
+1078   }
+1079   return bytesToString(buf);
+1080 }
+1081 
+1082 const AnnotationPrefix = "pdfjs_internal_id_";
+1083 
+1084 const FontRenderOps = {
+1085   BEZIER_CURVE_TO: 0,
+1086   MOVE_TO: 1,
+1087   LINE_TO: 2,
+1088   QUADRATIC_CURVE_TO: 3,
+1089   RESTORE: 4,
+1090   SAVE: 5,
+1091   SCALE: 6,
+1092   TRANSFORM: 7,
+1093   TRANSLATE: 8,
+1094 };
+1095 
+1096 export {
+1097   AbortException,
+1098   AnnotationActionEventType,
+1099   AnnotationBorderStyleType,
+1100   AnnotationEditorParamsType,
+1101   AnnotationEditorPrefix,
+1102   AnnotationEditorType,
+1103   AnnotationFieldFlag,
+1104   AnnotationFlag,
+1105   AnnotationMode,
+1106   AnnotationPrefix,
+1107   AnnotationReplyType,
+1108   AnnotationType,
+1109   assert,
+1110   BaseException,
+1111   BASELINE_FACTOR,
+1112   bytesToString,
+1113   CMapCompressionType,
+1114   createValidAbsoluteUrl,
+1115   DocumentActionEventType,
+1116   FeatureTest,
+1117   FONT_IDENTITY_MATRIX,
+1118   FontRenderOps,
+1119   FormatError,
+1120   getModificationDate,
+1121   getUuid,
+1122   getVerbosityLevel,
+1123   IDENTITY_MATRIX,
+1124   ImageKind,
+1125   info,
+1126   InvalidPDFException,
+1127   isArrayEqual,
+1128   isNodeJS,
+1129   LINE_DESCENT_FACTOR,
+1130   LINE_FACTOR,
+1131   MAX_IMAGE_SIZE_TO_CACHE,
+1132   MissingPDFException,
+1133   normalizeUnicode,
+1134   objectFromMap,
+1135   objectSize,
+1136   OPS,
+1137   PageActionEventType,
+1138   PasswordException,
+1139   PasswordResponses,
+1140   PermissionFlag,
+1141   RenderingIntentFlag,
+1142   setVerbosityLevel,
+1143   shadow,
+1144   string32,
+1145   stringToBytes,
+1146   stringToPDFString,
+1147   stringToUTF8String,
+1148   TextRenderingMode,
+1149   UnexpectedResponseException,
+1150   UnknownErrorException,
+1151   unreachable,
+1152   utf8StringToString,
+1153   Util,
+1154   VerbosityLevel,
+1155   warn,
+1156 };
+</code>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

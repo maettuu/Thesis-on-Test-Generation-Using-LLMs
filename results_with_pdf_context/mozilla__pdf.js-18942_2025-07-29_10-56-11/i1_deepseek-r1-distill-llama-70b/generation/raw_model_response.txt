@@ -1,0 +1,32 @@
+<think>
+Okay, I need to create a regression test for the bug where the PDF.js library fails to load a specific PDF file, resulting in a "TypeError: e.peekBytes is not a function" error. The test should fail before the patch is applied and pass after the patch is applied.
+
+First, I'll start by understanding the issue. The error occurs because the code expects a Stream object but receives a Dict instead. The problematic function is getFontFileType, which is trying to call peekBytes on a Dict, which doesn't have that method.
+
+The patch provided modifies the evaluator.js file. It adds checks to ensure that fontFile is an instance of BaseStream and throws an error if it's not. It also sets fontFile to null instead of a NullStream when an error occurs. This should prevent the code from attempting to call peekBytes on a non-Stream object.
+
+Now, I need to write a test that triggers this bug. The test should load the provided PDF file and check if the font is loaded correctly without throwing an error.
+
+Looking at the test file, evaluator_spec.js, I see that it imports necessary modules and sets up mocks. I'll use the existing setup but add a new test case.
+
+The test will use getDocument to load the problematic PDF. It will attempt to get the first page and render it, which should trigger the font loading code. If the bug is present, this should throw an error. After the patch, it should load without issues.
+
+I'll structure the test using Jest's it function. I'll import getDocument and buildGetDocumentParams as shown in the example. Then, I'll load the document, get the first page, and try to render it. If no error is thrown, the test passes.
+
+I need to ensure that the test is self-contained and only tests this specific behavior. I'll use async/await to handle the promises from getDocument and page.render.
+
+Finally, I'll write the test code, making sure to only include the necessary imports and steps. The test should fail before the patch because the error occurs, and pass after the patch because the error is handled correctly.
+</think>
+
+```javascript
+it("should handle font files correctly without peekBytes error", async () => {
+  const { getDocument } = await import('../../src/display/api.js');
+  const { buildGetDocumentParams } = await import('./test_utils.js');
+  const loadingTask = getDocument(buildGetDocumentParams('issue18941.pdf'));
+  
+  const { pdfDocument } = await loadingTask;
+  const page = await pdfDocument.getPage(1);
+  
+  await expect(page.render()).resolves.not.toThrowError();
+});
+```

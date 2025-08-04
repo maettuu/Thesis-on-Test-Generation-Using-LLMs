@@ -1,0 +1,307 @@
+<think>
+Okay, so I need to write a regression test for the issue where OpenJPEG warnings don't respect the PDF.js verbosity levels. The patch provided modifies the JpxImage.decode method to pass the warn function from util.js to the OpenJPEG instance. 
+
+First, I should understand what the problem was before the patch. Previously, OpenJPEG was logging warnings directly using console.warn, which didn't respect the verbosity settings in PDF.js. The patch changes this by passing the warn function, so now OpenJPEG should use that instead.
+
+So the test needs to verify that when the verbosity is set to a level that should suppress warnings, the warn function isn't called. Conversely, when verbosity is higher, warnings should be logged.
+
+Looking at the imports in the test file, I see that getVerbosityLevel, setVerbosityLevel, and VerbosityLevel are already imported from shared/util.js. Also, JpxImage is imported from jpx.js.
+
+I think I can create a test case where I set the verbosity to a low level (like 'error') and then trigger an OpenJPEG warning. I'll mock the warn function to check if it's called or not.
+
+I'll structure the test using Jest's mocking capabilities. I'll set the verbosity level to 'error' and then call JpxImage.decode with some data that triggers a warning. Since I can't have actual image data here, I'll simulate an error scenario, perhaps by passing invalid data to decode, which should trigger an OpenJPEG warning.
+
+Wait, but how do I know what data to pass to trigger a warning? Maybe I can pass an empty buffer or invalid data that would cause OpenJPEG to decode it and emit a warning. Alternatively, perhaps the OpenJPEG instance can be mocked to throw a specific warning.
+
+Alternatively, since the decode method now takes the warn function, I can create a mock function for warn and check if it's called when the verbosity is set to a level that allows warnings.
+
+So, the steps in the test would be:
+
+1. Mock the console.warn function to track if it's called.
+2. Set the verbosity level to 'error' so that warnings should not be shown.
+3. Call JpxImage.decode with data that causes a warning.
+4. Assert that the mock warn function wasn't called, indicating that the warning was suppressed.
+
+Wait, but after the patch, the warn function from util.js is passed to OpenJPEG. So when the verbosity is set to 'error', the warn function in util.js should not log anything. So, in the test, when we set the verbosity to 'error', any warnings from OpenJPEG should not trigger the util.warn function, which in turn doesn't log to console if the verbosity is too low.
+
+Hmm, maybe I should structure the test as follows:
+
+- Create a mock for the warn function in util.js.
+- Set the verbosity level to 'error' so that warnings are not logged.
+- Call JpxImage.decode with data that causes a warning.
+- Check that the mock warn function was not called.
+
+But how do I ensure that a warning is generated during decode? Maybe I can pass invalid data that triggers an OpenJPEG warning. For example, pass a small buffer that's not a valid JPX image.
+
+Alternatively, perhaps I can create a test image that would cause a non-fatal error during decoding, leading to a warning.
+
+Wait, but in the JpxImage.decode method, if the module.decode returns a string, it's thrown as an error. So, perhaps I can pass data that causes module.decode to return a string (an error message), which would then be thrown as a JpxError. But in that case, the warning would have been logged before that.
+
+Alternatively, perhaps during the decode process, OpenJPEG emits a warning, which is a non-fatal issue, but the decoding still proceeds.
+
+Wait, perhaps the OpenJPEG instance's decode method can be made to return a warning, but I'm not sure. Maybe I can simulate this by passing a buffer that causes a warning but doesn't throw an error.
+
+Alternatively, perhaps I can use a small buffer that's not a valid image, but that might cause an error instead of a warning.
+
+Hmm, maybe it's better to test both cases: when verbosity is set to a level that should show warnings and when it shouldn't.
+
+But the main issue is that before the patch, warnings were always logged via console.warn, regardless of the verbosity. After the patch, they should respect the verbosity.
+
+So, in the test, I can set the verbosity to 'error' and ensure that when a warning is generated, it's not logged via the warn function.
+
+But how do I trigger a warning in OpenJPEG? Maybe I can pass a truncated image buffer that causes a warning but doesn't throw an error.
+
+Alternatively, perhaps I can create a mock for the OpenJPEG module where the decode function returns a warning string, but that might complicate things.
+
+Wait, in the JpxImage.decode function, after the patch, the OpenJPEG instance is created with { warn }, which is the warn function from util.js. So, any warnings from OpenJPEG will be passed to that function.
+
+So, in the test, I can mock the warn function and check if it's called based on the verbosity level.
+
+So, the test plan is:
+
+1. Import necessary modules, including the mock for util.warn.
+2. Set up the test case with different verbosity levels.
+3. For each case, call JpxImage.decode with data that triggers a warning.
+4. Check if the mock warn function was called or not, depending on the verbosity.
+
+But since the test needs to be self-contained and only have one it block, perhaps I can test both cases in the same test.
+
+Wait, no, the example structure shows a single it block. So perhaps I can structure the test to check that when verbosity is set to 'error', the warn function isn't called, and when set to 'info', it is called.
+
+But in the test, I can't have both cases in one it block unless I structure it that way.
+
+Alternatively, perhaps the test can check that when the verbosity is set to 'error', the warn function isn't called, which would confirm that the patch works.
+
+So, the test would look like this:
+
+- Mock the warn function.
+- Set verbosity to 'error'.
+- Call JpxImage.decode with data that causes a warning.
+- Assert that warn was not called.
+
+But how do I get the data that causes a warning? Maybe I can pass an empty buffer or a small buffer that's not a valid image.
+
+Alternatively, perhaps I can use a known invalid buffer that triggers a warning but doesn't throw an error.
+
+But I'm not sure what data would do that. Maybe I can create a small buffer that's too small to be a valid JPX image, causing OpenJPEG to log a warning but not throw an error.
+
+Alternatively, perhaps I can use a buffer that's just 'test' in UTF-8, which is invalid as image data.
+
+But in that case, the decode function might throw an error, which would cause the test to fail because we're expecting a warning, not an error.
+
+Hmm, perhaps I can find a way to trigger a warning without causing an error. Or, perhaps the test can expect that the warning is not logged when verbosity is set to 'error', regardless of whether an error is thrown.
+
+Wait, the issue is about warnings, not errors. So perhaps the test should trigger a warning, not an error.
+
+But how? Maybe I can pass a buffer that's a valid JPX image but has some issues that cause a warning, like incorrect headers or something.
+
+Alternatively, perhaps I can modify the OpenJPEG instance to emit a warning during decode.
+
+But that might be complicated.
+
+Alternatively, perhaps the test can check that when the verbosity is set to 'info', the warning is logged, and when set to 'error', it's not.
+
+But in the test, I can't have both cases because the it block is one.
+
+Alternatively, perhaps the test can be written to check that when the verbosity is set to 'error', the warning is not logged, which is the main point of the patch.
+
+So, the test would:
+
+- Mock the warn function.
+- Set verbosity to 'error'.
+- Call JpxImage.decode with data that causes a warning.
+- Assert that warn was not called.
+
+But to do this, I need to have data that causes a warning. Maybe I can pass a small buffer that's not a valid image, causing OpenJPEG to log a warning but not throw an error.
+
+Alternatively, perhaps I can pass a buffer that's just the start of a JPX image, causing a warning about incomplete data.
+
+But I'm not sure. Maybe in practice, any invalid data would cause an error, not a warning.
+
+Hmm, perhaps it's better to test that when the verbosity is set to 'info', the warning is logged, and when set to 'error', it's not. But that would require two test cases, which can't be done in one it block.
+
+Alternatively, perhaps the test can be written to check that when the verbosity is set to 'error', no warning is logged, which would confirm that the patch is working.
+
+So, in code:
+
+- Import the necessary modules.
+- Mock the warn function from util.js.
+- Set the verbosity to 'error'.
+- Call JpxImage.decode with some data that causes a warning.
+- Assert that the mock warn function wasn't called.
+
+But I'm not sure how to get the data that causes a warning without an error. Maybe I can pass an empty buffer, but that might cause an error.
+
+Alternatively, perhaps I can pass a buffer that's a valid JPX image but with some minor issues that cause a warning.
+
+But without knowing the specifics of OpenJPEG's warning conditions, it's hard to say.
+
+Alternatively, perhaps the test can be written to expect that no warning is logged when the verbosity is set to 'error', regardless of the data passed.
+
+But that might not be sufficient.
+
+Alternatively, perhaps the test can be written to pass a buffer that causes a warning, and then check that the warn function is called only when the verbosity is set to allow it.
+
+Wait, perhaps the test can be structured as follows:
+
+1. Create a mock for the warn function.
+2. Set the verbosity to 'error' and call decode with some data.
+3. Assert that warn was not called.
+4. Then, set the verbosity to 'info' and call decode again.
+5. Assert that warn was called.
+
+But that would require two separate calls within the same test, which is possible.
+
+But in the test, I can do that. So, the test would have both cases.
+
+But the example structure shows only one it block, so I can include both checks in one test.
+
+So, the code would look like:
+
+it("should respect verbosity levels for OpenJPEG warnings", async () => {
+  const mockWarn = jest.fn();
+  const originalWarn = console.warn;
+
+  // Mock the warn function in util.js
+  const { warn: utilWarn } = await import("../../src/shared/util.js");
+  utilWarn.mockImplementation(mockWarn);
+
+  // Set verbosity to 'error' and check that warn is not called
+  setVerbosityLevel(VerbosityLevel.error);
+  const data = new Uint8Array(); // or some invalid data
+  await JpxImage.decode(data);
+  expect(mockWarn).not.toHaveBeenCalled();
+
+  // Reset mock
+  mockWarn.mockClear();
+
+  // Set verbosity to 'info' and check that warn is called
+  setVerbosityLevel(VerbosityLevel.info);
+  await JpxImage.decode(data);
+  expect(mockWarn).toHaveBeenCalled();
+
+  // Restore original console.warn
+  console.warn = originalWarn;
+});
+
+Wait, but in the code, the warn function is passed to OpenJPEG, so the util.warn is being used. So, when the verbosity is set to 'error', util.warn should not log anything, meaning that the mockWarn should not be called.
+
+But how does the util.warn function behave based on the verbosity level? Let me check the util.js code.
+
+In util.js, the warn function probably checks the current verbosity level before logging. So, if the verbosity is set to 'error', it won't log warnings.
+
+So, in the test, when we set the verbosity to 'error', the util.warn function won't call console.warn, so the mockWarn won't be called.
+
+Therefore, the test can be structured as above.
+
+But I need to make sure that the data passed to decode actually causes a warning. If it's just an empty buffer, it might cause an error, which would throw, and the test would fail.
+
+So, perhaps I can use a known valid JPX image and then modify it to cause a warning. Or, perhaps I can create a buffer that's almost valid but causes a non-fatal warning.
+
+Alternatively, perhaps I can pass a buffer that's a subset of a valid image, causing a warning about truncated data.
+
+But without knowing the specifics, perhaps the test can pass an empty buffer, and if it causes a warning, the test will pass.
+
+Alternatively, perhaps I can create a buffer with the correct magic numbers but incomplete data, causing a warning.
+
+But perhaps for the test, it's sufficient to pass any data that causes OpenJPEG to emit a warning, regardless of whether it's an error.
+
+But in that case, the decode function might throw an error, which would cause the test to fail because we're expecting a warning.
+
+Hmm, perhaps I can wrap the decode call in a try-catch block and check for warnings regardless of errors.
+
+But that complicates the test.
+
+Alternatively, perhaps the test can focus only on the case where the verbosity is set to 'error' and ensure that no warning is logged, regardless of whether an error is thrown.
+
+But that might not cover all cases.
+
+Alternatively, perhaps the test can be written to check that when the verbosity is set to 'error', the warn function isn't called, even if an error is thrown.
+
+But that might not be the case because the error would be thrown, and the warning would have been logged before that.
+
+Wait, in the JpxImage.decode function, if module.decode returns a string, it's thrown as an error. So, if the data is invalid, the decode function would throw, but before that, any warnings would have been logged.
+
+So, in the test, if the data is invalid, the decode function would throw an error, but before that, any warnings would have been logged based on the verbosity.
+
+So, in the test, when the data is invalid, the decode function would throw, but the warning would have been logged if the verbosity allows it.
+
+So, in the test, I can pass invalid data, and in the error case, check that the warning wasn't logged.
+
+But then, the test would need to catch the error and then check the mock.
+
+So, the test would look like:
+
+it("should respect verbosity levels for OpenJPEG warnings", async () => {
+  const mockWarn = jest.fn();
+  const originalWarn = console.warn;
+
+  const { warn: utilWarn } = await import("../../src/shared/util.js");
+  utilWarn.mockImplementation(mockWarn);
+
+  const data = new Uint8Array(); // invalid data
+
+  // Test with verbosity 'error'
+  setVerbosityLevel(VerbosityLevel.error);
+  try {
+    await JpxImage.decode(data);
+  } catch (error) {
+    // Expected to throw an error
+  }
+  expect(mockWarn).not.toHaveBeenCalled();
+
+  // Reset mock
+  mockWarn.mockClear();
+
+  // Test with verbosity 'info'
+  setVerbosityLevel(VerbosityLevel.info);
+  try {
+    await JpxImage.decode(data);
+  } catch (error) {
+    // Expected to throw an error
+  }
+  expect(mockWarn).toHaveBeenCalled();
+
+  console.warn = originalWarn;
+});
+
+But wait, in this case, when the data is invalid, the decode function would throw an error, but before that, any warnings would have been logged. So, in the 'error' verbosity case, the warning shouldn't be logged, and in the 'info' case, it should.
+
+So, this test should pass after the patch because when the verbosity is 'error', the warning isn't logged, and when it's 'info', it is.
+
+Thus, this test would fail before the patch because the warning would be logged regardless of the verbosity, and pass after the patch because the logging respects the verbosity.
+
+So, this test correctly verifies the issue.
+
+I think this is a solid approach. Now, I'll write the code accordingly.
+</think>
+
+it("should respect verbosity levels for OpenJPEG warnings", async () => {
+  const mockWarn = jest.fn();
+  const originalWarn = console.warn;
+
+  const { warn: utilWarn } = await import("../../src/shared/util.js");
+  utilWarn.mockImplementation(mockWarn);
+
+  const data = new Uint8Array();
+
+  setVerbosityLevel(VerbosityLevel.error);
+  try {
+    await JpxImage.decode(data);
+  } catch (error) {
+    // Expected to throw an error
+  }
+  expect(mockWarn).not.toHaveBeenCalled();
+
+  mockWarn.mockClear();
+
+  setVerbosityLevel(VerbosityLevel.info);
+  try {
+    await JpxImage.decode(data);
+  } catch (error) {
+    // Expected to throw an error
+  }
+  expect(mockWarn).toHaveBeenCalled();
+
+  console.warn = originalWarn;
+});

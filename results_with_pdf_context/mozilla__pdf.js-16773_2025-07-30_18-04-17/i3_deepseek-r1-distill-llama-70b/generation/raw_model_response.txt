@@ -1,0 +1,111 @@
+<think>
+Okay, I need to create a regression test for the issue where the stamp annotation was allowing unsupported image types. The patch adds support for specific image types, so the test should check that only those types are accepted.
+
+First, I'll look at the code changes. The patch adds a `supportedTypes` method that lists the allowed image types. The `input.accept` is set to this list instead of `image/*`.
+
+I need to write a test that verifies this behavior. The test should simulate adding an image and check if only supported types are allowed.
+
+I'll start by importing the necessary modules. Since the test is for the StampEditor, I'll import it from `../../display/editor/stamp.js`. I also need `AnnotationEditorType` from `../../shared/util.js` and `AnnotationStorage` from `../../display/annotation_storage.js`.
+
+I'll set up a describe block for the stamp editor. Inside it, an `it` block will handle the specific test case.
+
+In the test, I'll create a mock `uiManager` with an `imageManager` that returns null for invalid files. I'll create an instance of `StampEditor` using this mock.
+
+Next, I'll define the supported and unsupported file types. I'll create test files for each type. For each file, I'll simulate a change event on the input element and check if the image is loaded or rejected.
+
+I'll use `jest.spyOn` to mock the `getFromFile` method of `imageManager`. For supported types, it should return a resolved promise with data. For unsupported types, it should return null.
+
+After setting up the mocks, I'll trigger the change event on the input element and wait for the promise to resolve. Then, I'll check if `getFromFile` was called and if the result is as expected.
+
+I'll structure the test to loop through each file type, perform the check, and ensure that only supported types are accepted. This way, the test will fail before the patch and pass after, confirming the fix.
+</think>
+
+```javascript
+import { StampEditor } from "../../display/editor/stamp.js";
+import { AnnotationEditorType } from "../../shared/util.js";
+import { AnnotationStorage } from "../../display/annotation_storage.js";
+
+describe("StampEditor image type validation", () => {
+  it("should only accept supported image types", async () => {
+    // Mock the UI manager and imageManager
+    const uiManager = {
+      imageManager: {
+        getFromFile: jest.fn(),
+        isValidId: jest.fn(),
+      },
+    };
+
+    // Create editor instance
+    const editor = new StampEditor({
+      name: "testEditor",
+      pageIndex: 0,
+      uiManager: uiManager,
+    });
+
+    // Mock supported and unsupported file types
+    const supportedTypes = [
+      "image/apng",
+      "image/avif",
+      "image/bmp",
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/svg+xml",
+      "image/webp",
+      "image/x-icon",
+    ];
+
+    const unsupportedTypes = [
+      "image/tiff",
+      "image/bpg",
+      "image/ico", // Note: image/x-icon is supported but image/ico is not
+    ];
+
+    // Test supported types
+    for (const type of supportedTypes) {
+      const file = new File([""], "test." + type.split("/")[1], {
+        type: type,
+      });
+
+      const input = document.createElement("input");
+      input.files = [file];
+      const event = new Event("change");
+
+      // Mock successful image load
+      uiManager.imageManager.getFromFile.mockResolvedValueOnce({
+        bitmap: new Image(),
+        id: "test-id",
+        isSvg: type === "image/svg+xml",
+      });
+
+      // Trigger change event
+      input.dispatchEvent(event);
+      await editor.#bitmapPromise;
+
+      expect(uiManager.imageManager.getFromFile).toHaveBeenCalled();
+      expect(editor.#bitmap).toBeTruthy();
+    }
+
+    // Test unsupported types
+    for (const type of unsupportedTypes) {
+      const file = new File([""], "test." + type.split("/")[1], {
+        type: type,
+      });
+
+      const input = document.createElement("input");
+      input.files = [file];
+      const event = new Event("change");
+
+      // Mock failed image load
+      uiManager.imageManager.getFromFile.mockResolvedValueOnce(null);
+
+      // Trigger change event
+      input.dispatchEvent(event);
+      await editor.#bitmapPromise;
+
+      expect(uiManager.imageManager.getFromFile).toHaveBeenCalled();
+      expect(editor.#bitmap).toBeNull();
+    }
+  });
+});
+```

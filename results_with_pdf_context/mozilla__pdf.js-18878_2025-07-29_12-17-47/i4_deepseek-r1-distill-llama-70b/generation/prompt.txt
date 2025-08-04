@@ -1,0 +1,1249 @@
+Before you begin:
+- Keep going until the job is completely solved — don’t stop halfway.
+- If you’re unsure about the behavior, reread the provided patch carefully; do not hallucinate.
+- Plan your approach before writing code by reflecting on whether the test truly fails before and passes after.
+
+Issue:
+<issue>
+[Bug]: Uncaught error on unexpected data after end of stream
+### Attach (recommended) or Link to PDF file
+
+[PDF_FILE-1.pdf](https://github.com/user-attachments/files/17320406/PDF_FILE-1.pdf)
+
+
+### Web browser and its version
+
+Chrome 129.0.6668.10 / Firefox 131.0
+
+### Operating system and its version
+
+macOS Sonoma 14.6.1 / Ubuntu 22.04.5
+
+### PDF.js version
+
+4.4.168
+
+### Is the bug present in the latest PDF.js version?
+
+Yes
+
+### Is a browser extension
+
+No
+
+### Steps to reproduce the problem
+
+1. Go to https://jsfiddle.net/tr2h1j8f/
+1. Open the DevTools console
+1. Click the Run button
+
+### What is the expected behavior?
+
+No errors should appear in the console.
+
+### What went wrong?
+
+### Chrome
+
+The `Uncaught (in promise) TypeError: Junk found after end of compressed data.` error appears in the console.
+
+![image](https://github.com/user-attachments/assets/a0e63b0d-af04-441e-a8ab-7cd5963c0e54)
+
+### Firefox
+
+The `TypeError: Unexpected input after the end of stream` error appears in the console.
+
+![image](https://github.com/user-attachments/assets/b55cbb17-a990-48ac-a354-d7bf26c986d5)
+
+
+### Link to a viewer
+
+_No response_
+
+### Additional context
+
+Related code:
+
+https://github.com/mozilla/pdf.js/blob/233ac1773da43cf7557615b659b56ac5ef2fc431/src/core/flate_stream.js#L157-L197
+
+This error occurs because promises returned by `writer.write(bytes);` and `writer.close();` are not being awaited. There’s a reason for this though which is explained in https://github.com/whatwg/compression/issues/55#issuecomment-1614476837.
+
+A potential solution could be to discard the errors
+```js
+writer.write(bytes).catch(() => {});
+writer.close().catch(() => {});
+```
+They will still be caught by the `catch` block when awaited here
+
+https://github.com/mozilla/pdf.js/blob/233ac1773da43cf7557615b659b56ac5ef2fc431/src/core/flate_stream.js#L170
+</issue>
+
+Patch:
+<patch>
+diff --git a/src/core/flate_stream.js b/src/core/flate_stream.js
+--- a/src/core/flate_stream.js
++++ b/src/core/flate_stream.js
+@@ -161,8 +161,17 @@ class FlateStream extends DecodeStream {
+     try {
+       const { readable, writable } = new DecompressionStream("deflate");
+       const writer = writable.getWriter();
+-      writer.write(bytes);
+-      writer.close();
++      await writer.ready;
++
++      // We can't await writer.write() because it'll block until the reader
++      // starts which happens few lines below.
++      writer
++        .write(bytes)
++        .then(async () => {
++          await writer.ready;
++          await writer.close();
++        })
++        .catch(() => {});
+ 
+       const chunks = [];
+       let totalLength = 0;
+
+diff --git a/src/core/writer.js b/src/core/writer.js
+--- a/src/core/writer.js
++++ b/src/core/writer.js
+@@ -71,8 +71,14 @@ async function writeStream(stream, buffer, transform) {
+     try {
+       const cs = new CompressionStream("deflate");
+       const writer = cs.writable.getWriter();
+-      writer.write(bytes);
+-      writer.close();
++      await writer.ready;
++      writer
++        .write(bytes)
++        .then(async () => {
++          await writer.ready;
++          await writer.close();
++        })
++        .catch(() => {});
+ 
+       // Response::text doesn't return the correct data.
+       const buf = await new Response(cs.readable).arrayBuffer();
+
+
+</patch>
+
+Imports:
+<imports>
+Available Packages
+Dev Dependencies:
+- @babel/core: ^7.25.7
+- @babel/preset-env: ^7.25.7
+- @babel/runtime: ^7.25.7
+- @fluent/bundle: ^0.18.0
+- @fluent/dom: ^0.10.0
+- @jazzer.js/core: ^2.1.0
+- @metalsmith/layouts: ^2.7.0
+- @metalsmith/markdown: ^1.10.0
+- autoprefixer: ^10.4.20
+- babel-loader: ^9.2.1
+- caniuse-lite: ^1.0.30001667
+- canvas: ^2.11.2
+- core-js: ^3.38.1
+- eslint: ^8.57.1
+- eslint-config-prettier: ^9.1.0
+- eslint-plugin-fetch-options: ^0.0.5
+- eslint-plugin-html: ^8.1.2
+- eslint-plugin-import: ^2.31.0
+- eslint-plugin-jasmine: ^4.2.2
+- eslint-plugin-json: ^3.1.0
+- eslint-plugin-no-unsanitized: ^4.1.2
+- eslint-plugin-prettier: ^5.2.1
+- eslint-plugin-sort-exports: ^0.9.1
+- eslint-plugin-unicorn: ^56.0.0
+- gulp: ^5.0.0
+- gulp-cli: ^3.0.0
+- gulp-postcss: ^10.0.0
+- gulp-rename: ^2.0.0
+- gulp-replace: ^1.1.4
+- gulp-zip: ^6.0.0
+- highlight.js: ^11.10.0
+- jasmine: ^5.3.1
+- jsdoc: ^4.0.3
+- jstransformer-nunjucks: ^1.2.0
+- metalsmith: ^2.6.3
+- metalsmith-html-relative: ^2.0.4
+- ordered-read-streams: ^2.0.0
+- path2d: ^0.2.1
+- pngjs: ^7.0.0
+- postcss: ^8.4.47
+- postcss-dark-theme-class: ^1.3.0
+- postcss-dir-pseudo-class: ^9.0.0
+- postcss-discard-comments: ^7.0.3
+- postcss-nesting: ^13.0.0
+- prettier: ^3.3.3
+- puppeteer: 23.3.1
+- stylelint: ^16.9.0
+- stylelint-prettier: ^5.0.2
+- svglint: ^3.0.0
+- terser-webpack-plugin: ^5.3.10
+- tsc-alias: ^1.8.10
+- ttest: ^4.0.0
+- typescript: ^5.6.2
+- vinyl: ^3.0.0
+- webpack: ^5.95.0
+- webpack-stream: ^7.0.0
+- yargs: ^17.7.2
+
+Engines:
+- node: >=18
+
+Available Relative Imports:
+- `../../src/core/annotation.js`: Annotation, AnnotationBorderStyle, AnnotationFactory, MarkupAnnotation, getQuadPoints
+- `../../src/core/bidi.js`: bidi
+- `../../src/core/cff_parser.js`: CFFCharset, CFFCompiler, CFFFDSelect, CFFParser, CFFStrings
+- `../../src/core/cmap.js`: CMap, CMapFactory, IdentityCMap
+- `../../src/core/colorspace.js`: ColorSpace
+- `../../src/core/core_utils.js`: arrayBuffersToBytes, encodeToXmlString, escapePDFName, escapeString, getInheritableProperty, getSizeInBytes, isAscii, isWhiteSpace, log2, numberToString, parseXFAPath, recoverJsURL, stringToUTF16HexString, stringToUTF16String, toRomanNumerals, validateCSSFont
+- `../../src/core/crypto.js`: AES128Cipher, AES256Cipher, ARCFourCipher, CipherTransformFactory, PDF17, PDF20, calculateMD5, calculateSHA256, calculateSHA384, calculateSHA512
+- `../../src/core/default_appearance.js`: createDefaultAppearance, parseAppearanceStream, parseDefaultAppearance
+- `../../src/core/document.js`: PDFDocument, Page
+- `../../src/core/encodings.js`: getEncoding
+- `../../src/core/evaluator.js`: PartialEvaluator
+- `../../src/core/flate_stream.js`: FlateStream
+- `../../src/core/font_substitutions.js`: getFontSubstitution
+- `../../src/core/fonts_utils.js`: SEAC_ANALYSIS_ENABLED
+- `../../src/core/function.js`: PDFFunctionFactory, PostScriptCompiler, PostScriptEvaluator
+- `../../src/core/glyphlist.js`: getDingbatsGlyphsUnicode, getGlyphsUnicode
+- `../../src/core/image_utils.js`: GlobalImageCache, LocalColorSpaceCache
+- `../../src/core/jbig2.js`: Jbig2Error, Jbig2Image
+- `../../src/core/jpg.js`: JpegError, JpegImage
+- `../../src/core/jpx.js`: JpxError, JpxImage
+- `../../src/core/metadata_parser.js`: MetadataParser
+- `../../src/core/operator_list.js`: OperatorList
+- `../../src/core/parser.js`: Lexer, Linearization, Parser
+- `../../src/core/predictor_stream.js`: PredictorStream
+- `../../src/core/primitives.js`: Cmd, Dict, EOF, Name, Ref, RefSet, RefSetCache, isCmd, isDict, isName, isRefsEqual
+- `../../src/core/ps_parser.js`: PostScriptLexer, PostScriptParser
+- `../../src/core/stream.js`: NullStream, Stream, StringStream
+- `../../src/core/type1_parser.js`: Type1Parser
+- `../../src/core/unicode.js`: getCharUnicodeCategory, getUnicodeForGlyph, getUnicodeRangeFor, mapSpecialUnicodeValues
+- `../../src/core/worker.js`: WorkerMessageHandler, WorkerTask
+- `../../src/core/writer.js`: incrementalUpdate, writeDict
+- `../../src/core/xfa/bind.js`: Binder
+- `../../src/core/xfa/data.js`: DataHandler
+- `../../src/core/xfa/factory.js`: XFAFactory
+- `../../src/core/xfa/formcalc_lexer.js`: Lexer, TOKEN, Token
+- `../../src/core/xfa/formcalc_parser.js`: Errors, Parser
+- `../../src/core/xfa/parser.js`: XFAParser
+- `../../src/core/xfa/som.js`: searchNode
+- `../../src/core/xfa/symbol_utils.js`: $dump, $getChildren, $getChildrenByClass, $getChildrenByName, $text, $uid
+- `../../src/core/xml_parser.js`: SimpleXMLParser, XMLParserBase
+- `../../src/display/annotation_layer.js`: AnnotationLayer
+- `../../src/display/annotation_storage.js`: AnnotationStorage
+- `../../src/display/api.js`: DefaultCMapReaderFactory, DefaultCanvasFactory, DefaultStandardFontDataFactory, LoopbackPort, PDFDataRangeTransport, PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, PDFWorker, RenderTask, build, getDocument, version
+- `../../src/display/display_utils.js`: DOMCanvasFactory, DOMSVGFactory, OutputScale, PDFDateString, PageViewport, PixelsPerInch, RenderingCancelledException, StatTimer, fetchData, getFilenameFromUrl, getPdfFilenameFromUrl, getXfaPageViewport, isDataScheme, isPdfFile, isValidFetchUrl, noContextMenu, setLayerDimensions
+- `../../src/display/draw_layer.js`: DrawLayer
+- `../../src/display/editor/annotation_editor_layer.js`: AnnotationEditorLayer
+- `../../src/display/editor/color_picker.js`: ColorPicker
+- `../../src/display/editor/tools.js`: AnnotationEditorUIManager, CommandManager
+- `../../src/display/fetch_stream.js`: PDFFetchStream
+- `../../src/display/metadata.js`: Metadata
+- `../../src/display/network.js`: PDFNetworkStream
+- `../../src/display/network_utils.js`: createHeaders, createResponseStatusError, extractFilenameFromHeader, validateRangeRequestCapabilities, validateResponseStatus
+- `../../src/display/node_stream.js`: PDFNodeStream
+- `../../src/display/node_utils.js`: NodePackages
+- `../../src/display/text_layer.js`: TextLayer
+- `../../src/display/worker_options.js`: GlobalWorkerOptions
+- `../../src/display/xfa_layer.js`: XfaLayer
+- `../../src/shared/message_handler.js`: MessageHandler
+- `../../src/shared/murmurhash3.js`: MurmurHash3_64
+- `../../src/shared/util.js`: AbortException, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationType, BaseException, CMapCompressionType, FeatureTest, FormatError, ImageKind, InvalidPDFException, MissingPDFException, OPS, PasswordException, PasswordResponses, PermissionFlag, RenderingIntentFlag, UnexpectedResponseException, UnknownErrorException, Util, VerbosityLevel, assert, bytesToString, createValidAbsoluteUrl, getModificationDate, getVerbosityLevel, isNodeJS, normalizeUnicode, objectSize, setVerbosityLevel, shadow, string32, stringToBytes, stringToPDFString, stringToUTF8String
+- `../../web/annotation_layer_builder.js`: AnnotationLayerBuilder
+- `../../web/app_options.js`: AppOptions, OptionKind
+- `../../web/download_manager.js`: DownloadManager
+- `../../web/event_utils.js`: EventBus, WaitOnType, waitOnEventOrTimeout
+- `../../web/genericl10n.js`: GenericL10n
+- `../../web/pdf_find_controller.js`: FindState, PDFFindController
+- `../../web/pdf_find_utils.js`: CharacterType, getCharacterType
+- `../../web/pdf_history.js`: PDFHistory, isDestArraysEqual, isDestHashesEqual
+- `../../web/pdf_link_service.js`: LinkTarget, PDFLinkService, SimpleLinkService
+- `../../web/pdf_page_view.js`: PDFPageView
+- `../../web/pdf_scripting_manager.component.js`: PDFScriptingManager
+- `../../web/pdf_single_page_viewer.js`: PDFSinglePageViewer
+- `../../web/pdf_viewer.js`: PDFPageViewBuffer, PDFViewer
+- `../../web/struct_tree_layer_builder.js`: StructTreeLayerBuilder
+- `../../web/text_layer_builder.js`: TextLayerBuilder
+- `../../web/ui_utils.js`: AutoPrintRegExp, ProgressBar, RenderingStates, ScrollMode, SpreadMode, backtrackBeforeAllVisibleElements, binarySearchFirstItem, calcRound, getPageSizeInches, getVisibleElements, isPortraitOrientation, isValidRotation, parseQueryString, removeNullCharacters
+- `../../web/xfa_layer_builder.js`: XfaLayerBuilder
+- `./test_utils.js`: CMAP_URL, DefaultFileReaderFactory, STANDARD_FONT_DATA_URL, TEST_PDFS_PATH, XRefMock, buildGetDocumentParams, createIdFactory, createTemporaryNodeServer
+- `./testreporter.js`: TestReporter
+</imports>
+
+Code:
+<code>
+File:
+src/core/flate_stream.js
+1 /* Copyright 2012 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 /* Copyright 1996-2003 Glyph & Cog, LLC
+16  *
+17  * The flate stream implementation contained in this file is a JavaScript port
+18  * of XPDF's implementation, made available under the Apache 2.0 open source
+19  * license.
+20  */
+21 
+22 import { FormatError, info } from "../shared/util.js";
+23 import { DecodeStream } from "./decode_stream.js";
+24 import { Stream } from "./stream.js";
+25 
+26 const codeLenCodeMap = new Int32Array([
+27   16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+28 ]);
+29 
+30 const lengthDecode = new Int32Array([
+31   0x00003, 0x00004, 0x00005, 0x00006, 0x00007, 0x00008, 0x00009, 0x0000a,
+32   0x1000b, 0x1000d, 0x1000f, 0x10011, 0x20013, 0x20017, 0x2001b, 0x2001f,
+33   0x30023, 0x3002b, 0x30033, 0x3003b, 0x40043, 0x40053, 0x40063, 0x40073,
+34   0x50083, 0x500a3, 0x500c3, 0x500e3, 0x00102, 0x00102, 0x00102,
+35 ]);
+36 
+37 const distDecode = new Int32Array([
+38   0x00001, 0x00002, 0x00003, 0x00004, 0x10005, 0x10007, 0x20009, 0x2000d,
+39   0x30011, 0x30019, 0x40021, 0x40031, 0x50041, 0x50061, 0x60081, 0x600c1,
+40   0x70101, 0x70181, 0x80201, 0x80301, 0x90401, 0x90601, 0xa0801, 0xa0c01,
+41   0xb1001, 0xb1801, 0xc2001, 0xc3001, 0xd4001, 0xd6001,
+42 ]);
+43 
+44 const fixedLitCodeTab = [
+45   new Int32Array([
+46     0x70100, 0x80050, 0x80010, 0x80118, 0x70110, 0x80070, 0x80030, 0x900c0,
+47     0x70108, 0x80060, 0x80020, 0x900a0, 0x80000, 0x80080, 0x80040, 0x900e0,
+48     0x70104, 0x80058, 0x80018, 0x90090, 0x70114, 0x80078, 0x80038, 0x900d0,
+49     0x7010c, 0x80068, 0x80028, 0x900b0, 0x80008, 0x80088, 0x80048, 0x900f0,
+50     0x70102, 0x80054, 0x80014, 0x8011c, 0x70112, 0x80074, 0x80034, 0x900c8,
+51     0x7010a, 0x80064, 0x80024, 0x900a8, 0x80004, 0x80084, 0x80044, 0x900e8,
+52     0x70106, 0x8005c, 0x8001c, 0x90098, 0x70116, 0x8007c, 0x8003c, 0x900d8,
+53     0x7010e, 0x8006c, 0x8002c, 0x900b8, 0x8000c, 0x8008c, 0x8004c, 0x900f8,
+54     0x70101, 0x80052, 0x80012, 0x8011a, 0x70111, 0x80072, 0x80032, 0x900c4,
+55     0x70109, 0x80062, 0x80022, 0x900a4, 0x80002, 0x80082, 0x80042, 0x900e4,
+56     0x70105, 0x8005a, 0x8001a, 0x90094, 0x70115, 0x8007a, 0x8003a, 0x900d4,
+57     0x7010d, 0x8006a, 0x8002a, 0x900b4, 0x8000a, 0x8008a, 0x8004a, 0x900f4,
+58     0x70103, 0x80056, 0x80016, 0x8011e, 0x70113, 0x80076, 0x80036, 0x900cc,
+59     0x7010b, 0x80066, 0x80026, 0x900ac, 0x80006, 0x80086, 0x80046, 0x900ec,
+60     0x70107, 0x8005e, 0x8001e, 0x9009c, 0x70117, 0x8007e, 0x8003e, 0x900dc,
+61     0x7010f, 0x8006e, 0x8002e, 0x900bc, 0x8000e, 0x8008e, 0x8004e, 0x900fc,
+62     0x70100, 0x80051, 0x80011, 0x80119, 0x70110, 0x80071, 0x80031, 0x900c2,
+63     0x70108, 0x80061, 0x80021, 0x900a2, 0x80001, 0x80081, 0x80041, 0x900e2,
+64     0x70104, 0x80059, 0x80019, 0x90092, 0x70114, 0x80079, 0x80039, 0x900d2,
+65     0x7010c, 0x80069, 0x80029, 0x900b2, 0x80009, 0x80089, 0x80049, 0x900f2,
+66     0x70102, 0x80055, 0x80015, 0x8011d, 0x70112, 0x80075, 0x80035, 0x900ca,
+67     0x7010a, 0x80065, 0x80025, 0x900aa, 0x80005, 0x80085, 0x80045, 0x900ea,
+68     0x70106, 0x8005d, 0x8001d, 0x9009a, 0x70116, 0x8007d, 0x8003d, 0x900da,
+69     0x7010e, 0x8006d, 0x8002d, 0x900ba, 0x8000d, 0x8008d, 0x8004d, 0x900fa,
+70     0x70101, 0x80053, 0x80013, 0x8011b, 0x70111, 0x80073, 0x80033, 0x900c6,
+71     0x70109, 0x80063, 0x80023, 0x900a6, 0x80003, 0x80083, 0x80043, 0x900e6,
+72     0x70105, 0x8005b, 0x8001b, 0x90096, 0x70115, 0x8007b, 0x8003b, 0x900d6,
+73     0x7010d, 0x8006b, 0x8002b, 0x900b6, 0x8000b, 0x8008b, 0x8004b, 0x900f6,
+74     0x70103, 0x80057, 0x80017, 0x8011f, 0x70113, 0x80077, 0x80037, 0x900ce,
+75     0x7010b, 0x80067, 0x80027, 0x900ae, 0x80007, 0x80087, 0x80047, 0x900ee,
+76     0x70107, 0x8005f, 0x8001f, 0x9009e, 0x70117, 0x8007f, 0x8003f, 0x900de,
+77     0x7010f, 0x8006f, 0x8002f, 0x900be, 0x8000f, 0x8008f, 0x8004f, 0x900fe,
+78     0x70100, 0x80050, 0x80010, 0x80118, 0x70110, 0x80070, 0x80030, 0x900c1,
+79     0x70108, 0x80060, 0x80020, 0x900a1, 0x80000, 0x80080, 0x80040, 0x900e1,
+80     0x70104, 0x80058, 0x80018, 0x90091, 0x70114, 0x80078, 0x80038, 0x900d1,
+81     0x7010c, 0x80068, 0x80028, 0x900b1, 0x80008, 0x80088, 0x80048, 0x900f1,
+82     0x70102, 0x80054, 0x80014, 0x8011c, 0x70112, 0x80074, 0x80034, 0x900c9,
+83     0x7010a, 0x80064, 0x80024, 0x900a9, 0x80004, 0x80084, 0x80044, 0x900e9,
+84     0x70106, 0x8005c, 0x8001c, 0x90099, 0x70116, 0x8007c, 0x8003c, 0x900d9,
+85     0x7010e, 0x8006c, 0x8002c, 0x900b9, 0x8000c, 0x8008c, 0x8004c, 0x900f9,
+86     0x70101, 0x80052, 0x80012, 0x8011a, 0x70111, 0x80072, 0x80032, 0x900c5,
+87     0x70109, 0x80062, 0x80022, 0x900a5, 0x80002, 0x80082, 0x80042, 0x900e5,
+88     0x70105, 0x8005a, 0x8001a, 0x90095, 0x70115, 0x8007a, 0x8003a, 0x900d5,
+89     0x7010d, 0x8006a, 0x8002a, 0x900b5, 0x8000a, 0x8008a, 0x8004a, 0x900f5,
+90     0x70103, 0x80056, 0x80016, 0x8011e, 0x70113, 0x80076, 0x80036, 0x900cd,
+91     0x7010b, 0x80066, 0x80026, 0x900ad, 0x80006, 0x80086, 0x80046, 0x900ed,
+92     0x70107, 0x8005e, 0x8001e, 0x9009d, 0x70117, 0x8007e, 0x8003e, 0x900dd,
+93     0x7010f, 0x8006e, 0x8002e, 0x900bd, 0x8000e, 0x8008e, 0x8004e, 0x900fd,
+94     0x70100, 0x80051, 0x80011, 0x80119, 0x70110, 0x80071, 0x80031, 0x900c3,
+95     0x70108, 0x80061, 0x80021, 0x900a3, 0x80001, 0x80081, 0x80041, 0x900e3,
+96     0x70104, 0x80059, 0x80019, 0x90093, 0x70114, 0x80079, 0x80039, 0x900d3,
+97     0x7010c, 0x80069, 0x80029, 0x900b3, 0x80009, 0x80089, 0x80049, 0x900f3,
+98     0x70102, 0x80055, 0x80015, 0x8011d, 0x70112, 0x80075, 0x80035, 0x900cb,
+99     0x7010a, 0x80065, 0x80025, 0x900ab, 0x80005, 0x80085, 0x80045, 0x900eb,
+100     0x70106, 0x8005d, 0x8001d, 0x9009b, 0x70116, 0x8007d, 0x8003d, 0x900db,
+101     0x7010e, 0x8006d, 0x8002d, 0x900bb, 0x8000d, 0x8008d, 0x8004d, 0x900fb,
+102     0x70101, 0x80053, 0x80013, 0x8011b, 0x70111, 0x80073, 0x80033, 0x900c7,
+103     0x70109, 0x80063, 0x80023, 0x900a7, 0x80003, 0x80083, 0x80043, 0x900e7,
+104     0x70105, 0x8005b, 0x8001b, 0x90097, 0x70115, 0x8007b, 0x8003b, 0x900d7,
+105     0x7010d, 0x8006b, 0x8002b, 0x900b7, 0x8000b, 0x8008b, 0x8004b, 0x900f7,
+106     0x70103, 0x80057, 0x80017, 0x8011f, 0x70113, 0x80077, 0x80037, 0x900cf,
+107     0x7010b, 0x80067, 0x80027, 0x900af, 0x80007, 0x80087, 0x80047, 0x900ef,
+108     0x70107, 0x8005f, 0x8001f, 0x9009f, 0x70117, 0x8007f, 0x8003f, 0x900df,
+109     0x7010f, 0x8006f, 0x8002f, 0x900bf, 0x8000f, 0x8008f, 0x8004f, 0x900ff,
+110   ]),
+111   9,
+112 ];
+113 
+114 const fixedDistCodeTab = [
+115   new Int32Array([
+116     0x50000, 0x50010, 0x50008, 0x50018, 0x50004, 0x50014, 0x5000c, 0x5001c,
+117     0x50002, 0x50012, 0x5000a, 0x5001a, 0x50006, 0x50016, 0x5000e, 0x00000,
+118     0x50001, 0x50011, 0x50009, 0x50019, 0x50005, 0x50015, 0x5000d, 0x5001d,
+119     0x50003, 0x50013, 0x5000b, 0x5001b, 0x50007, 0x50017, 0x5000f, 0x00000,
+120   ]),
+121   5,
+122 ];
+123 
+124 class FlateStream extends DecodeStream {
+125   constructor(str, maybeLength) {
+126     super(maybeLength);
+127 
+128     this.str = str;
+129     this.dict = str.dict;
+130 
+131     const cmf = str.getByte();
+132     const flg = str.getByte();
+133     if (cmf === -1 || flg === -1) {
+134       throw new FormatError(`Invalid header in flate stream: ${cmf}, ${flg}`);
+135     }
+136     if ((cmf & 0x0f) !== 0x08) {
+137       throw new FormatError(
+138         `Unknown compression method in flate stream: ${cmf}, ${flg}`
+139       );
+140     }
+141     if (((cmf << 8) + flg) % 31 !== 0) {
+142       throw new FormatError(`Bad FCHECK in flate stream: ${cmf}, ${flg}`);
+143     }
+144     if (flg & 0x20) {
+145       throw new FormatError(`FDICT bit set in flate stream: ${cmf}, ${flg}`);
+146     }
+147 
+148     this.codeSize = 0;
+149     this.codeBuf = 0;
+150   }
+151 
+152   async getImageData(length, _decoderOptions) {
+153     const data = await this.asyncGetBytes();
+154     return data?.subarray(0, length) || this.getBytes(length);
+155   }
+156 
+157   async asyncGetBytes() {
+158     this.str.reset();
+159     const bytes = this.str.getBytes();
+160 
+161     try {
+162       const { readable, writable } = new DecompressionStream("deflate");
+163       const writer = writable.getWriter();
+164       writer.write(bytes);
+165       writer.close();
+166 
+167       const chunks = [];
+168       let totalLength = 0;
+169 
+170       for await (const chunk of readable) {
+171         chunks.push(chunk);
+172         totalLength += chunk.byteLength;
+173       }
+174       const data = new Uint8Array(totalLength);
+175       let offset = 0;
+176       for (const chunk of chunks) {
+177         data.set(chunk, offset);
+178         offset += chunk.byteLength;
+179       }
+180 
+181       return data;
+182     } catch {
+183       // DecompressionStream failed (for example because there are some extra
+184       // bytes after the end of the compressed data), so we fallback to our
+185       // decoder.
+186       // We already get the bytes from the underlying stream, so we just reuse
+187       // them to avoid get them again.
+188       this.str = new Stream(
+189         bytes,
+190         2 /* = header size (see ctor) */,
+191         bytes.length,
+192         this.str.dict
+193       );
+194       this.reset();
+195       return null;
+196     }
+197   }
+198 
+199   get isAsync() {
+200     return true;
+201   }
+202 
+203   getBits(bits) {
+204     const str = this.str;
+205     let codeSize = this.codeSize;
+206     let codeBuf = this.codeBuf;
+207 
+208     let b;
+209     while (codeSize < bits) {
+210       if ((b = str.getByte()) === -1) {
+211         throw new FormatError("Bad encoding in flate stream");
+212       }
+213       codeBuf |= b << codeSize;
+214       codeSize += 8;
+215     }
+216     b = codeBuf & ((1 << bits) - 1);
+217     this.codeBuf = codeBuf >> bits;
+218     this.codeSize = codeSize -= bits;
+219 
+220     return b;
+221   }
+222 
+223   getCode(table) {
+224     const str = this.str;
+225     const codes = table[0];
+226     const maxLen = table[1];
+227     let codeSize = this.codeSize;
+228     let codeBuf = this.codeBuf;
+229 
+230     let b;
+231     while (codeSize < maxLen) {
+232       if ((b = str.getByte()) === -1) {
+233         // premature end of stream. code might however still be valid.
+234         // codeSize < codeLen check below guards against incomplete codeVal.
+235         break;
+236       }
+237       codeBuf |= b << codeSize;
+238       codeSize += 8;
+239     }
+240     const code = codes[codeBuf & ((1 << maxLen) - 1)];
+241     const codeLen = code >> 16;
+242     const codeVal = code & 0xffff;
+243     if (codeLen < 1 || codeSize < codeLen) {
+244       throw new FormatError("Bad encoding in flate stream");
+245     }
+246     this.codeBuf = codeBuf >> codeLen;
+247     this.codeSize = codeSize - codeLen;
+248     return codeVal;
+249   }
+250 
+251   generateHuffmanTable(lengths) {
+252     const n = lengths.length;
+253 
+254     // find max code length
+255     let maxLen = 0;
+256     let i;
+257     for (i = 0; i < n; ++i) {
+258       if (lengths[i] > maxLen) {
+259         maxLen = lengths[i];
+260       }
+261     }
+262 
+263     // build the table
+264     const size = 1 << maxLen;
+265     const codes = new Int32Array(size);
+266     for (
+267       let len = 1, code = 0, skip = 2;
+268       len <= maxLen;
+269       ++len, code <<= 1, skip <<= 1
+270     ) {
+271       for (let val = 0; val < n; ++val) {
+272         if (lengths[val] === len) {
+273           // bit-reverse the code
+274           let code2 = 0;
+275           let t = code;
+276           for (i = 0; i < len; ++i) {
+277             code2 = (code2 << 1) | (t & 1);
+278             t >>= 1;
+279           }
+280 
+281           // fill the table entries
+282           for (i = code2; i < size; i += skip) {
+283             codes[i] = (len << 16) | val;
+284           }
+285           ++code;
+286         }
+287       }
+288     }
+289 
+290     return [codes, maxLen];
+291   }
+292 
+293   #endsStreamOnError(err) {
+294     info(err);
+295     this.eof = true;
+296   }
+297 
+298   readBlock() {
+299     let buffer, hdr, len;
+300     const str = this.str;
+301     // read block header
+302     try {
+303       hdr = this.getBits(3);
+304     } catch (ex) {
+305       this.#endsStreamOnError(ex.message);
+306       return;
+307     }
+308     if (hdr & 1) {
+309       this.eof = true;
+310     }
+311     hdr >>= 1;
+312 
+313     if (hdr === 0) {
+314       // uncompressed block
+315       let b;
+316 
+317       if ((b = str.getByte()) === -1) {
+318         this.#endsStreamOnError("Bad block header in flate stream");
+319         return;
+320       }
+321       let blockLen = b;
+322       if ((b = str.getByte()) === -1) {
+323         this.#endsStreamOnError("Bad block header in flate stream");
+324         return;
+325       }
+326       blockLen |= b << 8;
+327       if ((b = str.getByte()) === -1) {
+328         this.#endsStreamOnError("Bad block header in flate stream");
+329         return;
+330       }
+331       let check = b;
+332       if ((b = str.getByte()) === -1) {
+333         this.#endsStreamOnError("Bad block header in flate stream");
+334         return;
+335       }
+336       check |= b << 8;
+337       if (check !== (~blockLen & 0xffff) && (blockLen !== 0 || check !== 0)) {
+338         // Ignoring error for bad "empty" block (see issue 1277)
+339         throw new FormatError("Bad uncompressed block length in flate stream");
+340       }
+341 
+342       this.codeBuf = 0;
+343       this.codeSize = 0;
+344 
+345       const bufferLength = this.bufferLength,
+346         end = bufferLength + blockLen;
+347       buffer = this.ensureBuffer(end);
+348       this.bufferLength = end;
+349 
+350       if (blockLen === 0) {
+351         if (str.peekByte() === -1) {
+352           this.eof = true;
+353         }
+354       } else {
+355         const block = str.getBytes(blockLen);
+356         buffer.set(block, bufferLength);
+357         if (block.length < blockLen) {
+358           this.eof = true;
+359         }
+360       }
+361       return;
+362     }
+363 
+364     let litCodeTable;
+365     let distCodeTable;
+366     if (hdr === 1) {
+367       // compressed block, fixed codes
+368       litCodeTable = fixedLitCodeTab;
+369       distCodeTable = fixedDistCodeTab;
+370     } else if (hdr === 2) {
+371       // compressed block, dynamic codes
+372       const numLitCodes = this.getBits(5) + 257;
+373       const numDistCodes = this.getBits(5) + 1;
+374       const numCodeLenCodes = this.getBits(4) + 4;
+375 
+376       // build the code lengths code table
+377       const codeLenCodeLengths = new Uint8Array(codeLenCodeMap.length);
+378 
+379       let i;
+380       for (i = 0; i < numCodeLenCodes; ++i) {
+381         codeLenCodeLengths[codeLenCodeMap[i]] = this.getBits(3);
+382       }
+383       const codeLenCodeTab = this.generateHuffmanTable(codeLenCodeLengths);
+384 
+385       // build the literal and distance code tables
+386       len = 0;
+387       i = 0;
+388       const codes = numLitCodes + numDistCodes;
+389       const codeLengths = new Uint8Array(codes);
+390       let bitsLength, bitsOffset, what;
+391       while (i < codes) {
+392         const code = this.getCode(codeLenCodeTab);
+393         if (code === 16) {
+394           bitsLength = 2;
+395           bitsOffset = 3;
+396           what = len;
+397         } else if (code === 17) {
+398           bitsLength = 3;
+399           bitsOffset = 3;
+400           what = len = 0;
+401         } else if (code === 18) {
+402           bitsLength = 7;
+403           bitsOffset = 11;
+404           what = len = 0;
+405         } else {
+406           codeLengths[i++] = len = code;
+407           continue;
+408         }
+409 
+410         let repeatLength = this.getBits(bitsLength) + bitsOffset;
+411         while (repeatLength-- > 0) {
+412           codeLengths[i++] = what;
+413         }
+414       }
+415 
+416       litCodeTable = this.generateHuffmanTable(
+417         codeLengths.subarray(0, numLitCodes)
+418       );
+419       distCodeTable = this.generateHuffmanTable(
+420         codeLengths.subarray(numLitCodes, codes)
+421       );
+422     } else {
+423       throw new FormatError("Unknown block type in flate stream");
+424     }
+425 
+426     buffer = this.buffer;
+427     let limit = buffer ? buffer.length : 0;
+428     let pos = this.bufferLength;
+429     while (true) {
+430       let code1 = this.getCode(litCodeTable);
+431       if (code1 < 256) {
+432         if (pos + 1 >= limit) {
+433           buffer = this.ensureBuffer(pos + 1);
+434           limit = buffer.length;
+435         }
+436         buffer[pos++] = code1;
+437         continue;
+438       }
+439       if (code1 === 256) {
+440         this.bufferLength = pos;
+441         return;
+442       }
+443       code1 -= 257;
+444       code1 = lengthDecode[code1];
+445       let code2 = code1 >> 16;
+446       if (code2 > 0) {
+447         code2 = this.getBits(code2);
+448       }
+449       len = (code1 & 0xffff) + code2;
+450       code1 = this.getCode(distCodeTable);
+451       code1 = distDecode[code1];
+452       code2 = code1 >> 16;
+453       if (code2 > 0) {
+454         code2 = this.getBits(code2);
+455       }
+456       const dist = (code1 & 0xffff) + code2;
+457       if (pos + len >= limit) {
+458         buffer = this.ensureBuffer(pos + len);
+459         limit = buffer.length;
+460       }
+461       for (let k = 0; k < len; ++k, ++pos) {
+462         buffer[pos] = buffer[pos - dist];
+463       }
+464     }
+465   }
+466 }
+467 
+468 export { FlateStream };
+File:
+src/core/writer.js
+1 /* Copyright 2020 Mozilla Foundation
+2  *
+3  * Licensed under the Apache License, Version 2.0 (the "License");
+4  * you may not use this file except in compliance with the License.
+5  * You may obtain a copy of the License at
+6  *
+7  *     http://www.apache.org/licenses/LICENSE-2.0
+8  *
+9  * Unless required by applicable law or agreed to in writing, software
+10  * distributed under the License is distributed on an "AS IS" BASIS,
+11  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+12  * See the License for the specific language governing permissions and
+13  * limitations under the License.
+14  */
+15 
+16 import { bytesToString, info, warn } from "../shared/util.js";
+17 import { Dict, isName, Name, Ref } from "./primitives.js";
+18 import {
+19   escapePDFName,
+20   escapeString,
+21   getSizeInBytes,
+22   numberToString,
+23   parseXFAPath,
+24 } from "./core_utils.js";
+25 import { SimpleDOMNode, SimpleXMLParser } from "./xml_parser.js";
+26 import { BaseStream } from "./base_stream.js";
+27 import { calculateMD5 } from "./crypto.js";
+28 import { Stream } from "./stream.js";
+29 
+30 async function writeObject(ref, obj, buffer, { encrypt = null }) {
+31   const transform = encrypt?.createCipherTransform(ref.num, ref.gen);
+32   buffer.push(`${ref.num} ${ref.gen} obj\n`);
+33   if (obj instanceof Dict) {
+34     await writeDict(obj, buffer, transform);
+35   } else if (obj instanceof BaseStream) {
+36     await writeStream(obj, buffer, transform);
+37   } else if (Array.isArray(obj) || ArrayBuffer.isView(obj)) {
+38     await writeArray(obj, buffer, transform);
+39   }
+40   buffer.push("\nendobj\n");
+41 }
+42 
+43 async function writeDict(dict, buffer, transform) {
+44   buffer.push("<<");
+45   for (const key of dict.getKeys()) {
+46     buffer.push(` /${escapePDFName(key)} `);
+47     await writeValue(dict.getRaw(key), buffer, transform);
+48   }
+49   buffer.push(">>");
+50 }
+51 
+52 async function writeStream(stream, buffer, transform) {
+53   let bytes = stream.getBytes();
+54   const { dict } = stream;
+55 
+56   const [filter, params] = await Promise.all([
+57     dict.getAsync("Filter"),
+58     dict.getAsync("DecodeParms"),
+59   ]);
+60 
+61   const filterZero = Array.isArray(filter)
+62     ? await dict.xref.fetchIfRefAsync(filter[0])
+63     : filter;
+64   const isFilterZeroFlateDecode = isName(filterZero, "FlateDecode");
+65 
+66   // If the string is too small there is no real benefit in compressing it.
+67   // The number 256 is arbitrary, but it should be reasonable.
+68   const MIN_LENGTH_FOR_COMPRESSING = 256;
+69 
+70   if (bytes.length >= MIN_LENGTH_FOR_COMPRESSING || isFilterZeroFlateDecode) {
+71     try {
+72       const cs = new CompressionStream("deflate");
+73       const writer = cs.writable.getWriter();
+74       writer.write(bytes);
+75       writer.close();
+76 
+77       // Response::text doesn't return the correct data.
+78       const buf = await new Response(cs.readable).arrayBuffer();
+79       bytes = new Uint8Array(buf);
+80 
+81       let newFilter, newParams;
+82       if (!filter) {
+83         newFilter = Name.get("FlateDecode");
+84       } else if (!isFilterZeroFlateDecode) {
+85         newFilter = Array.isArray(filter)
+86           ? [Name.get("FlateDecode"), ...filter]
+87           : [Name.get("FlateDecode"), filter];
+88         if (params) {
+89           newParams = Array.isArray(params)
+90             ? [null, ...params]
+91             : [null, params];
+92         }
+93       }
+94       if (newFilter) {
+95         dict.set("Filter", newFilter);
+96       }
+97       if (newParams) {
+98         dict.set("DecodeParms", newParams);
+99       }
+100     } catch (ex) {
+101       info(`writeStream - cannot compress data: "${ex}".`);
+102     }
+103   }
+104 
+105   let string = bytesToString(bytes);
+106   if (transform) {
+107     string = transform.encryptString(string);
+108   }
+109 
+110   dict.set("Length", string.length);
+111   await writeDict(dict, buffer, transform);
+112   buffer.push(" stream\n", string, "\nendstream");
+113 }
+114 
+115 async function writeArray(array, buffer, transform) {
+116   buffer.push("[");
+117   let first = true;
+118   for (const val of array) {
+119     if (!first) {
+120       buffer.push(" ");
+121     } else {
+122       first = false;
+123     }
+124     await writeValue(val, buffer, transform);
+125   }
+126   buffer.push("]");
+127 }
+128 
+129 async function writeValue(value, buffer, transform) {
+130   if (value instanceof Name) {
+131     buffer.push(`/${escapePDFName(value.name)}`);
+132   } else if (value instanceof Ref) {
+133     buffer.push(`${value.num} ${value.gen} R`);
+134   } else if (Array.isArray(value) || ArrayBuffer.isView(value)) {
+135     await writeArray(value, buffer, transform);
+136   } else if (typeof value === "string") {
+137     if (transform) {
+138       value = transform.encryptString(value);
+139     }
+140     buffer.push(`(${escapeString(value)})`);
+141   } else if (typeof value === "number") {
+142     buffer.push(numberToString(value));
+143   } else if (typeof value === "boolean") {
+144     buffer.push(value.toString());
+145   } else if (value instanceof Dict) {
+146     await writeDict(value, buffer, transform);
+147   } else if (value instanceof BaseStream) {
+148     await writeStream(value, buffer, transform);
+149   } else if (value === null) {
+150     buffer.push("null");
+151   } else {
+152     warn(`Unhandled value in writer: ${typeof value}, please file a bug.`);
+153   }
+154 }
+155 
+156 function writeInt(number, size, offset, buffer) {
+157   for (let i = size + offset - 1; i > offset - 1; i--) {
+158     buffer[i] = number & 0xff;
+159     number >>= 8;
+160   }
+161   return offset + size;
+162 }
+163 
+164 function writeString(string, offset, buffer) {
+165   for (let i = 0, len = string.length; i < len; i++) {
+166     buffer[offset + i] = string.charCodeAt(i) & 0xff;
+167   }
+168 }
+169 
+170 function computeMD5(filesize, xrefInfo) {
+171   const time = Math.floor(Date.now() / 1000);
+172   const filename = xrefInfo.filename || "";
+173   const md5Buffer = [time.toString(), filename, filesize.toString()];
+174   let md5BufferLen = md5Buffer.reduce((a, str) => a + str.length, 0);
+175   for (const value of Object.values(xrefInfo.info)) {
+176     md5Buffer.push(value);
+177     md5BufferLen += value.length;
+178   }
+179 
+180   const array = new Uint8Array(md5BufferLen);
+181   let offset = 0;
+182   for (const str of md5Buffer) {
+183     writeString(str, offset, array);
+184     offset += str.length;
+185   }
+186   return bytesToString(calculateMD5(array));
+187 }
+188 
+189 function writeXFADataForAcroform(str, newRefs) {
+190   const xml = new SimpleXMLParser({ hasAttributes: true }).parseFromString(str);
+191 
+192   for (const { xfa } of newRefs) {
+193     if (!xfa) {
+194       continue;
+195     }
+196     const { path, value } = xfa;
+197     if (!path) {
+198       continue;
+199     }
+200     const nodePath = parseXFAPath(path);
+201     let node = xml.documentElement.searchNode(nodePath, 0);
+202     if (!node && nodePath.length > 1) {
+203       // If we're lucky the last element in the path will identify the node.
+204       node = xml.documentElement.searchNode([nodePath.at(-1)], 0);
+205     }
+206     if (node) {
+207       node.childNodes = Array.isArray(value)
+208         ? value.map(val => new SimpleDOMNode("value", val))
+209         : [new SimpleDOMNode("#text", value)];
+210     } else {
+211       warn(`Node not found for path: ${path}`);
+212     }
+213   }
+214   const buffer = [];
+215   xml.documentElement.dump(buffer);
+216   return buffer.join("");
+217 }
+218 
+219 async function updateAcroform({
+220   xref,
+221   acroForm,
+222   acroFormRef,
+223   hasXfa,
+224   hasXfaDatasetsEntry,
+225   xfaDatasetsRef,
+226   needAppearances,
+227   newRefs,
+228 }) {
+229   if (hasXfa && !hasXfaDatasetsEntry && !xfaDatasetsRef) {
+230     warn("XFA - Cannot save it");
+231   }
+232 
+233   if (!needAppearances && (!hasXfa || !xfaDatasetsRef || hasXfaDatasetsEntry)) {
+234     return;
+235   }
+236 
+237   const dict = acroForm.clone();
+238 
+239   if (hasXfa && !hasXfaDatasetsEntry) {
+240     // We've a XFA array which doesn't contain a datasets entry.
+241     // So we'll update the AcroForm dictionary to have an XFA containing
+242     // the datasets.
+243     const newXfa = acroForm.get("XFA").slice();
+244     newXfa.splice(2, 0, "datasets");
+245     newXfa.splice(3, 0, xfaDatasetsRef);
+246 
+247     dict.set("XFA", newXfa);
+248   }
+249 
+250   if (needAppearances) {
+251     dict.set("NeedAppearances", true);
+252   }
+253 
+254   const buffer = [];
+255   await writeObject(acroFormRef, dict, buffer, xref);
+256 
+257   newRefs.push({ ref: acroFormRef, data: buffer.join("") });
+258 }
+259 
+260 function updateXFA({ xfaData, xfaDatasetsRef, newRefs, xref }) {
+261   if (xfaData === null) {
+262     const datasets = xref.fetchIfRef(xfaDatasetsRef);
+263     xfaData = writeXFADataForAcroform(datasets.getString(), newRefs);
+264   }
+265 
+266   const encrypt = xref.encrypt;
+267   if (encrypt) {
+268     const transform = encrypt.createCipherTransform(
+269       xfaDatasetsRef.num,
+270       xfaDatasetsRef.gen
+271     );
+272     xfaData = transform.encryptString(xfaData);
+273   }
+274   const data =
+275     `${xfaDatasetsRef.num} ${xfaDatasetsRef.gen} obj\n` +
+276     `<< /Type /EmbeddedFile /Length ${xfaData.length}>>\nstream\n` +
+277     xfaData +
+278     "\nendstream\nendobj\n";
+279 
+280   newRefs.push({ ref: xfaDatasetsRef, data });
+281 }
+282 
+283 async function getXRefTable(xrefInfo, baseOffset, newRefs, newXref, buffer) {
+284   buffer.push("xref\n");
+285   const indexes = getIndexes(newRefs);
+286   let indexesPosition = 0;
+287   for (const { ref, data } of newRefs) {
+288     if (ref.num === indexes[indexesPosition]) {
+289       buffer.push(
+290         `${indexes[indexesPosition]} ${indexes[indexesPosition + 1]}\n`
+291       );
+292       indexesPosition += 2;
+293     }
+294     // The EOL is \r\n to make sure that every entry is exactly 20 bytes long.
+295     // (see 7.5.4 - Cross-Reference Table).
+296     if (data !== null) {
+297       buffer.push(
+298         `${baseOffset.toString().padStart(10, "0")} ${Math.min(ref.gen, 0xffff).toString().padStart(5, "0")} n\r\n`
+299       );
+300       baseOffset += data.length;
+301     } else {
+302       buffer.push(
+303         `0000000000 ${Math.min(ref.gen + 1, 0xffff)
+304           .toString()
+305           .padStart(5, "0")} f\r\n`
+306       );
+307     }
+308   }
+309   computeIDs(baseOffset, xrefInfo, newXref);
+310   buffer.push("trailer\n");
+311   await writeDict(newXref, buffer);
+312   buffer.push("\nstartxref\n", baseOffset.toString(), "\n%%EOF\n");
+313 }
+314 
+315 function getIndexes(newRefs) {
+316   const indexes = [];
+317   for (const { ref } of newRefs) {
+318     if (ref.num === indexes.at(-2) + indexes.at(-1)) {
+319       indexes[indexes.length - 1] += 1;
+320     } else {
+321       indexes.push(ref.num, 1);
+322     }
+323   }
+324   return indexes;
+325 }
+326 
+327 async function getXRefStreamTable(
+328   xrefInfo,
+329   baseOffset,
+330   newRefs,
+331   newXref,
+332   buffer
+333 ) {
+334   const xrefTableData = [];
+335   let maxOffset = 0;
+336   let maxGen = 0;
+337   for (const { ref, data } of newRefs) {
+338     let gen;
+339     maxOffset = Math.max(maxOffset, baseOffset);
+340     if (data !== null) {
+341       gen = Math.min(ref.gen, 0xffff);
+342       xrefTableData.push([1, baseOffset, gen]);
+343       baseOffset += data.length;
+344     } else {
+345       gen = Math.min(ref.gen + 1, 0xffff);
+346       xrefTableData.push([0, 0, gen]);
+347     }
+348     maxGen = Math.max(maxGen, gen);
+349   }
+350   newXref.set("Index", getIndexes(newRefs));
+351   const offsetSize = getSizeInBytes(maxOffset);
+352   const maxGenSize = getSizeInBytes(maxGen);
+353   const sizes = [1, offsetSize, maxGenSize];
+354   newXref.set("W", sizes);
+355   computeIDs(baseOffset, xrefInfo, newXref);
+356 
+357   const structSize = sizes.reduce((a, x) => a + x, 0);
+358   const data = new Uint8Array(structSize * xrefTableData.length);
+359   const stream = new Stream(data);
+360   stream.dict = newXref;
+361 
+362   let offset = 0;
+363   for (const [type, objOffset, gen] of xrefTableData) {
+364     offset = writeInt(type, sizes[0], offset, data);
+365     offset = writeInt(objOffset, sizes[1], offset, data);
+366     offset = writeInt(gen, sizes[2], offset, data);
+367   }
+368 
+369   await writeObject(xrefInfo.newRef, stream, buffer, {});
+370   buffer.push("startxref\n", baseOffset.toString(), "\n%%EOF\n");
+371 }
+372 
+373 function computeIDs(baseOffset, xrefInfo, newXref) {
+374   if (Array.isArray(xrefInfo.fileIds) && xrefInfo.fileIds.length > 0) {
+375     const md5 = computeMD5(baseOffset, xrefInfo);
+376     newXref.set("ID", [xrefInfo.fileIds[0], md5]);
+377   }
+378 }
+379 
+380 function getTrailerDict(xrefInfo, newRefs, useXrefStream) {
+381   const newXref = new Dict(null);
+382   newXref.set("Prev", xrefInfo.startXRef);
+383   const refForXrefTable = xrefInfo.newRef;
+384   if (useXrefStream) {
+385     newRefs.push({ ref: refForXrefTable, data: "" });
+386     newXref.set("Size", refForXrefTable.num + 1);
+387     newXref.set("Type", Name.get("XRef"));
+388   } else {
+389     newXref.set("Size", refForXrefTable.num);
+390   }
+391   if (xrefInfo.rootRef !== null) {
+392     newXref.set("Root", xrefInfo.rootRef);
+393   }
+394   if (xrefInfo.infoRef !== null) {
+395     newXref.set("Info", xrefInfo.infoRef);
+396   }
+397   if (xrefInfo.encryptRef !== null) {
+398     newXref.set("Encrypt", xrefInfo.encryptRef);
+399   }
+400   return newXref;
+401 }
+402 
+403 async function incrementalUpdate({
+404   originalData,
+405   xrefInfo,
+406   newRefs,
+407   xref = null,
+408   hasXfa = false,
+409   xfaDatasetsRef = null,
+410   hasXfaDatasetsEntry = false,
+411   needAppearances,
+412   acroFormRef = null,
+413   acroForm = null,
+414   xfaData = null,
+415   useXrefStream = false,
+416 }) {
+417   await updateAcroform({
+418     xref,
+419     acroForm,
+420     acroFormRef,
+421     hasXfa,
+422     hasXfaDatasetsEntry,
+423     xfaDatasetsRef,
+424     needAppearances,
+425     newRefs,
+426   });
+427 
+428   if (hasXfa) {
+429     updateXFA({
+430       xfaData,
+431       xfaDatasetsRef,
+432       newRefs,
+433       xref,
+434     });
+435   }
+436 
+437   const buffer = [];
+438   let baseOffset = originalData.length;
+439   const lastByte = originalData.at(-1);
+440   if (lastByte !== /* \n */ 0x0a && lastByte !== /* \r */ 0x0d) {
+441     // Avoid to concatenate %%EOF with an object definition
+442     buffer.push("\n");
+443     baseOffset += 1;
+444   }
+445 
+446   const newXref = getTrailerDict(xrefInfo, newRefs, useXrefStream);
+447   newRefs = newRefs.sort(
+448     (a, b) => /* compare the refs */ a.ref.num - b.ref.num
+449   );
+450   for (const { data } of newRefs) {
+451     if (data !== null) {
+452       buffer.push(data);
+453     }
+454   }
+455 
+456   await (useXrefStream
+457     ? getXRefStreamTable(xrefInfo, baseOffset, newRefs, newXref, buffer)
+458     : getXRefTable(xrefInfo, baseOffset, newRefs, newXref, buffer));
+459 
+460   const totalLength = buffer.reduce(
+461     (a, str) => a + str.length,
+462     originalData.length
+463   );
+464   const array = new Uint8Array(totalLength);
+465 
+466   // Original data
+467   array.set(originalData);
+468   let offset = originalData.length;
+469 
+470   // New data
+471   for (const str of buffer) {
+472     writeString(str, offset, array);
+473     offset += str.length;
+474   }
+475 
+476   return array;
+477 }
+478 
+479 export { incrementalUpdate, writeDict, writeObject };
+</code>
+
+Your task:
+You are a software tester at pdf.js.
+1. Write exactly one javascript test `it("...", async () => {...})` block.
+2. Your test must fail on the code before the patch, and pass after, hence the test will verify that the patch resolves the issue.
+3. The test must be self-contained and to-the-point.
+4. Use only the provided imports (respect the paths exactly how they are given) by importing dynamically for compatibility with Node.js — no new dependencies. 
+5. Return only the javascript code (no comments or explanations).
+
+Example structure:
+it("should <describe behavior>", async () => {
+  const { example } = await import("../../src/core/example.js");
+  <initialize required variables>;
+  <define expected variable>;
+  <generate actual variables>;
+  <compare expected with actual>;
+});
+

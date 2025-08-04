@@ -1,0 +1,46 @@
+<think>
+Okay, I need to create a test for the given issue where text isn't shown when `browser.display.use_document_fonts` is set to 0 in Firefox. The user provided a patch that modifies `src/display/canvas.js`, so I need to write a test that fails before the patch and passes after.
+
+First, I'll look at the existing test file to see what's available. It imports several modules, but I might need to add more. The test should use the provided PDF file, so I'll need to import `getDocument` and `buildGetDocumentParams`.
+
+I'll set up the test using `getDocument` with the parameters for the PDF. Then, I'll create a dummy canvas element to simulate rendering. I'll set `browser.display.use_document_fonts` to 0 using a mock function.
+
+Next, I'll load the PDF and render the first page. After rendering, I'll check if the rendered canvas contains the expected text. I'll use `canvas.toDataURL()` and check for non-empty data to confirm rendering.
+
+The test should compare the actual output with an expected snapshot. If the text isn't rendered, the data URL will be empty, causing the test to fail before the patch. After the patch, the data URL should have content, making the test pass.
+
+I'll structure the test with `it` from Jest, using async/await for the asynchronous operations. I'll make sure all necessary modules are imported dynamically to maintain compatibility.
+
+Finally, I'll write the test code, ensuring it's self-contained and only tests the specific issue. This way, when the patch is applied, the test will pass, confirming the fix.
+</think>
+
+```javascript
+it("should render text with document fonts disabled", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { buildGetDocumentParams } = await import("./test_utils.js");
+  const pdf = "issue20065.pdf";
+  const loadingTask = getDocument(buildGetDocumentParams(pdf));
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  // Mock browser.display.use_document_fonts = 0
+  globalThis.browser = {
+    display: {
+      use_document_fonts: 0,
+    },
+  };
+
+  const pdfDocument = await loadingTask.promise;
+  const pdfPage = await pdfDocument.getPage(1);
+  await pdfPage.startRendering({
+    canvasContext: ctx,
+    viewport: pdfPage.getViewport({ scale: 1 }),
+  });
+
+  const expectedCanvasData = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  const actualCanvasData = canvas.toDataURL();
+
+  expect(actualCanvasData).toBe(expectedCanvasData);
+});
+```

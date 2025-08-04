@@ -1,0 +1,81 @@
+<think>
+Alright, I need to create a test that verifies the patch resolves the issue where PDF objects with default properties like `toString` are incorrectly considered valid operators. 
+
+First, I'll start by understanding the problem. The issue arises because the `opMap` in `evaluator.js` uses a regular JavaScript object, which inherits properties like `toString` from its prototype. This causes the code to treat these inherited properties as valid operator tokens, leading to exceptions later on.
+
+The patch changes `opMap` to use `Object.create(null)`, which doesn't inherit any prototype properties. This should prevent `toString` and similar properties from being considered valid operators.
+
+Now, to write a test for this. I'll use the existing test file `test/unit/evaluator_spec.js` and add a new test case. 
+
+I'll need to:
+1. Import the necessary modules, like `PartialEvaluator`, `OperatorList`, and `XRefMock`.
+2. Set up a mock XRef to simulate the PDF data.
+3. Define the `opMap` as it was before the patch, using a regular object.
+4. Create a test PDF content that includes the `toString` token.
+5. Use `PartialEvaluator` to process the content and check if it correctly identifies `toString` as an invalid operator.
+
+In the test, I'll create a `hello.pdf` content with a stream containing the `toString` token. Then, I'll initialize `PartialEvaluator` with this content and an `OperatorList`. 
+
+I expect that before the patch, the `opMap` would incorrectly treat `toString` as a valid operator, leading to an error when it's not found. After the patch, `toString` should be ignored, and no error should occur.
+
+I'll structure the test to mock the necessary dependencies and assert that the processing doesn't throw an error, indicating that the invalid operator is ignored.
+
+Finally, I'll write the test case using Jest's `it` function, ensuring it's self-contained and only tests the specific behavior.
+</think>
+
+```javascript
+it("should ignore Object.prototype properties in opMap", async () => {
+  const xref = new XRefMock({
+    hello: new Dict({
+      Type: "Pages",
+      Kids: [],
+      Count: 0,
+    }),
+  });
+
+  const content = `
+    q
+    q
+    1 0 0 1 0 0 cm
+    /hello << 
+    /Length 35 0 R
+    >> stream
+    toString
+    endstream
+    startxref
+    0
+    %%EOF
+  `;
+
+  const stream = new StringStream(content);
+  const operatorList = new OperatorList();
+  const evaluator = new PartialEvaluator({
+    xref,
+    handler: {},
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options: {},
+  });
+
+  const opMap = evaluator.constructor.opMap;
+  const originalOpMap = { ...opMap };
+
+  try {
+    delete opMap.toString;
+    await evaluator.getOperatorList({
+      stream,
+      task: new WorkerTask(),
+      resources: new Dict(),
+      operatorList,
+      initialState: new EvalState(),
+    });
+  } catch (error) {
+    throw new FormatError("Should not have thrown an error");
+  }
+});
+```

@@ -1,0 +1,75 @@
+<think>
+Okay, I need to write a regression test for the bug where adding a `<base href>` tag breaks transparency filters in Firefox. The patch provided modifies the `display_utils.js` file to correctly handle URLs when a `<base>` element is present. 
+
+First, I should understand the problem. The issue arises because the SVG filters use relative URLs that don't account for the `<base>` tag, causing incorrect rendering. The patch introduces a method `createUrl` that adjusts the URLs based on the presence of a `<base>` element.
+
+To test this, I'll create an HTML file with a `<base href=".">` tag and include a PDF using the PDF.js viewer. I'll check if the transparency filters are applied correctly.
+
+I'll use `test_utils.js` to create a server and serve the HTML and PDF files. The test will load the PDF and check for the presence of the drop shadow, which was the symptom of the bug.
+
+I'll structure the test using Jest. I'll import necessary modules like `createServer` and `createTemporaryNodeServer` from `test_utils.js` and `PDFDocument` from `display/api.js`. 
+
+In the test, I'll set up a temporary server to host the HTML and PDF files. Then, I'll create a PDF document and check if the page renders correctly with the drop shadow. 
+
+I need to ensure that the test fails before the patch and passes after. The test will look for the correct rendering by checking the existence of the drop shadow filter in the SVG elements.
+
+I'll write the test as an `it` block, making sure it's self-contained and uses async/await for proper asynchronous handling. I'll also clean up the server after the test to avoid any leaks.
+
+Finally, I'll make sure the test only returns the JavaScript code for the `it` block without any additional comments or explanations.
+</think>
+
+```javascript
+it("should handle base href correctly for transparency filters", async () => {
+  const { createServer } = await import("../../test_utils.js");
+  const { PDFDocument } = await import("../../display/api.js");
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <base href=".">
+      <title>Test Base Href</title>
+    </head>
+    <body>
+      <script src="../../web/viewer.js"></script>
+      <div id="viewer" style="width: 100%; height: 100vh;"></div>
+      <script>
+        const pdf = new PDFDocument({
+          data: new Uint8Array(await fetch('test.pdf').then(r => r.arrayBuffer())),
+          url: 'test.pdf',
+        });
+        pdfViewer.setDocument(pdf);
+      </script>
+    </body>
+    </html>
+  `;
+
+  const server = await createServer({
+    "/test.pdf": fetch(new URL("../../test_files/test.pdf", import.meta.url)).then(r => r.arrayBuffer()),
+    "/": htmlContent,
+  });
+
+  try {
+    const pdf = await PDFDocument.load({
+      url: new URL("/", server.url).href,
+      fetch: (url) => fetch(new URL(url, server.url).href),
+    });
+
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+
+    const svg = await page.render({
+      viewport,
+      renderInteractive: false,
+      useSVG: true,
+      canvasFactory: new DOMSVGFactory(),
+    });
+
+    // Verify the drop shadow is rendered correctly
+    const dropShadowFilter = svg.querySelector("[filter]");
+    expect(dropShadowFilter).toBeTruthy();
+  } finally {
+    await server.close();
+  }
+});
+```

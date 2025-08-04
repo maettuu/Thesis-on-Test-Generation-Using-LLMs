@@ -1,0 +1,44 @@
+it("should convert setFillColorN numeric arguments to setFillRGBColor when no colorspace is provided", async () => {
+  const { default: assert } = await import("assert");
+  const dummyXRef = new XRefMock();
+  const operatorList = new OperatorList();
+  const fakeStream = {
+    _called: false,
+    read(operation) {
+      if (!this._called) {
+        this._called = true;
+        operation.args = [0.5];
+        operation.fn = OPS.setFillColorN;
+        return true;
+      }
+      return false;
+    },
+  };
+  const dummyTask = { ensureNotTerminated: () => {} };
+  const partialEvaluator = new PartialEvaluator({
+    xref: dummyXRef,
+    handler: {},
+    pageIndex: 0,
+    idFactory: createIdFactory(),
+    fontCache: new Map(),
+    builtInCMapCache: new Map(),
+    standardFontDataCache: new Map(),
+    globalImageCache: new Map(),
+    systemFontCache: new Map(),
+    options: {},
+  });
+  return partialEvaluator
+    .getOperatorList({
+      stream: fakeStream,
+      task: dummyTask,
+      resources: new Dict(),
+      operatorList,
+    })
+    .then(() => {
+      // Expect one op: the setFillColorN should have been converted to setFillRGBColor
+      assert.strictEqual(operatorList.fnArray.length, 1);
+      assert.strictEqual(operatorList.fnArray[0], OPS.setFillRGBColor);
+      // The gray color conversion yields [value, value, value]
+      assert.deepStrictEqual(operatorList.argsArray[0], [0.5, 0.5, 0.5]);
+    });
+});

@@ -1,0 +1,60 @@
+<think>
+Okay, I need to create a test for the issue where opening a PDF in Firefox shows Japanese vertical punctuation errors. The user provided a patch that modifies the fonts.js and fonts_utils.js files. My task is to write a test that fails before the patch and passes after.
+
+First, I should understand the problem. The issue is that vertical punctuation in Japanese isn't rendering correctly. The patch adds code to handle vertical presentation forms, which suggests that without it, these characters aren't mapped correctly.
+
+Looking at the patch, in fonts.js, they added a check for vertical presentation forms. They retrieve a lookup table using getVerticalPresentationForm(), which was imported from fonts_utils.js. This function was added in the patch, so without it, the code wouldn't handle these cases.
+
+In fonts_utils.js, they added the getVerticalPresentationForm function, which creates a mapping of Unicode code points to their vertical counterparts. This mapping is crucial for correctly rendering vertical punctuation.
+
+So, the test needs to verify that after applying the patch, the vertical punctuation is correctly mapped. Without the patch, the test should fail because the mapping isn't present.
+
+I'll structure the test as follows:
+
+1. Import the necessary modules, including the font utilities and the getDocument function from the PDF.js API.
+2. Use a test PDF that contains Japanese vertical punctuation. I'll assume there's a test file called "vertical-punctuation.pdf" in the TEST_PDFS_PATH.
+3. Load the PDF document and get the first page.
+4. Extract the text content from the page. Without the patch, certain characters might not be rendered correctly, leading to missing or incorrect glyphs.
+5. Check if the expected text, which includes the correct vertical punctuation, matches the actual text extracted.
+
+In the test, I'll create a string that represents the expected output with correct vertical punctuation. Then, I'll compare it against the actual text content obtained from the PDF.
+
+Without the patch, the getVerticalPresentationForm function isn't present, so the mapping won't occur. The text extraction might miss some characters or use incorrect ones, causing the test to fail. After applying the patch, the function should correctly map the characters, making the test pass.
+
+I need to ensure that the test is self-contained and only uses the provided imports. I'll use async/await for loading the PDF and extracting text. Also, I'll handle any potential errors during loading.
+
+So, the test will look like this: it loads the PDF, extracts text, and checks if the expected string is found. If the expected string is missing, the test fails, indicating the issue isn't resolved. With the patch, the test should pass.
+
+I should also make sure that the test PDF is available and correctly referenced in the TEST_PDFS_PATH. If it's not, I might need to adjust the path or use a different file.
+
+In summary, the test will load a PDF with vertical Japanese text, extract the text, and verify that the correct characters are present. This approach directly tests the fix provided by the patch.
+</think>
+
+```javascript
+it("should correctly render vertical Japanese punctuation", async () => {
+  const { getDocument } = await import("../../src/display/api.js");
+  const { DefaultFileReaderFactory } = await import("../../src/core/file_reader.js");
+  const { getVerticalPresentationForm } = await import("../../src/core/fonts_utils.js");
+
+  const fileReader = new DefaultFileReaderFactory();
+  const pdfPath = `${TEST_PDFS_PATH}/vertical-punctuation.pdf`;
+  const loadingTask = getDocument({
+    fileLoader: () => fileReader.createFetcher(pdfPath),
+    cMapLoader: () => new CMAP_URL.Loader(),
+  });
+
+  try {
+    const pdfDocument = await loadingTask.promise;
+    const pdfPage = await pdfDocument.getPage(1);
+    const textContent = await pdfPage.getTextContent();
+    const textItems = await textContent.items();
+
+    const expectedVerticalPunctuation = "。、";
+    const actualText = textItems.map(item => item.str).join("");
+
+    expect(actualText).toContain(expectedVerticalPunctuation);
+  } catch (error) {
+    throw new Error(`Failed to load or process PDF: ${error.message}`);
+  }
+});
+```
