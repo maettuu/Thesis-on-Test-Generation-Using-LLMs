@@ -1,6 +1,7 @@
 # main — gh-bot
 
-A GitHub bot that generates regression-style “fail-to-pass” tests for the repository [pdf.js](github.com/mozilla/pdf.js) by analyzing Pull Request diffs and invoking an LLM to produce test code.
+This project represents GitHub bot that generates regression-style “fail-to-pass” tests for the repository [pdf.js](github.com/mozilla/pdf.js) by analyzing Pull Request diffs and invoking an LLM to produce test code.
+It is inspired by an existing bot for Python repositories. The old codebase can be inspected in the `init` commit [here](https://github.com/maettuu/Thesis-on-Test-Generation-Using-LLMs/tree/6e3d8a2be3be19a24efaae3742848d726653d073).
 
 ---
 
