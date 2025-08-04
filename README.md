@@ -1,4 +1,4 @@
-# gh-bot-js
+# main — gh-bot
 
 A GitHub bot that generates regression-style “fail-to-pass” tests for the repository [pdf.js](github.com/mozilla/pdf.js) by analyzing Pull Request diffs and invoking an LLM to produce test code.
 
@@ -16,6 +16,7 @@ A GitHub bot that generates regression-style “fail-to-pass” tests for the re
 - [Key Components](#key-components)
 - [Adding a New Test Payload](#adding-a-new-test-payload)
 - [Models Used](#models-used)
+- [License](#license)
 
 ---
 
@@ -59,12 +60,12 @@ To set up a GitHub Token follow these steps.
 
 1. **Clone the repo**  
    ```bash
-   git clone --branch gh-bot-js --single-branch https://github.com/your-org/gh-bot.git ~/gh-bot-js
-   cd gh-bot-js
+   git clone --branch main --single-branch https://github.com/maettuu/Thesis-on-Test-Generation-Using-LLMs.git ~/main
+   cd main
    ```
    *Hint:* To always pull from the same branch, configure git upstream as follows:
     ```bash
-    git branch --set-upstream-to=origin/gh-bot-js gh-bot-js
+    git branch --set-upstream-to=origin/main main
     ```
    Now you can run `git pull` to simply update the single branch. You can verify this configuration with:
    ```bash
@@ -79,8 +80,8 @@ To set up a GitHub Token follow these steps.
 
 3. **Install dependencies**  
    ```bash
-   python -m venv .gh-bot-js-venv
-   source .gh-bot-js-venv/bin/activate
+   python -m venv .main-venv
+   source .main-venv/bin/activate
    pip install -r requirements.txt
    ```
 
@@ -103,12 +104,12 @@ To set up a GitHub Token follow these steps.
    ```
 4. **Clone the repo**  
    ```bash
-   git clone --branch gh-bot-js --single-branch https://github.com/your-org/gh-bot.git ~/gh-bot-js
-   cd gh-bot-js
+   git clone --branch main --single-branch https://github.com/maettuu/Thesis-on-Test-Generation-Using-LLMs.git ~/main
+   cd main
    ```
    *Hint:* To always pull from the same branch, configure git upstream as follows:
     ```bash
-    git branch --set-upstream-to=origin/gh-bot-js gh-bot-js
+    git branch --set-upstream-to=origin/main main
     ```
    Now you can run `git pull` to simply update the single branch. You can verify this configuration with:
    ```bash
@@ -123,8 +124,8 @@ To set up a GitHub Token follow these steps.
 
 6. **Install dependencies & migrate**  
    ```bash
-   python3.12 -m venv .gh-bot-js-venv
-   source .gh-bot-js-venv/bin/activate
+   python3.12 -m venv .main-venv
+   source .main-venv/bin/activate
    pip install -r requirements.txt
    python manage.py migrate
    deactivate
@@ -181,9 +182,9 @@ To set up a GitHub Token follow these steps.
    [Service]
    User=<USER>
    Group=<GROUP>
-   WorkingDirectory=<PATH/TO/gh-bot-js/>
-   EnvironmentFile=<PATH/TO/gh-bot-js/.env>
-   ExecStart=<PATH/TO/gh-bot-js/.gh-bot-js-venv/bin/gunicorn> \
+   WorkingDirectory=<PATH/TO/main/>
+   EnvironmentFile=<PATH/TO/main/.env>
+   ExecStart=<PATH/TO/main/.main-venv/bin/gunicorn> \
      --workers 3 \
      --timeout 1800 \
      --bind 0.0.0.0:8000 \
@@ -317,13 +318,13 @@ docker start -ai gh-bot_pdfjs_ctn
 - **Django App (`github_bot/`)**  
   - Exposes `POST /webhook-js/` for GitHub PR events, verifies signatures, and dispatches to the pipeline.
 
-- **Webhook (`webhook.py)**
+- **Webhook (`webhook.py`)**
   - Entry point for any request sent to the server.
 
 - **Pipeline (`pipeline.py`)**  
   - Coordinates every step in the flow.
 
-- **Tests (`webhook_handler/test/`)**  
+- **Tests (`test/`)**  
   - Mock PR payloads and assertions on generated test output.
 
 ### core/
@@ -395,7 +396,12 @@ docker start -ai gh-bot_pdfjs_ctn
 
 ## Models Used
 
-- **OpenAI from openai:** GPT-4o, o4-mini
+- **OpenAI from openai:** GPT-4o, o3-mini
 - **Groq from groq:** llama-3.3-70b-versatile, deepseek-r1-distill-llama-70b
 
 _With this setup, every Pull Request triggers automated, AI-driven regression tests—helping catch regressions early and reducing manual QA overhead._
+
+---
+
+## License
+This project is released under the MIT License. Upon usage in any way include the original copyright and license notice in all copies or substantial portions of the software. The software is provided "as is", without warranty of any kind.
