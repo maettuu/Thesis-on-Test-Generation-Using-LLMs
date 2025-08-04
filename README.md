@@ -250,4 +250,4 @@ The PR will now be included in the execution.
 - **OpenAI from openai:** GPT-4o, o4-mini
 - **Groq from groq:** llama-3.3-70b-versatile, deepseek-r1-distill-llama-70b
 
-_With this setup, every Pull Request triggers automated, AI-driven regression tests—helping catch regressions early and reducing manual QA overhead._
+_With this setup, every Pull Request triggers automated, AI-driven regression tests, helping catch regressions early and reducing manual QA overhead._
