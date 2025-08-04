@@ -12,6 +12,7 @@ This branch extends from the [main](https://github.com/maettuu/Thesis-on-Test-Ge
 - [Batch Server Job](#batch-server-job)
 - [Build Independently](#build-independently)
 - [Key Components](#key-components)
+- [Possible Configurations](#possible-configurations)
 - [Adding a New Test Payload](#adding-a-new-test-payload)
 - [Models Used](#models-used)
 
@@ -58,7 +59,7 @@ To set up a GitHub Token follow these steps.
 
 1. **Clone the repo**  
    ```bash
-   git clone --branch feature/scraping --single-branch https://github.com/your-org/gh-bot.git ~/feature/scraping
+   git clone --branch feature/scraping --single-branch https://github.com/maettuu/Thesis-on-Test-Generation-Using-LLMs.git ~/feature/scraping
    cd feature/scraping
    ```
    *Hint:* To always pull from the same branch, configure git upstream as follows:
@@ -102,7 +103,7 @@ To set up a GitHub Token follow these steps.
    ```
 4. **Clone the repo**  
    ```bash
-   git clone --branch feature/scraping --single-branch https://github.com/your-org/gh-bot.git ~/feature/scraping
+   git clone --branch feature/scraping --single-branch https://github.com/maettuu/Thesis-on-Test-Generation-Using-LLMs.git ~/feature/scraping
    cd feature/scraping
    ```
    *Hint:* To always pull from the same branch, configure git upstream as follows:
@@ -186,6 +187,9 @@ docker start -ai gh-bot_pdfjs_ctn
 
 ## Key Components
 
+- **Config (`config.py`)**
+  - Defines all configurations for the pipeline.
+
 - **Scraping (`scraping.py`)**  
   - Iterates through all PRs and fetches the data for those fulfilling the following requirements:
     1. The PR's action must be OPENED or MERGED.
@@ -203,7 +207,7 @@ docker start -ai gh-bot_pdfjs_ctn
     6. Build a Docker container.
     7. Execute `TestGenerator` → LLM.
 
-- **Tests (`webhook_handler/test/`)**  
+- **Tests (`test/`)**  
   - Mock PR payloads and assertions on generated test output.
 
 ### core/
@@ -233,7 +237,7 @@ docker start -ai gh-bot_pdfjs_ctn
 
 ---
 
-## Possible Configuration
+## Possible Configurations
 
 - **`self.parse_language`**  
   The Tree-sitter language to use for parsing source files (e.g. `"javascript"`, `"typescript"`, `"python"`, etc.).
