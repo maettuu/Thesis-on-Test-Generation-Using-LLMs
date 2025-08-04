@@ -167,6 +167,15 @@ class Pipeline:
                 self._generation_completed = False
                 self._test_generated = True
 
+        if execute_mini:
+            model = LLM.GPTo3_MINI
+            _try_and_execute(model, 0, "o3-mini finished successfully")
+
+            if self._generation_completed:
+                _save_generated_test()
+                self._generation_completed = False
+                self._test_generated = True
+
         if self._mock_response is not None:
             self._logger.success("MOCK response fetched successfully")
             model = LLM.MOCK
