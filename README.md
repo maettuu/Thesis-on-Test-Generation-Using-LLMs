@@ -15,6 +15,7 @@ It is inspired by an existing bot for Python repositories. The old codebase can 
 - [Build Independently](#build-independently)
 - [Webhook Explained](#webhook-explained)
 - [Key Components](#key-components)
+- [Possible Configurations](#possible-configurations)
 - [Adding a New Test Payload](#adding-a-new-test-payload)
 - [Models Used](#models-used)
 - [License](#license)
@@ -352,6 +353,30 @@ docker start -ai gh-bot_pdfjs_ctn
 - **`LLMHandler`**: Manages prompt templates and API calls.  
 - **`PullRequestDiffContext`**:  Models the extracted code snippets (golden files + diffs) sent to the LLM.
 - **`TestGenerator`**: Operating class to query the LLM and execute the test in the pre-PR and the post-PR codebase.
+
+---
+
+## Possible Configurations
+
+- **`self.parse_language`**  
+  The Tree-sitter language to use for parsing source files (e.g. `"javascript"`, `"typescript"`, `"python"`, etc.).
+
+- **`self.prompt_combinations`**  
+  A list of prompt-template combinations that control whether and how context is included in each generated prompt.
+
+- **`self.old_repo_state`**  
+  Boolean flag indicating which codebase state to target:  
+  - `true` → operate on the CommonJS version of PDF.js  
+  - `false` → operate on the ESModules version
+
+- **`self.fetch_pdf`**  
+  Whether PDF fetching is enabled (`true`) or disabled (`false`).
+
+- **`self.bot_log_dir`**  
+  Filesystem path where the bot should write its execution logs.
+
+- **`self.gen_test_dir`**  
+  Filesystem path where generated test files should be saved.
 
 ---
 

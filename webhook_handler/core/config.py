@@ -28,6 +28,10 @@ class Config:
 
         ################# General Config ################
         self.execution_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.project_root = Path.cwd()
+        is_in_server = Path("/home/ubuntu").is_dir()  # Directory where webhook requests will be saved
+
+        ############### Modifiable Config ###############
         self.parse_language = Language(tree_sitter_javascript.language())
         self.prompt_combinations = {
             "include_golden_code"        : [1, 1, 1, 1, 0],
@@ -36,22 +40,19 @@ class Config:
             "sliced"                     : [1, 1, 0, 0, 0]
         }
         self.old_repo_state = False
-
-        ############# Log Directories Config ############
-        self.project_root = Path.cwd()
-
-        is_in_server = Path("/home/ubuntu").is_dir()  # Directory where webhook requests will be saved
+        self.fetch_pdf = True
         if is_in_server:
             self.webhook_raw_log_dir = "/home/ubuntu/logs_js/raw/"  # for raw requests
             self.bot_log_dir         = "/home/ubuntu/logs_js/"      # for parsed requests
         else:
             self.webhook_raw_log_dir = Path(self.project_root, "bot_logs")  # for raw requests
             self.bot_log_dir         = Path(self.project_root, "bot_logs")  # for parsed requests
+        self.gen_test_dir = Path(self.project_root, "generated_tests")
+
+        ############# Log Directories Config ############
         self.pr_log_dir = None
         self.output_dir = None
         self.cloned_repo_dir = None
-
-        self.gen_test_dir = Path(self.project_root, "generated_tests")
 
         Path(self.webhook_raw_log_dir).mkdir(parents=True, exist_ok=True)
         Path(self.bot_log_dir).mkdir(parents=True, exist_ok=True)
