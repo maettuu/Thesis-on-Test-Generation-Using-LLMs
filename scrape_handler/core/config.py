@@ -36,6 +36,7 @@ class Config:
             "sliced"                     : [1, 1, 0, 0, 0]
         }
         self.old_repo_state = False
+        self.fetch_pdf = True
 
         ############# Log Directories Config ############
         self.project_root = Path(__file__).resolve().parent.parent.parent

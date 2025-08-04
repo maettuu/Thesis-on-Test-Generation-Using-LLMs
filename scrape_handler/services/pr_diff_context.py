@@ -92,24 +92,24 @@ class PullRequestDiffContext:
             bytes: The content of the pdf file, or empty if not available
         """
 
-        # for pr_file_diff in self._pr_file_diffs:
-        #     filename = pr_file_diff.name.split("/")[-1]
-        #     if candidate in filename:
-        #         if filename.endswith(".pdf"):
-        #             content = self._gh_api.fetch_file_version(head_commit, pr_file_diff.name, get_bytes=True)
-        #             if content:
-        #                 logger.success("PDF file %s fetched successfully", filename)
-        #                 return filename, content
-        #             logger.warning("Failed to fetch PDF file %s", filename)
-        #         elif filename.endswith(".link"):
-        #             url = pr_file_diff.after.rstrip('\n')
-        #             pdf_filename = filename.replace(".link", "")
-        #             logger.info("Fetching PDF file %s", url)
-        #             response = requests.get(url, stream=True)
-        #             if response.status_code == 200:
-        #                 logger.success("PDF file %s fetched successfully", pdf_filename)
-        #                 return pdf_filename, response.content
-        #             logger.warning("Failed to fetch PDF file %s", pdf_filename)
+        for pr_file_diff in self._pr_file_diffs:
+            filename = pr_file_diff.name.split("/")[-1]
+            if candidate in filename:
+                if filename.endswith(".pdf"):
+                    content = self._gh_api.fetch_file_version(head_commit, pr_file_diff.name, get_bytes=True)
+                    if content:
+                        logger.success("PDF file %s fetched successfully", filename)
+                        return filename, content
+                    logger.warning("Failed to fetch PDF file %s", filename)
+                elif filename.endswith(".link"):
+                    url = pr_file_diff.after.rstrip('\n')
+                    pdf_filename = filename.replace(".link", "")
+                    logger.info("Fetching PDF file %s", url)
+                    response = requests.get(url, stream=True)
+                    if response.status_code == 200:
+                        logger.success("PDF file %s fetched successfully", pdf_filename)
+                        return pdf_filename, response.content
+                    logger.warning("Failed to fetch PDF file %s", pdf_filename)
 
         logger.warning("No PDF file available")
         return "", b""

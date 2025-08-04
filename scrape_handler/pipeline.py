@@ -240,7 +240,9 @@ class Pipeline:
         )
 
         # 4. Retrieve PDF
-        pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_candidate, self._pr_data.head_commit)
+        pdf_name, pdf_content = "", b""
+        if self._config.fetch_pdf:
+            pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_candidate, self._pr_data.head_commit)
 
         # 5. Slice golden code
         self._cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
