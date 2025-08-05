@@ -1,6 +1,6 @@
-# Experiment Results
+# experiment/results
 
-This branch contains all artifacts and outputs from the experiments conducted to compare the **pre-PR** and **post-PR** test executions across both approaches with and without **PDF**-fetching feature. The structure and contents are organized as follows:
+This branch contains all artifacts and outputs from the experiments conducted to compare the **pre-PR** and **post-PR** test executions across both approaches with and without **PDF**-fetching feature.
 
 ---
 
