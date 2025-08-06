@@ -23,6 +23,62 @@ def _get_mock_content(rel_path: str) -> str:
 #
 # RUN With: python manage.py test webhook_handler.test.<filename>.<testname>
 #
+class TestGenerationPdfJs18844(TestCase):
+    def setUp(self):
+        self.payload = _get_payload("test_mocks/pdf_js_18844.json")
+        mock_response = _get_mock_content("test_mocks/pdf_js_18844_response.txt")
+        self.config = Config()
+        self.config.fetch_pdf = False
+        self.pipeline = Pipeline(self.payload, self.config, mock_response=mock_response)
+
+    def tearDown(self):
+        del self.payload
+        del self.config
+        del self.pipeline
+
+    def test_generation_pdf_js_19825(self):
+        generation_completed = self.pipeline.execute_pipeline()
+        self.assertTrue(generation_completed)
+
+
+class TestGenerationPdfJs18910(TestCase):
+    def setUp(self):
+        self.payload = _get_payload("test_mocks/pdf_js_18910.json")
+        mock_response = _get_mock_content("test_mocks/pdf_js_18910_response.txt")
+        self.config = Config()
+        self.config.fetch_pdf = False
+        self.config.inject_in_file = "test/unit/jpg_spec.js"
+        self.pipeline = Pipeline(self.payload, self.config, mock_response=mock_response)
+
+    def tearDown(self):
+        del self.payload
+        del self.config
+        del self.pipeline
+
+    def test_generation_pdf_js_19825(self):
+        generation_completed = self.pipeline.execute_pipeline()
+        self.assertTrue(generation_completed)
+
+
+class TestGenerationPdfJs19184(TestCase):
+    def setUp(self):
+        self.payload = _get_payload("test_mocks/pdf_js_19184.json")
+        mock_response = _get_mock_content("test_mocks/pdf_js_19184_response.txt")
+        self.config = Config()
+        self.config.fetch_pdf = False
+        self.config.inject_in_file = "test/unit/to_unicode_map_spec.js"
+        self.pipeline = Pipeline(self.payload, self.config, mock_response=mock_response)
+
+    def tearDown(self):
+        del self.payload
+        del self.config
+        del self.pipeline
+
+    def test_generation_pdf_js_19825(self):
+        generation_completed = self.pipeline.execute_pipeline()
+        self.assertTrue(generation_completed)
+
+
 class TestGenerationPdfJs19639(TestCase):
     def setUp(self):
         self.payload = _get_payload("test_mocks/pdf_js_19639.json")

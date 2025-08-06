@@ -39,8 +39,10 @@ class Config:
             "include_predicted_test_file": [1, 0, 1, 0, 0],
             "sliced"                     : [1, 1, 0, 0, 0]
         }
-        self.old_repo_state = False
-        self.fetch_pdf = True
+        self.old_repo_state = False  # default: False
+        self.fetch_pdf = True  # default: True
+        self.inject_in_file = ""  # default: ""
+        self.execute_teardown = True  # default: True
         if is_in_server:
             self.webhook_raw_log_dir = "/home/ubuntu/logs_js/raw/"  # for raw requests
             self.bot_log_dir         = "/home/ubuntu/logs_js/"      # for parsed requests
