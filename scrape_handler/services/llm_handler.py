@@ -90,7 +90,7 @@ class LLMHandler:
 
         instructions = ("Your task:\n"
                         f"You are a software tester at {self._pr_data.repo}.\n"
-                        "1. Write exactly one javascript test `it(\"...\", async () => {...})` block.\n"
+                        "1. Write exactly one javascript test `it(\"...\", () => {...})` block.\n"
                         "2. Your test must fail on the code before the patch, and pass after, hence "
                         "the test will verify that the patch resolves the issue.\n"
                         "3. The test must be self-contained and to-the-point.\n"
@@ -100,7 +100,7 @@ class LLMHandler:
                         "5. Return only the javascript code (no comments or explanations).\n\n")
 
         example = ("Example structure:\n"
-                   "it(\"should <describe behavior>\", async () => {\n"
+                   "it(\"should <describe behavior>\", () => {\n"
                    "  const { example } = await import(\"../../src/core/example.js\");\n"
                    "  <initialize required variables>;\n"
                    "  <define expected variable>;\n"
@@ -115,7 +115,7 @@ class LLMHandler:
                 instructions = ("Your task:\n"
                                 f"You are a software tester at {self._pr_data.repo}.\n"
                                 "1. Examine the existing test file. You may reuse any imports, helpers or setup blocks it already has.\n"
-                                "2. Write exactly one javascript test `it(\"...\", async () => {...})` block.\n"
+                                "2. Write exactly one javascript test `it(\"...\", () => {...})` block.\n"
                                 "3. Your test must fail on the code before the patch, and pass after, hence "
                                 "the test will verify that the patch resolves the issue.\n"
                                 "4. The test must be self-contained and to-the-point.\n"
@@ -131,7 +131,7 @@ class LLMHandler:
                                 "   - All necessary imports (use only the provided imports and respect the "
                                 "paths exactly how they are given) — no new dependencies.).\n"
                                 "   - A top-level `describe(\"<brief suite name>\", () => {{ ... }})`.\n"
-                                "   - Exactly one `it(\"...\", async () => {{ ... }})` inside that block.\n"
+                                "   - Exactly one `it(\"...\", () => {{ ... }})` inside that block.\n"
                                 "2. The `it` test must fail on the code before the patch, and pass after, hence "
                                 "the test will verify that the patch resolves the issue.\n"
                                 "3. Keep the file self-contained — no external dependencies beyond those you import here.\n"
@@ -140,7 +140,7 @@ class LLMHandler:
                 example = ("Example structure:\n"
                            "import { example } from \"../../src/core/example.js\";\n\n"
                            "describe(\"<describe purpose>\", () => {\n"
-                           "  it(\"<describe behavior>\", async () => {\n"
+                           "  it(\"<describe behavior>\", () => {\n"
                            "    <initialize required variables>;\n"
                            "    <define expected variable>;\n"
                            "    <generate actual variables>;\n"
@@ -150,11 +150,11 @@ class LLMHandler:
 
         pr_summary = ""
         if include_pr_summary:
-            pr_summary += f"PR summary:\n<pr_summary>\n{
+            pr_summary += f"PR description:\n<pr_description>\n{
                 self._pr_data.title
             }\n{
                 self._pr_data.description
-            }\n</pr_summary>\n\n"
+            }\n</pr_description>\n\n"
 
         return (f"{guidelines}"
                 f"{linked_issue}"
