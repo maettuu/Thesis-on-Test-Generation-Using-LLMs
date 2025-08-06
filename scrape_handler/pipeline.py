@@ -67,23 +67,28 @@ class Pipeline:
         self._config.setup_pr_log_dir(self._pr_data.id)
         configure_logger(self._config.pr_log_dir, self._execution_id)
         self._logger = logging.getLogger()
-        helpers.remove_dir(Path(self._config.cloned_repo_dir))
+        if self._config.execute_teardown:
+            helpers.remove_dir(Path(self._config.cloned_repo_dir))
 
     def _teardown(self) -> None:
         """
         Cleans state of directory after completion.
         """
 
-        helpers.remove_dir(Path(self._config.cloned_repo_dir), log_success=True)
-        image_tag = self._pr_data.image_tag
-        try:
-            client = docker.from_env()
-            client.images.remove(image=f"{image_tag}:latest", force=True)
-            self._logger.success(f"Removed Docker image '{image_tag}'")
-        except ImageNotFound:
-            self._logger.error(f"Tried to remove image '{image_tag}', but it was not found")
-        except Exception as e:
-            self._logger.error(f"Failed to remove Docker image '{image_tag}': {e}")
+        if self._config.execute_teardown:
+            helpers.remove_dir(Path(self._config.cloned_repo_dir), log_success=True)
+            image_tag = self._pr_data.image_tag
+            try:
+                client = docker.from_env()
+                client.images.remove(image=f"{image_tag}:latest", force=True)
+                self._logger.success(f"Removed Docker image '{image_tag}'")
+            except ImageNotFound:
+                self._logger.error(f"Tried to remove image '{image_tag}', but it was not found")
+            except Exception as e:
+                self._logger.error(f"Failed to remove Docker image '{image_tag}': {e}")
+        else:
+            self._logger.warning("Teardown is disabled")
+
         with self._executed_tests.open("a", encoding='utf-8') as f:
             f.write(f"{self._execution_id}\n")
 
@@ -106,7 +111,7 @@ class Pipeline:
             bool: True if PR is valid, False otherwise
         """
 
-        self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
+        self._logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
         self._logger.marker("================ Preparing Environment ===============")
         self._gh_api = GitHubApi(self._config, self._pr_data)
         self._issue_statement, self._pdf_candidate = self._gh_api.get_linked_data()
@@ -252,6 +257,8 @@ class Pipeline:
         pdf_name, pdf_content = "", b""
         if self._config.fetch_pdf:
             pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_candidate, self._pr_data.head_commit)
+        else:
+            self._logger.warning("PDF fetching is disabled")
 
         # 5. Slice golden code
         self._cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
@@ -264,16 +271,21 @@ class Pipeline:
             self._logger.info(f"Temporary repository '{self._pr_data.repo}' already cloned – skipped")
 
         # 7. Fetch test file for injection
-        try:
-            test_filename, test_file_content, test_file_content_sliced = test_injection.get_candidate_test_file(
-                self._config.parse_language,
-                self._pr_data.base_commit,
-                self._pr_diff_ctx.golden_code_patch,
-                self._config.cloned_repo_dir
-            )
-        except:
-            self._logger.critical("Failed to determine test file for injection")
-            raise ExecutionError("Failed to determine test file for injection")
+        test_filename = self._config.inject_in_file
+        if not test_filename:
+            try:
+                test_filename, test_file_content, test_file_content_sliced = test_injection.get_candidate_test_file(
+                    self._config.parse_language,
+                    self._pr_data.base_commit,
+                    self._pr_diff_ctx.golden_code_patch,
+                    self._config.cloned_repo_dir
+                )
+            except:
+                self._logger.critical("Failed to determine test file for injection")
+                raise ExecutionError("Failed to determine test file for injection")
+        else:
+            self._logger.warning(f"Custom test file {test_filename} is defined")
+            test_file_content = test_file_content_sliced = ""
 
         # 8. Fetch packages and imports
         try:
