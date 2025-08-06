@@ -56,8 +56,8 @@ class Pipeline:
         Sets up log directories, files and the logger itself.
         """
 
-        self.executed_tests = Path(self._config.bot_log_dir, "executed_tests.txt")
-        self.executed_tests.touch(exist_ok=True)
+        self._executed_tests = Path(self._config.bot_log_dir, "executed_tests.txt")
+        self._executed_tests.touch(exist_ok=True)
         if not Path(self._config.bot_log_dir, 'results.csv').exists():
             Path(self._config.bot_log_dir, 'results.csv').write_text(
                 "{:<9},{:<30},{:<9},{:<45}\n".format("prNumber", "model", "iAttempt", "stop"),
@@ -65,7 +65,7 @@ class Pipeline:
             )
         self._config.setup_pr_log_dir(self._pr_data.id)
         configure_logger(self._config.pr_log_dir, self._execution_id)
-        self.logger = logging.getLogger()
+        self._logger = logging.getLogger()
         if self._config.execute_teardown:
             helpers.remove_dir(Path(self._config.cloned_repo_dir))
 
@@ -80,15 +80,16 @@ class Pipeline:
             try:
                 client = docker.from_env()
                 client.images.remove(image=f"{image_tag}:latest", force=True)
-                self.logger.success(f"Removed Docker image '{image_tag}'")
+                self._logger.success(f"Removed Docker image '{image_tag}'")
             except ImageNotFound:
-                self.logger.error(f"Tried to remove image '{image_tag}', but it was not found")
+                self._logger.error(f"Tried to remove image '{image_tag}', but it was not found")
             except Exception as e:
-                self.logger.error(f"Failed to remove Docker image '{image_tag}': {e}")
-            with self.executed_tests.open("a", encoding='utf-8') as f:
-                f.write(f"{self._execution_id}\n")
+                self._logger.error(f"Failed to remove Docker image '{image_tag}': {e}")
         else:
-            self.logger.warning("Teardown is disabled")
+            self._logger.warning("Teardown is disabled")
+
+        with self._executed_tests.open("a", encoding='utf-8') as f:
+            f.write(f"{self._execution_id}\n")
 
         self._gh_api = None
         self._issue_statement = None
@@ -109,8 +110,8 @@ class Pipeline:
             bool: True if PR is valid, False otherwise
         """
 
-        self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
-        self.logger.marker("================ Preparing Environment ===============")
+        self._logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
+        self._logger.marker("================ Preparing Environment ===============")
         self._gh_api = GitHubApi(self._config, self._pr_data)
         self._issue_statement, self._pdf_candidate = self._gh_api.get_linked_data()
         if not self._issue_statement:
@@ -146,19 +147,19 @@ class Pipeline:
             self._config.setup_output_dir(curr_i_attempt, curr_model)
             try:
                 self._generation_completed = self._execute_attempt(model=curr_model, i_attempt=curr_i_attempt)
-                self.logger.success(success_msg)
+                self._logger.success(success_msg)
                 self._record_result(self._pr_data.number, curr_model, curr_i_attempt + 1, self._generation_completed)
             except ExecutionError as e:
                 self._record_result(self._pr_data.number, curr_model, curr_i_attempt + 1, str(e))
             except Exception as e:
-                self.logger.critical("Failed with unexpected error:\n%s" % e)
+                self._logger.critical("Failed with unexpected error:\n%s" % e)
                 self._record_result(self._pr_data.number, curr_model, curr_i_attempt + 1, "unexpected error")
 
         def _save_generated_test() -> None:
             gen_test = Path(self._config.output_dir, "generation", "generated_test.txt").read_text(encoding="utf-8")
             new_filename = f"{self._execution_id}_{self._config.output_dir.name}.txt"
             Path(self._config.gen_test_dir, new_filename).write_text(gen_test, encoding="utf-8")
-            self.logger.success(f"Test file copied to {self._config.gen_test_dir.name}/{new_filename}")
+            self._logger.success(f"Test file copied to {self._config.gen_test_dir.name}/{new_filename}")
 
         if self._mock_response is None:
             for model in [LLM.GPT4o, LLM.LLAMA, LLM.DEEPSEEK]:
@@ -178,14 +179,14 @@ class Pipeline:
                 if self._generation_completed:
                     _save_generated_test()
         else:
-            self.logger.success("MOCK response fetched successfully")
+            self._logger.success("MOCK response fetched successfully")
             model = LLM.MOCK
             _try_and_execute(model, 0, "MOCK finished successfully")
 
             if self._generation_completed:
                 _save_generated_test()
 
-        self.logger.marker(f"=============== Finished Payload #{self._pr_data.number} ==============")
+        self._logger.marker(f"=============== Finished Payload #{self._pr_data.number} ==============")
         self._teardown()
         return self._generation_completed
 
@@ -206,7 +207,7 @@ class Pipeline:
         """
 
         if self._environment_prepared:
-            self.logger.info("Environment ready – preparation skipped")
+            self._logger.info("Environment ready – preparation skipped")
         else:
             self._prepare_environment()
             self._environment_prepared = True
@@ -234,8 +235,8 @@ class Pipeline:
 
         # 1. Setup GitHub API
         if self._gh_api is None:
-            self.logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
-            self.logger.marker("================ Preparing Environment ===============")
+            self._logger.marker(f"=============== Running Payload #{self._pr_data.number} ===============")
+            self._logger.marker("================ Preparing Environment ===============")
             self._gh_api = GitHubApi(self._config, self._pr_data)
 
         # 2. Fetch linked issue
@@ -253,13 +254,13 @@ class Pipeline:
         if self._config.fetch_pdf:
             pdf_name, pdf_content = self._pr_diff_ctx.get_issue_pdf(self._pdf_candidate, self._pr_data.head_commit)
         else:
-            self.logger.warning("PDF fetching is disabled")
+            self._logger.warning("PDF fetching is disabled")
 
         # 5. Clone repository locally
         if not Path(self._config.cloned_repo_dir).exists():
             self._gh_api.clone_repo()
         else:
-            self.logger.info(f"Temporary repository '{self._pr_data.repo}' already cloned – skipped")
+            self._logger.info(f"Temporary repository '{self._pr_data.repo}' already cloned – skipped")
 
         # 6. Slice golden code
         self._cst_builder = CSTBuilder(self._config.parse_language, self._pr_diff_ctx)
@@ -276,23 +277,23 @@ class Pipeline:
                     self._config.cloned_repo_dir
                 )
             except:
-                self.logger.critical("Failed to determine test file for injection")
+                self._logger.critical("Failed to determine test file for injection")
                 raise ExecutionError("Failed to determine test file for injection")
         else:
-            self.logger.warning(f"Custom test file {test_filename} is defined")
+            self._logger.warning(f"Custom test file {test_filename} is defined")
             test_file_content = test_file_content_sliced = ""
 
         # 8. Fetch packages and imports
         try:
             available_packages = helpers.extract_packages(self._pr_data.base_commit, self._config.cloned_repo_dir)
         except:
-            self.logger.warning("Failed to determine available packages")
+            self._logger.warning("Failed to determine available packages")
             available_packages = ""
         try:
             available_relative_imports = helpers.extract_relative_imports(self._pr_data.base_commit,
                                                                           self._config.cloned_repo_dir)
         except:
-            self.logger.warning("Failed to determine available relative imports")
+            self._logger.warning("Failed to determine available relative imports")
             available_relative_imports = ""
 
         # 9. Build docker image
@@ -322,7 +323,7 @@ class Pipeline:
         # 11. Setup model handler
         self._llm_handler = LLMHandler(self._config, self._pipeline_inputs)
 
-        self.logger.marker("================ Preparation Complete ================")
+        self._logger.marker("================ Preparation Complete ================")
 
     def _record_result(self, number: str, model: LLM, i_attempt: int, stop: bool | str) -> None:
         """
