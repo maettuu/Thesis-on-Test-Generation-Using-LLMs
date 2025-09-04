@@ -372,6 +372,12 @@ docker start -ai gh-bot_pdfjs_ctn
 - **`self.fetch_pdf`**  
   Whether PDF fetching is enabled (`true`) or disabled (`false`).
 
+- **`self.inject_in_file`**  
+  Prevents search for test file by giving default location such as `example_spec.js`.
+
+- **`self.execute_teardown`**  
+  If `false` teardown is skipped which leaves the local clone of the target repository and the docker image.
+
 - **`self.bot_log_dir`**  
   Filesystem path where the bot should write its execution logs.
 
